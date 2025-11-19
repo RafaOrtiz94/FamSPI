@@ -102,6 +102,22 @@ export const createClientRequest = async (formData = {}, files = {}) => {
   return response.data?.data || response.data;
 };
 
+export const sendConsentEmailToken = async ({ client_email, client_name }) => {
+  const response = await api.post("/requests/new-client/consent-token", {
+    client_email,
+    client_name,
+  });
+  return response.data?.data || response.data;
+};
+
+export const verifyConsentEmailToken = async ({ token_id, code }) => {
+  const response = await api.post("/requests/new-client/consent-token/verify", {
+    token_id,
+    code,
+  });
+  return response.data?.data || response.data;
+};
+
 /** 📋 Lista paginada de solicitudes de nuevos clientes */
 export const getClientRequests = async (params = {}) => {
   const { page = 1, pageSize = 25, status, q } = params;

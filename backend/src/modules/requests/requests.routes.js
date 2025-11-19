@@ -25,6 +25,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 // 🙏 RUTA PÚBLICA para que el cliente otorgue consentimiento LOPDP
 router.get("/public/consent/:token", ctrl.grantConsent);
 
+router.post(
+  "/new-client/consent-token",
+  verifyToken,
+  requireRole(["comercial", "jefe_comercial"]),
+  ctrl.sendConsentEmailToken,
+);
+
+router.post(
+  "/new-client/consent-token/verify",
+  verifyToken,
+  requireRole(["comercial", "jefe_comercial"]),
+  ctrl.verifyConsentEmailToken,
+);
+
 // 🧾 CREAR SOLICITUD DE NUEVO CLIENTE
 router.post(
   "/new-client",

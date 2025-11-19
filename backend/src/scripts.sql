@@ -38,6 +38,8 @@ BEGIN
       ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS consent_capture_details TEXT;
       ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS consent_email_token_id VARCHAR(64);
+      ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS lopdp_consent_method VARCHAR(50);
       ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS lopdp_consent_details TEXT;
@@ -51,6 +53,7 @@ BEGIN
         ADD COLUMN IF NOT EXISTS consent_evidence_file_id VARCHAR(255);
 
       COMMENT ON COLUMN public.client_requests.consent_capture_method IS 'Método planificado para recolectar el consentimiento';
+      COMMENT ON COLUMN public.client_requests.consent_email_token_id IS 'Token OTP verificado previamente para LOPDP';
       COMMENT ON COLUMN public.client_requests.lopdp_consent_method IS 'Método real utilizado para registrar la aceptación';
     EXCEPTION
       WHEN others THEN
@@ -93,6 +96,33 @@ BEGIN
     EXCEPTION
       WHEN others THEN
         RAISE NOTICE 'No se pudo crear client_request_consents: %', SQLERRM;
+    END;
+
+    BEGIN
+      EXECUTE '
+        CREATE TABLE IF NOT EXISTS public.client_request_consent_tokens (
+          id VARCHAR(64) PRIMARY KEY,
+          client_email VARCHAR(255) NOT NULL,
+          client_name VARCHAR(255),
+          code_hash VARCHAR(255) NOT NULL,
+          code_last_four VARCHAR(4),
+          status VARCHAR(50) NOT NULL DEFAULT ''pending'',
+          attempts INT NOT NULL DEFAULT 0,
+          expires_at TIMESTAMP NOT NULL,
+          verified_at TIMESTAMP NULL,
+          verified_by_email VARCHAR(255),
+          verified_by_user_id INT,
+          created_by_email VARCHAR(255),
+          created_by_user_id INT,
+          used_at TIMESTAMP NULL,
+          used_request_id INT NULL REFERENCES public.client_requests(id) ON DELETE SET NULL,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      ';
+    EXCEPTION
+      WHEN others THEN
+        RAISE NOTICE 'No se pudo crear client_request_consent_tokens: %', SQLERRM;
     END;
   ELSE
     RAISE NOTICE 'La tabla public.client_requests no existe. Ejecuta primero el script de creación (V3.sql/V4.sql).';

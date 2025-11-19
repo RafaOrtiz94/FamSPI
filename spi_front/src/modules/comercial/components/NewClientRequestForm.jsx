@@ -1,7 +1,11 @@
 import React, { useMemo, useState } from "react";
 import { FiAlertCircle } from "react-icons/fi";
 import { useUI } from "../../../core/ui/useUI";
-import { createClientRequest } from "../../../core/api/requestsApi";
+import {
+  createClientRequest,
+  sendConsentEmailToken,
+  verifyConsentEmailToken,
+} from "../../../core/api/requestsApi";
 
 const COMMON_REQUIRED_FIELDS = [
   "commercial_name",
@@ -85,6 +89,7 @@ const initialFormState = {
   data_processing_consent: false,
   consent_capture_method: "email_link",
   consent_capture_details: "",
+  consent_email_token_id: "",
   client_type: "persona_natural",
   natural_person_firstname: "",
   natural_person_lastname: "",
@@ -151,6 +156,14 @@ const NewClientRequestForm = ({
   const [files, setFiles] = useState(initialFilesState);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [consentTokenState, setConsentTokenState] = useState({
+    status: "idle",
+    tokenId: null,
+    expiresAt: null,
+    verifiedAt: null,
+    lastEmail: "",
+  });
+  const [consentTokenCode, setConsentTokenCode] = useState("");
 
   const requiredFiles = useMemo(
     () =>
@@ -161,6 +174,18 @@ const NewClientRequestForm = ({
       ),
     [formData.client_type, formData.operating_permit_status, formData.consent_capture_method],
   );
+
+  const resetConsentTokenFlow = () => {
+    setConsentTokenState({ status: "idle", tokenId: null, expiresAt: null, verifiedAt: null, lastEmail: "" });
+    setConsentTokenCode("");
+    setFormData((prev) => ({ ...prev, consent_email_token_id: "" }));
+    setErrors((prev) => {
+      if (!prev.consent_email_token_id) return prev;
+      const next = { ...prev };
+      delete next.consent_email_token_id;
+      return next;
+    });
+  };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -178,6 +203,15 @@ const NewClientRequestForm = ({
     if (name === "operating_permit_status" && value !== "has_it") {
       setFiles((prev) => ({ ...prev, operating_permit_file: null }));
     }
+    if (name === "client_email") {
+      const normalized = value.trim().toLowerCase();
+      if (consentTokenState.lastEmail && normalized !== consentTokenState.lastEmail) {
+        resetConsentTokenFlow();
+      }
+    }
+    if (name === "data_processing_consent" && !checked) {
+      resetConsentTokenFlow();
+    }
   };
 
   const handleConsentMethodChange = (value) => {
@@ -187,6 +221,9 @@ const NewClientRequestForm = ({
       consent_capture_method: value,
       consent_capture_details: value === "email_link" ? "" : prev.consent_capture_details,
     }));
+    if (value !== "email_link") {
+      resetConsentTokenFlow();
+    }
     if (value !== "signed_document") {
       setFiles((prev) => ({ ...prev, consent_evidence_file: null }));
     }
@@ -201,6 +238,85 @@ const NewClientRequestForm = ({
       }
       return next;
     });
+  };
+
+  const guessClientDisplayName = () => {
+    if (formData.client_type === "persona_natural") {
+      return `${formData.natural_person_firstname || ""} ${formData.natural_person_lastname || ""}`.trim();
+    }
+    return formData.legal_person_business_name || formData.commercial_name || "";
+  };
+
+  const handleSendConsentToken = async () => {
+    if (disabledBody) return;
+    const email = (formData.client_email || "").trim();
+    if (!email) {
+      setErrors((prev) => ({ ...prev, client_email: "Ingresa el correo del cliente" }));
+      showToast("Necesitas un correo de cliente válido para enviar el código.", "warning");
+      return;
+    }
+    setConsentTokenState((prev) => ({ ...prev, status: "sending" }));
+    try {
+      const response = await sendConsentEmailToken({
+        client_email: email,
+        client_name: guessClientDisplayName(),
+      });
+      setConsentTokenState({
+        status: "sent",
+        tokenId: response.token_id,
+        expiresAt: response.expires_at,
+        verifiedAt: null,
+        lastEmail: email.toLowerCase(),
+      });
+      setConsentTokenCode("");
+      setFormData((prev) => ({ ...prev, consent_email_token_id: "" }));
+      showToast("Enviamos el código al correo del cliente.", "info");
+    } catch (error) {
+      console.error("Error al enviar token de consentimiento", error);
+      setConsentTokenState((prev) => ({ ...prev, status: "idle" }));
+      const message = error.response?.data?.message || error.message || "No pudimos enviar el código";
+      showToast(message, "error");
+    }
+  };
+
+  const handleVerifyConsentToken = async () => {
+    if (!consentTokenState.tokenId) {
+      showToast("Primero envía el código al correo del cliente.", "warning");
+      return;
+    }
+    const code = consentTokenCode.trim();
+    if (!code) {
+      setErrors((prev) => ({ ...prev, consent_email_token_id: "Ingresa el código enviado al cliente" }));
+      return;
+    }
+    setConsentTokenState((prev) => ({ ...prev, status: "verifying" }));
+    try {
+      const response = await verifyConsentEmailToken({
+        token_id: consentTokenState.tokenId,
+        code,
+      });
+      setConsentTokenState((prev) => ({
+        ...prev,
+        status: "verified",
+        verifiedAt: response.verified_at || new Date().toISOString(),
+      }));
+      setFormData((prev) => ({
+        ...prev,
+        consent_email_token_id: response.token_id || consentTokenState.tokenId,
+      }));
+      setErrors((prev) => {
+        if (!prev.consent_email_token_id) return prev;
+        const next = { ...prev };
+        delete next.consent_email_token_id;
+        return next;
+      });
+      showToast("Código validado correctamente.", "success");
+    } catch (error) {
+      console.error("Error al validar token", error);
+      setConsentTokenState((prev) => ({ ...prev, status: "sent" }));
+      const message = error.response?.data?.message || error.message || "El código no coincide";
+      showToast(message, "error");
+    }
   };
 
   const handleFileChange = (e) => {
@@ -234,6 +350,13 @@ const NewClientRequestForm = ({
       if (!detailsValue) {
         validationErrors.consent_capture_details = "Describe el medio utilizado para el consentimiento.";
       }
+    }
+    if (
+      formData.consent_capture_method === "email_link" &&
+      !formData.consent_email_token_id
+    ) {
+      validationErrors.consent_email_token_id =
+        "Debes validar el código enviado al cliente antes de continuar.";
     }
 
     const checkField = (field) => {
@@ -269,6 +392,7 @@ const NewClientRequestForm = ({
     setFormData({ ...initialFormState });
     setFiles({ ...initialFilesState });
     setErrors({});
+    resetConsentTokenFlow();
   };
 
   const handleSubmit = async (e) => {
@@ -283,7 +407,11 @@ const NewClientRequestForm = ({
     const selectedMethod = formData.consent_capture_method;
     setLoading(true);
     try {
-      await createClientRequest(formData, files);
+      const payload = { ...formData };
+      if (payload.consent_capture_method !== "email_link") {
+        delete payload.consent_email_token_id;
+      }
+      await createClientRequest(payload, files);
       const successCopy =
         selectedMethod === "email_link"
           ? successMessage
@@ -302,6 +430,15 @@ const NewClientRequestForm = ({
 
   const disabledBody = !formData.data_processing_consent;
   const disableFiles = !canUploadFiles || disabledBody;
+  const consentMethodIsEmail = formData.consent_capture_method === "email_link";
+  const tokenStatus = consentTokenState.status;
+  const tokenExpiresAt = consentTokenState.expiresAt
+    ? new Date(consentTokenState.expiresAt)
+    : null;
+  const isTokenVerified =
+    consentMethodIsEmail &&
+    tokenStatus === "verified" &&
+    Boolean(formData.consent_email_token_id);
 
   return (
     <form onSubmit={handleSubmit} className={`space-y-6 ${className}`}>
@@ -389,6 +526,69 @@ const NewClientRequestForm = ({
               disabled={disabledBody}
               error={errors.consent_capture_details}
             />
+          </div>
+        )}
+        {consentMethodIsEmail && (
+          <div
+            className={`mt-4 rounded-2xl border p-4 text-sm shadow-sm transition ${
+              isTokenVerified
+                ? "border-emerald-300 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+                : "border-blue-200 bg-blue-50/70 dark:border-blue-900/40 dark:bg-blue-950/10"
+            } ${disabledBody ? "opacity-60" : ""}`}
+          >
+            <p className="text-gray-700 dark:text-gray-200">
+              Envía un código automático al correo del cliente. Solo podrás continuar cuando el cliente te confirme el código y lo
+              registres aquí mismo.
+            </p>
+            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end">
+              <button
+                type="button"
+                onClick={handleSendConsentToken}
+                disabled={disabledBody || tokenStatus === "sending"}
+                className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
+              >
+                {tokenStatus === "sending" ? "Enviando..." : tokenStatus === "sent" ? "Reenviar código" : tokenStatus === "verified" ? "Código verificado" : "Enviar código"}
+              </button>
+              {consentTokenState.tokenId && (
+                <div className="flex flex-1 flex-col gap-1">
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-300">
+                    Código recibido por el cliente
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={6}
+                      value={consentTokenCode}
+                      onChange={(e) => setConsentTokenCode(e.target.value.replace(/[^0-9]/g, ""))}
+                      className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                      disabled={tokenStatus === "verifying" || isTokenVerified}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleVerifyConsentToken}
+                      disabled={isTokenVerified || tokenStatus === "verifying"}
+                      className="rounded-xl border border-blue-600 px-4 py-2 font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400"
+                    >
+                      {tokenStatus === "verifying" ? "Validando..." : isTokenVerified ? "Validado" : "Validar"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+              {isTokenVerified && consentTokenState.verifiedAt
+                ? `Consentimiento confirmado el ${new Date(consentTokenState.verifiedAt).toLocaleString("es-EC")}.`
+                : tokenExpiresAt
+                ? `El código actual vence a las ${tokenExpiresAt.toLocaleTimeString("es-EC", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}.`
+                : "El cliente deberá compartir el código recibido para que puedas continuar."}
+            </div>
+            {errors.consent_email_token_id && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errors.consent_email_token_id}</p>
+            )}
           </div>
         )}
       </section>

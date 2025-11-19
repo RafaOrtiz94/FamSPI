@@ -12,6 +12,7 @@ CREATE TABLE client_requests (
     lopdp_consent_status VARCHAR(50) NOT NULL DEFAULT 'pending' COMMENT 'pending, granted',
     consent_capture_method VARCHAR(50) NOT NULL DEFAULT 'email_link' COMMENT 'email_link, signed_document, other',
     consent_capture_details TEXT COMMENT 'Notas de cómo se obtuvo o se obtendrá el consentimiento',
+    consent_email_token_id VARCHAR(64) COMMENT 'ID del token OTP verificado previo al registro',
     lopdp_consent_method VARCHAR(50) COMMENT 'Método real utilizado para registrar el consentimiento',
     lopdp_consent_details TEXT COMMENT 'Notas auditables del consentimiento',
     lopdp_consent_at DATETIME NULL COMMENT 'Fecha de aceptación',
@@ -96,3 +97,26 @@ CREATE TABLE client_request_consents (
 );
 
 ALTER TABLE client_request_consents COMMENT 'Eventos auditables asociados a la aceptación de tratamiento de datos (LOPDP).';
+
+CREATE TABLE client_request_consent_tokens (
+    id VARCHAR(64) PRIMARY KEY,
+    client_email VARCHAR(255) NOT NULL,
+    client_name VARCHAR(255),
+    code_hash VARCHAR(255) NOT NULL,
+    code_last_four VARCHAR(4),
+    status VARCHAR(50) NOT NULL DEFAULT 'pending' COMMENT 'pending, verified, used, expired',
+    attempts INT NOT NULL DEFAULT 0,
+    expires_at DATETIME NOT NULL,
+    verified_at DATETIME NULL,
+    verified_by_email VARCHAR(255),
+    verified_by_user_id INT,
+    created_by_email VARCHAR(255),
+    created_by_user_id INT,
+    used_at DATETIME NULL,
+    used_request_id INT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_consent_token_request FOREIGN KEY (used_request_id) REFERENCES client_requests(id) ON DELETE SET NULL
+);
+
+ALTER TABLE client_request_consent_tokens COMMENT 'Tokens temporales enviados por correo para confirmar el consentimiento LOPDP.';
