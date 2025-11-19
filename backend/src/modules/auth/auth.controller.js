@@ -111,7 +111,7 @@ const signRefresh = (payload) =>
     { expiresIn: "7d" }
   );
 
-const INTERNAL_LOPDP_FOLDER = "LOPDP INTERNO FAM";
+const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";
 
 /* ============================================================
    1️⃣ Redirigir a Google OAuth
@@ -513,20 +513,21 @@ const acceptInternalLopdp = async (req, res) => {
 
     const baseFolder = await ensureFolder(INTERNAL_LOPDP_FOLDER, rootId);
     const personFolder = await ensureFolder(user.fullname || user.email, baseFolder.id);
+    const signedPdfFolder = await ensureFolder("pdffirmado", personFolder.id);
     const today = new Date().toISOString().slice(0, 10);
 
     const signatureFile = await uploadBase64File(
       `firma-${user.email}-${today}.png`,
       signatureBase64,
       "image/png",
-      personFolder.id
+      signedPdfFolder.id
     );
 
     const pdfFile = await uploadBase64File(
       `LOPDP-${user.email}-${today}.pdf`,
       pdfBase64,
       "application/pdf",
-      personFolder.id
+      signedPdfFolder.id
     );
 
     const ip =
