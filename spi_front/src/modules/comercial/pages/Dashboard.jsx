@@ -23,6 +23,9 @@ import {
   FiFileText,
   FiPaperclip,
   FiPackage,
+  FiClipboard,
+  FiTruck,
+  FiShoppingCart,
 } from "react-icons/fi";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
@@ -44,8 +47,8 @@ import { getInventoryByRequest } from "../../../core/api/inventarioApi";
 
 import SolicitudesGrid from "../components/SolicitudesGrid";
 import CreateRequestModal from "../components/CreateRequestModal";
-import ActionCreateCard from "../components/ActionCreateCard";
 import NewClientActionCard from "../components/NewClientActionCard";
+import RequestTypeActionCard from "../components/RequestTypeActionCard";
 import RequestHighlights from "../components/RequestHighlights";
 import ExecutiveStatCard from "../../../core/ui/components/ExecutiveStatCard";
 import LoadingOverlay from "../../../core/ui/components/LoadingOverlay";
@@ -90,6 +93,7 @@ const ComercialDashboard = () => {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [modalOpen, setModalOpen] = useState(false);
+  const [presetRequestType, setPresetRequestType] = useState(null);
   const [loadingMessage, setLoadingMessage] = useState("");
   const [detail, setDetail] = useState({
     open: false,
@@ -272,7 +276,7 @@ const ComercialDashboard = () => {
 
 
       showToast("Solicitud creada correctamente ✅", "success");
-      setModalOpen(false);
+      closeRequestModal();
       await load();
     } catch {
       showToast("No se pudo crear la solicitud", "error");
@@ -345,6 +349,52 @@ const ComercialDashboard = () => {
   // ============================
   // 🎨 Render principal
   // ============================
+  const requestActionCards = useMemo(
+    () => [
+      {
+        id: "inspection",
+        subtitle: "Inspecciones",
+        title: "Evalúa ambientes críticos",
+        description:
+          "Agenda la visita del equipo técnico y genera automáticamente la F.ST-INS para ambientes, LIS y periféricos.",
+        chips: ["F.ST-INS", "Checklist"],
+        tone: "blue",
+        icon: FiClipboard,
+      },
+      {
+        id: "retiro",
+        subtitle: "Retiros",
+        title: "Coordina retiros y devoluciones",
+        description:
+          "Gestiona la logística inversa para equipos en campo, notifica a inventario y documenta las observaciones.",
+        chips: ["Rutas", "Inventario"],
+        tone: "amber",
+        icon: FiTruck,
+      },
+      {
+        id: "compra",
+        subtitle: "Compras",
+        title: "Activa procesos de compra",
+        description:
+          "Solicita nuevos equipos o accesorios, asigna fechas tentativas y comparte especificaciones con abastecimiento.",
+        chips: ["CapEx", "Prioridades"],
+        tone: "violet",
+        icon: FiShoppingCart,
+      },
+    ],
+    [],
+  );
+
+  const openRequestModal = (type) => {
+    setPresetRequestType(type);
+    setModalOpen(true);
+  };
+
+  const closeRequestModal = () => {
+    setModalOpen(false);
+    setPresetRequestType(null);
+  };
+
   return (
     <motion.div
       ref={reportRef}
@@ -380,12 +430,43 @@ const ComercialDashboard = () => {
       </div>
 
       {/* ACCIONES DESTACADAS */}
-      <div className="space-y-4">
-        <ActionCreateCard onClick={() => setModalOpen(true)} />
-        {canCreateClients && (
-          <NewClientActionCard onClick={() => navigate("/dashboard/comercial/new-client-request")} />
-        )}
-      </div>
+      <section className="space-y-5">
+        <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
+              Crear una nueva solicitud
+            </p>
+            <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+              Coordina inspecciones, retiros, compras y registros
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={() => openRequestModal(null)}
+            className="inline-flex items-center justify-center rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 dark:border-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/20"
+          >
+            Explorar opciones
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {requestActionCards.map((card) => (
+            <RequestTypeActionCard
+              key={card.id}
+              {...card}
+              onClick={() => openRequestModal(card.id)}
+              ctaLabel="Iniciar"
+            />
+          ))}
+
+          {canCreateClients && (
+            <NewClientActionCard
+              className="h-full"
+              onClick={() => navigate("/dashboard/comercial/new-client-request")}
+            />
+          )}
+        </div>
+      </section>
 
       {/* SOLICITUDES DESTACADAS */}
       <RequestHighlights
@@ -512,8 +593,9 @@ const ComercialDashboard = () => {
       {/* MODAL CREAR */}
       <CreateRequestModal
         open={modalOpen}
-        onClose={() => setModalOpen(false)}
+        onClose={closeRequestModal}
         onSubmit={handleCreate}
+        presetType={presetRequestType}
       />
 
       <RequestDetailModal

@@ -1,6 +1,6 @@
 ﻿// src/modules/comercial/components/CreateRequestModal.jsx
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Dialog } from "@headlessui/react";
 import { FiSend, FiX, FiPlus, FiTrash2, FiPhone } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
@@ -212,7 +212,7 @@ const TODAY = getTodayDate();
 /* ============================================================
     🧾 Modal principal
 ============================================================ */
-const CreateRequestModal = ({ open, onClose, onSubmit }) => {
+const CreateRequestModal = ({ open, onClose, onSubmit, presetType = null }) => {
   const [type, setType] = useState(null);
   const [formData, setFormData] = useState({});
   const [equipos, setEquipos] = useState([]);
@@ -221,8 +221,32 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
   const [clientFiles, setClientFiles] = useState(INITIAL_CLIENT_FILES_STATE);
 
   const todayDateString = useMemo(() => TODAY, []);
+  const resetClientFiles = useCallback(
+    () => setClientFiles({ ...INITIAL_CLIENT_FILES_STATE }),
+    [],
+  );
 
-  const resetClientFiles = () => setClientFiles({ ...INITIAL_CLIENT_FILES_STATE });
+  useEffect(() => {
+    if (!open) {
+      setType(null);
+      setFormData({});
+      setEquipos([]);
+      setFiles([]);
+      setErrors({});
+      resetClientFiles();
+      return;
+    }
+
+    if (presetType) {
+      setType(presetType);
+    } else {
+      setType(null);
+    }
+    setFormData({});
+    setEquipos([]);
+    setErrors({});
+    resetClientFiles();
+    }, [open, presetType, resetClientFiles]);
 
   const setClientFile = (key, file) => {
     setClientFiles((prev) => ({ ...prev, [key]: file || null }));

@@ -6,8 +6,10 @@ const badges = [
   { label: "Documentos", icon: FiUserPlus },
 ];
 
-const NewClientActionCard = ({ onClick }) => (
-  <div className="rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-white p-6 shadow-sm dark:border-emerald-900/30 dark:from-emerald-950/40 dark:via-gray-900 dark:to-gray-900">
+const NewClientActionCard = ({ onClick, className = "" }) => (
+  <div
+    className={`rounded-2xl border border-emerald-200 bg-gradient-to-r from-emerald-50 via-white to-white p-6 shadow-sm dark:border-emerald-900/30 dark:from-emerald-950/40 dark:via-gray-900 dark:to-gray-900 ${className}`}
+  >
     <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
       <div className="space-y-3">
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-200">
