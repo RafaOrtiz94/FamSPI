@@ -35,6 +35,7 @@ router.post(
     { name: "ruc_file", maxCount: 1 },
     { name: "id_file", maxCount: 1 },
     { name: "operating_permit_file", maxCount: 1 },
+    { name: "consent_evidence_file", maxCount: 1 },
   ]),
   ctrl.createClientRequest
 );

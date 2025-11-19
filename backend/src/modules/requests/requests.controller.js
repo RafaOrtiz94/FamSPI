@@ -381,7 +381,13 @@ exports.processClientRequest = asyncHandler(async (req, res) => {
 // ============================================================
 exports.grantConsent = asyncHandler(async (req, res) => {
   const { token } = req.params;
-  const result = await service.grantConsent(token);
+  const result = await service.grantConsent({
+    token,
+    audit: {
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    },
+  });
 
   await logAction({
     user_id: null, // Es una acción del cliente final

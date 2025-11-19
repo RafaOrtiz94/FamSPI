@@ -519,7 +519,7 @@ const CreateRequestModal = ({
               onSuccess={() => {
                 onClose();
               }}
-              successMessage="Solicitud registrada y consentimiento enviado al cliente."
+              successMessage="Solicitud registrada. El consentimiento quedó auditado o se envió al cliente automáticamente."
             />
           )}
         </Dialog.Panel>

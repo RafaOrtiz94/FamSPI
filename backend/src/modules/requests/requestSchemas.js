@@ -89,6 +89,7 @@ module.exports = {
     type: "object",
     required: [
       "data_processing_consent",
+      "consent_capture_method",
       "client_type",
       "commercial_name",
       "ruc_cedula",
@@ -117,6 +118,11 @@ module.exports = {
     ],
     properties: {
       data_processing_consent: { type: "boolean", const: true },
+      consent_capture_method: {
+        type: "string",
+        enum: ["email_link", "signed_document", "other"],
+      },
+      consent_capture_details: { type: "string" },
       client_type: { type: "string", enum: ["persona_natural", "persona_juridica"] },
 
       // Datos comunes
@@ -173,6 +179,36 @@ module.exports = {
         },
         then: {
           required: ["legal_person_business_name", "nationality"],
+        },
+      },
+      {
+        if: {
+          properties: { consent_capture_method: { const: "email_link" } },
+        },
+        then: {
+          required: ["client_email"],
+        },
+      },
+      {
+        if: {
+          properties: { consent_capture_method: { const: "signed_document" } },
+        },
+        then: {
+          required: ["consent_capture_details"],
+          properties: {
+            consent_capture_details: { minLength: 5 },
+          },
+        },
+      },
+      {
+        if: {
+          properties: { consent_capture_method: { const: "other" } },
+        },
+        then: {
+          required: ["consent_capture_details"],
+          properties: {
+            consent_capture_details: { minLength: 5 },
+          },
         },
       },
     ],

@@ -12,13 +12,13 @@ BEGIN
   IF client_requests_exists THEN
     BEGIN
       ALTER TABLE public.client_requests
-        ADD COLUMN data_processing_consent BOOLEAN NOT NULL DEFAULT FALSE;
+        ADD COLUMN IF NOT EXISTS data_processing_consent BOOLEAN NOT NULL DEFAULT FALSE;
 
       COMMENT ON COLUMN public.client_requests.data_processing_consent
         IS 'Aceptación interna del tratamiento de datos';
     EXCEPTION
-      WHEN duplicate_column THEN
-        RAISE NOTICE 'La columna data_processing_consent ya existe en client_requests, no se realizaron cambios.';
+      WHEN others THEN
+        RAISE NOTICE 'No se pudo asegurar data_processing_consent: %', SQLERRM;
     END;
 
     BEGIN
@@ -30,6 +30,31 @@ BEGIN
     EXCEPTION
       WHEN others THEN
         RAISE NOTICE 'No se pudo agregar establishment_name: %', SQLERRM;
+    END;
+
+    BEGIN
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS consent_capture_method VARCHAR(50) NOT NULL DEFAULT 'email_link';
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS consent_capture_details TEXT;
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS lopdp_consent_method VARCHAR(50);
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS lopdp_consent_details TEXT;
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS lopdp_consent_at TIMESTAMP NULL;
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS lopdp_consent_ip VARCHAR(64);
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS lopdp_consent_user_agent TEXT;
+      ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS consent_evidence_file_id VARCHAR(255);
+
+      COMMENT ON COLUMN public.client_requests.consent_capture_method IS 'Método planificado para recolectar el consentimiento';
+      COMMENT ON COLUMN public.client_requests.lopdp_consent_method IS 'Método real utilizado para registrar la aceptación';
+    EXCEPTION
+      WHEN others THEN
+        RAISE NOTICE 'No se pudieron agregar las columnas de consentimiento: %', SQLERRM;
     END;
 
     BEGIN
@@ -47,6 +72,27 @@ BEGIN
     EXCEPTION
       WHEN others THEN
         RAISE NOTICE 'No se pudieron eliminar las columnas obsoletas: %', SQLERRM;
+    END;
+    BEGIN
+      EXECUTE '
+        CREATE TABLE IF NOT EXISTS public.client_request_consents (
+          id SERIAL PRIMARY KEY,
+          client_request_id INT NOT NULL REFERENCES public.client_requests(id) ON DELETE CASCADE,
+          event_type VARCHAR(50) NOT NULL,
+          method VARCHAR(50) NOT NULL,
+          details TEXT,
+          evidence_file_id VARCHAR(255),
+          actor_email VARCHAR(255),
+          actor_role VARCHAR(100),
+          actor_name VARCHAR(255),
+          ip VARCHAR(64),
+          user_agent TEXT,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      ';
+    EXCEPTION
+      WHEN others THEN
+        RAISE NOTICE 'No se pudo crear client_request_consents: %', SQLERRM;
     END;
   ELSE
     RAISE NOTICE 'La tabla public.client_requests no existe. Ejecuta primero el script de creación (V3.sql/V4.sql).';

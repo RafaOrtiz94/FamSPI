@@ -54,10 +54,37 @@ const FILE_REQUIREMENTS = {
     label: "Permiso de funcionamiento",
     helper: "Adjunta solo si el cliente ya cuenta con permiso vigente.",
   },
+  consent_evidence_file: {
+    label: "Evidencia del consentimiento",
+    helper: "Documento firmado u otro respaldo. Requerido si eliges 'Documento firmado'.",
+  },
 };
+
+const CONSENT_METHOD_OPTIONS = [
+  {
+    value: "email_link",
+    title: "Correo automático",
+    description:
+      "El sistema enviará un enlace auditable al cliente y registrará la IP/fecha cuando confirme.",
+  },
+  {
+    value: "signed_document",
+    title: "Documento firmado",
+    description:
+      "Ya cuentas con un documento de aceptación firmado. Adjunta el PDF y registra cómo se obtuvo.",
+  },
+  {
+    value: "other",
+    title: "Otro medio verificable",
+    description:
+      "Describe el medio utilizado (llamada grabada, formulario físico, etc.) y adjunta evidencia opcional.",
+  },
+];
 
 const initialFormState = {
   data_processing_consent: false,
+  consent_capture_method: "email_link",
+  consent_capture_details: "",
   client_type: "persona_natural",
   natural_person_firstname: "",
   natural_person_lastname: "",
@@ -94,15 +121,19 @@ const initialFilesState = {
   ruc_file: null,
   legal_rep_appointment_file: null,
   operating_permit_file: null,
+  consent_evidence_file: null,
 };
 
-const requiredFilesByType = (type, permitStatus) => {
+const requiredFilesByType = (type, permitStatus, consentMethod) => {
   const files = ["id_file", "ruc_file"];
   if (type === "persona_juridica") {
     files.push("legal_rep_appointment_file");
   }
   if (permitStatus === "has_it") {
     files.push("operating_permit_file");
+  }
+  if (consentMethod === "signed_document") {
+    files.push("consent_evidence_file");
   }
   return files;
 };
@@ -113,7 +144,7 @@ const NewClientRequestForm = ({
   onCancel,
   onSuccess,
   showIntro = true,
-  successMessage = "Solicitud registrada. El cliente recibirá el correo para confirmar el uso de datos.",
+  successMessage = "Solicitud registrada. El consentimiento se gestionará según el método elegido.",
 }) => {
   const { showToast } = useUI();
   const [formData, setFormData] = useState(initialFormState);
@@ -122,8 +153,13 @@ const NewClientRequestForm = ({
   const [loading, setLoading] = useState(false);
 
   const requiredFiles = useMemo(
-    () => requiredFilesByType(formData.client_type, formData.operating_permit_status),
-    [formData.client_type, formData.operating_permit_status],
+    () =>
+      requiredFilesByType(
+        formData.client_type,
+        formData.operating_permit_status,
+        formData.consent_capture_method,
+      ),
+    [formData.client_type, formData.operating_permit_status, formData.consent_capture_method],
   );
 
   const handleChange = (e) => {
@@ -142,6 +178,29 @@ const NewClientRequestForm = ({
     if (name === "operating_permit_status" && value !== "has_it") {
       setFiles((prev) => ({ ...prev, operating_permit_file: null }));
     }
+  };
+
+  const handleConsentMethodChange = (value) => {
+    if (!formData.data_processing_consent) return;
+    setFormData((prev) => ({
+      ...prev,
+      consent_capture_method: value,
+      consent_capture_details: value === "email_link" ? "" : prev.consent_capture_details,
+    }));
+    if (value !== "signed_document") {
+      setFiles((prev) => ({ ...prev, consent_evidence_file: null }));
+    }
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next.consent_capture_method;
+      delete next.consent_capture_details;
+      if (next.files?.consent_evidence_file && value !== "signed_document") {
+        const filesErrors = { ...next.files };
+        delete filesErrors.consent_evidence_file;
+        next.files = Object.keys(filesErrors).length ? filesErrors : undefined;
+      }
+      return next;
+    });
   };
 
   const handleFileChange = (e) => {
@@ -166,6 +225,15 @@ const NewClientRequestForm = ({
     const validationErrors = {};
     if (!formData.data_processing_consent) {
       validationErrors.data_processing_consent = "Debes registrar la aceptación del tratamiento de datos.";
+    }
+    if (!formData.consent_capture_method) {
+      validationErrors.consent_capture_method = "Selecciona cómo obtendrás el consentimiento.";
+    }
+    if (formData.consent_capture_method && formData.consent_capture_method !== "email_link") {
+      const detailsValue = (formData.consent_capture_details || "").trim();
+      if (!detailsValue) {
+        validationErrors.consent_capture_details = "Describe el medio utilizado para el consentimiento.";
+      }
     }
 
     const checkField = (field) => {
@@ -212,10 +280,15 @@ const NewClientRequestForm = ({
       return;
     }
 
+    const selectedMethod = formData.consent_capture_method;
     setLoading(true);
     try {
       await createClientRequest(formData, files);
-      showToast(successMessage, "success");
+      const successCopy =
+        selectedMethod === "email_link"
+          ? successMessage
+          : "Solicitud registrada y el consentimiento quedó auditado con tu evidencia.";
+      showToast(successCopy, "success");
       resetForm();
       onSuccess?.();
     } catch (error) {
@@ -236,8 +309,9 @@ const NewClientRequestForm = ({
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
           <FiAlertCircle className="mt-0.5 flex-shrink-0 text-xl" />
           <p className="text-sm leading-relaxed">
-            Esta ficha recopila todos los datos necesarios para habilitar a un nuevo cliente. Una vez enviada la solicitud,
-            el sistema notificará automáticamente al cliente para que confirme el uso de sus datos (LOPDP).
+            Esta ficha recopila todos los datos necesarios para habilitar a un nuevo cliente. Una vez enviada la solicitud
+            podrás enviar un correo automático de consentimiento o adjuntar la evidencia que ya tengas para cumplir con la
+            LOPDP.
           </p>
         </div>
       )}
@@ -259,6 +333,65 @@ const NewClientRequestForm = ({
           <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errors.data_processing_consent}</p>
         )}
       </div>
+
+      <section className="rounded-2xl border border-gray-200 bg-white/70 p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900 dark:text-gray-100">Registro del consentimiento</h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Selecciona cómo obtendrás la aceptación LOPDP para que quede auditada.
+            </p>
+          </div>
+        </div>
+        <div
+          className={`mt-4 grid gap-3 md:grid-cols-3 ${disabledBody ? "cursor-not-allowed opacity-60" : ""}`}
+        >
+          {CONSENT_METHOD_OPTIONS.map((option) => {
+            const isSelected = formData.consent_capture_method === option.value;
+            return (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => handleConsentMethodChange(option.value)}
+                disabled={disabledBody}
+                className={`text-left rounded-2xl border p-4 transition focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500 ${
+                  isSelected
+                    ? "border-blue-500 bg-blue-50 text-blue-900 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-50"
+                    : "border-gray-200 bg-white hover:border-blue-300 dark:border-gray-700 dark:bg-gray-900"
+                } ${disabledBody ? "pointer-events-none" : ""}`}
+              >
+                <div className="flex items-center gap-2 text-sm font-semibold">
+                  <span
+                    className={`inline-flex h-4 w-4 items-center justify-center rounded-full border ${
+                      isSelected ? "border-blue-600 bg-blue-600" : "border-gray-300"
+                    }`}
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                  </span>
+                  {option.title}
+                </div>
+                <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">{option.description}</p>
+              </button>
+            );
+          })}
+        </div>
+        {errors.consent_capture_method && (
+          <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errors.consent_capture_method}</p>
+        )}
+        {formData.consent_capture_method !== "email_link" && (
+          <div className="mt-4">
+            <TextAreaField
+              name="consent_capture_details"
+              label="Describe brevemente cómo y cuándo se obtuvo el consentimiento"
+              value={formData.consent_capture_details}
+              onChange={handleChange}
+              required
+              disabled={disabledBody}
+              error={errors.consent_capture_details}
+            />
+          </div>
+        )}
+      </section>
 
       <fieldset
         disabled={disabledBody}
@@ -551,18 +684,23 @@ const NewClientRequestForm = ({
             />
           </div>
           <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
-            {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => (
-              <FileInput
-                key={key}
-                name={key}
-                label={meta.label}
-                helper={meta.helper}
-                onChange={handleFileChange}
-                required={requiredFiles.includes(key)}
-                error={errors.files?.[key]}
-                disabled={disableFiles}
-              />
-            ))}
+            {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => {
+              if (key === "consent_evidence_file" && formData.consent_capture_method === "email_link") {
+                return null;
+              }
+              return (
+                <FileInput
+                  key={key}
+                  name={key}
+                  label={meta.label}
+                  helper={meta.helper}
+                  onChange={handleFileChange}
+                  required={requiredFiles.includes(key)}
+                  error={errors.files?.[key]}
+                  disabled={disableFiles}
+                />
+              );
+            })}
           </div>
           {!canUploadFiles && (
             <p className="md:col-span-2 text-xs text-amber-600 dark:text-amber-300">
@@ -617,6 +755,23 @@ const InputField = ({ label, name, value, onChange, type = "text", required = fa
       className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
         error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
       }`}
+    />
+    {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+  </label>
+);
+
+const TextAreaField = ({ label, name, value, onChange, required = false, error, rows = 3, disabled = false }) => (
+  <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+    {label} {required && <span className="text-red-500">*</span>}
+    <textarea
+      name={name}
+      value={value}
+      onChange={onChange}
+      rows={rows}
+      disabled={disabled}
+      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
+        error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />
     {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
   </label>

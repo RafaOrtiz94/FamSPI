@@ -10,6 +10,13 @@ CREATE TABLE client_requests (
     -- LOPDP (Protección de datos)
     lopdp_token VARCHAR(255) UNIQUE,
     lopdp_consent_status VARCHAR(50) NOT NULL DEFAULT 'pending' COMMENT 'pending, granted',
+    consent_capture_method VARCHAR(50) NOT NULL DEFAULT 'email_link' COMMENT 'email_link, signed_document, other',
+    consent_capture_details TEXT COMMENT 'Notas de cómo se obtuvo o se obtendrá el consentimiento',
+    lopdp_consent_method VARCHAR(50) COMMENT 'Método real utilizado para registrar el consentimiento',
+    lopdp_consent_details TEXT COMMENT 'Notas auditables del consentimiento',
+    lopdp_consent_at DATETIME NULL COMMENT 'Fecha de aceptación',
+    lopdp_consent_ip VARCHAR(64) COMMENT 'IP desde donde se otorgó el consentimiento',
+    lopdp_consent_user_agent TEXT COMMENT 'User agent del cliente al aceptar',
     client_email VARCHAR(255) NOT NULL COMMENT 'Email del cliente para la autorización LOPDP',
 
     -- Tipo de cliente
@@ -63,6 +70,7 @@ CREATE TABLE client_requests (
     ruc_file_id VARCHAR(255),
     id_file_id VARCHAR(255),
     operating_permit_file_id VARCHAR(255),
+    consent_evidence_file_id VARCHAR(255),
 
     -- Timestamps
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -70,3 +78,21 @@ CREATE TABLE client_requests (
 );
 
 ALTER TABLE client_requests COMMENT 'Tabla para el flujo de creación de nuevos clientes, desde la solicitud hasta la aprobación.';
+
+CREATE TABLE client_request_consents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_request_id INT NOT NULL,
+    event_type VARCHAR(50) NOT NULL COMMENT 'request_sent, granted, revoked',
+    method VARCHAR(50) NOT NULL COMMENT 'email_link, signed_document, other',
+    details TEXT,
+    evidence_file_id VARCHAR(255),
+    actor_email VARCHAR(255),
+    actor_role VARCHAR(100),
+    actor_name VARCHAR(255),
+    ip VARCHAR(64),
+    user_agent TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_request_id) REFERENCES client_requests(id) ON DELETE CASCADE
+);
+
+ALTER TABLE client_request_consents COMMENT 'Eventos auditables asociados a la aceptación de tratamiento de datos (LOPDP).';

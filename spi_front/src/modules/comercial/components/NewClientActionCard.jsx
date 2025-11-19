@@ -19,8 +19,8 @@ const NewClientActionCard = ({ onClick, className = "" }) => (
           Registra clientes directos desde el panel comercial
         </h3>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Completa la ficha con datos de facturación, tesorería y logística. El sistema enviará automáticamente el
-          correo de consentimiento al cliente y notificará a Backoffice para su aprobación.
+          Completa la ficha con datos de facturación, tesorería y logística. Decide si enviaremos el correo automático de
+          consentimiento o si adjuntarás la evidencia existente para que Backoffice cuente con la auditoría completa.
         </p>
         <div className="flex flex-wrap gap-2">
           {badges.map((badge) => (

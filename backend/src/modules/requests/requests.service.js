@@ -50,6 +50,7 @@ const CLIENT_FILE_LABELS = {
   ruc_file: "RUC en PDF",
   legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
   operating_permit_file: "Permiso de funcionamiento (PDF)",
+  consent_evidence_file: "Evidencia del consentimiento LOPDP",
 };
 
 const FORM_VARIANT_META = {
@@ -66,6 +67,38 @@ const FORM_VARIANT_META = {
     label: "Ficha de Cliente",
   },
 };
+
+async function recordConsentEvent({
+  client_request_id,
+  event_type,
+  method,
+  details = null,
+  actor_email = null,
+  actor_role = null,
+  actor_name = null,
+  ip = null,
+  user_agent = null,
+  evidence_file_id = null,
+}) {
+  if (!client_request_id || !event_type || !method) return;
+  const query = `
+    INSERT INTO client_request_consents
+      (client_request_id, event_type, method, details, evidence_file_id, actor_email, actor_role, actor_name, ip, user_agent)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  `;
+  await db.query(query, [
+    client_request_id,
+    event_type,
+    method,
+    details,
+    evidence_file_id,
+    actor_email,
+    actor_role,
+    actor_name,
+    ip,
+    user_agent,
+  ]);
+}
 
 function formatDate(value) {
   if (!value) return "";
@@ -577,6 +610,9 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     throw error;
   }
 
+  const consentCaptureMethod = (data.consent_capture_method || "email_link").toLowerCase();
+  const consentCaptureDetails = data.consent_capture_details?.trim() || null;
+
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
   const requiredFileFields = ["id_file", "ruc_file"];
@@ -585,6 +621,9 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
   if (data.operating_permit_status === "has_it") {
     requiredFileFields.push("operating_permit_file");
+  }
+  if (consentCaptureMethod === "signed_document") {
+    requiredFileFields.push("consent_evidence_file");
   }
   const missingFiles = requiredFileFields.filter((field) => !hasFile(field));
   if (missingFiles.length) {
@@ -620,8 +659,15 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   const dbClient = await db.getClient();
   try {
     await dbClient.query("BEGIN");
+    const shouldAutoApproveConsent = consentCaptureMethod !== "email_link";
+    const consentStatus = shouldAutoApproveConsent ? "granted" : "pending";
+    const requestStatus = shouldAutoApproveConsent ? "pending_approval" : "pending_consent";
+    const lopdpConsentAt = shouldAutoApproveConsent ? new Date() : null;
+    const lopdpConsentMethod = shouldAutoApproveConsent ? consentCaptureMethod : null;
+
     const columns = [
       "created_by", "status", "lopdp_token", "client_email", "client_type", "data_processing_consent",
+      "lopdp_consent_status", "consent_capture_method", "consent_capture_details",
       "legal_person_business_name", "nationality", "natural_person_firstname",
       "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
       "establishment_province", "establishment_city", "establishment_address",
@@ -630,12 +676,15 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
       "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
       "shipping_delivery_hours", "operating_permit_status", "drive_folder_id",
-      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id"
+      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id",
+      "consent_evidence_file_id", "lopdp_consent_method", "lopdp_consent_details", "lopdp_consent_at",
+      "lopdp_consent_ip", "lopdp_consent_user_agent"
     ];
     const values = columns.map((col, i) => `$${i + 1}`);
     const query = `INSERT INTO client_requests (${columns.join(", ")}) VALUES (${values.join(", ")}) RETURNING *`;
     const dbValues = [
-      user.email, 'pending_consent', lopdp_token, client_email, data.client_type, data.data_processing_consent === true,
+      user.email, requestStatus, lopdp_token, client_email, data.client_type, data.data_processing_consent === true,
+      consentStatus, consentCaptureMethod, consentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
       data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
@@ -644,18 +693,43 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       data.legal_rep_email || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
       data.shipping_province, data.shipping_reference || null, data.shipping_phone || null, data.shipping_cellphone || null,
       data.shipping_delivery_hours || null, data.operating_permit_status || null, driveFolderId,
-      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null
+      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null,
+      fileIds.consent_evidence_file_id || null, lopdpConsentMethod, consentCaptureDetails,
+      lopdpConsentAt, null, null
     ];
     const { rows } = await dbClient.query(query, dbValues);
     const newRequest = rows[0];
     await dbClient.query("COMMIT");
 
-    const consentLink = `${FRONTEND_URL}/auth/consent/${lopdp_token}`;
-    await sendMail({
-      to: client_email,
-      subject: "Autorización para el Tratamiento de Datos Personales",
-      html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
-    });
+    if (consentCaptureMethod === "email_link") {
+      const consentLink = `${FRONTEND_URL}/auth/consent/${lopdp_token}`;
+      await sendMail({
+        to: client_email,
+        subject: "Autorización para el Tratamiento de Datos Personales",
+        html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>` ,
+      });
+
+      await recordConsentEvent({
+        client_request_id: newRequest.id,
+        event_type: "request_sent",
+        method: "email_link",
+        details: `Correo enviado a ${client_email}`,
+        actor_email: user.email,
+        actor_role: user.role,
+        actor_name: user.fullname || user.name || null,
+      });
+    } else {
+      await recordConsentEvent({
+        client_request_id: newRequest.id,
+        event_type: "granted",
+        method: consentCaptureMethod,
+        details: consentCaptureDetails || "Consentimiento registrado manualmente",
+        actor_email: user.email,
+        actor_role: user.role,
+        actor_name: user.fullname || user.name || null,
+        evidence_file_id: fileIds.consent_evidence_file_id || null,
+      });
+    }
 
     await sendChatMessage({
       text: `*Nueva Solicitud de Cliente para Revisión*\n> *Cliente:* ${commercial_name}\n> *Tipo:* ${data.client_type}\n> *Solicitante:* ${user.email}\n> *Acción Requerida:* Revisar y aprobar/rechazar en el dashboard de Backoffice.`,
@@ -693,7 +767,23 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
 
 async function getClientRequestById(id, user) {
   if (!id || !user) throw new Error("ID de solicitud y usuario son obligatorios.");
-  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
+  const { rows } = await db.query(
+    `SELECT cr.*, COALESCE(
+        (
+          SELECT json_agg(row_to_json(history))
+          FROM (
+            SELECT id, event_type, method, details, evidence_file_id, actor_email, actor_role,
+                   actor_name, ip, user_agent, created_at
+            FROM client_request_consents
+            WHERE client_request_id = cr.id
+            ORDER BY created_at
+          ) history
+        ), '[]'::json
+      ) AS consent_history
+     FROM client_requests cr
+     WHERE cr.id = $1`,
+    [id]
+  );
   const request = rows[0];
   if (!request) {
     const error = new Error("Solicitud no encontrada.");
@@ -744,7 +834,7 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   return updatedRequest;
 }
 
-async function grantConsent(token) {
+async function grantConsent({ token, audit = {} }) {
   if (!token) {
     const error = new Error("Token de consentimiento no proporcionado.");
     error.status = 400;
@@ -761,11 +851,31 @@ async function grantConsent(token) {
     logger.warn(`Intento de re-confirmar consentimiento para la solicitud #${request.id}`);
     return request;
   }
+  const clientIp = audit.ip || null;
+  const userAgent = audit.userAgent || null;
   const { rows: updatedRows } = await db.query(
-    "UPDATE client_requests SET lopdp_consent_status = 'granted', status = 'pending_approval', updated_at = now() WHERE id = $1 RETURNING *",
-    [request.id]
+    `UPDATE client_requests
+      SET lopdp_consent_status = 'granted',
+          status = 'pending_approval',
+          lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
+          lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
+          lopdp_consent_at = now(),
+          lopdp_consent_ip = $2,
+          lopdp_consent_user_agent = $3,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [request.id, clientIp, userAgent]
   );
   const updatedRequest = updatedRows[0];
+  await recordConsentEvent({
+    client_request_id: updatedRequest.id,
+    event_type: "granted",
+    method: "email_link",
+    details: "Consentimiento confirmado por el cliente mediante enlace público.",
+    ip: clientIp,
+    user_agent: userAgent,
+  });
   await sendChatMessage({
     text: `*Consentimiento Recibido - Listo para Aprobación*\n> *Cliente:* ${request.commercial_name} (#${request.id})\n> *Acción Requerida:* La solicitud ha recibido el consentimiento del cliente y está lista para su revisión final.`,
   });
