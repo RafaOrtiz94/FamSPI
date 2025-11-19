@@ -121,3 +121,30 @@ CREATE TABLE client_request_consent_tokens (
 );
 
 ALTER TABLE client_request_consent_tokens COMMENT 'Tokens temporales enviados por correo para confirmar el consentimiento LOPDP.';
+
+-- =============================================================
+--  LOPDP interno (colaboradores)
+-- =============================================================
+ALTER TABLE users
+  ADD COLUMN IF NOT EXISTS lopdp_internal_status VARCHAR(50) NOT NULL DEFAULT 'granted',
+  ADD COLUMN IF NOT EXISTS lopdp_internal_signed_at DATETIME NULL,
+  ADD COLUMN IF NOT EXISTS lopdp_internal_pdf_file_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS lopdp_internal_signature_file_id VARCHAR(255),
+  ADD COLUMN IF NOT EXISTS lopdp_internal_ip VARCHAR(64),
+  ADD COLUMN IF NOT EXISTS lopdp_internal_user_agent TEXT,
+  ADD COLUMN IF NOT EXISTS lopdp_internal_notes TEXT;
+
+CREATE TABLE IF NOT EXISTS user_lopdp_consents (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NULL,
+    user_email VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    pdf_file_id VARCHAR(255),
+    signature_file_id VARCHAR(255),
+    ip VARCHAR(64),
+    user_agent TEXT,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+ALTER TABLE user_lopdp_consents COMMENT 'Evidencias internas de aceptación de LOPDP por colaboradores.';

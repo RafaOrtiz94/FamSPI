@@ -66,6 +66,28 @@ const REQUIRED_TABLES = [
     optionalColumns: ["verified_at", "verified_by_email", "created_by_email"],
   },
   {
+    schema: "public",
+    table: "users",
+    columns: [
+      "id",
+      "email",
+      "role",
+      "lopdp_internal_status",
+      "lopdp_internal_pdf_file_id",
+    ],
+    optionalColumns: [
+      "lopdp_internal_signature_file_id",
+      "lopdp_internal_signed_at",
+      "lopdp_internal_ip",
+      "lopdp_internal_user_agent",
+    ],
+  },
+  {
+    schema: "public",
+    table: "user_lopdp_consents",
+    columns: ["id", "user_email", "status", "pdf_file_id", "created_at"],
+  },
+  {
     schema: "auditoria",
     table: "logs",
     columns: ["id", "modulo", "accion", "usuario_email"],

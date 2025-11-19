@@ -198,3 +198,41 @@ BEGIN
     RAISE NOTICE 'No se pudo localizar ni crear la tabla public.client_requests. Revisa V4.sql antes de reintentar.';
   END IF;
 END $$;
+
+-- Asegurar columnas de consentimiento interno en usuarios y tabla de auditoría
+DO $$
+BEGIN
+  BEGIN
+    ALTER TABLE public.users
+      ADD COLUMN IF NOT EXISTS lopdp_internal_status VARCHAR(50) NOT NULL DEFAULT 'granted',
+      ADD COLUMN IF NOT EXISTS lopdp_internal_signed_at TIMESTAMP NULL,
+      ADD COLUMN IF NOT EXISTS lopdp_internal_pdf_file_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS lopdp_internal_signature_file_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS lopdp_internal_ip VARCHAR(64),
+      ADD COLUMN IF NOT EXISTS lopdp_internal_user_agent TEXT,
+      ADD COLUMN IF NOT EXISTS lopdp_internal_notes TEXT;
+  EXCEPTION
+    WHEN others THEN
+      RAISE NOTICE 'No se pudieron agregar las columnas internas de LOPDP en users: %', SQLERRM;
+  END;
+
+  BEGIN
+    EXECUTE '
+      CREATE TABLE IF NOT EXISTS public.user_lopdp_consents (
+        id SERIAL PRIMARY KEY,
+        user_id INT NULL,
+        user_email VARCHAR(255) NOT NULL,
+        status VARCHAR(50) NOT NULL,
+        pdf_file_id VARCHAR(255),
+        signature_file_id VARCHAR(255),
+        ip VARCHAR(64),
+        user_agent TEXT,
+        notes TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    ';
+  EXCEPTION
+    WHEN others THEN
+      RAISE NOTICE 'No se pudo crear user_lopdp_consents: %', SQLERRM;
+  END;
+END $$;

@@ -4,11 +4,13 @@ import { Outlet } from "react-router-dom";
 import Footer from "../ui/components/Footer";
 import Header from "../ui/components/Header";
 import NavigationBar from "../ui/components/NavigationBar";
+import InternalLopdpConsentModal from "../../modules/shared/components/InternalLopdpConsentModal";
 
 export default function DashboardLayout() {
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100">
+      <InternalLopdpConsentModal />
       <Header />
       <NavigationBar />
 
