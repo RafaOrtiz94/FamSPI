@@ -102,8 +102,9 @@ export const createClientRequest = async (formData = {}, files = {}) => {
   return response.data?.data || response.data;
 };
 
-export const sendConsentEmailToken = async ({ client_email, client_name }) => {
+export const sendConsentEmailToken = async ({ consent_recipient_email, client_email, client_name }) => {
   const response = await api.post("/requests/new-client/consent-token", {
+    consent_recipient_email,
     client_email,
     client_name,
   });

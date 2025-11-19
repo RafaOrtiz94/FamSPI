@@ -123,6 +123,7 @@ module.exports = {
         enum: ["email_link", "signed_document", "other"],
       },
       consent_capture_details: { type: "string" },
+      consent_recipient_email: { type: "string", format: "email" },
       consent_email_token_id: { type: "string", minLength: 10 },
       client_type: { type: "string", enum: ["persona_natural", "persona_juridica"] },
 
@@ -182,12 +183,15 @@ module.exports = {
           required: ["legal_person_business_name", "nationality"],
         },
       },
-      {
+      {        
         if: {
           properties: { consent_capture_method: { const: "email_link" } },
         },
         then: {
-          required: ["client_email", "consent_email_token_id"],
+          required: ["client_email", "consent_recipient_email", "consent_email_token_id"],
+          properties: {
+            consent_capture_details: { type: "string", minLength: 0 },
+          },
         },
       },
       {
@@ -197,7 +201,7 @@ module.exports = {
         then: {
           required: ["consent_capture_details"],
           properties: {
-            consent_capture_details: { minLength: 5 },
+            consent_capture_details: { type: "string", minLength: 5 },
           },
         },
       },
@@ -208,7 +212,7 @@ module.exports = {
         then: {
           required: ["consent_capture_details"],
           properties: {
-            consent_capture_details: { minLength: 5 },
+            consent_capture_details: { type: "string", minLength: 5 },
           },
         },
       },

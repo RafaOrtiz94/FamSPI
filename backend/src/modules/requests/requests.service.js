@@ -98,8 +98,8 @@ async function getConsentTokenById(tokenId) {
   return rows[0] || null;
 }
 
-async function sendConsentEmailToken({ user, client_email, client_name }) {
-  const normalizedEmail = (client_email || "").trim().toLowerCase();
+async function sendConsentEmailToken({ user, client_email, recipient_email, client_name }) {
+  const normalizedEmail = (recipient_email || client_email || "").trim().toLowerCase();
   if (!normalizedEmail) {
     throw buildHttpError("Debes ingresar el correo del cliente antes de enviar el código.");
   }
@@ -804,6 +804,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
 
   const { commercial_name, client_email } = data;
+  const consentRecipientEmail = data.consent_recipient_email || client_email;
   const consentEmailTokenId = data.consent_email_token_id?.trim() || null;
   let verifiedConsentToken = null;
   if (consentCaptureMethod === "email_link") {
@@ -812,7 +813,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     }
     verifiedConsentToken = await assertVerifiedConsentEmailToken({
       tokenId: consentEmailTokenId,
-      email: client_email,
+      email: consentRecipientEmail,
     });
   }
   const storedConsentCaptureDetails =
@@ -856,12 +857,12 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       ? verifiedConsentToken
         ? `Consentimiento confirmado con ${maskConsentCode(
             verifiedConsentToken.code_last_four,
-          )} enviado a ${client_email}`
+          )} enviado a ${consentRecipientEmail || client_email}`
         : consentCaptureDetails || "Consentimiento registrado manualmente"
       : null;
 
     const columns = [
-      "created_by", "status", "lopdp_token", "client_email", "client_type", "data_processing_consent",
+      "created_by", "status", "lopdp_token", "client_email", "consent_recipient_email", "client_type", "data_processing_consent",
       "lopdp_consent_status", "consent_capture_method", "consent_capture_details",
       "legal_person_business_name", "nationality", "natural_person_firstname",
       "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
@@ -878,7 +879,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const values = columns.map((col, i) => `$${i + 1}`);
     const query = `INSERT INTO client_requests (${columns.join(", ")}) VALUES (${values.join(", ")}) RETURNING *`;
     const dbValues = [
-      user.email, requestStatus, lopdp_token, client_email, data.client_type, data.data_processing_consent === true,
+      user.email, requestStatus, lopdp_token, client_email, consentRecipientEmail || client_email, data.client_type, data.data_processing_consent === true,
       consentStatus, consentCaptureMethod, storedConsentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
       data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
@@ -904,7 +905,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
         method: "email_link",
         details: `Consentimiento confirmado con ${maskConsentCode(
           verifiedConsentToken?.code_last_four,
-        )} enviado a ${client_email}`,
+        )} enviado a ${consentRecipientEmail || client_email}`,
         actor_email: user.email,
         actor_role: user.role,
         actor_name: user.fullname || user.name || null,
@@ -912,7 +913,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     } else if (consentCaptureMethod === "email_link") {
       const consentLink = `${FRONTEND_URL}/auth/consent/${lopdp_token}`;
       await sendMail({
-        to: client_email,
+        to: consentRecipientEmail || client_email,
         subject: "Autorización para el Tratamiento de Datos Personales",
         html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>` ,
       });
@@ -921,7 +922,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
         client_request_id: newRequest.id,
         event_type: "request_sent",
         method: "email_link",
-        details: `Correo enviado a ${client_email}`,
+        details: `Correo enviado a ${consentRecipientEmail || client_email}`,
         actor_email: user.email,
         actor_role: user.role,
         actor_name: user.fullname || user.name || null,

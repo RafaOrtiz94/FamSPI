@@ -43,10 +43,11 @@ exports.listRequests = asyncHandler(async (req, res) => {
 // 🧾 Crear nueva solicitud (con validación AJV y logs detallados)
 // ============================================================
 exports.sendConsentEmailToken = asyncHandler(async (req, res) => {
-  const { client_email, client_name } = req.body || {};
+  const { client_email, client_name, consent_recipient_email } = req.body || {};
   const data = await service.sendConsentEmailToken({
     user: req.user,
     client_email,
+    recipient_email: consent_recipient_email,
     client_name,
   });
 
@@ -55,7 +56,7 @@ exports.sendConsentEmailToken = asyncHandler(async (req, res) => {
     module: "client_requests",
     action: "send_consent_token",
     entity: "client_request_consent_tokens",
-    details: { client_email },
+    details: { client_email: consent_recipient_email || client_email },
   });
 
   res.json({

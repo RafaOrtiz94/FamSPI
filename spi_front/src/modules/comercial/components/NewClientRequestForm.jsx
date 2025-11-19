@@ -90,6 +90,7 @@ const initialFormState = {
   consent_capture_method: "email_link",
   consent_capture_details: "",
   consent_email_token_id: "",
+  consent_recipient_email: "",
   client_type: "persona_natural",
   natural_person_firstname: "",
   natural_person_lastname: "",
@@ -180,16 +181,26 @@ const NewClientRequestForm = ({
     setConsentTokenCode("");
     setFormData((prev) => ({ ...prev, consent_email_token_id: "" }));
     setErrors((prev) => {
-      if (!prev.consent_email_token_id) return prev;
+      if (!prev.consent_email_token_id && !prev.consent_recipient_email) return prev;
       const next = { ...prev };
-      delete next.consent_email_token_id;
+      if (next.consent_email_token_id) delete next.consent_email_token_id;
+      if (next.consent_recipient_email) delete next.consent_recipient_email;
       return next;
     });
   };
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+    setFormData((prev) => {
+      const nextValue = type === "checkbox" ? checked : value;
+      const nextState = { ...prev, [name]: nextValue };
+      if (name === "client_email") {
+        if (!prev.consent_recipient_email || prev.consent_recipient_email === prev.client_email) {
+          nextState.consent_recipient_email = nextValue;
+        }
+      }
+      return nextState;
+    });
     setErrors((prev) => {
       if (!prev[name]) return prev;
       const next = { ...prev };
@@ -203,7 +214,7 @@ const NewClientRequestForm = ({
     if (name === "operating_permit_status" && value !== "has_it") {
       setFiles((prev) => ({ ...prev, operating_permit_file: null }));
     }
-    if (name === "client_email") {
+    if (name === "client_email" || name === "consent_recipient_email") {
       const normalized = value.trim().toLowerCase();
       if (consentTokenState.lastEmail && normalized !== consentTokenState.lastEmail) {
         resetConsentTokenFlow();
@@ -249,16 +260,20 @@ const NewClientRequestForm = ({
 
   const handleSendConsentToken = async () => {
     if (disabledBody) return;
-    const email = (formData.client_email || "").trim();
+    const email = (formData.consent_recipient_email || formData.client_email || "").trim();
     if (!email) {
-      setErrors((prev) => ({ ...prev, client_email: "Ingresa el correo del cliente" }));
+      setErrors((prev) => ({
+        ...prev,
+        consent_recipient_email: "Ingresa el correo al que enviaremos el código",
+      }));
       showToast("Necesitas un correo de cliente válido para enviar el código.", "warning");
       return;
     }
     setConsentTokenState((prev) => ({ ...prev, status: "sending" }));
     try {
       const response = await sendConsentEmailToken({
-        client_email: email,
+        consent_recipient_email: email,
+        client_email: formData.client_email,
         client_name: guessClientDisplayName(),
       });
       setConsentTokenState({
@@ -351,12 +366,16 @@ const NewClientRequestForm = ({
         validationErrors.consent_capture_details = "Describe el medio utilizado para el consentimiento.";
       }
     }
-    if (
-      formData.consent_capture_method === "email_link" &&
-      !formData.consent_email_token_id
-    ) {
-      validationErrors.consent_email_token_id =
-        "Debes validar el código enviado al cliente antes de continuar.";
+    if (formData.consent_capture_method === "email_link") {
+      const consentEmail = (formData.consent_recipient_email || formData.client_email || "").trim();
+      if (!consentEmail) {
+        validationErrors.consent_recipient_email =
+          "Indica el correo al que enviaremos el código de autorización.";
+      }
+      if (!formData.consent_email_token_id) {
+        validationErrors.consent_email_token_id =
+          "Debes validar el código enviado al cliente antes de continuar.";
+      }
     }
 
     const checkField = (field) => {
@@ -540,7 +559,17 @@ const NewClientRequestForm = ({
               Envía un código automático al correo del cliente. Solo podrás continuar cuando el cliente te confirme el código y lo
               registres aquí mismo.
             </p>
-            <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-end">
+            <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <InputField
+                name="consent_recipient_email"
+                label="Correo que recibirá el código"
+                type="email"
+                value={formData.consent_recipient_email}
+                onChange={handleChange}
+                required
+                disabled={disabledBody}
+                error={errors.consent_recipient_email}
+              />
               <button
                 type="button"
                 onClick={handleSendConsentToken}
@@ -549,33 +578,31 @@ const NewClientRequestForm = ({
               >
                 {tokenStatus === "sending" ? "Enviando..." : tokenStatus === "sent" ? "Reenviar código" : tokenStatus === "verified" ? "Código verificado" : "Enviar código"}
               </button>
-              {consentTokenState.tokenId && (
-                <div className="flex flex-1 flex-col gap-1">
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-300">
-                    Código recibido por el cliente
-                  </label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      maxLength={6}
-                      value={consentTokenCode}
-                      onChange={(e) => setConsentTokenCode(e.target.value.replace(/[^0-9]/g, ""))}
-                      className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
-                      disabled={tokenStatus === "verifying" || isTokenVerified}
-                    />
-                    <button
-                      type="button"
-                      onClick={handleVerifyConsentToken}
-                      disabled={isTokenVerified || tokenStatus === "verifying"}
-                      className="rounded-xl border border-blue-600 px-4 py-2 font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400"
-                    >
-                      {tokenStatus === "verifying" ? "Validando..." : isTokenVerified ? "Validado" : "Validar"}
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
+            {consentTokenState.tokenId && (
+              <div className="mt-4 flex flex-1 flex-col gap-1">
+                <label className="text-xs font-medium text-gray-600 dark:text-gray-300">Código recibido por el cliente</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    value={consentTokenCode}
+                    onChange={(e) => setConsentTokenCode(e.target.value.replace(/[^0-9]/g, ""))}
+                    className="flex-1 rounded-xl border border-gray-300 px-3 py-2 text-base focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200"
+                    disabled={tokenStatus === "verifying" || isTokenVerified}
+                  />
+                  <button
+                    type="button"
+                    onClick={handleVerifyConsentToken}
+                    disabled={isTokenVerified || tokenStatus === "verifying"}
+                    className="rounded-xl border border-blue-600 px-4 py-2 font-medium text-blue-600 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-gray-300 disabled:text-gray-400"
+                  >
+                    {tokenStatus === "verifying" ? "Validando..." : isTokenVerified ? "Validado" : "Validar"}
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="mt-2 text-xs text-gray-600 dark:text-gray-300">
               {isTokenVerified && consentTokenState.verifiedAt
                 ? `Consentimiento confirmado el ${new Date(consentTokenState.verifiedAt).toLocaleString("es-EC")}.`
@@ -943,7 +970,7 @@ const Section = ({ title, children }) => (
   </section>
 );
 
-const InputField = ({ label, name, value, onChange, type = "text", required = false, error }) => (
+const InputField = ({ label, name, value, onChange, type = "text", required = false, error, disabled = false }) => (
   <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
     {label} {required && <span className="text-red-500">*</span>}
     <input
@@ -952,9 +979,10 @@ const InputField = ({ label, name, value, onChange, type = "text", required = fa
       value={value}
       onChange={onChange}
       required={required}
+      disabled={disabled}
       className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
         error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
-      }`}
+      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />
     {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
   </label>

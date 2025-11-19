@@ -18,7 +18,8 @@ CREATE TABLE client_requests (
     lopdp_consent_at DATETIME NULL COMMENT 'Fecha de aceptación',
     lopdp_consent_ip VARCHAR(64) COMMENT 'IP desde donde se otorgó el consentimiento',
     lopdp_consent_user_agent TEXT COMMENT 'User agent del cliente al aceptar',
-    client_email VARCHAR(255) NOT NULL COMMENT 'Email del cliente para la autorización LOPDP',
+    client_email VARCHAR(255) NOT NULL COMMENT 'Email de contacto del cliente',
+    consent_recipient_email VARCHAR(255) NOT NULL COMMENT 'Correo al que se envía el código de consentimiento',
 
     -- Tipo de cliente
     client_type VARCHAR(50) NOT NULL COMMENT 'persona_natural o persona_juridica',

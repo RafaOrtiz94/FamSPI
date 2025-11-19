@@ -38,6 +38,8 @@ BEGIN
       ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS consent_capture_details TEXT;
       ALTER TABLE public.client_requests
+        ADD COLUMN IF NOT EXISTS consent_recipient_email VARCHAR(255);
+      ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS consent_email_token_id VARCHAR(64);
       ALTER TABLE public.client_requests
         ADD COLUMN IF NOT EXISTS lopdp_consent_method VARCHAR(50);
@@ -53,6 +55,7 @@ BEGIN
         ADD COLUMN IF NOT EXISTS consent_evidence_file_id VARCHAR(255);
 
       COMMENT ON COLUMN public.client_requests.consent_capture_method IS 'Método planificado para recolectar el consentimiento';
+      COMMENT ON COLUMN public.client_requests.consent_recipient_email IS 'Correo al que se envió el código OTP LOPDP';
       COMMENT ON COLUMN public.client_requests.consent_email_token_id IS 'Token OTP verificado previamente para LOPDP';
       COMMENT ON COLUMN public.client_requests.lopdp_consent_method IS 'Método real utilizado para registrar la aceptación';
     EXCEPTION
