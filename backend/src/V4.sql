@@ -14,6 +14,7 @@ CREATE TABLE client_requests (
 
     -- Tipo de cliente
     client_type VARCHAR(50) NOT NULL COMMENT 'persona_natural o persona_juridica',
+    data_processing_consent TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Aceptación interna del tratamiento de datos',
 
     -- Datos Persona Jurídica
     legal_person_business_name VARCHAR(255) COMMENT 'Razón Social',

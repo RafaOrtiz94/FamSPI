@@ -34,6 +34,7 @@ import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
 import { useDashboard } from "../../../core/hooks/useDashboard";
 import { useAuth } from "../../../core/auth/AuthContext";
+import { canManageClientRequests } from "../constants/clientPermissions";
 
 import {
   getRequests,
@@ -111,7 +112,7 @@ const ComercialDashboard = () => {
   });
 
   const normalizedScope = (user?.scope || user?.role || "").toLowerCase();
-  const canCreateClients = ["comercial", "jefe_comercial", "asesor_comercial", "asesor"].includes(normalizedScope);
+  const canCreateClients = canManageClientRequests(normalizedScope);
 
   // ============================
   // 🔌 API Hooks
@@ -462,7 +463,7 @@ const ComercialDashboard = () => {
           {canCreateClients && (
             <NewClientActionCard
               className="h-full"
-              onClick={() => navigate("/dashboard/comercial/new-client-request")}
+              onClick={() => openRequestModal("cliente")}
             />
           )}
         </div>
@@ -596,6 +597,7 @@ const ComercialDashboard = () => {
         onClose={closeRequestModal}
         onSubmit={handleCreate}
         presetType={presetRequestType}
+        canUploadClientFiles={canCreateClients}
       />
 
       <RequestDetailModal

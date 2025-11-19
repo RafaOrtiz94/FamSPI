@@ -88,6 +88,7 @@ module.exports = {
   newClient: {
     type: "object",
     required: [
+      "data_processing_consent",
       "client_type",
       "commercial_name",
       "ruc_cedula",
@@ -118,6 +119,7 @@ module.exports = {
       "operating_permit_status",
     ],
     properties: {
+      data_processing_consent: { type: "boolean", const: true },
       client_type: { type: "string", enum: ["persona_natural", "persona_juridica"] },
 
       // Datos comunes

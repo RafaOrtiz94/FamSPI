@@ -621,7 +621,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   try {
     await dbClient.query("BEGIN");
     const columns = [
-      "created_by", "status", "lopdp_token", "client_email", "client_type",
+      "created_by", "status", "lopdp_token", "client_email", "client_type", "data_processing_consent",
       "legal_person_business_name", "nationality", "natural_person_firstname",
       "natural_person_lastname", "commercial_name", "ruc_cedula",
       "establishment_province", "establishment_city", "establishment_address",
@@ -637,7 +637,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const values = columns.map((col, i) => `$${i + 1}`);
     const query = `INSERT INTO client_requests (${columns.join(", ")}) VALUES (${values.join(", ")}) RETURNING *`;
     const dbValues = [
-      user.email, 'pending_consent', lopdp_token, client_email, data.client_type,
+      user.email, 'pending_consent', lopdp_token, client_email, data.client_type, data.data_processing_consent === true,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
       data.natural_person_lastname || null, commercial_name, data.ruc_cedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
