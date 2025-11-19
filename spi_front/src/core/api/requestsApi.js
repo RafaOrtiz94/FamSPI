@@ -1,0 +1,128 @@
+// src/core/api/requestsApi.js
+import api from "./index";
+
+/** 📋 Lista paginada de solicitudes */
+export const getRequests = async (params = {}) => {
+  const { page = 1, pageSize = 12, mine, status, q } = params;
+  const response = await api.get("/requests", {
+    params: { page, pageSize, mine, status, q },
+  });
+
+  console.log("📡 API /requests respondió:", response.data);
+
+  const data = response.data;
+
+  // Handle various response shapes, prioritizing ones with 'count'
+  if (data?.result && Array.isArray(data.result.rows)) {
+    return {
+      rows: data.result.rows,
+      count: data.result.count || data.result.rows.length,
+    };
+  }
+
+  if (Array.isArray(data?.rows)) {
+    return {
+      rows: data.rows,
+      count: data.count || data.rows.length,
+    };
+  }
+  
+  if (data?.data && Array.isArray(data.data.rows)) {
+    return {
+      rows: data.data.rows,
+      count: data.data.total || data.data.count || data.data.rows.length,
+    };
+  }
+
+  if (Array.isArray(data?.data)) {
+    return {
+      rows: data.data,
+      count: data.data.length,
+    };
+  }
+  
+  if (Array.isArray(data)) {
+    return {
+      rows: data,
+      count: data.length,
+    };
+  }
+
+  // Default fallback
+  return { rows: [], count: 0 };
+};
+
+/** 📄 Detalle de solicitud */
+export const getRequestById = async (id) => {
+  const response = await api.get(`/requests/${id}`);
+  if (response.data?.data) return response.data.data;
+  if (response.data?.result) return response.data.result;
+  return response.data;
+};
+
+/** 🧾 Crear solicitud (multipart/form-data) */
+export const createRequest = async ({ request_type_id, payload, files }) => {
+  const formData = new FormData();
+  formData.append("request_type_id", request_type_id);
+  formData.append("payload", JSON.stringify(payload || {}));
+  (files || []).forEach((f) => formData.append("files[]", f));
+
+  const response = await api.post("/requests", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  return response.data?.result || response.data;
+};
+
+/** ❌ Cancelar solicitud */
+export const cancelRequest = async (id) => {
+  const response = await api.post(`/requests/${id}/cancel`);
+  return response.data?.result || response.data;
+};
+
+/** 🆕 Crear solicitud de nuevo cliente */
+export const createClientRequest = async (formData, files) => {
+  const data = new FormData();
+
+  // Adjuntar todos los campos de texto
+  for (const key in formData) {
+    data.append(key, formData[key]);
+  }
+
+  // Adjuntar todos los archivos
+  for (const key in files) {
+    if (files[key]) {
+      data.append(key, files[key]);
+    }
+  }
+
+  const response = await api.post("/requests/new-client", data, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  return response.data?.data || response.data;
+};
+
+/** 📋 Lista paginada de solicitudes de nuevos clientes */
+export const getClientRequests = async (params = {}) => {
+  const { page = 1, pageSize = 25, status, q } = params;
+  const response = await api.get("/requests/new-client", {
+    params: { page, pageSize, status, q },
+  });
+  return response.data?.data || response.data;
+};
+
+/** 📄 Detalle de solicitud de nuevo cliente */
+export const getClientRequestById = async (id) => {
+  const response = await api.get(`/requests/new-client/${id}`);
+  return response.data?.data || response.data;
+};
+
+/** 🔄 Procesar (aprobar/rechazar) solicitud de nuevo cliente */
+export const processClientRequest = async (id, action, rejection_reason) => {
+  const response = await api.put(`/requests/new-client/${id}/process`, {
+    action,
+    rejection_reason,
+  });
+  return response.data?.data || response.data;
+};

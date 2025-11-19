@@ -1,0 +1,123 @@
+import React from "react";
+import { Routes, Route, Navigate } from "react-router-dom";
+
+// 🧠 Contextos y protecciones
+import { ProtectedRoute } from "../core/auth/ProtectedRoute";
+import { RoleRedirect } from "../core/auth/ProtectedRoute";
+
+// 🏠 Layouts
+import PublicLayout from "../core/layout/PublicLayout";
+import DashboardLayout from "../core/layout/DashboardLayout";
+
+// 🪪 Páginas públicas
+import Login from "../modules/shared/pages/Login";
+import LoginCallback from "../modules/shared/pages/LoginCallback";
+import NotFound from "../modules/shared/pages/NotFound";
+import Unauthorized from "../modules/shared/pages/Unauthorized";
+
+// 🧭 Dashboards por rol
+import DashboardGerencia from "../modules/gerencia/Dashboard";
+import DashboardFinanzas from "../modules/finanzas/Dashboard";
+import DashboardComercial from "../modules/comercial/pages/Dashboard";
+import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
+import DashboardServicio from "../modules/servicio/pages/Dashboard";
+import DashboardTalento from "../modules/talento/Dashboard";
+import DashboardTI from "../modules/talento/DashboardTI";
+import DashboardOperaciones from "../modules/operaciones/Dashboard";
+import DashboardCalidad from "../modules/calidad/Dashboard";
+import ClientRequests from "../modules/backoffice/pages/ClientRequests";
+import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
+
+// 📋 Páginas de Talento Humano
+import Usuarios from "../modules/talento/pages/Usuarios";
+import Departamentos from "../modules/talento/pages/Departamentos";
+
+// 🧾 Páginas compartidas
+import RequestsPage from "../modules/RequestsPage";
+import MantenimientosPage from "../modules/MantenimientosPage";
+import DocumentsPage from "../modules/DocumentsPage";
+import Auditoria from "../modules/gerencia/Auditoria";
+
+const AppRoutes = () => {
+  return (
+    <Routes>
+      {/* =======================================
+          🌐 RUTAS PÚBLICAS
+      ======================================= */}
+      <Route element={<PublicLayout />}>
+        <Route path="/login" element={<Login />} />
+        <Route path="/login/callback" element={<LoginCallback />} />
+        <Route path="/unauthorized" element={<Unauthorized />} />
+      </Route>
+
+      {/* =======================================
+          🔒 RUTAS PRIVADAS (requieren token JWT)
+      ======================================= */}
+      <Route
+        element={
+          <ProtectedRoute
+            allowedRoles={[
+              "gerencia",
+              "finanzas",
+              "comercial",
+              "jefe_comercial",
+              "backoffice_comercial",
+              "servicio_tecnico",
+              "jefe_tecnico",
+              "jefe_servicio_tecnico",
+              "talento_humano",
+              "ti",
+              "operaciones",
+      "calidad",
+            ]}
+          />
+        }
+      >
+        {/* Redirección automática según rol */}
+        <Route path="/dashboard" element={<RoleRedirect />} />
+
+        {/* Layout principal */}
+        <Route element={<DashboardLayout />}>
+          {/* Dashboards principales */}
+          <Route path="/dashboard/gerencia" element={<DashboardGerencia />} />
+          <Route path="/dashboard/finanzas" element={<DashboardFinanzas />} />
+          <Route path="/dashboard/comercial" element={<DashboardComercial />} />
+          <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
+          <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
+          <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
+          <Route path="/dashboard/ti" element={<DashboardTI />} />
+          <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
+          <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
+
+          {/* Subrutas Backoffice */}
+          <Route element={<ProtectedRoute allowedRoles={["backoffice_comercial", "gerencia"]} />}>
+            <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
+            <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
+          </Route>
+
+          {/* Subrutas Talento Humano */}
+          <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
+          <Route path="/dashboard/talento-humano/departamentos" element={<Departamentos />} />
+
+          {/* Auditoría (solo Gerencia y TI) */}
+          <Route element={<ProtectedRoute allowedRoles={["gerencia", "ti"]} />}>
+            <Route path="/dashboard/auditoria" element={<Auditoria />} />
+          </Route>
+
+          {/* Rutas compartidas */}
+          <Route path="/requests" element={<RequestsPage />} />
+          <Route path="/mantenimientos" element={<MantenimientosPage />} />
+          <Route path="/documents" element={<DocumentsPage />} />
+        </Route>
+      </Route>
+
+      {/* =======================================
+          🔁 REDIRECCIONES Y ERRORES
+      ======================================= */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
+      <Route path="*" element={<NotFound />} />
+    </Routes>
+  );
+};
+
+export default AppRoutes;

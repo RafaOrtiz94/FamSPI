@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+backend/node_modules/
+spi_front/node_modules/
+
+# Runtime artifacts
+logs/
+backend/logs/
+backend/uploads/
+backend/*.log
+*.log
+
+# Frontend builds
+spi_front/dist/
+spi_front/build/
+
+# OS noise
+.DS_Store
+Thumbs.db
+# Archivos de configuración sensible
+.env
+.env.local
+.env.*.local
+backend/.env
+spi_front/.env
+
+# Credenciales de Backend
+backend\src\data\dashboard-spi-3d9bca86a1bb.json
+backend/src/data/dashboard-spi-3d9bca86a1bb.json
