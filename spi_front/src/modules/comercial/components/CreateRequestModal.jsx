@@ -346,9 +346,16 @@ const CreateRequestModal = ({
         <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-xl overflow-y-auto max-h-[90vh]">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
-            <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
-              Nueva Solicitud
-            </Dialog.Title>
+            <div>
+              <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
+                {type ? requestTypes[type]?.title || "Nueva solicitud" : "Selecciona una solicitud"}
+              </Dialog.Title>
+              {type && (
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Flujo comercial preconfigurado
+                </p>
+              )}
+            </div>
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
@@ -357,29 +364,11 @@ const CreateRequestModal = ({
             </button>
           </div>
 
-          {/* Tipo de solicitud */}
-          <div className="mb-4">
-            <label className="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">
-              Tipo de solicitud
-            </label>
-            <select
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-2 text-gray-900 dark:text-white"
-              onChange={(e) => {
-                setType(e.target.value || null);
-                setFormData({});
-                setEquipos([]);
-                setErrors({});
-              }}
-              value={type || ""}
-            >
-              <option value="">Seleccione una opción</option>
-              {Object.entries(requestTypes).map(([id, info]) => (
-                <option key={id} value={id}>
-                  {info.title}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!type && (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+              Selecciona un flujo desde los accesos directos del dashboard para cargar la información correspondiente.
+            </div>
+          )}
 
           {/* Campos dinámicos */}
           {type && type !== "cliente" && (

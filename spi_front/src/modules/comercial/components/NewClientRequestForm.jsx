@@ -7,16 +7,13 @@ const COMMON_REQUIRED_FIELDS = [
   "commercial_name",
   "ruc_cedula",
   "client_email",
+  "establishment_name",
   "establishment_province",
   "establishment_city",
   "establishment_address",
   "establishment_reference",
   "establishment_phone",
   "establishment_cellphone",
-  "treasury_name",
-  "treasury_email",
-  "treasury_conventional_phone",
-  "treasury_cellphone",
   "shipping_contact_name",
   "shipping_address",
   "shipping_city",
@@ -33,14 +30,7 @@ const COMMON_REQUIRED_FIELDS = [
   "operating_permit_status",
 ];
 
-const NATURAL_REQUIRED_FIELDS = [
-  "natural_person_firstname",
-  "natural_person_lastname",
-  "domicile_province",
-  "domicile_city",
-  "domicile_address",
-  "domicile_phone_cellphone",
-];
+const NATURAL_REQUIRED_FIELDS = ["natural_person_firstname", "natural_person_lastname"];
 
 const LEGAL_REQUIRED_FIELDS = [
   "legal_person_business_name",
@@ -54,7 +44,7 @@ const FILE_REQUIREMENTS = {
   },
   ruc_file: {
     label: "RUC del cliente",
-    helper: "Obligatorio para personas jurídicas (PDF).",
+    helper: "Obligatorio para todos los clientes (PDF).",
   },
   legal_rep_appointment_file: {
     label: "Nombramiento del representante legal",
@@ -73,6 +63,7 @@ const initialFormState = {
   natural_person_lastname: "",
   legal_person_business_name: "",
   commercial_name: "",
+  establishment_name: "",
   ruc_cedula: "",
   nationality: "",
   client_email: "",
@@ -82,19 +73,11 @@ const initialFormState = {
   establishment_reference: "",
   establishment_phone: "",
   establishment_cellphone: "",
-  domicile_province: "",
-  domicile_city: "",
-  domicile_address: "",
-  domicile_phone_cellphone: "",
   legal_rep_name: "",
   legal_rep_position: "",
   legal_rep_id_document: "",
   legal_rep_cellphone: "",
   legal_rep_email: "",
-  treasury_name: "",
-  treasury_email: "",
-  treasury_conventional_phone: "",
-  treasury_cellphone: "",
   shipping_contact_name: "",
   shipping_address: "",
   shipping_city: "",
@@ -114,9 +97,9 @@ const initialFilesState = {
 };
 
 const requiredFilesByType = (type, permitStatus) => {
-  const files = ["id_file"];
+  const files = ["id_file", "ruc_file"];
   if (type === "persona_juridica") {
-    files.push("ruc_file", "legal_rep_appointment_file");
+    files.push("legal_rep_appointment_file");
   }
   if (permitStatus === "has_it") {
     files.push("operating_permit_file");
@@ -154,7 +137,7 @@ const NewClientRequestForm = ({
     });
 
     if (name === "client_type" && value === "persona_natural") {
-      setFiles((prev) => ({ ...prev, ruc_file: null, legal_rep_appointment_file: null }));
+      setFiles((prev) => ({ ...prev, legal_rep_appointment_file: null }));
     }
     if (name === "operating_permit_status" && value !== "has_it") {
       setFiles((prev) => ({ ...prev, operating_permit_file: null }));
@@ -387,6 +370,14 @@ const NewClientRequestForm = ({
 
         <Section title="Datos del establecimiento">
           <InputField
+            name="establishment_name"
+            label="Nombre del establecimiento"
+            value={formData.establishment_name}
+            onChange={handleChange}
+            required
+            error={errors.establishment_name}
+          />
+          <InputField
             name="establishment_province"
             label="Provincia"
             value={formData.establishment_province}
@@ -436,43 +427,6 @@ const NewClientRequestForm = ({
           />
         </Section>
 
-        {formData.client_type === "persona_natural" && (
-          <Section title="Domicilio de facturación">
-            <InputField
-              name="domicile_province"
-              label="Provincia"
-              value={formData.domicile_province}
-              onChange={handleChange}
-              required
-              error={errors.domicile_province}
-            />
-            <InputField
-              name="domicile_city"
-              label="Ciudad"
-              value={formData.domicile_city}
-              onChange={handleChange}
-              required
-              error={errors.domicile_city}
-            />
-            <InputField
-              name="domicile_address"
-              label="Dirección"
-              value={formData.domicile_address}
-              onChange={handleChange}
-              required
-              error={errors.domicile_address}
-            />
-            <InputField
-              name="domicile_phone_cellphone"
-              label="Teléfono/Celular"
-              value={formData.domicile_phone_cellphone}
-              onChange={handleChange}
-              required
-              error={errors.domicile_phone_cellphone}
-            />
-          </Section>
-        )}
-
         <Section title="Representante legal y contacto">
           <InputField
             name="legal_rep_name"
@@ -516,43 +470,6 @@ const NewClientRequestForm = ({
             error={errors.legal_rep_email}
           />
         </Section>
-
-        <Section title="Datos de tesorería">
-          <InputField
-            name="treasury_name"
-            label="Nombre"
-            value={formData.treasury_name}
-            onChange={handleChange}
-            required
-            error={errors.treasury_name}
-          />
-          <InputField
-            name="treasury_email"
-            label="Correo electrónico"
-            type="email"
-            value={formData.treasury_email}
-            onChange={handleChange}
-            required
-            error={errors.treasury_email}
-          />
-          <InputField
-            name="treasury_conventional_phone"
-            label="Teléfono convencional"
-            value={formData.treasury_conventional_phone}
-            onChange={handleChange}
-            required
-            error={errors.treasury_conventional_phone}
-          />
-          <InputField
-            name="treasury_cellphone"
-            label="Teléfono celular"
-            value={formData.treasury_cellphone}
-            onChange={handleChange}
-            required
-            error={errors.treasury_cellphone}
-          />
-        </Section>
-
         <Section title="Datos para el envío de mercadería">
           <InputField
             name="shipping_contact_name"

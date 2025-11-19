@@ -396,6 +396,19 @@ const ComercialDashboard = () => {
     setPresetRequestType(null);
   };
 
+  const scrollToRequestActions = () => {
+    if (typeof document !== "undefined") {
+      const actions = document.getElementById("comercial-request-actions");
+      if (actions) {
+        actions.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+    }
+    if (requestActionCards[0]) {
+      openRequestModal(requestActionCards[0].id);
+    }
+  };
+
   return (
     <motion.div
       ref={reportRef}
@@ -431,7 +444,7 @@ const ComercialDashboard = () => {
       </div>
 
       {/* ACCIONES DESTACADAS */}
-      <section className="space-y-5">
+      <section id="comercial-request-actions" className="space-y-5">
         <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300">
@@ -443,7 +456,7 @@ const ComercialDashboard = () => {
           </div>
           <button
             type="button"
-            onClick={() => openRequestModal(null)}
+            onClick={scrollToRequestActions}
             className="inline-flex items-center justify-center rounded-xl border border-blue-200 px-4 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 dark:border-blue-900/40 dark:text-blue-200 dark:hover:bg-blue-900/20"
           >
             Explorar opciones

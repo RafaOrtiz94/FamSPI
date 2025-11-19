@@ -26,6 +26,7 @@ CREATE TABLE client_requests (
 
     -- Datos Comunes
     commercial_name VARCHAR(255) COMMENT 'Nombre Comercial',
+    establishment_name VARCHAR(255) COMMENT 'Nombre del Establecimiento',
     ruc_cedula VARCHAR(20) NOT NULL UNIQUE,
 
     -- Datos del Establecimiento
@@ -36,24 +37,12 @@ CREATE TABLE client_requests (
     establishment_phone VARCHAR(50),
     establishment_cellphone VARCHAR(50),
 
-    -- Datos del Domicilio (Persona Natural)
-    domicile_province VARCHAR(100),
-    domicile_city VARCHAR(100),
-    domicile_address TEXT,
-    domicile_phone_cellphone VARCHAR(50),
-
     -- Datos del Representante Legal (Persona Jurídica)
     legal_rep_name VARCHAR(255),
     legal_rep_position VARCHAR(100),
     legal_rep_id_document VARCHAR(20),
     legal_rep_cellphone VARCHAR(50),
     legal_rep_email VARCHAR(255),
-
-    -- Datos de Tesorería
-    treasury_name VARCHAR(255),
-    treasury_email VARCHAR(255),
-    treasury_conventional_phone VARCHAR(50),
-    treasury_cellphone VARCHAR(50),
 
     -- Datos de Envío de Mercadería
     shipping_contact_name VARCHAR(255),

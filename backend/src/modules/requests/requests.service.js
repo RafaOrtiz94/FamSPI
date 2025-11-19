@@ -579,9 +579,9 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
 
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
-  const requiredFileFields = ["id_file"];
+  const requiredFileFields = ["id_file", "ruc_file"];
   if ((data.client_type || "").toLowerCase() === "persona_juridica") {
-    requiredFileFields.push("ruc_file", "legal_rep_appointment_file");
+    requiredFileFields.push("legal_rep_appointment_file");
   }
   if (data.operating_permit_status === "has_it") {
     requiredFileFields.push("operating_permit_file");
@@ -623,13 +623,11 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const columns = [
       "created_by", "status", "lopdp_token", "client_email", "client_type", "data_processing_consent",
       "legal_person_business_name", "nationality", "natural_person_firstname",
-      "natural_person_lastname", "commercial_name", "ruc_cedula",
+      "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
       "establishment_province", "establishment_city", "establishment_address",
       "establishment_reference", "establishment_phone", "establishment_cellphone",
-      "domicile_province", "domicile_city", "domicile_address", "domicile_phone_cellphone",
       "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
-      "legal_rep_email", "treasury_name", "treasury_email", "treasury_conventional_phone",
-      "treasury_cellphone", "shipping_contact_name", "shipping_address", "shipping_city",
+      "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
       "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
       "shipping_delivery_hours", "operating_permit_status", "drive_folder_id",
       "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id"
@@ -639,13 +637,11 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const dbValues = [
       user.email, 'pending_consent', lopdp_token, client_email, data.client_type, data.data_processing_consent === true,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
-      data.natural_person_lastname || null, commercial_name, data.ruc_cedula,
+      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
       data.establishment_reference || null, data.establishment_phone || null, data.establishment_cellphone || null,
-      data.domicile_province || null, data.domicile_city || null, data.domicile_address || null, data.domicile_phone_cellphone || null,
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,
-      data.legal_rep_email || null, data.treasury_name, data.treasury_email, data.treasury_conventional_phone || null,
-      data.treasury_cellphone || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
+      data.legal_rep_email || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
       data.shipping_province, data.shipping_reference || null, data.shipping_phone || null, data.shipping_cellphone || null,
       data.shipping_delivery_hours || null, data.operating_permit_status || null, driveFolderId,
       fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null
