@@ -9,6 +9,73 @@ BEGIN
       AND table_name = 'client_requests'
   ) INTO client_requests_exists;
 
+  IF NOT client_requests_exists THEN
+    BEGIN
+      RAISE NOTICE 'La tabla public.client_requests no existe. Creándola con la estructura base V4...';
+      EXECUTE '
+        CREATE TABLE IF NOT EXISTS public.client_requests (
+          id SERIAL PRIMARY KEY,
+          created_by VARCHAR(255) NOT NULL,
+          status VARCHAR(50) NOT NULL DEFAULT ''pending_consent'',
+          rejection_reason TEXT,
+          lopdp_token VARCHAR(255) UNIQUE,
+          lopdp_consent_status VARCHAR(50) NOT NULL DEFAULT ''pending'',
+          consent_capture_method VARCHAR(50) NOT NULL DEFAULT ''email_link'',
+          consent_capture_details TEXT,
+          consent_recipient_email VARCHAR(255) NOT NULL,
+          consent_email_token_id VARCHAR(64),
+          lopdp_consent_method VARCHAR(50),
+          lopdp_consent_details TEXT,
+          lopdp_consent_at TIMESTAMP NULL,
+          lopdp_consent_ip VARCHAR(64),
+          lopdp_consent_user_agent TEXT,
+          client_email VARCHAR(255) NOT NULL,
+          client_type VARCHAR(50) NOT NULL,
+          data_processing_consent BOOLEAN NOT NULL DEFAULT FALSE,
+          legal_person_business_name VARCHAR(255),
+          nationality VARCHAR(100),
+          natural_person_firstname VARCHAR(255),
+          natural_person_lastname VARCHAR(255),
+          commercial_name VARCHAR(255),
+          establishment_name VARCHAR(255),
+          ruc_cedula VARCHAR(20) NOT NULL UNIQUE,
+          establishment_province VARCHAR(100),
+          establishment_city VARCHAR(100),
+          establishment_address TEXT,
+          establishment_reference TEXT,
+          establishment_phone VARCHAR(50),
+          establishment_cellphone VARCHAR(50),
+          legal_rep_name VARCHAR(255),
+          legal_rep_position VARCHAR(100),
+          legal_rep_id_document VARCHAR(20),
+          legal_rep_cellphone VARCHAR(50),
+          legal_rep_email VARCHAR(255),
+          shipping_contact_name VARCHAR(255),
+          shipping_address TEXT,
+          shipping_city VARCHAR(100),
+          shipping_province VARCHAR(100),
+          shipping_reference TEXT,
+          shipping_phone VARCHAR(50),
+          shipping_cellphone VARCHAR(50),
+          shipping_delivery_hours VARCHAR(255),
+          operating_permit_status VARCHAR(50),
+          drive_folder_id VARCHAR(255),
+          legal_rep_appointment_file_id VARCHAR(255),
+          ruc_file_id VARCHAR(255),
+          id_file_id VARCHAR(255),
+          operating_permit_file_id VARCHAR(255),
+          consent_evidence_file_id VARCHAR(255),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+      ';
+      client_requests_exists := TRUE;
+    EXCEPTION
+      WHEN others THEN
+        RAISE NOTICE 'No se pudo crear la tabla client_requests: %', SQLERRM;
+    END;
+  END IF;
+
   IF client_requests_exists THEN
     BEGIN
       ALTER TABLE public.client_requests
@@ -128,6 +195,6 @@ BEGIN
         RAISE NOTICE 'No se pudo crear client_request_consent_tokens: %', SQLERRM;
     END;
   ELSE
-    RAISE NOTICE 'La tabla public.client_requests no existe. Ejecuta primero el script de creación (V3.sql/V4.sql).';
+    RAISE NOTICE 'No se pudo localizar ni crear la tabla public.client_requests. Revisa V4.sql antes de reintentar.';
   END IF;
 END $$;
