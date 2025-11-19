@@ -2,7 +2,6 @@ import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { FiAlertCircle, FiArrowLeft } from "react-icons/fi";
-import DashboardLayout from "../../../core/layout/DashboardLayout";
 import { useUI } from "../../../core/ui/useUI";
 import { createClientRequest } from "../../../core/api/requestsApi";
 
@@ -231,13 +230,12 @@ const NewClientRequest = () => {
   };
 
   return (
-    <DashboardLayout>
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="p-4 sm:p-6"
-      >
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4 }}
+      className="p-4 sm:p-6"
+    >
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">Registro de Clientes • Comercial</p>
@@ -649,8 +647,7 @@ const NewClientRequest = () => {
             </button>
           </div>
         </form>
-      </motion.div>
-    </DashboardLayout>
+    </motion.div>
   );
 };
 
