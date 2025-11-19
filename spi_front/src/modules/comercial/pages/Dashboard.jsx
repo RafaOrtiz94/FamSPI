@@ -12,6 +12,7 @@ import React, {
   useState,
 } from "react";
 import { motion } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
   FiDownload,
   FiRefreshCw,
@@ -29,6 +30,7 @@ import jsPDF from "jspdf";
 import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
 import { useDashboard } from "../../../core/hooks/useDashboard";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 import {
   getRequests,
@@ -43,6 +45,7 @@ import { getInventoryByRequest } from "../../../core/api/inventarioApi";
 import SolicitudesGrid from "../components/SolicitudesGrid";
 import CreateRequestModal from "../components/CreateRequestModal";
 import ActionCreateCard from "../components/ActionCreateCard";
+import NewClientActionCard from "../components/NewClientActionCard";
 import RequestHighlights from "../components/RequestHighlights";
 import ExecutiveStatCard from "../../../core/ui/components/ExecutiveStatCard";
 import LoadingOverlay from "../../../core/ui/components/LoadingOverlay";
@@ -82,6 +85,8 @@ const safeJSON = (txt) => {
 
 const ComercialDashboard = () => {
   const { showToast, confirm } = useUI();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("all");
   const [modalOpen, setModalOpen] = useState(false);
@@ -100,6 +105,9 @@ const ComercialDashboard = () => {
     aprobadas: 0,
     rechazadas: 0,
   });
+
+  const normalizedScope = (user?.scope || user?.role || "").toLowerCase();
+  const canCreateClients = ["comercial", "jefe_comercial", "asesor_comercial", "asesor"].includes(normalizedScope);
 
   // ============================
   // 🔌 API Hooks
@@ -371,8 +379,13 @@ const ComercialDashboard = () => {
         </div>
       </div>
 
-      {/* ACCIÓN DESTACADA */}
-      <ActionCreateCard onClick={() => setModalOpen(true)} />
+      {/* ACCIONES DESTACADAS */}
+      <div className="space-y-4">
+        <ActionCreateCard onClick={() => setModalOpen(true)} />
+        {canCreateClients && (
+          <NewClientActionCard onClick={() => navigate("/dashboard/comercial/new-client-request")} />
+        )}
+      </div>
 
       {/* SOLICITUDES DESTACADAS */}
       <RequestHighlights

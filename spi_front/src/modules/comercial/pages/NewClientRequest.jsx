@@ -1,215 +1,651 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
+import { FiAlertCircle, FiArrowLeft } from "react-icons/fi";
 import DashboardLayout from "../../../core/layout/DashboardLayout";
 import { useUI } from "../../../core/ui/useUI";
 import { createClientRequest } from "../../../core/api/requestsApi";
 
+const COMMON_REQUIRED_FIELDS = [
+  "commercial_name",
+  "ruc_cedula",
+  "client_email",
+  "establishment_province",
+  "establishment_city",
+  "establishment_address",
+  "establishment_reference",
+  "establishment_phone",
+  "establishment_cellphone",
+  "treasury_name",
+  "treasury_email",
+  "treasury_conventional_phone",
+  "treasury_cellphone",
+  "shipping_contact_name",
+  "shipping_address",
+  "shipping_city",
+  "shipping_province",
+  "shipping_reference",
+  "shipping_phone",
+  "shipping_cellphone",
+  "shipping_delivery_hours",
+  "legal_rep_name",
+  "legal_rep_position",
+  "legal_rep_id_document",
+  "legal_rep_cellphone",
+  "legal_rep_email",
+  "operating_permit_status",
+];
+
+const NATURAL_REQUIRED_FIELDS = [
+  "natural_person_firstname",
+  "natural_person_lastname",
+  "domicile_province",
+  "domicile_city",
+  "domicile_address",
+  "domicile_phone_cellphone",
+];
+
+const LEGAL_REQUIRED_FIELDS = [
+  "legal_person_business_name",
+  "nationality",
+];
+
+const FILE_REQUIREMENTS = {
+  id_file: {
+    label: "Documento de identificación del solicitante",
+    helper: "Formato PDF, máximo 10 MB.",
+  },
+  ruc_file: {
+    label: "RUC del cliente",
+    helper: "Obligatorio para personas jurídicas (PDF).",
+  },
+  legal_rep_appointment_file: {
+    label: "Nombramiento del representante legal",
+    helper: "Solo personas jurídicas (PDF).",
+  },
+  operating_permit_file: {
+    label: "Permiso de funcionamiento",
+    helper: "Adjunta solo si el cliente ya cuenta con permiso vigente.",
+  },
+};
+
+const initialFormState = {
+  client_type: "persona_natural",
+  natural_person_firstname: "",
+  natural_person_lastname: "",
+  legal_person_business_name: "",
+  commercial_name: "",
+  ruc_cedula: "",
+  nationality: "",
+  client_email: "",
+  establishment_province: "",
+  establishment_city: "",
+  establishment_address: "",
+  establishment_reference: "",
+  establishment_phone: "",
+  establishment_cellphone: "",
+  domicile_province: "",
+  domicile_city: "",
+  domicile_address: "",
+  domicile_phone_cellphone: "",
+  legal_rep_name: "",
+  legal_rep_position: "",
+  legal_rep_id_document: "",
+  legal_rep_cellphone: "",
+  legal_rep_email: "",
+  treasury_name: "",
+  treasury_email: "",
+  treasury_conventional_phone: "",
+  treasury_cellphone: "",
+  shipping_contact_name: "",
+  shipping_address: "",
+  shipping_city: "",
+  shipping_province: "",
+  shipping_reference: "",
+  shipping_phone: "",
+  shipping_cellphone: "",
+  shipping_delivery_hours: "",
+  operating_permit_status: "does_not_have_it",
+};
+
+const initialFilesState = {
+  id_file: null,
+  ruc_file: null,
+  legal_rep_appointment_file: null,
+  operating_permit_file: null,
+};
+
+const requiredFilesByType = (type, permitStatus) => {
+  const files = ["id_file"];
+  if (type === "persona_juridica") {
+    files.push("ruc_file", "legal_rep_appointment_file");
+  }
+  if (permitStatus === "has_it") {
+    files.push("operating_permit_file");
+  }
+  return files;
+};
+
 const NewClientRequest = () => {
   const { showToast } = useUI();
   const navigate = useNavigate();
-  const [formData, setFormData] = useState({
-    client_type: "persona_natural",
-    natural_person_firstname: "",
-    natural_person_lastname: "",
-    legal_person_business_name: "",
-    commercial_name: "",
-    ruc_cedula: "",
-    nationality: "",
-    client_email: "",
-    establishment_province: "",
-    establishment_city: "",
-    establishment_address: "",
-    establishment_reference: "",
-    establishment_phone: "",
-    establishment_cellphone: "",
-    domicile_province: "",
-    domicile_city: "",
-    domicile_address: "",
-    domicile_phone_cellphone: "",
-    legal_rep_name: "",
-    legal_rep_position: "",
-    legal_rep_id_document: "",
-    legal_rep_cellphone: "",
-    legal_rep_email: "",
-    treasury_name: "",
-    treasury_email: "",
-    treasury_conventional_phone: "",
-    treasury_cellphone: "",
-    shipping_contact_name: "",
-    shipping_address: "",
-    shipping_city: "",
-    shipping_province: "",
-    shipping_reference: "",
-    shipping_phone: "",
-    shipping_cellphone: "",
-    shipping_delivery_hours: "",
-    operating_permit_status: "does_not_have_it",
-  });
-  const [files, setFiles] = useState({});
+  const [formData, setFormData] = useState(initialFormState);
+  const [files, setFiles] = useState(initialFilesState);
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+
+  const requiredFiles = useMemo(
+    () => requiredFilesByType(formData.client_type, formData.operating_permit_status),
+    [formData.client_type, formData.operating_permit_status],
+  );
 
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
+    setErrors((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
+
+    if (name === "client_type" && value === "persona_natural") {
+      setFiles((prev) => ({ ...prev, ruc_file: null, legal_rep_appointment_file: null }));
+    }
+    if (name === "operating_permit_status" && value !== "has_it") {
+      setFiles((prev) => ({ ...prev, operating_permit_file: null }));
+    }
   };
 
   const handleFileChange = (e) => {
-    const { name, files: inputFiles } = e.target;
-    setFiles((prev) => ({ ...prev, [name]: inputFiles[0] }));
+    const { name, files: selectedFiles } = e.target;
+    const file = selectedFiles?.[0] || null;
+    setFiles((prev) => ({ ...prev, [name]: file }));
+    setErrors((prev) => {
+      if (!prev.files) return prev;
+      const nextFiles = { ...prev.files };
+      delete nextFiles[name];
+      const next = { ...prev };
+      if (Object.keys(nextFiles).length) {
+        next.files = nextFiles;
+      } else {
+        delete next.files;
+      }
+      return next;
+    });
+  };
+
+  const validateForm = () => {
+    const validationErrors = {};
+    const checkField = (field) => {
+      const value = (formData[field] || "").trim();
+      if (!value) {
+        validationErrors[field] = "Este campo es obligatorio.";
+      }
+    };
+
+    COMMON_REQUIRED_FIELDS.forEach(checkField);
+    if (formData.client_type === "persona_natural") {
+      NATURAL_REQUIRED_FIELDS.forEach(checkField);
+    } else {
+      LEGAL_REQUIRED_FIELDS.forEach(checkField);
+    }
+
+    const missingFiles = requiredFiles.filter((field) => !files[field]);
+    if (missingFiles.length) {
+      validationErrors.files = missingFiles.reduce((acc, field) => {
+        acc[field] = "Adjunta este documento";
+        return acc;
+      }, {});
+    }
+
+    return validationErrors;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    const validationErrors = validateForm();
+    if (Object.keys(validationErrors).length) {
+      setErrors(validationErrors);
+      showToast("Por favor completa la información obligatoria.", "warning");
+      return;
+    }
+
     setLoading(true);
     try {
       await createClientRequest(formData, files);
-      showToast("Solicitud creada con éxito. Se ha enviado un correo al cliente para su autorización.", "success");
-      // Reset form or navigate away
-      setFormData({ client_type: "persona_natural" }); // simplified reset
-      setFiles({});
+      showToast(
+        "Solicitud registrada. El cliente recibirá el correo para confirmar el uso de datos.",
+        "success",
+      );
+      setFormData({ ...initialFormState });
+      setFiles({ ...initialFilesState });
+      setErrors({});
       navigate("/dashboard/comercial");
     } catch (error) {
       console.error("Error al crear solicitud de cliente:", error);
-      const errorMsg = error.response?.data?.message || error.message || "Error al crear la solicitud";
-      showToast(errorMsg, "error");
+      const message = error.response?.data?.message || error.message || "Error al crear la solicitud";
+      showToast(message, "error");
     } finally {
       setLoading(false);
     }
   };
-  
-  const renderCommonFields = () => (
-    <>
-        <InputField name="commercial_name" label="Nombre Comercial" value={formData.commercial_name} onChange={handleChange} required />
-        <InputField name="ruc_cedula" label="RUC/Cédula" value={formData.ruc_cedula} onChange={handleChange} required />
-        <InputField name="client_email" label="Email del Cliente (para LOPDP)" value={formData.client_email} onChange={handleChange} type="email" required />
-    </>
-  );
 
   return (
     <DashboardLayout>
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-        className="p-6"
+        transition={{ duration: 0.4 }}
+        className="p-4 sm:p-6"
       >
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">
-          Solicitud de Creación de Nuevo Cliente
-        </h1>
-        
-        <form onSubmit={handleSubmit} className="space-y-8 bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md">
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <RadioGroup
-              label="Tipo de Cliente"
-              name="client_type"
-              value={formData.client_type}
-              onChange={handleChange}
-              options={[
-                { label: "Persona Natural", value: "persona_natural" },
-                { label: "Persona Jurídica", value: "persona_juridica" },
-              ]}
-            />
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Registro de Clientes • Comercial</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+              Solicitud de creación de nuevo cliente
+            </h1>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate(-1)}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+          >
+            <FiArrowLeft /> Regresar
+          </button>
+        </div>
 
-          {/* Campos Condicionales */}
+        <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
+          <FiAlertCircle className="mt-0.5 flex-shrink-0 text-xl" />
+          <p className="text-sm leading-relaxed">
+            Esta ficha recopila todos los datos necesarios para habilitar a un nuevo cliente. Asegúrate de ingresar
+            la información tal como constará en facturación y adjunta los documentos solicitados. Una vez enviada la
+            solicitud, el sistema notificará automáticamente al cliente para que confirme el uso de sus datos (LOPDP).
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-8">
+          <Section title="Tipo de cliente">
+            <div className="md:col-span-2">
+              <RadioGroup
+                name="client_type"
+                value={formData.client_type}
+                onChange={handleChange}
+                options={[
+                  { label: "Persona natural", value: "persona_natural" },
+                  { label: "Persona jurídica", value: "persona_juridica" },
+                ]}
+              />
+            </div>
+          </Section>
+
           {formData.client_type === "persona_natural" ? (
-            <Section title="Datos del Cliente (Persona Natural)">
-              <InputField name="natural_person_firstname" label="Nombres" value={formData.natural_person_firstname} onChange={handleChange} required />
-              <InputField name="natural_person_lastname" label="Apellidos" value={formData.natural_person_lastname} onChange={handleChange} required />
-              {renderCommonFields()}
+            <Section title="Datos del cliente (persona natural)">
+              <InputField
+                name="natural_person_firstname"
+                label="Nombres"
+                value={formData.natural_person_firstname}
+                onChange={handleChange}
+                required
+                error={errors.natural_person_firstname}
+              />
+              <InputField
+                name="natural_person_lastname"
+                label="Apellidos"
+                value={formData.natural_person_lastname}
+                onChange={handleChange}
+                required
+                error={errors.natural_person_lastname}
+              />
+              <InputField
+                name="commercial_name"
+                label="Nombre comercial"
+                value={formData.commercial_name}
+                onChange={handleChange}
+                required
+                error={errors.commercial_name}
+              />
+              <InputField
+                name="ruc_cedula"
+                label="RUC/Cédula"
+                value={formData.ruc_cedula}
+                onChange={handleChange}
+                required
+                error={errors.ruc_cedula}
+              />
+              <InputField
+                name="client_email"
+                label="Correo de contacto"
+                type="email"
+                value={formData.client_email}
+                onChange={handleChange}
+                required
+                error={errors.client_email}
+              />
             </Section>
           ) : (
-            <Section title="Datos del Cliente (Persona Jurídica)">
-              <InputField name="legal_person_business_name" label="Razón Social" value={formData.legal_person_business_name} onChange={handleChange} required />
-              {renderCommonFields()}
-              <InputField name="nationality" label="Nacionalidad" value={formData.nationality} onChange={handleChange} required />
+            <Section title="Datos del cliente (persona jurídica)">
+              <InputField
+                name="legal_person_business_name"
+                label="Razón social"
+                value={formData.legal_person_business_name}
+                onChange={handleChange}
+                required
+                error={errors.legal_person_business_name}
+              />
+              <InputField
+                name="commercial_name"
+                label="Nombre comercial"
+                value={formData.commercial_name}
+                onChange={handleChange}
+                required
+                error={errors.commercial_name}
+              />
+              <InputField
+                name="ruc_cedula"
+                label="RUC"
+                value={formData.ruc_cedula}
+                onChange={handleChange}
+                required
+                error={errors.ruc_cedula}
+              />
+              <InputField
+                name="nationality"
+                label="Nacionalidad"
+                value={formData.nationality}
+                onChange={handleChange}
+                required
+                error={errors.nationality}
+              />
+              <InputField
+                name="client_email"
+                label="Correo de contacto"
+                type="email"
+                value={formData.client_email}
+                onChange={handleChange}
+                required
+                error={errors.client_email}
+              />
             </Section>
           )}
 
-          {/* Resto de secciones... placeholder */}
-          <Section title="Datos del Establecimiento">
-            <InputField name="establishment_province" label="Provincia" value={formData.establishment_province} onChange={handleChange} required />
-            <InputField name="establishment_city" label="Ciudad" value={formData.establishment_city} onChange={handleChange} required />
-            <InputField name="establishment_address" label="Dirección" value={formData.establishment_address} onChange={handleChange} required />
-            <InputField name="establishment_reference" label="Referencia" value={formData.establishment_reference} onChange={handleChange} />
-            <InputField name="establishment_phone" label="Teléfono" value={formData.establishment_phone} onChange={handleChange} />
-            <InputField name="establishment_cellphone" label="Celular" value={formData.establishment_cellphone} onChange={handleChange} />
+          <Section title="Datos del establecimiento">
+            <InputField
+              name="establishment_province"
+              label="Provincia"
+              value={formData.establishment_province}
+              onChange={handleChange}
+              required
+              error={errors.establishment_province}
+            />
+            <InputField
+              name="establishment_city"
+              label="Ciudad"
+              value={formData.establishment_city}
+              onChange={handleChange}
+              required
+              error={errors.establishment_city}
+            />
+            <InputField
+              name="establishment_address"
+              label="Dirección"
+              value={formData.establishment_address}
+              onChange={handleChange}
+              required
+              error={errors.establishment_address}
+            />
+            <InputField
+              name="establishment_reference"
+              label="Referencia"
+              value={formData.establishment_reference}
+              onChange={handleChange}
+              required
+              error={errors.establishment_reference}
+            />
+            <InputField
+              name="establishment_phone"
+              label="Teléfono"
+              value={formData.establishment_phone}
+              onChange={handleChange}
+              required
+              error={errors.establishment_phone}
+            />
+            <InputField
+              name="establishment_cellphone"
+              label="Celular"
+              value={formData.establishment_cellphone}
+              onChange={handleChange}
+              required
+              error={errors.establishment_cellphone}
+            />
           </Section>
 
           {formData.client_type === "persona_natural" && (
-            <Section title="Datos del Domicilio">
-              <InputField name="domicile_province" label="Provincia" value={formData.domicile_province} onChange={handleChange} />
-              <InputField name="domicile_city" label="Ciudad" value={formData.domicile_city} onChange={handleChange} />
-              <InputField name="domicile_address" label="Dirección" value={formData.domicile_address} onChange={handleChange} />
-              <InputField name="domicile_phone_cellphone" label="Teléfono o Celular" value={formData.domicile_phone_cellphone} onChange={handleChange} />
+            <Section title="Domicilio de facturación">
+              <InputField
+                name="domicile_province"
+                label="Provincia"
+                value={formData.domicile_province}
+                onChange={handleChange}
+                required
+                error={errors.domicile_province}
+              />
+              <InputField
+                name="domicile_city"
+                label="Ciudad"
+                value={formData.domicile_city}
+                onChange={handleChange}
+                required
+                error={errors.domicile_city}
+              />
+              <InputField
+                name="domicile_address"
+                label="Dirección"
+                value={formData.domicile_address}
+                onChange={handleChange}
+                required
+                error={errors.domicile_address}
+              />
+              <InputField
+                name="domicile_phone_cellphone"
+                label="Teléfono o celular"
+                value={formData.domicile_phone_cellphone}
+                onChange={handleChange}
+                required
+                error={errors.domicile_phone_cellphone}
+              />
             </Section>
           )}
 
-          {formData.client_type === "persona_juridica" && (
-            <Section title="Datos del Representante Legal">
-              <InputField name="legal_rep_name" label="Nombres Completos" value={formData.legal_rep_name} onChange={handleChange} required />
-              <InputField name="legal_rep_position" label="Cargo" value={formData.legal_rep_position} onChange={handleChange} />
-              <InputField name="legal_rep_id_document" label="Documento de Identificación" value={formData.legal_rep_id_document} onChange={handleChange} required />
-              <InputField name="legal_rep_cellphone" label="Celular" value={formData.legal_rep_cellphone} onChange={handleChange} />
-              <InputField name="legal_rep_email" label="Email" value={formData.legal_rep_email} onChange={handleChange} type="email" required />
-            </Section>
-          )}
-
-          <Section title="Datos de Tesorería">
-            <InputField name="treasury_name" label="Nombre de Contacto" value={formData.treasury_name} onChange={handleChange} required />
-            <InputField name="treasury_email" label="Email" value={formData.treasury_email} onChange={handleChange} type="email" required />
-            <InputField name="treasury_conventional_phone" label="Teléfono Convencional" value={formData.treasury_conventional_phone} onChange={handleChange} />
-            <InputField name="treasury_cellphone" label="Teléfono Celular" value={formData.treasury_cellphone} onChange={handleChange} />
+          <Section title="Representante legal / contacto principal">
+            <InputField
+              name="legal_rep_name"
+              label="Nombres completos"
+              value={formData.legal_rep_name}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_name}
+            />
+            <InputField
+              name="legal_rep_position"
+              label="Cargo"
+              value={formData.legal_rep_position}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_position}
+            />
+            <InputField
+              name="legal_rep_id_document"
+              label="Documento de identificación"
+              value={formData.legal_rep_id_document}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_id_document}
+            />
+            <InputField
+              name="legal_rep_cellphone"
+              label="Celular"
+              value={formData.legal_rep_cellphone}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_cellphone}
+            />
+            <InputField
+              name="legal_rep_email"
+              label="Correo"
+              type="email"
+              value={formData.legal_rep_email}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_email}
+            />
           </Section>
 
-          <Section title="Datos para Envío de Mercadería">
-            <InputField name="shipping_contact_name" label="Nombre de Encargado" value={formData.shipping_contact_name} onChange={handleChange} required />
-            <InputField name="shipping_address" label="Dirección" value={formData.shipping_address} onChange={handleChange} required />
-            <InputField name="shipping_city" label="Ciudad" value={formData.shipping_city} onChange={handleChange} required />
-            <InputField name="shipping_province" label="Provincia" value={formData.shipping_province} onChange={handleChange} required />
-            <InputField name="shipping_reference" label="Referencia" value={formData.shipping_reference} onChange={handleChange} />
-            <InputField name="shipping_phone" label="Teléfono" value={formData.shipping_phone} onChange={handleChange} />
-            <InputField name="shipping_cellphone" label="Celular" value={formData.shipping_cellphone} onChange={handleChange} />
-            <InputField name="shipping_delivery_hours" label="Horario de Entregas" value={formData.shipping_delivery_hours} onChange={handleChange} />
+          <Section title="Datos de tesorería">
+            <InputField
+              name="treasury_name"
+              label="Nombre del responsable"
+              value={formData.treasury_name}
+              onChange={handleChange}
+              required
+              error={errors.treasury_name}
+            />
+            <InputField
+              name="treasury_email"
+              label="Correo"
+              type="email"
+              value={formData.treasury_email}
+              onChange={handleChange}
+              required
+              error={errors.treasury_email}
+            />
+            <InputField
+              name="treasury_conventional_phone"
+              label="Teléfono convencional"
+              value={formData.treasury_conventional_phone}
+              onChange={handleChange}
+              required
+              error={errors.treasury_conventional_phone}
+            />
+            <InputField
+              name="treasury_cellphone"
+              label="Teléfono celular"
+              value={formData.treasury_cellphone}
+              onChange={handleChange}
+              required
+              error={errors.treasury_cellphone}
+            />
           </Section>
 
-          <Section title="Documentos Adjuntos">
-            {formData.client_type === 'persona_juridica' && (
-              <>
-                <FileInput name="ruc_file" label="RUC (PDF)" onChange={handleFileChange} required accept=".pdf" />
-                <FileInput name="legal_rep_appointment_file" label="Nombramiento Representante Legal (PDF)" onChange={handleFileChange} required accept=".pdf" />
-              </>
-            )}
-            <FileInput name="id_file" label="Documento de Identificación (PDF)" onChange={handleFileChange} required accept=".pdf" />
-            
+          <Section title="Datos para el envío de mercadería">
+            <InputField
+              name="shipping_contact_name"
+              label="Nombre del encargado"
+              value={formData.shipping_contact_name}
+              onChange={handleChange}
+              required
+              error={errors.shipping_contact_name}
+            />
+            <InputField
+              name="shipping_address"
+              label="Dirección"
+              value={formData.shipping_address}
+              onChange={handleChange}
+              required
+              error={errors.shipping_address}
+            />
+            <InputField
+              name="shipping_city"
+              label="Ciudad"
+              value={formData.shipping_city}
+              onChange={handleChange}
+              required
+              error={errors.shipping_city}
+            />
+            <InputField
+              name="shipping_province"
+              label="Provincia"
+              value={formData.shipping_province}
+              onChange={handleChange}
+              required
+              error={errors.shipping_province}
+            />
+            <InputField
+              name="shipping_reference"
+              label="Referencia"
+              value={formData.shipping_reference}
+              onChange={handleChange}
+              required
+              error={errors.shipping_reference}
+            />
+            <InputField
+              name="shipping_phone"
+              label="Teléfono"
+              value={formData.shipping_phone}
+              onChange={handleChange}
+              required
+              error={errors.shipping_phone}
+            />
+            <InputField
+              name="shipping_cellphone"
+              label="Celular"
+              value={formData.shipping_cellphone}
+              onChange={handleChange}
+              required
+              error={errors.shipping_cellphone}
+            />
+            <InputField
+              name="shipping_delivery_hours"
+              label="Horario de entregas"
+              value={formData.shipping_delivery_hours}
+              onChange={handleChange}
+              required
+              error={errors.shipping_delivery_hours}
+            />
+          </Section>
+
+          <Section title="Documentos y permisos">
             <div className="md:col-span-2">
               <RadioGroup
-                label="Permiso de Funcionamiento"
                 name="operating_permit_status"
                 value={formData.operating_permit_status}
                 onChange={handleChange}
                 options={[
-                  { label: "No lo tiene", value: "does_not_have_it" },
+                  { label: "No cuenta con permiso", value: "does_not_have_it" },
                   { label: "En trámite", value: "in_progress" },
-                  { label: "Sí lo tiene", value: "has_it" },
+                  { label: "Tiene permiso vigente", value: "has_it" },
                 ]}
               />
             </div>
-            
-            {formData.operating_permit_status === 'has_it' && (
-              <FileInput name="operating_permit_file" label="Subir Permiso de Funcionamiento (PDF)" onChange={handleFileChange} required accept=".pdf" />
-            )}
+            <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
+              {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => (
+                <FileInput
+                  key={key}
+                  name={key}
+                  label={meta.label}
+                  helper={meta.helper}
+                  onChange={handleFileChange}
+                  required={requiredFiles.includes(key)}
+                  error={errors.files?.[key]}
+                />
+              ))}
+            </div>
           </Section>
-          
-          <div className="flex justify-end pt-4">
+
+          <div className="flex flex-col gap-3 border-t border-gray-200 pt-6 dark:border-gray-700 sm:flex-row sm:justify-end">
+            <button
+              type="button"
+              onClick={() => navigate("/dashboard/comercial")}
+              className="inline-flex items-center justify-center rounded-xl border border-gray-300 px-5 py-2.5 text-sm font-semibold text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-800"
+              disabled={loading}
+            >
+              Cancelar
+            </button>
             <button
               type="submit"
               disabled={loading}
-              className="px-6 py-2 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400"
+              className="inline-flex items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-300"
             >
-              {loading ? "Enviando..." : "Crear Solicitud"}
+              {loading ? "Enviando solicitud..." : "Enviar solicitud"}
             </button>
           </div>
         </form>
@@ -218,72 +654,62 @@ const NewClientRequest = () => {
   );
 };
 
-// --- Componentes de UI Helpers ---
-
 const Section = ({ title, children }) => (
-  <div className="p-6 border border-gray-200 dark:border-gray-700 rounded-lg">
-    <h2 className="text-lg font-semibold text-gray-800 dark:text-white mb-4">{title}</h2>
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-      {children}
-    </div>
-  </div>
+  <section className="rounded-2xl border border-gray-200 bg-white p-5 shadow-sm dark:border-gray-700 dark:bg-gray-900/40">
+    <h2 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>
+  </section>
 );
 
-const InputField = ({ label, name, value, onChange, type = "text", required = false }) => (
-  <div>
-    <label htmlFor={name} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-      {label} {required && <span className="text-red-500">*</span>}
-    </label>
+const InputField = ({ label, name, value, onChange, type = "text", required = false, error }) => (
+  <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+    {label} {required && <span className="text-red-500">*</span>}
     <input
       type={type}
-      id={name}
       name={name}
       value={value}
       onChange={onChange}
       required={required}
-      className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500"
+      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
+        error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
+      }`}
     />
-  </div>
+    {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+  </label>
 );
 
-const FileInput = ({ label, name, onChange, required = false, accept }) => (
-    <div>
-        <label htmlFor={name} className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            {label} {required && <span className="text-red-500">*</span>}
-        </label>
+const FileInput = ({ label, name, onChange, required, helper, error }) => (
+  <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+    {label} {required && <span className="text-red-500">*</span>}
+    <input
+      type="file"
+      name={name}
+      accept="application/pdf"
+      onChange={onChange}
+      className={`mt-2 w-full cursor-pointer rounded-xl border border-dashed px-3 py-2 text-sm text-gray-700 transition hover:border-blue-400 dark:border-gray-600 dark:text-gray-200 ${
+        error ? "border-red-400" : "border-gray-300"
+      }`}
+    />
+    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helper}</p>
+    {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+  </label>
+);
+
+const RadioGroup = ({ name, value, onChange, options }) => (
+  <div className="flex flex-wrap gap-4">
+    {options.map((option) => (
+      <label key={option.value} className="inline-flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-200">
         <input
-            type="file"
-            id={name}
-            name={name}
-            onChange={onChange}
-            required={required}
-            accept={accept}
-            className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+          type="radio"
+          name={name}
+          value={option.value}
+          checked={value === option.value}
+          onChange={onChange}
+          className="h-4 w-4 border-gray-300 text-blue-600 focus:ring-blue-500"
         />
-    </div>
-);
-
-const RadioGroup = ({ label, name, value, onChange, options }) => (
-  <div>
-    <span className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{label}</span>
-    <div className="flex items-center gap-x-6">
-      {options.map((option) => (
-        <div key={option.value} className="flex items-center">
-          <input
-            type="radio"
-            id={`${name}_${option.value}`}
-            name={name}
-            value={option.value}
-            checked={value === option.value}
-            onChange={onChange}
-            className="h-4 w-4 text-blue-600 border-gray-300 focus:ring-blue-500"
-          />
-          <label htmlFor={`${name}_${option.value}`} className="ml-2 block text-sm text-gray-900 dark:text-gray-200">
-            {option.label}
-          </label>
-        </div>
-      ))}
-    </div>
+        {option.label}
+      </label>
+    ))}
   </div>
 );
 

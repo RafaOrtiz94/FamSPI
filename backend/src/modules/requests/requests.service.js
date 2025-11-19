@@ -45,6 +45,13 @@ const ajv = new Ajv({
 addFormats(ajv);
 ajv.addSchema(requestSchemas.newClient, 'newClient');
 
+const CLIENT_FILE_LABELS = {
+  id_file: "Documento de identificación (PDF)",
+  ruc_file: "RUC en PDF",
+  legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
+  operating_permit_file: "Permiso de funcionamiento (PDF)",
+};
+
 const FORM_VARIANT_META = {
   inspection: {
     label: "Solicitud de Inspección de Ambiente",
@@ -554,7 +561,14 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
  * ============================================================ 
  */
 
-async function createClientRequest(user, data, files) {
+async function createClientRequest(user, rawData = {}, rawFiles = {}) {
+  const data = Object.fromEntries(
+    Object.entries(rawData || {}).map(([key, value]) => [
+      key,
+      typeof value === "string" ? value.trim() : value,
+    ]),
+  );
+
   const validate = ajv.getSchema('newClient');
   if (!validate(data)) {
     const error = new Error("Datos de solicitud inválidos.");
@@ -563,17 +577,42 @@ async function createClientRequest(user, data, files) {
     throw error;
   }
 
+  const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
+  const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
+  const requiredFileFields = ["id_file"];
+  if ((data.client_type || "").toLowerCase() === "persona_juridica") {
+    requiredFileFields.push("ruc_file", "legal_rep_appointment_file");
+  }
+  if (data.operating_permit_status === "has_it") {
+    requiredFileFields.push("operating_permit_file");
+  }
+  const missingFiles = requiredFileFields.filter((field) => !hasFile(field));
+  if (missingFiles.length) {
+    const readable = missingFiles
+      .map((field) => CLIENT_FILE_LABELS[field] || field)
+      .join(", ");
+    const error = new Error(`Faltan archivos obligatorios: ${readable}`);
+    error.status = 400;
+    error.details = { missingFiles };
+    throw error;
+  }
+
   const { commercial_name, client_email } = data;
   const driveFolderId = await createClientFolder(commercial_name);
 
   const fileIds = {};
-  const fileUploadPromises = Object.entries(files).map(async ([fieldName, fileArray]) => {
+  const fileUploadPromises = Object.entries(normalizedFiles).map(async ([fieldName, fileArray]) => {
+    if (!Array.isArray(fileArray) || !fileArray.length) return;
     const file = fileArray[0];
-    if (file) {
-      const uploadedFile = await uploadBase64File(file.originalname, file.buffer.toString("base64"), file.mimetype, driveFolderId);
-      const dbFieldName = `${fieldName}_id`;
-      fileIds[dbFieldName] = uploadedFile.id;
-    }
+    if (!file) return;
+    const uploadedFile = await uploadBase64File(
+      file.originalname,
+      file.buffer.toString("base64"),
+      file.mimetype,
+      driveFolderId,
+    );
+    const dbFieldName = `${fieldName}_id`;
+    fileIds[dbFieldName] = uploadedFile.id;
   });
   await Promise.all(fileUploadPromises);
 

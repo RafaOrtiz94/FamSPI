@@ -81,20 +81,19 @@ export const cancelRequest = async (id) => {
 };
 
 /** 🆕 Crear solicitud de nuevo cliente */
-export const createClientRequest = async (formData, files) => {
+export const createClientRequest = async (formData = {}, files = {}) => {
   const data = new FormData();
 
-  // Adjuntar todos los campos de texto
-  for (const key in formData) {
-    data.append(key, formData[key]);
-  }
+  Object.entries(formData).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const normalized = typeof value === "string" ? value.trim() : value;
+    data.append(key, normalized);
+  });
 
-  // Adjuntar todos los archivos
-  for (const key in files) {
-    if (files[key]) {
-      data.append(key, files[key]);
-    }
-  }
+  Object.entries(files).forEach(([key, file]) => {
+    if (!file) return;
+    data.append(key, file);
+  });
 
   const response = await api.post("/requests/new-client", data, {
     headers: { "Content-Type": "multipart/form-data" },
