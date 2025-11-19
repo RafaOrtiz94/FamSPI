@@ -41,9 +41,13 @@ const REQUEST_TYPE_LABELS = {
 };
 
 // 🧩 Validación dinámica con logs extendidos
+// Nota: removeAdditional "all" elimina propiedades válidas cuando se usan
+// esquemas compuestos (allOf/if-then). Usamos "failing" para limpiar sólo
+// las propiedades que realmente incumplen la validación sin despojar el
+// payload completo.
 const ajv = new Ajv({
   allErrors: true,
-  removeAdditional: "all",
+  removeAdditional: "failing",
   useDefaults: true,
   coerceTypes: true,
 });
