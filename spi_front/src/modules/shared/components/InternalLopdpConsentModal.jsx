@@ -15,7 +15,7 @@ const paragraphs = [
   "La firma implica reconocer estas responsabilidades y acatar los procedimientos internos de protección de datos y confidencialidad.",
 ];
 
-const InternalLopdpConsentModal = () => {
+const InternalLopdpConsentModal = ({ forceOpen = false }) => {
   const { user, reloadProfile } = useAuth();
   const { showToast } = useUI();
   const signatureRef = useRef(null);
@@ -30,8 +30,17 @@ const InternalLopdpConsentModal = () => {
   );
 
   useEffect(() => {
-    setVisible(normalizedStatus === "pending");
-  }, [normalizedStatus]);
+    setVisible(forceOpen || normalizedStatus !== "granted");
+  }, [forceOpen, normalizedStatus]);
+
+  useEffect(() => {
+    if (!visible) return undefined;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [visible]);
 
   if (!visible) return null;
 

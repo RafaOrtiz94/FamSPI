@@ -204,7 +204,7 @@ const googleCallback = async (req, res) => {
             fullname = $2,
             updated_at = NOW(),
             department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
-            lopdp_internal_status = COALESCE(lopdp_internal_status, 'granted')
+      lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
         WHERE email = $3
         RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
         `,
@@ -231,7 +231,7 @@ const googleCallback = async (req, res) => {
       department,
       scope: roleMeta.scope,
       dashboard: roleMeta.dashboard,
-      lopdp_internal_status: user.lopdp_internal_status || "granted",
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
     };
 
     // Firmar tokens
@@ -317,7 +317,7 @@ const me = async (req, res) => {
         ...payload,
         scope: meta.scope,
         dashboard: meta.dashboard,
-        lopdp_internal_status: payload.lopdp_internal_status || "granted",
+        lopdp_internal_status: payload.lopdp_internal_status || "pending",
       },
     });
   } catch (err) {
