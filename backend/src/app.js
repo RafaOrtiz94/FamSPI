@@ -178,8 +178,13 @@ const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
 
 // ======================================================
-// ❤️ 6️⃣ Ruta pública de salud
+// ❤️ 6️⃣ Rutas públicas de salud
 // ======================================================
+app.get("/", (_req, res) => res.status(200).json({ 
+  ok: true, 
+  message: "SPI FAM API", 
+  version: require("../package.json").version 
+}));
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
 // ======================================================

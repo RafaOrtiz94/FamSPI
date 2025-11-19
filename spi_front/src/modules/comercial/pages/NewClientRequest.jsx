@@ -70,7 +70,7 @@ const NewClientRequest = () => {
       setFiles({});
       navigate("/dashboard/comercial");
     } catch (error) {
-      logger.error("Error al crear solicitud de cliente:", error);
+      console.error("Error al crear solicitud de cliente:", error);
       const errorMsg = error.response?.data?.message || error.message || "Error al crear la solicitud";
       showToast(errorMsg, "error");
     } finally {
