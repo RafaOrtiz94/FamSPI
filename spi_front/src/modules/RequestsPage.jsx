@@ -42,6 +42,13 @@ const STATUS_LABELS = {
   cancelado: "Cancelado",
 };
 
+const REQUEST_TYPE_LABELS = {
+  inspection: "Inspección de ambiente",
+  purchase: "Proceso de compra",
+  retirement: "Retiro de equipo",
+  client: "Nuevo cliente",
+};
+
 const StatusBadge = ({ status }) => (
   <span
     className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
@@ -140,6 +147,11 @@ const RequestsPage = () => {
 
     if (!canCreateRequests) {
       showToast("No tienes permisos para crear solicitudes.", "error");
+      return;
+    }
+
+    if (!createModal.type) {
+      showToast("Selecciona un tipo de solicitud desde los accesos rápidos.", "warning");
       return;
     }
 
@@ -407,17 +419,17 @@ const RequestsPage = () => {
             className={`space-y-4 ${submitting ? "opacity-50 pointer-events-none" : ""}`}
           >
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Tipo de solicitud"
-              value={createModal.type}
-              onChange={(e) => setCreateModal((m) => ({ ...m, type: e.target.value }))}
-              options={[
-                { value: "inspection", label: "Inspección" },
-                { value: "purchase", label: "Compra" },
-                { value: "retirement", label: "Retiro" },
-                { value: "client", label: "Cliente" },
-              ]}
-            />
+            <div className="md:col-span-2 rounded-2xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-100">
+              <p className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-300">
+                Tipo seleccionado
+              </p>
+              <p className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                {REQUEST_TYPE_LABELS[createModal.type] || "—"}
+              </p>
+              <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
+                Cierra este modal y usa los accesos rápidos para elegir otro flujo.
+              </p>
+            </div>
             <Input
               label="Nombre del Cliente"
               value={formPayload.nombre_cliente}

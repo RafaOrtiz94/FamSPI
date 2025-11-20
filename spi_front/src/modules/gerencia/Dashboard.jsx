@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
-import { motion } from "framer-motion";
 import { Bar, Line, Doughnut } from "react-chartjs-2";
 import {
   FiRefreshCw,
@@ -13,10 +12,9 @@ import {
 } from "react-icons/fi";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
-import { useNavigate } from "react-router-dom";
 
-import DashboardLayout from "../../core/layout/DashboardLayout";
 import Button from "../../core/ui/components/Button";
+import AttendanceWidget from "../shared/components/AttendanceWidget";
 import { useUI } from "../../core/ui/useUI";
 import { useApi } from "../../core/hooks/useApi";
 import { useDashboard } from "../../core/hooks/useDashboard";
@@ -56,14 +54,11 @@ ChartJS.register(
 const Dashboard = () => {
   const { showToast, showLoader, hideLoader } = useUI();
   const [query, setQuery] = useState("");
-  const [page, setPage] = useState(1);
   const [initialized, setInitialized] = useState(false);
   const [auditStats, setAuditStats] = useState({});
   const reportRef = useRef();
-  const navigate = useNavigate();
   const perPage = 9;
 
-  // === API Hooks ===
   const {
     data: requestsData,
     loading: loadingRequests,
@@ -71,7 +66,6 @@ const Dashboard = () => {
   } = useApi(getRequests, { globalLoader: true });
   const { data: auditData, execute: fetchAuditoria } = useApi(getAuditoria);
 
-  // === Carga inicial ===
   const load = useCallback(async () => {
     showLoader();
     try {
@@ -90,12 +84,10 @@ const Dashboard = () => {
     }
   }, [initialized, load]);
 
-  // === Datos ===
   const requests = requestsData?.rows || requestsData?.result?.rows || [];
   const audits = auditData?.results || auditData?.rows || [];
   const { stats, chartData } = useDashboard(requests);
 
-  // === Procesar estadísticas de auditoría ===
   useEffect(() => {
     if (audits.length > 0) {
       const countByModule = {};
@@ -118,9 +110,8 @@ const Dashboard = () => {
       r.tipo?.toLowerCase().includes(query.toLowerCase()) ||
       r.solicitante?.toLowerCase().includes(query.toLowerCase())
   );
-  const current = filtered.slice((page - 1) * perPage, page * perPage);
+  const current = filtered.slice(0, perPage);
 
-  // === Logout ===
   const handleLogout = async () => {
     try {
       await logout();
@@ -131,7 +122,6 @@ const Dashboard = () => {
     }
   };
 
-  // === Exportar PDF ===
   const exportPDF = async () => {
     try {
       showLoader();
@@ -163,110 +153,113 @@ const Dashboard = () => {
     ],
   };
 
-  // === Render ===
   return (
-    <DashboardLayout>
-      <motion.div
-        ref={reportRef}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.4 }}
-        className="min-h-screen p-6"
-      >
-        {/* HEADER */}
-        <header className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <FiActivity className="text-blue-600" /> Dashboard Gerencial
-          </h1>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" icon={FiRefreshCw} onClick={load}>
-              Actualizar
-            </Button>
-            <Button variant="primary" icon={FiDownload} onClick={exportPDF}>
-              Exportar
-            </Button>
-            <Button variant="danger" icon={FiLogOut} onClick={handleLogout}>
-              Cerrar Sesión
-            </Button>
-          </div>
-        </header>
+    <div ref={reportRef} className="p-6">
+      <header className="flex flex-col md:flex-row justify-between items-center mb-6 gap-3">
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <FiActivity className="text-blue-600" /> Dashboard Gerencial
+        </h1>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" icon={FiRefreshCw} onClick={load}>
+            Actualizar
+          </Button>
+          <Button variant="primary" icon={FiDownload} onClick={exportPDF}>
+            Exportar
+          </Button>
+          <Button variant="secondary" icon={FiLogOut} onClick={handleLogout}>
+            Salir
+          </Button>
+        </div>
+      </header>
 
-        {/* KPIs */}
-        <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 mb-8">
-          <KpiCard
-            title="Total Solicitudes"
-            value={stats.total}
-            icon={FiTrendingUp}
-            color="border-blue-600"
-          />
-          <KpiCard
-            title="Aprobadas"
-            value={stats.aprobadas}
-            icon={FiCheckCircle}
-            color="border-green-600"
-          />
+      <div className="mb-6">
+        <AttendanceWidget />
+      </div>
+
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <KpiCard
+          title="Total Solicitudes"
+          value={stats.total || 0}
+          icon={FiTrendingUp}
+          color="blue"
+        />
+        <KpiCard
+          title="Aprobadas"
+          value={stats.approved || 0}
+          icon={FiCheckCircle}
+          color="green"
+        />
         <KpiCard
           title="Rechazadas"
-          value={stats.rechazadas}
+          value={stats.rejected || 0}
           icon={FiXCircle}
-          color="border-red-600"
+          color="red"
+        />
+        <KpiCard
+          title="Pendientes"
+          value={stats.pending || 0}
+          icon={FiRefreshCw}
+          color="yellow"
         />
       </section>
 
-        {/* GRÁFICOS */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          <ChartCard title="Tendencia de Solicitudes" span="lg:col-span-2">
-            {chartData?.line ? <Line data={chartData.line} /> : <Line data={chartData.bar} />}
-          </ChartCard>
-          <ChartCard title="Estado General">
-            <Doughnut data={chartData.doughnut} />
-          </ChartCard>
-          <ChartCard title="Módulos más activos (Auditoría)">
-            <Bar data={auditChartData} />
-          </ChartCard>
-        </section>
-
-        {/* BUSCADOR */}
-        <div className="flex flex-col md:flex-row justify-between items-center gap-3 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">
-            Registro de Solicitudes
-          </h2>
-          <div className="relative w-full md:w-1/3">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar por tipo o solicitante..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 focus:ring-2 focus:ring-blue-500"
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <ChartCard title="Estado de Solicitudes">
+          <div className="h-64 flex justify-center items-center">
+            <Doughnut
+              data={chartData.doughnut}
+              options={{ maintainAspectRatio: false }}
             />
           </div>
+        </ChartCard>
+        <ChartCard title="Módulos más activos (Auditoría)">
+          <div className="h-64">
+            <Bar
+              data={auditChartData}
+              options={{ maintainAspectRatio: false }}
+            />
+          </div>
+        </ChartCard>
+      </section>
+
+      <div className="flex flex-col md:flex-row justify-between items-center gap-3 mb-6">
+        <h2 className="text-xl font-semibold text-gray-900">
+          Registro de Solicitudes
+        </h2>
+        <div className="relative w-full md:w-1/3">
+          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar por tipo o solicitante..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 focus:ring-2 focus:ring-blue-500"
+          />
         </div>
+      </div>
 
-        {/* LISTADO DE SOLICITUDES */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-10">
-          {current.length ? (
-            current.map((req) => (
-              <RequestCard
-                key={req.id}
-                req={req}
-                onView={(id) =>
-                  showToast(`Ver detalle solicitud #${id}`, "info")
-                }
-                onFiles={(files) =>
-                  showToast(`Tiene ${files.length} archivos adjuntos.`, "info")
-                }
-              />
-            ))
-          ) : (
-            <div className="col-span-full text-center py-16 text-gray-500 bg-white rounded-2xl border border-gray-200">
-              No se encontraron solicitudes.
-            </div>
-          )}
-        </section>
+      <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-10">
+        {current.length ? (
+          current.map((req) => (
+            <RequestCard
+              key={req.id}
+              req={req}
+              onView={(id) =>
+                showToast(`Ver detalle solicitud #${id}`, "info")
+              }
+              onFiles={(files) =>
+                showToast(`Tiene ${files.length} archivos adjuntos.`, "info")
+              }
+            />
+          ))
+        ) : (
+          <div className="col-span-full text-center py-16 text-gray-500 bg-white rounded-2xl border border-gray-200">
+            No se encontraron solicitudes.
+          </div>
+        )}
+      </section>
 
-      </motion.div>
-    </DashboardLayout>
+    </div>
   );
 };
 

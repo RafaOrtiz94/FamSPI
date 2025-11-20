@@ -5,6 +5,9 @@ import {
   FiUsers,
   FiBriefcase,
   FiFileText,
+  FiPackage,
+  FiClipboard,
+  FiShoppingCart,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -13,6 +16,25 @@ import { useAuth } from "../../auth/AuthContext";
 const baseLinks = [
   { name: "Inicio", icon: FiHome, path: "/dashboard" },
 ];
+
+const comercialLinks = [
+  {
+    name: "Solicitudes",
+    icon: FiClipboard,
+    path: "/dashboard/comercial/solicitudes",
+  },
+  {
+    name: "Clientes",
+    icon: FiUsers,
+    path: "/dashboard/comercial/clientes",
+  },
+  {
+    name: "Inventario",
+    icon: FiPackage,
+    path: "/dashboard/comercial/inventario",
+  },
+];
+
 const talentoLinks = [
   {
     name: "Gestión de Usuarios",
@@ -25,6 +47,7 @@ const talentoLinks = [
     path: "/dashboard/talento-humano/departamentos",
   },
 ];
+
 const auditLinks = [
   {
     name: "Auditoría y Trazabilidad",
@@ -35,12 +58,22 @@ const auditLinks = [
 
 const buildLinks = (scope) => {
   const links = [...baseLinks];
+
+  // Comercial links
+  if (["comercial", "gerencia", "ti"].includes(scope)) {
+    links.push(...comercialLinks);
+  }
+
+  // Talento Humano links
   if (["talento-humano", "talento_humano", "ti", "gerencia"].includes(scope)) {
     links.push(...talentoLinks);
   }
+
+  // Audit links
   if (["ti", "gerencia"].includes(scope)) {
     links.push(...auditLinks);
   }
+
   return links;
 };
 

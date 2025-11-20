@@ -25,6 +25,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 // 🙏 RUTA PÚBLICA para que el cliente otorgue consentimiento LOPDP
 router.get("/public/consent/:token", ctrl.grantConsent);
 
+router.post(
+  "/new-client/consent-token",
+  verifyToken,
+  requireRole(["comercial", "jefe_comercial"]),
+  ctrl.sendConsentEmailToken,
+);
+
+router.post(
+  "/new-client/consent-token/verify",
+  verifyToken,
+  requireRole(["comercial", "jefe_comercial"]),
+  ctrl.verifyConsentEmailToken,
+);
+
 // 🧾 CREAR SOLICITUD DE NUEVO CLIENTE
 router.post(
   "/new-client",
@@ -35,6 +49,7 @@ router.post(
     { name: "ruc_file", maxCount: 1 },
     { name: "id_file", maxCount: 1 },
     { name: "operating_permit_file", maxCount: 1 },
+    { name: "consent_evidence_file", maxCount: 1 },
   ]),
   ctrl.createClientRequest
 );
@@ -94,7 +109,22 @@ router.post(
 router.get(
   "/",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.listRequests
 );
 
@@ -106,7 +136,22 @@ router.get(
 router.get(
   "/:id",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.getDetail
 );
 

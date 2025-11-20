@@ -29,6 +29,11 @@ const requestSchemas = require("./requestSchemas");
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
   /\$\/$/, ""
 );
+const CONSENT_EMAIL_TOKEN_TTL_MINUTES = parseInt(
+  process.env.CONSENT_EMAIL_TOKEN_TTL_MINUTES || "15",
+  10
+);
+const CONSENT_EMAIL_TOKEN_TTL_MS = Math.max(5, CONSENT_EMAIL_TOKEN_TTL_MINUTES || 15) * 60 * 1000;
 const REQUEST_TYPE_LABELS = {
   "F.ST-20": "Solicitud de inspección de ambiente",
   "F.ST-21": "Solicitud de retiro de equipo",
@@ -36,14 +41,26 @@ const REQUEST_TYPE_LABELS = {
 };
 
 // 🧩 Validación dinámica con logs extendidos
+// Nota: removeAdditional "all" elimina propiedades válidas cuando se usan
+// esquemas compuestos (allOf/if-then). Usamos "failing" para limpiar sólo
+// las propiedades que realmente incumplen la validación sin despojar el
+// payload completo.
 const ajv = new Ajv({
   allErrors: true,
-  removeAdditional: "all",
+  removeAdditional: "failing",
   useDefaults: true,
   coerceTypes: true,
 });
 addFormats(ajv);
 ajv.addSchema(requestSchemas.newClient, 'newClient');
+
+const CLIENT_FILE_LABELS = {
+  id_file: "Documento de identificación (PDF)",
+  ruc_file: "RUC en PDF",
+  legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
+  operating_permit_file: "Permiso de funcionamiento (PDF)",
+  consent_evidence_file: "Evidencia del consentimiento LOPDP",
+};
 
 const FORM_VARIANT_META = {
   inspection: {
@@ -59,6 +76,200 @@ const FORM_VARIANT_META = {
     label: "Ficha de Cliente",
   },
 };
+
+function buildHttpError(message, status = 400) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+}
+
+function hashConsentEmailCode(tokenId, code) {
+  return crypto.createHash("sha256").update(`${tokenId}:${code}`).digest("hex");
+}
+
+function maskConsentCode(lastFour) {
+  if (!lastFour) return "código OTP";
+  const lastDigits = String(lastFour).slice(-4);
+  return `****${lastDigits}`;
+}
+
+async function getConsentTokenById(tokenId) {
+  if (!tokenId) return null;
+  const { rows } = await db.query(
+    "SELECT * FROM client_request_consent_tokens WHERE id = $1",
+    [tokenId],
+  );
+  return rows[0] || null;
+}
+
+async function sendConsentEmailToken({ user, client_email, recipient_email, client_name }) {
+  const normalizedEmail = (recipient_email || client_email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    throw buildHttpError("Debes ingresar el correo del cliente antes de enviar el código.");
+  }
+  const friendlyName = (client_name || "").trim();
+  const tokenId = uuidv4();
+  const code = String(Math.floor(100000 + Math.random() * 900000));
+  const codeHash = hashConsentEmailCode(tokenId, code);
+  const expiresAt = new Date(Date.now() + CONSENT_EMAIL_TOKEN_TTL_MS);
+
+  const insert = await db.query(
+    `INSERT INTO client_request_consent_tokens
+      (id, client_email, client_name, code_hash, code_last_four, status, expires_at, created_by_email, created_by_user_id)
+     VALUES ($1,$2,$3,$4,$5,'pending',$6,$7,$8)
+     RETURNING id, expires_at` ,
+    [
+      tokenId,
+      normalizedEmail,
+      friendlyName || null,
+      codeHash,
+      code.slice(-4),
+      expiresAt,
+      user?.email || null,
+      user?.id || null,
+    ],
+  );
+
+  const html = `
+    <h2>Autorización del tratamiento de datos</h2>
+    <p>Hola${friendlyName ? ` ${friendlyName}` : ""},</p>
+    <p>Estamos registrando tu ficha como cliente en SPI y necesitamos confirmar que autorizas el uso de tus datos conforme a la LOPDP.</p>
+    <p>Comparte el siguiente código con tu asesor comercial para finalizar el proceso:</p>
+    <p style="font-size:24px;font-weight:bold;letter-spacing:4px;">${code}</p>
+    <p>El código vence en ${Math.round(CONSENT_EMAIL_TOKEN_TTL_MS / 60000)} minutos. Compartirlo implica tu consentimiento expreso para el tratamiento descrito.</p>
+    <p>Si no reconoces esta solicitud, ignora este correo.</p>
+  `;
+
+  await sendMail({
+    to: normalizedEmail,
+    subject: "Código de autorización para tratamiento de datos",
+    html,
+    senderName: user?.fullname || user?.name || user?.email || "SPI",
+    replyTo: user?.email || undefined,
+  });
+
+  return {
+    token_id: insert.rows[0].id,
+    expires_at: insert.rows[0].expires_at,
+  };
+}
+
+async function verifyConsentEmailToken({ user, token_id, code }) {
+  const tokenId = (token_id || "").trim();
+  const submittedCode = (code || "").trim();
+  if (!tokenId || !submittedCode) {
+    throw buildHttpError("Debes ingresar el código enviado al correo del cliente.");
+  }
+
+  const token = await getConsentTokenById(tokenId);
+  if (!token) {
+    throw buildHttpError("No encontramos un código válido. Genera uno nuevo.", 404);
+  }
+  if (token.used_at) {
+    throw buildHttpError("Este código ya fue utilizado en otra solicitud.", 409);
+  }
+  if (token.status === "expired") {
+    throw buildHttpError("El código expiró. Solicita uno nuevo.");
+  }
+
+  const now = Date.now();
+  if (token.expires_at && new Date(token.expires_at).getTime() < now) {
+    await db.query(
+      "UPDATE client_request_consent_tokens SET status = 'expired', updated_at = now() WHERE id = $1",
+      [tokenId],
+    );
+    throw buildHttpError("El código expiró. Solicita uno nuevo.");
+  }
+
+  const hashedAttempt = hashConsentEmailCode(tokenId, submittedCode);
+  if (hashedAttempt !== token.code_hash) {
+    await db.query(
+      "UPDATE client_request_consent_tokens SET attempts = attempts + 1, updated_at = now() WHERE id = $1",
+      [tokenId],
+    );
+    throw buildHttpError("El código ingresado no coincide con el enviado al cliente.");
+  }
+
+  const { rows } = await db.query(
+    `UPDATE client_request_consent_tokens
+      SET status = 'verified',
+          attempts = attempts + 1,
+          verified_at = now(),
+          verified_by_email = $2,
+          verified_by_user_id = $3,
+          updated_at = now()
+     WHERE id = $1
+     RETURNING id, verified_at, expires_at, client_email, client_name, code_last_four` ,
+    [tokenId, user?.email || null, user?.id || null],
+  );
+  return rows[0];
+}
+
+async function assertVerifiedConsentEmailToken({ tokenId, email }) {
+  const token = await getConsentTokenById(tokenId);
+  if (!token) {
+    throw buildHttpError("Debes validar el código de consentimiento antes de continuar.");
+  }
+  if (token.used_at) {
+    throw buildHttpError("El código ingresado ya fue usado en otra solicitud.", 409);
+  }
+  if (token.status !== "verified" || !token.verified_at) {
+    throw buildHttpError("El código aún no ha sido verificado en el formulario.");
+  }
+  if (token.expires_at && new Date(token.expires_at).getTime() < Date.now()) {
+    await db.query(
+      "UPDATE client_request_consent_tokens SET status = 'expired', updated_at = now() WHERE id = $1",
+      [token.id],
+    );
+    throw buildHttpError("El código verificado expiró. Solicita uno nuevo.");
+  }
+  if (email && token.client_email && token.client_email.toLowerCase() !== email.trim().toLowerCase()) {
+    throw buildHttpError("El código pertenece a otro correo. Genera uno nuevo para este cliente.");
+  }
+  return token;
+}
+
+async function markConsentEmailTokenAsUsed(tokenId, requestId) {
+  if (!tokenId) return;
+  await db.query(
+    `UPDATE client_request_consent_tokens
+      SET status = 'used', used_at = now(), used_request_id = $2, updated_at = now()
+     WHERE id = $1`,
+    [tokenId, requestId || null],
+  );
+}
+
+async function recordConsentEvent({
+  client_request_id,
+  event_type,
+  method,
+  details = null,
+  actor_email = null,
+  actor_role = null,
+  actor_name = null,
+  ip = null,
+  user_agent = null,
+  evidence_file_id = null,
+}) {
+  if (!client_request_id || !event_type || !method) return;
+  const query = `
+    INSERT INTO client_request_consents
+      (client_request_id, event_type, method, details, evidence_file_id, actor_email, actor_role, actor_name, ip, user_agent)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+  `;
+  await db.query(query, [
+    client_request_id,
+    event_type,
+    method,
+    details,
+    evidence_file_id,
+    actor_email,
+    actor_role,
+    actor_name,
+    ip,
+    user_agent,
+  ]);
+}
 
 function formatDate(value) {
   if (!value) return "";
@@ -554,7 +765,14 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
  * ============================================================ 
  */
 
-async function createClientRequest(user, data, files) {
+async function createClientRequest(user, rawData = {}, rawFiles = {}) {
+  const data = Object.fromEntries(
+    Object.entries(rawData || {}).map(([key, value]) => [
+      key,
+      typeof value === "string" ? value.trim() : value,
+    ]),
+  );
+
   const validate = ajv.getSchema('newClient');
   if (!validate(data)) {
     const error = new Error("Datos de solicitud inválidos.");
@@ -563,17 +781,64 @@ async function createClientRequest(user, data, files) {
     throw error;
   }
 
+  const consentCaptureMethod = (data.consent_capture_method || "email_link").toLowerCase();
+  const consentCaptureDetails = data.consent_capture_details?.trim() || null;
+
+  const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
+  const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
+  const requiredFileFields = ["id_file", "ruc_file"];
+  if ((data.client_type || "").toLowerCase() === "persona_juridica") {
+    requiredFileFields.push("legal_rep_appointment_file");
+  }
+  if (data.operating_permit_status === "has_it") {
+    requiredFileFields.push("operating_permit_file");
+  }
+  if (consentCaptureMethod === "signed_document") {
+    requiredFileFields.push("consent_evidence_file");
+  }
+  const missingFiles = requiredFileFields.filter((field) => !hasFile(field));
+  if (missingFiles.length) {
+    const readable = missingFiles
+      .map((field) => CLIENT_FILE_LABELS[field] || field)
+      .join(", ");
+    const error = new Error(`Faltan archivos obligatorios: ${readable}`);
+    error.status = 400;
+    error.details = { missingFiles };
+    throw error;
+  }
+
   const { commercial_name, client_email } = data;
+  const consentRecipientEmail = data.consent_recipient_email || client_email;
+  const consentEmailTokenId = data.consent_email_token_id?.trim() || null;
+  let verifiedConsentToken = null;
+  if (consentCaptureMethod === "email_link") {
+    if (!consentEmailTokenId) {
+      throw buildHttpError("Debes validar el código enviado al cliente antes de crear la solicitud.");
+    }
+    verifiedConsentToken = await assertVerifiedConsentEmailToken({
+      tokenId: consentEmailTokenId,
+      email: consentRecipientEmail,
+    });
+  }
+  const storedConsentCaptureDetails =
+    consentCaptureMethod === "email_link" && verifiedConsentToken
+      ? "Consentimiento confirmado mediante código OTP"
+      : consentCaptureDetails;
   const driveFolderId = await createClientFolder(commercial_name);
 
   const fileIds = {};
-  const fileUploadPromises = Object.entries(files).map(async ([fieldName, fileArray]) => {
+  const fileUploadPromises = Object.entries(normalizedFiles).map(async ([fieldName, fileArray]) => {
+    if (!Array.isArray(fileArray) || !fileArray.length) return;
     const file = fileArray[0];
-    if (file) {
-      const uploadedFile = await uploadBase64File(file.originalname, file.buffer.toString("base64"), file.mimetype, driveFolderId);
-      const dbFieldName = `${fieldName}_id`;
-      fileIds[dbFieldName] = uploadedFile.id;
-    }
+    if (!file) return;
+    const uploadedFile = await uploadBase64File(
+      file.originalname,
+      file.buffer.toString("base64"),
+      file.mimetype,
+      driveFolderId,
+    );
+    const dbFieldName = `${fieldName}_id`;
+    fileIds[dbFieldName] = uploadedFile.id;
   });
   await Promise.all(fileUploadPromises);
 
@@ -581,46 +846,103 @@ async function createClientRequest(user, data, files) {
   const dbClient = await db.getClient();
   try {
     await dbClient.query("BEGIN");
+    const hasVerifiedToken = Boolean(verifiedConsentToken);
+    const shouldAutoApproveConsent =
+      consentCaptureMethod !== "email_link" ? true : hasVerifiedToken;
+    const consentStatus = shouldAutoApproveConsent ? "granted" : "pending";
+    const requestStatus = shouldAutoApproveConsent ? "pending_approval" : "pending_consent";
+    const lopdpConsentAt = shouldAutoApproveConsent
+      ? verifiedConsentToken?.verified_at
+        ? new Date(verifiedConsentToken.verified_at)
+        : new Date()
+      : null;
+    const lopdpConsentMethod = shouldAutoApproveConsent ? consentCaptureMethod : null;
+    const lopdpConsentDetails = shouldAutoApproveConsent
+      ? verifiedConsentToken
+        ? `Consentimiento confirmado con ${maskConsentCode(
+            verifiedConsentToken.code_last_four,
+          )} enviado a ${consentRecipientEmail || client_email}`
+        : consentCaptureDetails || "Consentimiento registrado manualmente"
+      : null;
+
     const columns = [
-      "created_by", "status", "lopdp_token", "client_email", "client_type",
+      "created_by", "status", "lopdp_token", "client_email", "consent_recipient_email", "client_type", "data_processing_consent",
+      "lopdp_consent_status", "consent_capture_method", "consent_capture_details",
       "legal_person_business_name", "nationality", "natural_person_firstname",
-      "natural_person_lastname", "commercial_name", "ruc_cedula",
+      "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
       "establishment_province", "establishment_city", "establishment_address",
       "establishment_reference", "establishment_phone", "establishment_cellphone",
-      "domicile_province", "domicile_city", "domicile_address", "domicile_phone_cellphone",
       "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
-      "legal_rep_email", "treasury_name", "treasury_email", "treasury_conventional_phone",
-      "treasury_cellphone", "shipping_contact_name", "shipping_address", "shipping_city",
+      "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
       "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
       "shipping_delivery_hours", "operating_permit_status", "drive_folder_id",
-      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id"
+      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id",
+      "consent_evidence_file_id", "lopdp_consent_method", "lopdp_consent_details", "lopdp_consent_at",
+      "lopdp_consent_ip", "lopdp_consent_user_agent", "consent_email_token_id"
     ];
     const values = columns.map((col, i) => `$${i + 1}`);
     const query = `INSERT INTO client_requests (${columns.join(", ")}) VALUES (${values.join(", ")}) RETURNING *`;
     const dbValues = [
-      user.email, 'pending_consent', lopdp_token, client_email, data.client_type,
+      user.email, requestStatus, lopdp_token, client_email, consentRecipientEmail || client_email, data.client_type, data.data_processing_consent === true,
+      consentStatus, consentCaptureMethod, storedConsentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
-      data.natural_person_lastname || null, commercial_name, data.ruc_cedula,
+      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
       data.establishment_reference || null, data.establishment_phone || null, data.establishment_cellphone || null,
-      data.domicile_province || null, data.domicile_city || null, data.domicile_address || null, data.domicile_phone_cellphone || null,
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,
-      data.legal_rep_email || null, data.treasury_name, data.treasury_email, data.treasury_conventional_phone || null,
-      data.treasury_cellphone || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
+      data.legal_rep_email || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
       data.shipping_province, data.shipping_reference || null, data.shipping_phone || null, data.shipping_cellphone || null,
       data.shipping_delivery_hours || null, data.operating_permit_status || null, driveFolderId,
-      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null
+      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null,
+      fileIds.consent_evidence_file_id || null, lopdpConsentMethod, lopdpConsentDetails,
+      lopdpConsentAt, null, null, consentEmailTokenId || null
     ];
     const { rows } = await dbClient.query(query, dbValues);
     const newRequest = rows[0];
     await dbClient.query("COMMIT");
 
-    const consentLink = `${FRONTEND_URL}/auth/consent/${lopdp_token}`;
-    await sendMail({
-      to: client_email,
-      subject: "Autorización para el Tratamiento de Datos Personales",
-      html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
-    });
+    if (consentCaptureMethod === "email_link" && hasVerifiedToken) {
+      await markConsentEmailTokenAsUsed(consentEmailTokenId, newRequest.id);
+      await recordConsentEvent({
+        client_request_id: newRequest.id,
+        event_type: "granted",
+        method: "email_link",
+        details: `Consentimiento confirmado con ${maskConsentCode(
+          verifiedConsentToken?.code_last_four,
+        )} enviado a ${consentRecipientEmail || client_email}`,
+        actor_email: user.email,
+        actor_role: user.role,
+        actor_name: user.fullname || user.name || null,
+      });
+    } else if (consentCaptureMethod === "email_link") {
+      const consentLink = `${FRONTEND_URL}/auth/consent/${lopdp_token}`;
+      await sendMail({
+        to: consentRecipientEmail || client_email,
+        subject: "Autorización para el Tratamiento de Datos Personales",
+        html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>` ,
+      });
+
+      await recordConsentEvent({
+        client_request_id: newRequest.id,
+        event_type: "request_sent",
+        method: "email_link",
+        details: `Correo enviado a ${consentRecipientEmail || client_email}`,
+        actor_email: user.email,
+        actor_role: user.role,
+        actor_name: user.fullname || user.name || null,
+      });
+    } else {
+      await recordConsentEvent({
+        client_request_id: newRequest.id,
+        event_type: "granted",
+        method: consentCaptureMethod,
+        details: consentCaptureDetails || "Consentimiento registrado manualmente",
+        actor_email: user.email,
+        actor_role: user.role,
+        actor_name: user.fullname || user.name || null,
+        evidence_file_id: fileIds.consent_evidence_file_id || null,
+      });
+    }
 
     await sendChatMessage({
       text: `*Nueva Solicitud de Cliente para Revisión*\n> *Cliente:* ${commercial_name}\n> *Tipo:* ${data.client_type}\n> *Solicitante:* ${user.email}\n> *Acción Requerida:* Revisar y aprobar/rechazar en el dashboard de Backoffice.`,
@@ -658,7 +980,23 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
 
 async function getClientRequestById(id, user) {
   if (!id || !user) throw new Error("ID de solicitud y usuario son obligatorios.");
-  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
+  const { rows } = await db.query(
+    `SELECT cr.*, COALESCE(
+        (
+          SELECT json_agg(row_to_json(history))
+          FROM (
+            SELECT id, event_type, method, details, evidence_file_id, actor_email, actor_role,
+                   actor_name, ip, user_agent, created_at
+            FROM client_request_consents
+            WHERE client_request_id = cr.id
+            ORDER BY created_at
+          ) history
+        ), '[]'::json
+      ) AS consent_history
+     FROM client_requests cr
+     WHERE cr.id = $1`,
+    [id]
+  );
   const request = rows[0];
   if (!request) {
     const error = new Error("Solicitud no encontrada.");
@@ -709,7 +1047,7 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   return updatedRequest;
 }
 
-async function grantConsent(token) {
+async function grantConsent({ token, audit = {} }) {
   if (!token) {
     const error = new Error("Token de consentimiento no proporcionado.");
     error.status = 400;
@@ -726,11 +1064,31 @@ async function grantConsent(token) {
     logger.warn(`Intento de re-confirmar consentimiento para la solicitud #${request.id}`);
     return request;
   }
+  const clientIp = audit.ip || null;
+  const userAgent = audit.userAgent || null;
   const { rows: updatedRows } = await db.query(
-    "UPDATE client_requests SET lopdp_consent_status = 'granted', status = 'pending_approval', updated_at = now() WHERE id = $1 RETURNING *",
-    [request.id]
+    `UPDATE client_requests
+      SET lopdp_consent_status = 'granted',
+          status = 'pending_approval',
+          lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
+          lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
+          lopdp_consent_at = now(),
+          lopdp_consent_ip = $2,
+          lopdp_consent_user_agent = $3,
+          updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [request.id, clientIp, userAgent]
   );
   const updatedRequest = updatedRows[0];
+  await recordConsentEvent({
+    client_request_id: updatedRequest.id,
+    event_type: "granted",
+    method: "email_link",
+    details: "Consentimiento confirmado por el cliente mediante enlace público.",
+    ip: clientIp,
+    user_agent: userAgent,
+  });
   await sendChatMessage({
     text: `*Consentimiento Recibido - Listo para Aprobación*\n> *Cliente:* ${request.commercial_name} (#${request.id})\n> *Acción Requerida:* La solicitud ha recibido el consentimiento del cliente y está lista para su revisión final.`,
   });
@@ -750,4 +1108,6 @@ module.exports = {
   getClientRequestById,
   processClientRequest,
   grantConsent,
+  sendConsentEmailToken,
+  verifyConsentEmailToken,
 };

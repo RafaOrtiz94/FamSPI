@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
+import AttendanceWidget from "../shared/components/AttendanceWidget";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import { useNavigate } from "react-router-dom";
@@ -69,6 +70,9 @@ const TalentoDashboard = () => {
         </Card>
       </div>
 
+      {/* Attendance Widget */}
+      <AttendanceWidget />
+
       {/* Accesos directos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Card className="p-6 flex flex-col justify-between">
@@ -110,3 +114,4 @@ const TalentoDashboard = () => {
 };
 
 export default TalentoDashboard;
+

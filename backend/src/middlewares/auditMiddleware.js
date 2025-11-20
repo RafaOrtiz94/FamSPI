@@ -133,8 +133,13 @@ function mapHttpMethodToAction(method, pathParts) {
 function truncateBody(body, limit = 800) {
   if (!body || typeof body !== "object") return null;
   try {
-    const str = JSON.stringify(body);
-    return str.length > limit ? str.slice(0, limit) + "...[truncated]" : body;
+    // Clonar a JSON seguro (evita Buffers/ciclos) y devolver siempre un objeto
+    const safe = JSON.parse(JSON.stringify(body));
+    const str = JSON.stringify(safe);
+    if (str.length > limit) {
+      return { truncated: true, preview: str.slice(0, limit) + "...[truncated]" };
+    }
+    return safe;
   } catch {
     return null;
   }

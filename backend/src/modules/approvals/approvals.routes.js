@@ -22,7 +22,14 @@ router.use((req, res, next) => {
 router.get(
   "/pending",
   verifyToken,
-  requireRole(["tecnico", "gerencia"]),
+  requireRole([
+    "tecnico",
+    "gerencia",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+  ]),
   ctrl.listPending
 );
 
