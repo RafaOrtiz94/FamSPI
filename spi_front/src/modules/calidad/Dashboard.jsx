@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   FiCheckCircle,
@@ -13,6 +13,7 @@ import { useDashboard } from "../../core/hooks/useDashboard";
 import { useUI } from "../../core/ui/useUI";
 import { getRequests } from "../../core/api/requestsApi";
 import { getPendingApprovals } from "../../core/api/approvalsApi";
+import { getUsers } from "../../core/api/usersApi";
 import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
@@ -44,6 +45,24 @@ const DashboardCalidad = () => {
     execute: loadApprovals,
   } = useApi(getPendingApprovals, { errorMsg: "No se pudieron obtener las aprobaciones." });
 
+  const {
+    data: usersData,
+    loading: loadingUsers,
+    execute: loadUsers,
+  } = useApi(getUsers, { errorMsg: "No se pudieron obtener los usuarios." });
+
+  const [attendanceFilters, setAttendanceFilters] = useState(() => {
+    const today = new Date();
+    const monthAgo = new Date();
+    monthAgo.setMonth(today.getMonth() - 1);
+
+    return {
+      from: monthAgo.toISOString().slice(0, 10),
+      to: today.toISOString().slice(0, 10),
+      user: "all",
+    };
+  });
+
   const refresh = useCallback(async () => {
     try {
       await Promise.all([loadRequests(), loadApprovals()]);
@@ -55,10 +74,30 @@ const DashboardCalidad = () => {
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+    loadUsers();
+  }, [refresh, loadUsers]);
 
   const requests = useMemo(() => unwrapRows(requestsData), [requestsData]);
   const approvals = useMemo(() => unwrapRows(approvalsData), [approvalsData]);
+  const users = useMemo(() => unwrapRows(usersData), [usersData]);
+
+  const handleLastMonth = () => {
+    const end = attendanceFilters.to ? new Date(attendanceFilters.to) : new Date();
+    const start = new Date(end);
+    start.setMonth(end.getMonth() - 1);
+
+    setAttendanceFilters((prev) => ({
+      ...prev,
+      from: start.toISOString().slice(0, 10),
+      to: end.toISOString().slice(0, 10),
+    }));
+  };
+
+  const selectedUserLabel = useMemo(() => {
+    if (attendanceFilters.user === "all") return "Todos los usuarios";
+    const match = users.find((u) => `${u.id}` === `${attendanceFilters.user}` || u.email === attendanceFilters.user);
+    return match?.name || match?.fullname || match?.email || "Usuario";
+  }, [attendanceFilters.user, users]);
 
   const { stats } = useDashboard(requests);
 
@@ -153,6 +192,91 @@ const DashboardCalidad = () => {
           )}
         </Card>
       </section>
+
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Reporte de asistencias</h2>
+            <p className="text-sm text-gray-500">Filtra por usuario o revisa el mes completo.</p>
+          </div>
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button variant="ghost" size="sm" onClick={handleLastMonth}>
+              Último mes
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() =>
+                showToast(
+                  `Filtro aplicado: ${selectedUserLabel} · ${attendanceFilters.from} a ${attendanceFilters.to}`,
+                  "success"
+                )
+              }
+            >
+              Aplicar filtros
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <label className="flex flex-col text-sm text-gray-700 gap-1">
+            Desde
+            <input
+              type="date"
+              value={attendanceFilters.from}
+              onChange={(e) =>
+                setAttendanceFilters((prev) => ({
+                  ...prev,
+                  from: e.target.value,
+                }))
+              }
+              className="border border-gray-200 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex flex-col text-sm text-gray-700 gap-1">
+            Hasta
+            <input
+              type="date"
+              value={attendanceFilters.to}
+              onChange={(e) =>
+                setAttendanceFilters((prev) => ({
+                  ...prev,
+                  to: e.target.value,
+                }))
+              }
+              className="border border-gray-200 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </label>
+
+          <label className="flex flex-col text-sm text-gray-700 gap-1">
+            Usuario
+            <select
+              value={attendanceFilters.user}
+              onChange={(e) =>
+                setAttendanceFilters((prev) => ({
+                  ...prev,
+                  user: e.target.value,
+                }))
+              }
+              className="border border-gray-200 rounded-lg px-3 py-2 text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={loadingUsers}
+            >
+              <option value="all">Todos los usuarios</option>
+              {users.map((user) => (
+                <option key={user.id || user.email} value={user.id || user.email}>
+                  {(user.name || user.fullname || "")?.trim() || user.email || "Usuario"}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="rounded-lg border border-dashed border-gray-200 p-4 text-sm text-gray-600">
+          Selecciona un rango y un colaborador para descargar o visualizar el informe de asistencias. Usa "Todos los
+          usuarios" para generar reportes consolidados.
+        </div>
+      </Card>
 
       <Card className="p-5">
         <div className="flex items-center justify-between mb-3">
