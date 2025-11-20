@@ -137,3 +137,29 @@ export const refreshAccessToken = async () => {
     throw err;
   }
 };
+
+/* ==========================================================
+   ✍️  Consentimiento interno LOPDP
+   ========================================================== */
+export const submitInternalLopdpConsent = async ({
+  signatureBase64,
+  pdfBase64,
+  notes,
+}) => {
+  const token = getAccessToken();
+  if (!token) throw new Error("No hay token activo");
+
+  const { data } = await api.post(
+    "/auth/lopdp/accept",
+    {
+      signature_base64: signatureBase64,
+      pdf_base64: pdfBase64,
+      notes,
+      accepted: true,
+    },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!data?.ok) throw new Error(data?.message || "No se pudo registrar la aceptación");
+  return data;
+};

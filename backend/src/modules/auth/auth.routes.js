@@ -55,6 +55,12 @@ router.post("/refresh", controller.refreshToken);
  */
 router.post("/logout", verifyToken, controller.logout);
 
+/**
+ * @route POST /api/v1/auth/lopdp/accept
+ * @desc Registra la aceptación interna de LOPDP (nuevos colaboradores)
+ */
+router.post("/lopdp/accept", verifyToken, controller.acceptInternalLopdp);
+
 // ======================================================
 // 🧾 3️⃣ AUDITORÍA DE SESIONES (solo TI / Gerencia)
 // ======================================================

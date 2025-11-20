@@ -18,6 +18,7 @@ const { oauth2Client, google } = require("../../config/oauth");
 const db = require("../../config/db");
 const jwt = require("jsonwebtoken");
 const logger = require("../../config/logger");
+const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const {
   createSession,
   updateSessionRefreshToken,
@@ -110,6 +111,19 @@ const signRefresh = (payload) =>
     { expiresIn: "7d" }
   );
 
+const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";
+
+const ensureInternalLopdpPath = async (user, rootId) => {
+  const safeName = (user.fullname || user.email || "colaborador").replace(
+    /[\\/:*?"<>|]/g,
+    "-"
+  );
+  const baseFolder = await ensureFolder(INTERNAL_LOPDP_FOLDER, rootId);
+  const personFolder = await ensureFolder(safeName, baseFolder.id);
+  const signedPdfFolder = await ensureFolder("pdffirmado", personFolder.id);
+  return { baseFolder, personFolder, signedPdfFolder };
+};
+
 /* ============================================================
    1️⃣ Redirigir a Google OAuth
 ============================================================ */
@@ -167,16 +181,27 @@ const googleCallback = async (req, res) => {
     }
 
     // Buscar o crear usuario
-    const existing = await db.query("SELECT id, email, fullname, role, department_id FROM users WHERE email = $1 LIMIT 1", [email]);
+    const existing = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE email = $1 LIMIT 1",
+      [email]
+    );
     let user;
 
     if (existing.rows.length === 0) {
       logger.info(`🆕 Creando nuevo usuario: ${email}`);
       const ins = await db.query(
         `
-        INSERT INTO users (google_id, email, fullname, name, role, department_id)
-        VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1))
-        RETURNING id, email, fullname, role, department_id;
+        INSERT INTO users (
+          google_id,
+          email,
+          fullname,
+          name,
+          role,
+          department_id,
+          lopdp_internal_status
+        )
+        VALUES ($1, $2, $3, $4, $5, (SELECT id FROM departments WHERE code = $6 LIMIT 1), 'pending')
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
         `,
         [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
       );
@@ -189,9 +214,10 @@ const googleCallback = async (req, res) => {
         SET google_id = $1,
             fullname = $2,
             updated_at = NOW(),
-            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1))
+            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
+      lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
         WHERE email = $3
-        RETURNING id, email, fullname, role, department_id;
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
         `,
         [googleId, fullname, email, "ti"]
       );
@@ -216,6 +242,7 @@ const googleCallback = async (req, res) => {
       department,
       scope: roleMeta.scope,
       dashboard: roleMeta.dashboard,
+      lopdp_internal_status: user.lopdp_internal_status || "pending",
     };
 
     // Firmar tokens
@@ -276,7 +303,16 @@ const me = async (req, res) => {
 
     const { rows } = await db.query(
       `
-      SELECT u.id, u.email, u.fullname, u.role, d.code AS department
+      SELECT
+        u.id,
+        u.email,
+        u.fullname,
+        u.role,
+        d.code AS department,
+        u.lopdp_internal_status,
+        u.lopdp_internal_signed_at,
+        u.lopdp_internal_pdf_file_id,
+        u.lopdp_internal_signature_file_id
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
       WHERE u.email = $1 LIMIT 1;
@@ -292,6 +328,7 @@ const me = async (req, res) => {
         ...payload,
         scope: meta.scope,
         dashboard: meta.dashboard,
+        lopdp_internal_status: payload.lopdp_internal_status || "pending",
       },
     });
   } catch (err) {
@@ -438,6 +475,154 @@ const activeUsers = async (_req, res) => {
 };
 
 /* ============================================================
+   6️⃣ Consentimiento interno LOPDP (nuevos colaboradores)
+============================================================ */
+const acceptInternalLopdp = async (req, res) => {
+  try {
+    const actor = req.user || {};
+    if (!actor?.email) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const {
+      signature_base64: signatureBase64,
+      pdf_base64: pdfBase64,
+      notes,
+      accepted,
+    } = req.body || {};
+
+    if (!accepted) {
+      return res
+        .status(400)
+        .json({ ok: false, message: "Debe aceptar el aviso de protección de datos" });
+    }
+
+    if (!signatureBase64 || !pdfBase64) {
+      return res.status(400).json({ ok: false, message: "Falta la firma o el PDF generado" });
+    }
+
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE email = $1 LIMIT 1",
+      [actor.email]
+    );
+
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+    const user = rows[0];
+
+    if ((user.lopdp_internal_status || "").toLowerCase() === "granted") {
+      return res.status(200).json({ ok: true, alreadyAccepted: true });
+    }
+
+    const rootId =
+      process.env.DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_FOLDER_ID;
+    if (!rootId) {
+      return res.status(500).json({
+        ok: false,
+        message: "No se ha configurado DRIVE_ROOT_FOLDER_ID en el entorno",
+      });
+    }
+
+    const { baseFolder, personFolder, signedPdfFolder } = await ensureInternalLopdpPath(
+      user,
+      rootId
+    );
+    const today = new Date().toISOString().slice(0, 10);
+
+    const signatureFile = await uploadBase64File(
+      `firma-${user.email}-${today}.png`,
+      signatureBase64,
+      "image/png",
+      signedPdfFolder.id
+    );
+
+    const pdfFile = await uploadBase64File(
+      `LOPDP-${user.email}-${today}.pdf`,
+      pdfBase64,
+      "application/pdf",
+      signedPdfFolder.id
+    );
+
+    const ip =
+      req.headers["x-forwarded-for"]?.split(",")[0] ||
+      req.socket?.remoteAddress ||
+      req.ip;
+    const userAgent = req.headers["user-agent"] || null;
+
+    const updated = await db.query(
+      `
+      UPDATE users
+      SET lopdp_internal_status = 'granted',
+          lopdp_internal_signed_at = NOW(),
+          lopdp_internal_pdf_file_id = $2,
+          lopdp_internal_signature_file_id = $3,
+          lopdp_internal_ip = $4,
+          lopdp_internal_user_agent = $5,
+          lopdp_internal_notes = COALESCE($6, lopdp_internal_notes),
+          updated_at = NOW()
+      WHERE email = $1
+      RETURNING id, email, fullname, role, department_id, lopdp_internal_status, lopdp_internal_signed_at, lopdp_internal_pdf_file_id, lopdp_internal_signature_file_id;
+      `,
+      [user.email, pdfFile.id, signatureFile.id, ip, userAgent, notes || null]
+    );
+
+    await db
+      .query(
+        `
+        INSERT INTO user_lopdp_consents (
+          user_id,
+          user_email,
+          status,
+          base_folder_id,
+          person_folder_id,
+          signed_folder_id,
+          pdf_file_id,
+          signature_file_id,
+          ip,
+          user_agent,
+          notes
+        ) VALUES ($1, $2, 'granted', $3, $4, $5, $6, $7, $8, $9, $10);
+        `,
+        [
+          user.id,
+          user.email,
+          baseFolder.id,
+          personFolder.id,
+          signedPdfFolder.id,
+          pdfFile.id,
+          signatureFile.id,
+          ip,
+          userAgent,
+          notes || null,
+        ]
+      )
+      .catch((err) => logger.warn({ err }, "No se pudo registrar auditoría interna LOPDP"));
+
+    const updatedUser = updated.rows[0];
+    let department = null;
+    if (updatedUser?.department_id) {
+      const depQ = await db.query("SELECT code FROM departments WHERE id = $1 LIMIT 1", [
+        updatedUser.department_id,
+      ]);
+      department = depQ.rows[0]?.code || null;
+    }
+    const meta = resolveRoleMeta(updatedUser.role || "pendiente");
+
+    return res.status(200).json({
+      ok: true,
+      user: {
+        ...updatedUser,
+        department: department || meta.scope || "pendiente",
+        scope: meta.scope,
+        dashboard: meta.dashboard,
+      },
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error registrando LOPDP interno");
+    return res.status(500).json({ ok: false, message: "No se pudo registrar la aceptación" });
+  }
+};
+
+/* ============================================================
    Exportación
 ============================================================ */
 module.exports = {
@@ -448,4 +633,5 @@ module.exports = {
   logout,
   listSessions,
   activeUsers,
+  acceptInternalLopdp,
 };

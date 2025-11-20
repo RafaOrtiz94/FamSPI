@@ -17,6 +17,7 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
   const { user, isAuthenticated, loading } = useAuth();
   const { showToast } = useUI();
   const toastShownRef = useRef(false);
+  const lopdpToastShownRef = useRef(false);
   const location = useLocation();
   const normalizedAllowed = allowedRoles.map((r) => r.toLowerCase());
   const userRole = (user?.role || "").toLowerCase();
@@ -27,6 +28,7 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
     normalizedAllowed.includes(userRole) ||
     userScope === "gerencia" ||
     userRole === "gerencia";
+  const lopdpPending = (user?.lopdp_internal_status || "").toLowerCase() !== "granted";
 
   useEffect(() => {
     if (loading || toastShownRef.current) return;
@@ -40,8 +42,11 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
     ) {
       showToast("No tienes permisos para acceder a esta sección.", "error");
       toastShownRef.current = true;
+    } else if (lopdpPending && !lopdpToastShownRef.current) {
+      showToast("Debes firmar el acuerdo interno de datos para continuar.", "warning");
+      lopdpToastShownRef.current = true;
     }
-  }, [loading, isAuthenticated, hasPermission, showToast]);
+  }, [loading, isAuthenticated, hasPermission, showToast, lopdpPending]);
 
   // 🕐 Mientras se verifica sesión
   if (loading) {

@@ -81,25 +81,41 @@ export const cancelRequest = async (id) => {
 };
 
 /** 🆕 Crear solicitud de nuevo cliente */
-export const createClientRequest = async (formData, files) => {
+export const createClientRequest = async (formData = {}, files = {}) => {
   const data = new FormData();
 
-  // Adjuntar todos los campos de texto
-  for (const key in formData) {
-    data.append(key, formData[key]);
-  }
+  Object.entries(formData).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const normalized = typeof value === "string" ? value.trim() : value;
+    data.append(key, normalized);
+  });
 
-  // Adjuntar todos los archivos
-  for (const key in files) {
-    if (files[key]) {
-      data.append(key, files[key]);
-    }
-  }
+  Object.entries(files).forEach(([key, file]) => {
+    if (!file) return;
+    data.append(key, file);
+  });
 
   const response = await api.post("/requests/new-client", data, {
     headers: { "Content-Type": "multipart/form-data" },
   });
 
+  return response.data?.data || response.data;
+};
+
+export const sendConsentEmailToken = async ({ consent_recipient_email, client_email, client_name }) => {
+  const response = await api.post("/requests/new-client/consent-token", {
+    consent_recipient_email,
+    client_email,
+    client_name,
+  });
+  return response.data?.data || response.data;
+};
+
+export const verifyConsentEmailToken = async ({ token_id, code }) => {
+  const response = await api.post("/requests/new-client/consent-token/verify", {
+    token_id,
+    code,
+  });
   return response.data?.data || response.data;
 };
 

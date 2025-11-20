@@ -69,6 +69,19 @@ const refresh = async () => {
     }
   };
 
+  const reloadProfile = async () => {
+    try {
+      const profile = await getProfile();
+      setUser(profile);
+      setIsAuthenticated(true);
+      localStorage.setItem("user", JSON.stringify(profile));
+      return profile;
+    } catch (err) {
+      console.warn("⚠️ No se pudo recargar el perfil:", err.message);
+      return null;
+    }
+  };
+
   /* ============================================================
      🔄 Verificar sesión al cargar la app
   ============================================================ */
@@ -97,6 +110,7 @@ const refresh = async () => {
         isAuthenticated,
         loading,
         refresh,
+        reloadProfile,
         login,
         logout: logoutFn, // alias usado por Header y navegación
         signOut,

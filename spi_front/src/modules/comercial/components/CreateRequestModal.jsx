@@ -1,21 +1,11 @@
-﻿// src/modules/comercial/components/CreateRequestModal.jsx
+// src/modules/comercial/components/CreateRequestModal.jsx
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Dialog } from "@headlessui/react";
 import { FiSend, FiX, FiPlus, FiTrash2, FiPhone } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
 import FileUploader from "../../../core/ui/components/FileUploader";
-
-const CLIENT_REQUIRED_FILES = [
-  { key: "doc1", label: "Archivo obligatorio 1" },
-  { key: "doc2", label: "Archivo obligatorio 2" },
-  { key: "doc3", label: "Archivo obligatorio 3" },
-];
-
-const INITIAL_CLIENT_FILES_STATE = CLIENT_REQUIRED_FILES.reduce(
-  (acc, { key }) => ({ ...acc, [key]: null }),
-  {}
-);
+import NewClientRequestForm from "./NewClientRequestForm";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -212,28 +202,40 @@ const TODAY = getTodayDate();
 /* ============================================================
     🧾 Modal principal
 ============================================================ */
-const CreateRequestModal = ({ open, onClose, onSubmit }) => {
+const CreateRequestModal = ({
+  open,
+  onClose,
+  onSubmit,
+  presetType = null,
+  canUploadClientFiles = false,
+}) => {
   const [type, setType] = useState(null);
   const [formData, setFormData] = useState({});
   const [equipos, setEquipos] = useState([]);
   const [files, setFiles] = useState([]);
   const [errors, setErrors] = useState({});
-  const [clientFiles, setClientFiles] = useState(INITIAL_CLIENT_FILES_STATE);
 
   const todayDateString = useMemo(() => TODAY, []);
 
-  const resetClientFiles = () => setClientFiles({ ...INITIAL_CLIENT_FILES_STATE });
-
-  const setClientFile = (key, file) => {
-    setClientFiles((prev) => ({ ...prev, [key]: file || null }));
-    if (errors.clientFiles) {
-      setErrors((prev) => ({ ...prev, clientFiles: null }));
+  useEffect(() => {
+    if (!open) {
+      setType(null);
+      setFormData({});
+      setEquipos([]);
+      setFiles([]);
+      setErrors({});
+      return;
     }
-  };
 
-  const removeClientFile = (key) => {
-    setClientFile(key, null);
-  };
+    if (presetType) {
+      setType(presetType);
+    } else {
+      setType(null);
+    }
+    setFormData({});
+    setEquipos([]);
+    setErrors({});
+    }, [open, presetType]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -274,13 +276,6 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                 newErrors.equipos = "Todos los equipos deben tener nombre y estado seleccionado.";
             }
         });
-    }
-
-    if (type === "cliente") {
-      const requiredDocs = Object.values(clientFiles).filter(Boolean).length;
-      if (requiredDocs < CLIENT_REQUIRED_FILES.length) {
-        newErrors.clientFiles = "Debes adjuntar los 3 archivos obligatorios para registrar al cliente.";
-      }
     }
 
     setErrors(newErrors);
@@ -351,9 +346,16 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
         <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-xl overflow-y-auto max-h-[90vh]">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
-            <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
-              Nueva Solicitud
-            </Dialog.Title>
+            <div>
+              <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
+                {type ? requestTypes[type]?.title || "Nueva solicitud" : "Selecciona una solicitud"}
+              </Dialog.Title>
+              {type && (
+                <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  Flujo comercial preconfigurado
+                </p>
+              )}
+            </div>
             <button
               onClick={onClose}
               className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
@@ -362,32 +364,14 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
             </button>
           </div>
 
-          {/* Tipo de solicitud */}
-          <div className="mb-4">
-            <label className="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-300">
-              Tipo de solicitud
-            </label>
-            <select
-              className="w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 p-2 text-gray-900 dark:text-white"
-              onChange={(e) => {
-                setType(e.target.value || null);
-                setFormData({});
-                setEquipos([]);
-                setErrors({});
-              }}
-              value={type || ""}
-            >
-              <option value="">Seleccione una opción</option>
-              {Object.entries(requestTypes).map(([id, info]) => (
-                <option key={id} value={id}>
-                  {info.title}
-                </option>
-              ))}
-            </select>
-          </div>
+          {!type && (
+            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+              Selecciona un flujo desde los accesos directos del dashboard para cargar la información correspondiente.
+            </div>
+          )}
 
           {/* Campos dinámicos */}
-          {type && (
+          {type && type !== "cliente" && (
             <form onSubmit={handleSubmit} className="space-y-3">
               {requestTypes[type].fields.map((f) => (
                 <div key={f}>
@@ -450,111 +434,62 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                   </p>
                   {equipos.map((eq, i) => (
                     <EquipoInput
-                        key={i}
-                        index={i}
-                        equipo={eq}
-                        updateEquipo={updateEquipo}
-                        type={type}
-                        removeEquipo={removeEquipo}
+                      key={i}
+                      index={i}
+                      equipo={eq}
+                      updateEquipo={updateEquipo}
+                      type={type}
+                      removeEquipo={removeEquipo}
                     />
                   ))}
                   {errors.equipos && (
                     <p className="text-red-500 text-xs mt-1 mb-2">{errors.equipos}</p>
                   )}
-                <Button
+                  <Button
                     type="button"
                     onClick={addEquipo}
                     className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2"
-                >
+                  >
                     <FiPlus /> Agregar equipo
-                </Button>
+                  </Button>
                 </div>
               )}
 
-{/* 📎 Adjuntos especiales SOLO si es registro de nuevo cliente */}
-{type === "cliente" && (
-  <div className="mt-5 border-t pt-3 border-gray-200 dark:border-gray-600">
-    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-3">
-      Documentos obligatorios para registrar cliente
-    </p>
-
-    {[
-      { key: "doc1", label: "Nombramiento del representante legal" },
-      { key: "doc2", label: "RUC" },
-      { key: "doc3", label: "Cédula del representante legal" },
-    ].map(({ key, label }) => (
-      <div key={key} className="mb-4">
-        <label className="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-400">
-          {label} <span className="text-red-500">*</span>
-        </label>
-
-        {clientFiles[key] ? (
-          <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700">
-            <span className="truncate text-gray-900 dark:text-white text-sm">
-              📄 {clientFiles[key].name} ({Math.round(clientFiles[key].size / 1024)} KB)
-            </span>
-            <button
-              type="button"
-              className="text-red-500 text-xs font-semibold hover:underline"
-              onClick={() => removeClientFile(key)}
-            >
-              Quitar
-            </button>
-          </div>
-        ) : (
-          <FileUploader
-            multiple={false}
-            helper="Sube PDF o imagen"
-            onFilesSelected={(files) => setClientFile(key, files[0])}
-          />
-        )}
-      </div>
-    ))}
-
-    {errors.clientFiles && (
-      <p className="text-red-500 text-xs mt-1">{errors.clientFiles}</p>
-    )}
-  </div>
-)}
-
-
-{type !== "cliente" && (
-  <div className="mt-5 border-t pt-3 border-gray-200 dark:border-gray-600">
-    <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-      Adjuntos (opcional)
-    </p>
-    <FileUploader
-      multiple
-      helper="Arrastra o selecciona PDFs / imágenes"
-      onFilesSelected={(selected) =>
-        setFiles((prev) => [...prev, ...selected])
-      }
-    />
-    {files.length > 0 && (
-      <ul className="mt-3 space-y-2">
-        {files.map((file, idx) => (
-          <li
-            key={`${file.name}-${idx}`}
-            className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700"
-          >
-            <span className="truncate text-gray-700 dark:text-gray-200">
-              {file.name} ({Math.round(file.size / 1024)} KB)
-            </span>
-            <button
-              type="button"
-              onClick={() =>
-                setFiles((prev) => prev.filter((_, i) => i !== idx))
-              }
-              className="text-red-500 text-xs font-semibold hover:underline"
-            >
-              Quitar
-            </button>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-)}
+              <div className="mt-5 border-t pt-3 border-gray-200 dark:border-gray-600">
+                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                  Adjuntos (opcional)
+                </p>
+                <FileUploader
+                  multiple
+                  helper="Arrastra o selecciona PDFs / imágenes"
+                  onFilesSelected={(selected) =>
+                    setFiles((prev) => [...prev, ...selected])
+                  }
+                />
+                {files.length > 0 && (
+                  <ul className="mt-3 space-y-2">
+                    {files.map((file, idx) => (
+                      <li
+                        key={`${file.name}-${idx}`}
+                        className="flex items-center justify-between text-sm bg-gray-50 dark:bg-gray-900 px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700"
+                      >
+                        <span className="truncate text-gray-700 dark:text-gray-200">
+                          {file.name} ({Math.round(file.size / 1024)} KB)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setFiles((prev) => prev.filter((_, i) => i !== idx))
+                          }
+                          className="text-red-500 text-xs font-semibold hover:underline"
+                        >
+                          Quitar
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
 
               {/* Botones */}
               <div className="flex justify-end gap-3 pt-4">
@@ -573,6 +508,19 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                   </Button>
               </div>
             </form>
+          )}
+
+          {type === "cliente" && (
+            <NewClientRequestForm
+              className="mt-2"
+              showIntro={false}
+              canUploadFiles={canUploadClientFiles}
+              onCancel={onClose}
+              onSuccess={() => {
+                onClose();
+              }}
+              successMessage="Solicitud registrada. El consentimiento quedó auditado o se envió al cliente automáticamente."
+            />
           )}
         </Dialog.Panel>
       </div>

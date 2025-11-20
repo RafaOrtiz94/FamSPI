@@ -42,6 +42,62 @@ exports.listRequests = asyncHandler(async (req, res) => {
 // ============================================================
 // 🧾 Crear nueva solicitud (con validación AJV y logs detallados)
 // ============================================================
+exports.sendConsentEmailToken = asyncHandler(async (req, res) => {
+  const { client_email, client_name, consent_recipient_email } = req.body || {};
+  const data = await service.sendConsentEmailToken({
+    user: req.user,
+    client_email,
+    recipient_email: consent_recipient_email,
+    client_name,
+  });
+
+  await logAction({
+    user_id: req.user.id,
+    module: "client_requests",
+    action: "send_consent_token",
+    entity: "client_request_consent_tokens",
+    details: { client_email: consent_recipient_email || client_email },
+  });
+
+  res.json({
+    ok: true,
+    message: "Código enviado al correo del cliente.",
+    data,
+  });
+});
+
+exports.verifyConsentEmailToken = asyncHandler(async (req, res) => {
+  const { token_id, code } = req.body || {};
+  const result = await service.verifyConsentEmailToken({
+    user: req.user,
+    token_id,
+    code,
+  });
+
+  await logAction({
+    user_id: req.user.id,
+    module: "client_requests",
+    action: "verify_consent_token",
+    entity: "client_request_consent_tokens",
+    entity_id: result?.id || token_id,
+    details: { token_id },
+  });
+
+  res.json({
+    ok: true,
+    message: "Código validado correctamente.",
+    data: {
+      token_id: result?.id || token_id,
+      verified_at: result?.verified_at,
+      expires_at: result?.expires_at,
+      client_email: result?.client_email,
+    },
+  });
+});
+
+// ============================================================
+// 🧾 Crear nueva solicitud (con validación AJV y logs detallados)
+// ============================================================
 exports.createRequest = asyncHandler(async (req, res) => {
   const user = req.user;
   let { request_type_id, payload } = req.body;
@@ -381,7 +437,13 @@ exports.processClientRequest = asyncHandler(async (req, res) => {
 // ============================================================
 exports.grantConsent = asyncHandler(async (req, res) => {
   const { token } = req.params;
-  const result = await service.grantConsent(token);
+  const result = await service.grantConsent({
+    token,
+    audit: {
+      ip: req.ip,
+      userAgent: req.get("user-agent"),
+    },
+  });
 
   await logAction({
     user_id: null, // Es una acción del cliente final
