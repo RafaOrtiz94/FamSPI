@@ -12,6 +12,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { google } = require("../../config/oauth");
 const { oauth2Client } = require("../../config/oauth");
+const { generateCalibrationPDF } = require("./attendance.calibration.service");
 
 /**
  * Download signature image from Google Drive
@@ -323,6 +324,11 @@ const generatePDF = async (req, res) => {
     try {
         const { userId } = req.params;
         const { start, end } = req.query;
+
+        // Allow calibration access even if the route falls through due to ordering issues
+        if (userId === "calibrate") {
+            return generateCalibrationPDF(req, res);
+        }
 
         if (!start || !end) {
             return res.status(400).json({
