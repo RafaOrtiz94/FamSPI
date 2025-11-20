@@ -75,7 +75,7 @@ const generateCalibrationPDF = async (req, res) => {
     }
 
     // Footer mark
-    page.drawText("🔧 MODO CALIBRACIÓN — NO USAR PARA FIRMAR NI ENVIAR", {
+    page.drawText("MODO CALIBRACIÓN - NO USAR PARA FIRMAR NI ENVIAR", {
       x: 50,
       y: 20,
       size: 10,
