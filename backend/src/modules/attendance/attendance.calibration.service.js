@@ -29,18 +29,24 @@ const generateCalibrationPDF = async (req, res) => {
       });
     }
 
-    // Load template
-    const pdfBytes = fs.readFileSync(TEMPLATE_PATH);
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-
-    const pages = pdfDoc.getPages();
-    const page = pages[0];
+    // Load template and clone page into a fresh document to keep base artwork intact
+    const templateBytes = fs.readFileSync(TEMPLATE_PATH);
+    const templateDoc = await PDFDocument.load(templateBytes);
+    const pdfDoc = await PDFDocument.create();
+    const [templatePage] = await pdfDoc.copyPages(templateDoc, [0]);
+    const page = templatePage;
+    pdfDoc.addPage(page);
 
     const { width, height } = page.getSize();
 
     // Draw grid every 50px
     const step = 50;
     const lineColor = rgb(0.8, 0.1, 0.1);
+
+    // Reference crosshair on the PDF origin to help align coordinates with the template
+    page.drawLine({ start: { x: 0, y: 0 }, end: { x: 20, y: 0 }, thickness: 1, color: rgb(0.1, 0.1, 0.1) });
+    page.drawLine({ start: { x: 0, y: 0 }, end: { x: 0, y: 20 }, thickness: 1, color: rgb(0.1, 0.1, 0.1) });
+    page.drawText("Origen (0,0)", { x: 5, y: 25, size: 9, color: rgb(0, 0, 0.7) });
 
     for (let x = 0; x < width; x += step) {
       page.drawLine({
