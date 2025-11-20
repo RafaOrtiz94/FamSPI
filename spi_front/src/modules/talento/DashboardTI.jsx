@@ -15,6 +15,7 @@ import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import Card from "../../core/ui/components/Card";
 import { downloadAttendanceCalibrationPDF } from "../../core/api/attendanceApi";
+import AttendanceWidget from "../shared/components/AttendanceWidget";
 
 const DashboardTI = () => {
   const [users, setUsers] = useState([]);
@@ -120,6 +121,11 @@ const DashboardTI = () => {
             <p className="text-3xl font-bold text-neutral-800">{kpi.value}</p>
           </Card>
         ))}
+      </div>
+
+      {/* CONTROL DE ASISTENCIA */}
+      <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-4">
+        <AttendanceWidget />
       </div>
 
       {/* ACCESOS DIRECTOS */}
