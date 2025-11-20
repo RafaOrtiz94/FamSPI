@@ -1,0 +1,150 @@
+// src/core/api/attendanceApi.js
+import api from "./index";
+import { getAccessToken } from "./authApi";
+
+/**
+ * ==========================================================
+ * 📋 Attendance API Client
+ * ----------------------------------------------------------
+ * Handles all attendance-related API calls
+ * ==========================================================
+ */
+
+/**
+ * Clock In - Record entry time
+ */
+export const clockIn = async () => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/clock-in",
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Clock Out for Lunch - Record lunch start time
+ */
+export const clockOutLunch = async (signatureBase64) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/clock-out-lunch",
+        { signature_base64: signatureBase64 },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Clock In from Lunch - Record lunch end time
+ */
+export const clockInLunch = async () => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/clock-in-lunch",
+        {},
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Clock Out - Record exit time
+ */
+export const clockOut = async (signatureBase64) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/clock-out",
+        { signature_base64: signatureBase64 },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Get Today's Attendance - For current user
+ */
+export const getTodayAttendance = async () => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.get("/attendance/today", {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return data;
+};
+
+/**
+ * Get User Attendance - For specific date
+ */
+export const getUserAttendance = async (userId, date) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.get(`/attendance/user/${userId}?date=${date}`, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return data;
+};
+
+/**
+ * Get Attendance Range - For reporting
+ */
+export const getAttendanceRange = async (startDate, endDate, userId = null) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    let url = `/attendance/range?start=${startDate}&end=${endDate}`;
+    if (userId) {
+        url += `&userId=${userId}`;
+    }
+
+    const { data } = await api.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return data;
+};
+
+/**
+ * Download Attendance PDF
+ */
+export const downloadAttendancePDF = async (userId, startDate, endDate) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const response = await api.get(
+        `/attendance/pdf/${userId}?start=${startDate}&end=${endDate}`,
+        {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: "blob",
+        }
+    );
+
+    // Create download link
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement("a");
+    link.href = url;
+    link.setAttribute("download", `asistencia-${userId}-${startDate}-${endDate}.pdf`);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+
+    return true;
+};

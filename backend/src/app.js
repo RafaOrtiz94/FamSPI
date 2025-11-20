@@ -78,8 +78,8 @@ if (
     `${trustProxyValue}`.toLowerCase() === "true"
       ? true
       : Number.isNaN(Number(trustProxyValue))
-      ? trustProxyValue
-      : Number(trustProxyValue);
+        ? trustProxyValue
+        : Number(trustProxyValue);
 
   app.set("trust proxy", normalizedTrustProxy);
   logger.info(
@@ -176,14 +176,15 @@ const mantenimientosRoutes = require("./modules/mantenimientos/mantenimientos.ro
 const departmentsRoutes = require("./modules/departments/departments.routes");
 const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
+const attendanceRoutes = require("./modules/attendance/attendance.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
 // ======================================================
-app.get("/", (_req, res) => res.status(200).json({ 
-  ok: true, 
-  message: "SPI FAM API", 
-  version: require("../package.json").version 
+app.get("/", (_req, res) => res.status(200).json({
+  ok: true,
+  message: "SPI FAM API",
+  version: require("../package.json").version
 }));
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
@@ -228,6 +229,7 @@ app.use("/api/v1/servicio", servicioRoutes);
 app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
+app.use("/api/v1/attendance", attendanceRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

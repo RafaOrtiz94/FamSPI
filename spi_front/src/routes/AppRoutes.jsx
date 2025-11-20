@@ -12,6 +12,7 @@ import DashboardLayout from "../core/layout/DashboardLayout";
 // 🪪 Páginas públicas
 import Login from "../modules/shared/pages/Login";
 import LoginCallback from "../modules/shared/pages/LoginCallback";
+import FirstLoginSignature from "../modules/shared/pages/FirstLoginSignature";
 import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
 
@@ -19,6 +20,9 @@ import Unauthorized from "../modules/shared/pages/Unauthorized";
 import DashboardGerencia from "../modules/gerencia/Dashboard";
 import DashboardFinanzas from "../modules/finanzas/Dashboard";
 import DashboardComercial from "../modules/comercial/pages/Dashboard";
+import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
+import ClientesPage from "../modules/comercial/pages/Clientes";
+import InventarioPage from "../modules/comercial/pages/Inventario";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
 import DashboardTalento from "../modules/talento/Dashboard";
@@ -68,7 +72,7 @@ const AppRoutes = () => {
               "talento_humano",
               "ti",
               "operaciones",
-      "calidad",
+              "calidad",
             ]}
           />
         }
@@ -82,9 +86,15 @@ const AppRoutes = () => {
           <Route path="/dashboard/gerencia" element={<DashboardGerencia />} />
           <Route path="/dashboard/finanzas" element={<DashboardFinanzas />} />
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "asesor", "asesor_comercial"]} />}>
+
+          {/* Subrutas Comercial */}
+          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti"]} />}>
+            <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
+            <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
+            <Route path="/dashboard/comercial/inventario" element={<InventarioPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
           </Route>
+
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
           <Route path="/dashboard/ti" element={<DashboardTI />} />
@@ -110,6 +120,7 @@ const AppRoutes = () => {
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/first-login-signature" element={<FirstLoginSignature />} />
         </Route>
       </Route>
 

@@ -163,3 +163,7 @@ export const submitInternalLopdpConsent = async ({
   if (!data?.ok) throw new Error(data?.message || "No se pudo registrar la aceptación");
   return data;
 };
+
+// Alias for consistency
+export const acceptInternalLopdp = submitInternalLopdpConsent;
+

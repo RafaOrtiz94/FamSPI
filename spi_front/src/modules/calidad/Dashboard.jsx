@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   FiCheckCircle,
@@ -6,6 +6,7 @@ import {
   FiRefreshCw,
   FiActivity,
   FiXCircle,
+  FiDownload,
 } from "react-icons/fi";
 
 import { useApi } from "../../core/hooks/useApi";
@@ -13,7 +14,9 @@ import { useDashboard } from "../../core/hooks/useDashboard";
 import { useUI } from "../../core/ui/useUI";
 import { getRequests } from "../../core/api/requestsApi";
 import { getPendingApprovals } from "../../core/api/approvalsApi";
+import { downloadAttendancePDF } from "../../core/api/attendanceApi";
 import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
+import AttendanceWidget from "../shared/components/AttendanceWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 
@@ -29,6 +32,9 @@ const statusMeta = {
 
 const DashboardCalidad = () => {
   const { showToast } = useUI();
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
+  const [selectedUserId, setSelectedUserId] = useState("");
 
   const {
     data: requestsData,
@@ -55,6 +61,11 @@ const DashboardCalidad = () => {
 
   useEffect(() => {
     refresh();
+    // Set default dates (current month)
+    const today = new Date();
+    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+    setStartDate(firstDay.toISOString().split("T")[0]);
+    setEndDate(today.toISOString().split("T")[0]);
   }, [refresh]);
 
   const requests = useMemo(() => unwrapRows(requestsData), [requestsData]);
@@ -63,6 +74,26 @@ const DashboardCalidad = () => {
   const { stats } = useDashboard(requests);
 
   const loading = loadingRequests || loadingApprovals;
+
+  const handleDownloadPDF = async () => {
+    if (!startDate || !endDate) {
+      showToast("Por favor selecciona un rango de fechas", "error");
+      return;
+    }
+
+    if (!selectedUserId) {
+      showToast("Por favor ingresa el ID del usuario", "error");
+      return;
+    }
+
+    try {
+      await downloadAttendancePDF(selectedUserId, startDate, endDate);
+      showToast("PDF descargado correctamente", "success");
+    } catch (err) {
+      console.error("Error downloading PDF:", err);
+      showToast("Error descargando PDF de asistencia", "error");
+    }
+  };
 
   return (
     <motion.section
@@ -85,7 +116,8 @@ const DashboardCalidad = () => {
         </Button>
       </header>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <ExecutiveStatCard
           icon={<FiActivity size={22} />}
           label="Total solicitudes"
@@ -114,7 +146,73 @@ const DashboardCalidad = () => {
           from="from-rose-600"
           to="to-pink-500"
         />
-      </section>
+      </div>
+
+      {/* Attendance Widget */}
+      <AttendanceWidget />
+
+      {/* 🆕 Attendance Reports Section */}
+      <Card className="p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold text-gray-900">
+            Reportes de Asistencia
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Fecha Inicio
+            </label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(e) => setStartDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Fecha Fin
+            </label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              ID Usuario
+            </label>
+            <input
+              type="number"
+              value={selectedUserId}
+              onChange={(e) => setSelectedUserId(e.target.value)}
+              placeholder="Ej: 1"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
+          </div>
+
+          <div className="flex items-end">
+            <Button
+              variant="primary"
+              icon={FiDownload}
+              onClick={handleDownloadPDF}
+              className="w-full"
+            >
+              Descargar PDF
+            </Button>
+          </div>
+        </div>
+
+        <p className="text-xs text-gray-500">
+          Genera un reporte PDF de asistencia para un usuario específico en el rango de fechas seleccionado.
+        </p>
+      </Card>
 
       <section className="grid grid-cols-1 gap-4">
         <Card className="p-5 space-y-3">

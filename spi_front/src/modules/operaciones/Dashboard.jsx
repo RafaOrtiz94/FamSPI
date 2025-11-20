@@ -16,6 +16,7 @@ import { useUI } from "../../core/ui/useUI";
 import { getRequests } from "../../core/api/requestsApi";
 import { getMantenimientos } from "../../core/api/mantenimientosApi";
 import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
+import AttendanceWidget from "../shared/components/AttendanceWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 
@@ -128,7 +129,8 @@ const DashboardOperaciones = () => {
         </Button>
       </header>
 
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <ExecutiveStatCard
           icon={<FiClipboard size={22} />}
           label="Órdenes activas"
@@ -157,7 +159,10 @@ const DashboardOperaciones = () => {
           from="from-indigo-600"
           to="to-blue-500"
         />
-      </section>
+      </div>
+
+      {/* Attendance Widget */}
+      <AttendanceWidget />
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-5 lg:col-span-2 space-y-4">
@@ -222,11 +227,10 @@ const DashboardOperaciones = () => {
                   </p>
                 </div>
                 <span
-                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                    ["pendiente", "pending"].includes(normalize(m.estado))
-                      ? "bg-amber-100 text-amber-700"
-                      : "bg-green-100 text-green-700"
-                  }`}
+                  className={`text-xs font-semibold px-2 py-0.5 rounded-full ${["pendiente", "pending"].includes(normalize(m.estado))
+                    ? "bg-amber-100 text-amber-700"
+                    : "bg-green-100 text-green-700"
+                    }`}
                 >
                   {m.estado}
                 </span>
@@ -311,11 +315,10 @@ const DashboardOperaciones = () => {
                       </p>
                     </div>
                     <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
-                        normalize(req.status) === "approved"
-                          ? "bg-green-100 text-green-700"
-                          : "bg-rose-100 text-rose-700"
-                      }`}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full ${normalize(req.status) === "approved"
+                        ? "bg-green-100 text-green-700"
+                        : "bg-rose-100 text-rose-700"
+                        }`}
                     >
                       {normalize(req.status) === "approved" ? "Aprobada" : "Rechazada"}
                     </span>

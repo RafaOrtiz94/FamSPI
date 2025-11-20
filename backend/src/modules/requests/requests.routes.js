@@ -109,7 +109,22 @@ router.post(
 router.get(
   "/",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.listRequests
 );
 
@@ -121,7 +136,22 @@ router.get(
 router.get(
   "/:id",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.getDetail
 );
 
