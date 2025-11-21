@@ -149,26 +149,3 @@ export const downloadAttendancePDF = async (userId, startDate, endDate) => {
     return true;
 };
 
-/**
- * Download calibration PDF to measure document coordinates
- */
-export const downloadAttendanceCalibrationPDF = async () => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
-    const response = await api.get("/attendance/pdf/calibrate", {
-        headers: { Authorization: `Bearer ${token}` },
-        responseType: "blob",
-    });
-
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "calibracion-asistencia.pdf");
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
-
-    return true;
-};

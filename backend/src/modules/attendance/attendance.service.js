@@ -2,17 +2,25 @@
  * src/modules/attendance/attendance.service.js
  * --------------------------------------------
  * 📄 PDF Generation Service for Attendance Reports
- * - Generates PDF with company format
- * - Embeds user signatures
- * - Fetches data from Google Drive
+ * - Fills predefined PDF form template with attendance data
+ * - Embeds employee signatures where available
  */
 
-const PDFDocument = require("pdfkit");
+const fs = require("fs");
+const path = require("path");
+const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { google } = require("../../config/oauth");
-const { oauth2Client } = require("../../config/oauth");
-const { generateCalibrationPDF } = require("./attendance.calibration.service");
+const { google, oauth2Client } = require("../../config/oauth");
+
+const TEMPLATE_PATH = path.join(
+    __dirname,
+    "..",
+    "..",
+    "data",
+    "plantillas",
+    "F.RH-09_V01_PLANTILLA_RA.pdf"
+);
 
 /**
  * Download signature image from Google Drive
@@ -32,10 +40,10 @@ const downloadSignatureFromDrive = async (fileId) => {
 };
 
 /**
- * Format time for display
+ * Format time in HH:mm 24h format
  */
 const formatTime = (timestamp) => {
-    if (!timestamp) return "---";
+    if (!timestamp) return "";
     const date = new Date(timestamp);
     return date.toLocaleTimeString("es-EC", {
         hour: "2-digit",
@@ -45,51 +53,64 @@ const formatTime = (timestamp) => {
 };
 
 /**
- * Format date for display
+ * Safely set a form field text value
  */
-const formatDate = (dateStr) => {
-    const date = new Date(dateStr);
-    return date.toLocaleDateString("es-EC", {
-        weekday: "long",
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-    });
-};
-
-/**
- * Calculate total hours worked
- */
-const calculateHours = (entryTime, exitTime, lunchStart, lunchEnd) => {
-    if (!entryTime || !exitTime) return "---";
-
-    const entry = new Date(entryTime);
-    const exit = new Date(exitTime);
-    let totalMs = exit - entry;
-
-    // Subtract lunch break if both times are present
-    if (lunchStart && lunchEnd) {
-        const lunchStartTime = new Date(lunchStart);
-        const lunchEndTime = new Date(lunchEnd);
-        const lunchMs = lunchEndTime - lunchStartTime;
-        totalMs -= lunchMs;
+const setFieldText = (form, fieldName, value) => {
+    try {
+        const field = form.getField(fieldName);
+        if (field && typeof field.setText === "function") {
+            field.setText(value ?? "");
+            return true;
+        }
+    } catch (err) {
+        logger.warn({ fieldName, err }, "No se pudo asignar texto al campo");
     }
-
-    const hours = Math.floor(totalMs / (1000 * 60 * 60));
-    const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
-
-    return `${hours}h ${minutes}m`;
+    return false;
 };
 
 /**
- * Generate PDF for single user attendance record
+ * Attempt to set an image into a field (button) or fall back to text note
+ */
+const setFieldSignature = async (pdfDoc, form, fieldName, signatureBuffer) => {
+    try {
+        const field = form.getField(fieldName);
+        if (!field) return;
+
+        if (signatureBuffer) {
+            let image;
+            try {
+                image = await pdfDoc.embedPng(signatureBuffer);
+            } catch (err) {
+                image = await pdfDoc.embedJpg(signatureBuffer);
+            }
+
+            if (typeof field.setImage === "function") {
+                field.setImage(image);
+                return;
+            }
+
+            if (typeof field.setText === "function") {
+                field.setText("Firma registrada");
+                return;
+            }
+        }
+
+        if (typeof field.setText === "function") {
+            field.setText("Firma no disponible");
+        }
+    } catch (err) {
+        logger.warn({ fieldName, err }, "No se pudo asignar firma al campo");
+    }
+};
+
+/**
+ * Generate PDF for single user attendance record using predefined template
  */
 const generateAttendancePDF = async (userId, startDate, endDate) => {
-    try {
-        // Fetch attendance records
-        const attendanceQuery = await db.query(
-            `
-      SELECT 
+    // Fetch attendance records
+    const attendanceQuery = await db.query(
+        `
+      SELECT
         a.*,
         u.fullname,
         u.email,
@@ -102,219 +123,82 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
       WHERE a.user_id = $1 AND a.date BETWEEN $2 AND $3
       ORDER BY a.date ASC
       `,
-            [userId, startDate, endDate]
-        );
+        [userId, startDate, endDate]
+    );
 
-        const records = attendanceQuery.rows;
+    const records = attendanceQuery.rows;
 
-        if (records.length === 0) {
-            throw new Error("No se encontraron registros de asistencia");
-        }
-
-        const user = records[0];
-
-        // Download signature if available
-        let signatureBuffer = null;
-        if (user.lopdp_internal_signature_file_id) {
-            signatureBuffer = await downloadSignatureFromDrive(
-                user.lopdp_internal_signature_file_id
-            );
-        }
-
-        // Create PDF
-        const doc = new PDFDocument({ size: "A4", margin: 50 });
-        const chunks = [];
-
-        doc.on("data", (chunk) => chunks.push(chunk));
-
-        // Header
-        doc
-            .fontSize(20)
-            .font("Helvetica-Bold")
-            .text("REGISTRO DE ASISTENCIA", { align: "center" });
-
-        doc.moveDown(0.5);
-
-        // Company info (customize as needed)
-        doc
-            .fontSize(10)
-            .font("Helvetica")
-            .text("FAM - Familia Agropecuaria Moderna", { align: "center" });
-
-        doc.moveDown(1);
-
-        // Employee information
-        doc.fontSize(12).font("Helvetica-Bold").text("Información del Empleado");
-
-        doc.moveDown(0.3);
-
-        doc.fontSize(10).font("Helvetica");
-        doc.text(`Nombre: ${user.fullname || "N/A"}`);
-        doc.text(`Email: ${user.email || "N/A"}`);
-        doc.text(`Cargo: ${user.role || "N/A"}`);
-        doc.text(`Departamento: ${user.department_name || "N/A"}`);
-
-        doc.moveDown(1);
-
-        // Period
-        doc
-            .fontSize(12)
-            .font("Helvetica-Bold")
-            .text(
-                `Período: ${formatDate(startDate)} - ${formatDate(endDate)}`
-            );
-
-        doc.moveDown(1);
-
-        // Table header
-        const tableTop = doc.y;
-        const colWidths = {
-            date: 100,
-            entry: 70,
-            lunchOut: 70,
-            lunchIn: 70,
-            exit: 70,
-            total: 70,
-        };
-
-        doc.fontSize(9).font("Helvetica-Bold");
-
-        let x = 50;
-        doc.text("Fecha", x, tableTop, { width: colWidths.date });
-        x += colWidths.date;
-        doc.text("Entrada", x, tableTop, { width: colWidths.entry });
-        x += colWidths.entry;
-        doc.text("Salida Alm.", x, tableTop, { width: colWidths.lunchOut });
-        x += colWidths.lunchOut;
-        doc.text("Entrada Alm.", x, tableTop, { width: colWidths.lunchIn });
-        x += colWidths.lunchIn;
-        doc.text("Salida", x, tableTop, { width: colWidths.exit });
-        x += colWidths.exit;
-        doc.text("Total", x, tableTop, { width: colWidths.total });
-
-        // Draw line under header
-        doc
-            .moveTo(50, tableTop + 15)
-            .lineTo(550, tableTop + 15)
-            .stroke();
-
-        doc.moveDown(1.5);
-
-        // Table rows
-        doc.font("Helvetica").fontSize(8);
-
-        records.forEach((record, index) => {
-            const rowY = doc.y;
-
-            // Check if we need a new page
-            if (rowY > 700) {
-                doc.addPage();
-                doc.y = 50;
-            }
-
-            let x = 50;
-
-            // Date
-            doc.text(
-                new Date(record.date).toLocaleDateString("es-EC"),
-                x,
-                doc.y,
-                { width: colWidths.date }
-            );
-            x += colWidths.date;
-
-            // Entry time
-            doc.text(formatTime(record.entry_time), x, rowY, {
-                width: colWidths.entry,
-            });
-            x += colWidths.entry;
-
-            // Lunch out
-            doc.text(formatTime(record.lunch_start_time), x, rowY, {
-                width: colWidths.lunchOut,
-            });
-            x += colWidths.lunchOut;
-
-            // Lunch in
-            doc.text(formatTime(record.lunch_end_time), x, rowY, {
-                width: colWidths.lunchIn,
-            });
-            x += colWidths.lunchIn;
-
-            // Exit
-            doc.text(formatTime(record.exit_time), x, rowY, {
-                width: colWidths.exit,
-            });
-            x += colWidths.exit;
-
-            // Total hours
-            doc.text(
-                calculateHours(
-                    record.entry_time,
-                    record.exit_time,
-                    record.lunch_start_time,
-                    record.lunch_end_time
-                ),
-                x,
-                rowY,
-                { width: colWidths.total }
-            );
-
-            doc.moveDown(0.8);
-        });
-
-        doc.moveDown(2);
-
-        // Signature section
-        if (signatureBuffer) {
-            doc.fontSize(10).font("Helvetica-Bold").text("Firma del Empleado:");
-            doc.moveDown(0.5);
-
-            try {
-                doc.image(signatureBuffer, {
-                    fit: [150, 50],
-                    align: "left",
-                });
-            } catch (imgErr) {
-                logger.warn("Could not embed signature image in PDF");
-                doc.fontSize(8).font("Helvetica-Oblique").text("(Firma no disponible)");
-            }
-        } else {
-            doc.fontSize(10).font("Helvetica-Bold").text("Firma del Empleado:");
-            doc.moveDown(0.5);
-            doc
-                .fontSize(8)
-                .font("Helvetica-Oblique")
-                .text("(El empleado no ha registrado su firma)");
-        }
-
-        doc.moveDown(1);
-
-        // Footer
-        doc
-            .fontSize(8)
-            .font("Helvetica")
-            .text(
-                `Generado el: ${new Date().toLocaleString("es-EC")}`,
-                50,
-                doc.page.height - 50,
-                { align: "center" }
-            );
-
-        // Finalize PDF
-        doc.end();
-
-        return new Promise((resolve, reject) => {
-            doc.on("end", () => {
-                const pdfBuffer = Buffer.concat(chunks);
-                resolve(pdfBuffer);
-            });
-            doc.on("error", reject);
-        });
-    } catch (err) {
-        logger.error({ err }, "Error generating attendance PDF");
-        throw err;
+    if (records.length === 0) {
+        throw new Error("No se encontraron registros de asistencia");
     }
+
+    const user = records[0];
+
+    // Download signature if available
+    let signatureBuffer = null;
+    if (user.lopdp_internal_signature_file_id) {
+        signatureBuffer = await downloadSignatureFromDrive(
+            user.lopdp_internal_signature_file_id
+        );
+    }
+
+    // Load template
+    const templateBytes = fs.readFileSync(TEMPLATE_PATH);
+    const pdfDoc = await PDFDocument.load(templateBytes);
+    const form = pdfDoc.getForm();
+
+    // Set fixed fields
+    const periodDate = new Date(startDate);
+    setFieldText(form, "nombre_usuario", user.fullname || "");
+    setFieldText(form, "ra_ano", `${periodDate.getFullYear()}`);
+    setFieldText(
+        form,
+        "ra_mes",
+        `${String(periodDate.getMonth() + 1).padStart(2, "0")}`
+    );
+
+    // Build map by day for quick lookup
+    const recordsByDay = new Map();
+    records.forEach((record) => {
+        const day = new Date(record.date).getDate();
+        recordsByDay.set(day, record);
+    });
+
+    // Populate daily fields
+    for (let day = 1; day <= 31; day += 1) {
+        const record = recordsByDay.get(day);
+
+        const horaEntrada = record ? formatTime(record.entry_time) : "";
+        const horaSalidaAlmuerzo = record
+            ? formatTime(record.lunch_start_time)
+            : "";
+        const horaEntradaAlmuerzo = record
+            ? formatTime(record.lunch_end_time)
+            : "";
+        const horaSalida = record ? formatTime(record.exit_time) : "";
+
+        setFieldText(form, `hora_entrada_${day}`, horaEntrada);
+        setFieldText(form, `hora_salida_${day}`, horaSalida);
+        setFieldText(form, `hora_entrada_a_${day}`, horaSalidaAlmuerzo);
+        setFieldText(form, `hora_salida_a_${day}`, horaEntradaAlmuerzo);
+        setFieldText(form, `ra_observaciones_${day}`, "");
+
+        await setFieldSignature(
+            pdfDoc,
+            form,
+            `firma_fila_${day}`,
+            signatureBuffer
+        );
+    }
+
+    // Signatures at the bottom of the template
+    await setFieldSignature(pdfDoc, form, "firma_uno", signatureBuffer);
+    await setFieldSignature(pdfDoc, form, "firma_dos", signatureBuffer);
+
+    form.flatten();
+
+    const pdfBytes = await pdfDoc.save();
+    return Buffer.from(pdfBytes);
 };
 
 /**
@@ -325,11 +209,6 @@ const generatePDF = async (req, res) => {
         const { userId } = req.params;
         const { start, end } = req.query;
 
-        // Allow calibration access even if the route falls through due to ordering issues
-        if (userId === "calibrate") {
-            return generateCalibrationPDF(req, res);
-        }
-
         if (!start || !end) {
             return res.status(400).json({
                 ok: false,
@@ -339,7 +218,6 @@ const generatePDF = async (req, res) => {
 
         const pdfBuffer = await generateAttendancePDF(userId, start, end);
 
-        // Set response headers
         res.setHeader("Content-Type", "application/pdf");
         res.setHeader(
             "Content-Disposition",

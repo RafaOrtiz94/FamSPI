@@ -7,22 +7,18 @@ import {
   FiActivity,
   FiShield,
   FiArrowRight,
-  FiFileText,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import api from "../../core/api";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import Card from "../../core/ui/components/Card";
-import { downloadAttendanceCalibrationPDF } from "../../core/api/attendanceApi";
-import AttendanceWidget from "../shared/components/AttendanceWidget";
 
 const DashboardTI = () => {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [downloadingCalibration, setDownloadingCalibration] = useState(false);
   const navigate = useNavigate();
 
   // ============================================================
@@ -123,11 +119,6 @@ const DashboardTI = () => {
         ))}
       </div>
 
-      {/* CONTROL DE ASISTENCIA */}
-      <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-4">
-        <AttendanceWidget />
-      </div>
-
       {/* ACCESOS DIRECTOS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
         {[
@@ -176,57 +167,6 @@ const DashboardTI = () => {
         ))}
       </div>
 
-      {/* CALIBRACIÓN DE DOCUMENTOS */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        <Card className="p-6 rounded-2xl shadow-sm border border-neutral-100 bg-white">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
-              <FiFileText size={24} />
-            </div>
-            <div className="space-y-2">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-blue-500 font-semibold">
-                  Herramienta de calibración
-                </p>
-                <h2 className="text-xl font-bold text-neutral-800">
-                  Calibrar formatos de asistencia
-                </h2>
-              </div>
-              <p className="text-sm text-neutral-600 leading-relaxed">
-                Genera un PDF con cuadrícula y coordenadas para validar la ubicación de
-                firmas y campos en los documentos de asistencia. Úsalo antes de subir
-                nuevas plantillas o ajustar los offsets.
-              </p>
-              <div className="flex items-center gap-3 text-sm text-neutral-500">
-                <span className="px-3 py-1 rounded-full bg-blue-50 text-blue-600 font-medium">
-                  attendance.calibration.service
-                </span>
-                <span>Plantilla base: F.RH-09_V01</span>
-              </div>
-              <div className="pt-2">
-                <button
-                  onClick={async () => {
-                    setDownloadingCalibration(true);
-                    try {
-                      await downloadAttendanceCalibrationPDF();
-                      toast.success("PDF de calibración descargado");
-                    } catch (err) {
-                      console.error("❌ Error descargando PDF de calibración:", err);
-                      toast.error("No se pudo generar el PDF de calibración");
-                    } finally {
-                      setDownloadingCalibration(false);
-                    }
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50"
-                  disabled={downloadingCalibration}
-                >
-                  {downloadingCalibration ? "Generando..." : "Descargar PDF de calibración"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </Card>
-      </div>
     </div>
   );
 };
