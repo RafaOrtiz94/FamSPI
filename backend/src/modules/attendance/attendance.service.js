@@ -70,7 +70,13 @@ const setFieldText = (form, fieldName, value) => {
 /**
  * Attempt to set an image into a field (button) or fall back to text note
  */
-const setFieldSignature = async (pdfDoc, form, fieldName, signatureBuffer) => {
+const setFieldSignature = async (
+    pdfDoc,
+    form,
+    fieldName,
+    signatureBuffer,
+    textFallback
+) => {
     try {
         const field = form.getField(fieldName);
         if (!field) return;
@@ -85,17 +91,19 @@ const setFieldSignature = async (pdfDoc, form, fieldName, signatureBuffer) => {
 
             if (typeof field.setImage === "function") {
                 field.setImage(image);
-                return;
             }
 
-            if (typeof field.setText === "function") {
-                field.setText("Firma registrada");
+            if (textFallback && typeof field.setText === "function") {
+                field.setText(textFallback);
+            }
+
+            if (typeof field.setImage === "function" || typeof field.setText === "function") {
                 return;
             }
         }
 
         if (typeof field.setText === "function") {
-            field.setText("Firma no disponible");
+            field.setText(textFallback || "Firma no disponible");
         }
     } catch (err) {
         logger.warn({ fieldName, err }, "No se pudo asignar firma al campo");
@@ -167,6 +175,10 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
     for (let day = 1; day <= 31; day += 1) {
         const record = recordsByDay.get(day);
 
+        const currentDate = new Date(periodDate);
+        currentDate.setDate(day);
+        const isWeekend = [0, 6].includes(currentDate.getDay());
+
         const horaEntrada = record ? formatTime(record.entry_time) : "";
         const horaSalidaAlmuerzo = record
             ? formatTime(record.lunch_start_time)
@@ -180,18 +192,34 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
         setFieldText(form, `hora_salida_${day}`, horaSalida);
         setFieldText(form, `hora_entrada_a_${day}`, horaSalidaAlmuerzo);
         setFieldText(form, `hora_salida_a_${day}`, horaEntradaAlmuerzo);
-        setFieldText(form, `ra_observaciones_${day}`, "");
+        setFieldText(
+            form,
+            `ra_observaciones_${day}`,
+            isWeekend ? "FIN DE SEMANA" : ""
+        );
 
         await setFieldSignature(
             pdfDoc,
             form,
-            `firma_fila_${day}`,
+            `Firma_${day}`,
             signatureBuffer
         );
     }
 
     // Signatures at the bottom of the template
-    await setFieldSignature(pdfDoc, form, "firma_uno", signatureBuffer);
+    const todayStr = new Date().toLocaleDateString("es-EC");
+    const signatureNote = signatureBuffer
+        ? `Firmado electrónicamente el ${todayStr}`
+        : "Firma no disponible";
+
+    await setFieldSignature(
+        pdfDoc,
+        form,
+        "Firma_uno",
+        signatureBuffer,
+        signatureNote
+    );
+    await setFieldSignature(pdfDoc, form, "Firma_dos", signatureBuffer);
     await setFieldSignature(pdfDoc, form, "firma_dos", signatureBuffer);
 
     form.flatten();
