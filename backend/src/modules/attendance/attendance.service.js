@@ -11,7 +11,7 @@ const path = require("path");
 const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { google, oauth2Client } = require("../../config/oauth");
+const { drive } = require("../../config/google");
 
 const TEMPLATE_PATH = path.join(
     __dirname,
@@ -23,13 +23,12 @@ const TEMPLATE_PATH = path.join(
 );
 
 /**
- * Download signature image from Google Drive
+ * Download signature image from Google Drive (service account)
  */
 const downloadSignatureFromDrive = async (fileId) => {
     try {
-        const drive = google.drive({ version: "v3", auth: oauth2Client });
         const response = await drive.files.get(
-            { fileId, alt: "media" },
+            { fileId, alt: "media", supportsAllDrives: true },
             { responseType: "arraybuffer" }
         );
         return Buffer.from(response.data);
