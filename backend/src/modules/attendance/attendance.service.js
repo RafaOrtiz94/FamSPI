@@ -75,7 +75,8 @@ const setFieldSignature = async (
     form,
     fieldName,
     signatureBuffer,
-    textFallback
+    textFallback = "",
+    fillTextWhenMissing = false
 ) => {
     try {
         const field = form.getField(fieldName);
@@ -102,8 +103,8 @@ const setFieldSignature = async (
             }
         }
 
-        if (typeof field.setText === "function") {
-            field.setText(textFallback || "Firma no disponible");
+        if (fillTextWhenMissing && typeof field.setText === "function") {
+            field.setText(textFallback);
         }
     } catch (err) {
         logger.warn({ fieldName, err }, "No se pudo asignar firma al campo");
@@ -192,6 +193,7 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             setFieldText(form, `hora_entrada_a_${day}`, "");
             setFieldText(form, `hora_salida_a_${day}`, "");
             setFieldText(form, `ra_observaciones_${day}`, "");
+            await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
             continue;
         }
 
@@ -234,6 +236,8 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
                     signatureBuffer
                 );
             }
+        } else {
+            await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
         }
     }
 
