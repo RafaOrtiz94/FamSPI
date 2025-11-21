@@ -112,6 +112,10 @@ const signRefresh = (payload) =>
   );
 
 const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";
+const LOPDP_ROOT_FOLDER = "Consentimientos LOPDP";
+const LOPDP_INTERNAL_FOLDER = "Colaboradores";
+const LOPDP_SIGNATURES_FOLDER = "Firmas";
+const LOPDP_DOCUMENTS_FOLDER = "Documentos";
 
 /* ============================================================
    1️⃣ Redirigir a Google OAuth
@@ -538,23 +542,28 @@ const acceptInternalLopdp = async (req, res) => {
       });
     }
 
-    const baseFolder = await ensureFolder(INTERNAL_LOPDP_FOLDER, rootId);
-    const personFolder = await ensureFolder(user.fullname || user.email, baseFolder.id);
-    const signedPdfFolder = await ensureFolder("pdffirmado", personFolder.id);
+    const lopdpRoot = await ensureFolder(LOPDP_ROOT_FOLDER, rootId);
+    const internalRoot = await ensureFolder(LOPDP_INTERNAL_FOLDER, lopdpRoot.id);
+    const personFolder = await ensureFolder(
+      user.email || user.fullname || INTERNAL_LOPDP_FOLDER,
+      internalRoot.id
+    );
+    const signaturesFolder = await ensureFolder(LOPDP_SIGNATURES_FOLDER, personFolder.id);
+    const documentsFolder = await ensureFolder(LOPDP_DOCUMENTS_FOLDER, personFolder.id);
     const today = new Date().toISOString().slice(0, 10);
 
     const signatureFile = await uploadBase64File(
       `firma-${user.email}-${today}.png`,
       signatureBase64,
       "image/png",
-      signedPdfFolder.id
+      signaturesFolder.id
     );
 
     const pdfFile = await uploadBase64File(
       `LOPDP-${user.email}-${today}.pdf`,
       pdfBase64,
       "application/pdf",
-      signedPdfFolder.id
+      documentsFolder.id
     );
 
     const ip =
