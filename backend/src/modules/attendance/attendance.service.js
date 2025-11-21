@@ -197,8 +197,8 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             continue;
         }
 
-        const currentDate = new Date(Date.UTC(periodYear, periodMonth, day));
-        const isWeekend = [0, 6].includes(currentDate.getUTCDay());
+        const currentDate = new Date(periodYear, periodMonth, day);
+        const isWeekend = [0, 6].includes(currentDate.getDay());
 
         const horaEntrada = record ? formatTime(record.entry_time) : "";
         const horaSalidaAlmuerzo = record
@@ -211,8 +211,8 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
 
         setFieldText(form, `hora_entrada_${day}`, horaEntrada);
         setFieldText(form, `hora_salida_${day}`, horaSalida);
-        setFieldText(form, `hora_entrada_a_${day}`, horaSalidaAlmuerzo);
-        setFieldText(form, `hora_salida_a_${day}`, horaEntradaAlmuerzo);
+        setFieldText(form, `hora_salida_a_${day}`, horaSalidaAlmuerzo);
+        setFieldText(form, `hora_entrada_a_${day}`, horaEntradaAlmuerzo);
         setFieldText(
             form,
             `ra_observaciones_${day}`,
