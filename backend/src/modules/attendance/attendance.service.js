@@ -156,13 +156,22 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
 
     // Set fixed fields
     const periodDate = new Date(startDate);
+    const periodYear = periodDate.getFullYear();
+    const periodMonth = periodDate.getMonth();
+    const daysInMonth = new Date(periodYear, periodMonth + 1, 0).getDate();
     setFieldText(form, "nombre_usuario", user.fullname || "");
-    setFieldText(form, "ra_ano", `${periodDate.getFullYear()}`);
-    setFieldText(
-        form,
-        "ra_mes",
-        `${String(periodDate.getMonth() + 1).padStart(2, "0")}`
-    );
+    setFieldText(form, "ra_ano", `${periodYear}`);
+    const monthName = periodDate
+        .toLocaleString("es-EC", { month: "long" })
+        .replace(/^(.)/, (c) => c.toUpperCase());
+    setFieldText(form, "ra_mes", monthName);
+
+    const hasAllTimes = (record) =>
+        record &&
+        record.entry_time &&
+        record.lunch_start_time &&
+        record.lunch_end_time &&
+        record.exit_time;
 
     // Build map by day for quick lookup
     const recordsByDay = new Map();
@@ -171,13 +180,23 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
         recordsByDay.set(day, record);
     });
 
+    let lastCompleteAttendanceDate = null;
+
     // Populate daily fields
     for (let day = 1; day <= 31; day += 1) {
         const record = recordsByDay.get(day);
 
-        const currentDate = new Date(periodDate);
-        currentDate.setDate(day);
-        const isWeekend = [0, 6].includes(currentDate.getDay());
+        if (day > daysInMonth) {
+            setFieldText(form, `hora_entrada_${day}`, "");
+            setFieldText(form, `hora_salida_${day}`, "");
+            setFieldText(form, `hora_entrada_a_${day}`, "");
+            setFieldText(form, `hora_salida_a_${day}`, "");
+            setFieldText(form, `ra_observaciones_${day}`, "");
+            continue;
+        }
+
+        const currentDate = new Date(Date.UTC(periodYear, periodMonth, day));
+        const isWeekend = [0, 6].includes(currentDate.getUTCDay());
 
         const horaEntrada = record ? formatTime(record.entry_time) : "";
         const horaSalidaAlmuerzo = record
@@ -198,29 +217,55 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             isWeekend ? "FIN DE SEMANA" : ""
         );
 
-        await setFieldSignature(
-            pdfDoc,
-            form,
-            `Firma_${day}`,
-            signatureBuffer
-        );
+        if (hasAllTimes(record)) {
+            const recordDate = new Date(record.date);
+            if (
+                !lastCompleteAttendanceDate ||
+                recordDate.getTime() > lastCompleteAttendanceDate.getTime()
+            ) {
+                lastCompleteAttendanceDate = recordDate;
+            }
+
+            if (signatureBuffer) {
+                await setFieldSignature(
+                    pdfDoc,
+                    form,
+                    `Firma_${day}`,
+                    signatureBuffer
+                );
+            }
+        }
     }
 
     // Signatures at the bottom of the template
-    const todayStr = new Date().toLocaleDateString("es-EC");
-    const signatureNote = signatureBuffer
-        ? `Firmado electrónicamente el ${todayStr}`
+    const lastAttendanceStr = lastCompleteAttendanceDate
+        ? lastCompleteAttendanceDate.toLocaleDateString("es-EC")
+        : null;
+    const signatureNote = signatureBuffer && lastAttendanceStr
+        ? `Firmado electrónicamente el ${lastAttendanceStr}`
+        : lastAttendanceStr
+        ? `Última asistencia registrada: ${lastAttendanceStr}`
         : "Firma no disponible";
 
     await setFieldSignature(
         pdfDoc,
         form,
         "Firma_uno",
-        signatureBuffer,
+        signatureBuffer && lastAttendanceStr ? signatureBuffer : null,
         signatureNote
     );
-    await setFieldSignature(pdfDoc, form, "Firma_dos", signatureBuffer);
-    await setFieldSignature(pdfDoc, form, "firma_dos", signatureBuffer);
+    await setFieldSignature(
+        pdfDoc,
+        form,
+        "Firma_dos",
+        signatureBuffer && lastAttendanceStr ? signatureBuffer : null
+    );
+    await setFieldSignature(
+        pdfDoc,
+        form,
+        "firma_dos",
+        signatureBuffer && lastAttendanceStr ? signatureBuffer : null
+    );
 
     form.flatten();
 
