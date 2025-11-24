@@ -63,6 +63,36 @@ const CLIENT_FILE_LABELS = {
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
 };
 
+function buildDriveLink(fileId) {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+
+function getClientRequestAttachments(request = {}) {
+  const attachments = [
+    { key: "id_file", field: "id_file_id", label: CLIENT_FILE_LABELS.id_file },
+    { key: "ruc_file", field: "ruc_file_id", label: CLIENT_FILE_LABELS.ruc_file },
+    {
+      key: "legal_rep_appointment_file",
+      field: "legal_rep_appointment_file_id",
+      label: CLIENT_FILE_LABELS.legal_rep_appointment_file,
+    },
+    { key: "operating_permit_file", field: "operating_permit_file_id", label: CLIENT_FILE_LABELS.operating_permit_file },
+    { key: "consent_evidence_file", field: "consent_evidence_file_id", label: CLIENT_FILE_LABELS.consent_evidence_file },
+  ];
+
+  return attachments
+    .map((attachment) => {
+      const fileId = request[attachment.field];
+      if (!fileId) return null;
+      return {
+        ...attachment,
+        file_id: fileId,
+        link: buildDriveLink(fileId),
+      };
+    })
+    .filter(Boolean);
+}
+
 const FORM_VARIANT_META = {
   inspection: {
     label: "Solicitud de Inspección de Ambiente",
@@ -748,13 +778,6 @@ async function resolveRequesterProfile({ requester_id, requester_email, requeste
 }
 
 async function notifyTechnicalApprovers({ request, requester, requestType, payload, document }) {
-  const { rows } = await db.query(`SELECT email, fullname FROM users WHERE role = 'jefe_servicio_tecnico' AND email IS NOT NULL`);
-  const recipients = rows.map((row) => row.email).filter(Boolean);
-  if (!recipients.length) {
-    logger.info("ℹ️ No se enviaron notificaciones porque no existen usuarios con rol jefe_servicio_tecnico.");
-    return;
-  }
-
   const requesterName = requester?.fullname || requester?.name || requester?.email || "Usuario SPI";
   const requesterEmail = requester?.email || null;
   const requestTitle = getRequestLabel(requestType?.code, requestType?.title);
@@ -770,8 +793,26 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const summaryBlock = summaryItems.length ? `<ul>${summaryItems.join("")}</ul>` : "<p>No se registraron detalles adicionales.</p>";
   const documentSection = document?.link ? `<p>Documento generado: <a href="${document.link}" target="_blank" rel="noopener">${document.name || "Abrir documento"}</a></p>` : "";
 
-  const html = `<h2>Solicitud pendiente de aprobación</h2><p>Hola equipo de Servicio Técnico,</p><p><b>${requesterName}</b>${requesterEmail ? ` (${requesterEmail})` : ""} registró la solicitud <b>#${request.id}</b> (${requestTitle}).</p>${summaryBlock}${documentSection}<p>Revisa la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p><p style="margin-top:16px;">Este aviso se envió automáticamente cuando la solicitud quedó pendiente.</p>`;
-  await sendMail({ to: recipients, subject: `Solicitud #${request.id} pendiente de aprobación`, html, from: requesterEmail ? { email: requesterEmail, name: requesterName } : undefined, replyTo: requesterEmail || undefined, senderName: requesterName, delegatedUser: requesterEmail, gmailUserId: request?.requester_id || null });
+  const summaryText = summaryItems.length
+    ? summaryItems
+        .map((item) => item.replace(/<[^>]+>/g, ""))
+        .map((text) => `• ${text}`)
+        .join("\n")
+    : "• Sin detalles adicionales";
+
+  const documentLine = document?.link ? `• Documento generado: ${document.link}` : null;
+  const lines = [
+    `*Solicitud pendiente de aprobación* (#${request.id})`,
+    `*Tipo:* ${requestTitle}`,
+    `*Solicitante:* ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}`,
+    summaryText,
+    documentLine,
+    `*Revisar en SPI:* ${detailLink}`,
+  ].filter(Boolean);
+
+  const text = lines.map((line, index) => (index === 0 ? line : `> ${line}`)).join("\n");
+
+  await sendChatMessage({ text });
 }
 
 /*
@@ -1027,7 +1068,10 @@ async function getClientRequestById(id, user) {
     error.status = 403;
     throw error;
   }
-  return request;
+  return {
+    ...request,
+    attachments: getClientRequestAttachments(request),
+  };
 }
 
 async function processClientRequest({ id, user, action, rejection_reason }) {

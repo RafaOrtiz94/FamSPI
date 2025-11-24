@@ -11,7 +11,8 @@ import {
     FiMail,
     FiPhone,
     FiMapPin,
-    FiAlertCircle
+    FiAlertCircle,
+    FiLink
 } from 'react-icons/fi';
 import { getClientRequests, processClientRequest, getClientRequestById } from '../../../core/api/requestsApi';
 import Modal from '../../../core/ui/components/Modal';
@@ -220,7 +221,7 @@ const ClientRequestManagement = () => {
                                     <div className="mt-2 grid grid-cols-1 md:grid-cols-3 gap-2 text-sm text-gray-600">
                                         <div className="flex items-center space-x-2">
                                             <FiFileText className="w-4 h-4 text-gray-400" />
-                                            <span><strong>RUC:</strong> {request.ruc_cedula}</span>
+                                            <span><strong>RUC:</strong> {request.ruc_cedula || 'No proporcionado'}</span>
                                         </div>
                                         <div className="flex items-center space-x-2">
                                             <FiUser className="w-4 h-4 text-gray-400" />
@@ -429,6 +430,35 @@ const ClientRequestManagement = () => {
                                     </p>
                                 )}
                             </div>
+                        </div>
+
+                        {/* Documentos adjuntos */}
+                        <div>
+                            <h3 className="text-sm font-semibold text-gray-700 mb-3">Documentos Cargados</h3>
+                            {selectedRequest.attachments && selectedRequest.attachments.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {selectedRequest.attachments.map((file) => (
+                                        <a
+                                            key={file.file_id}
+                                            href={file.link}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="flex items-center justify-between px-4 py-3 bg-gray-50 rounded-lg border border-gray-200 hover:border-blue-500 hover:bg-blue-50 transition-colors"
+                                        >
+                                            <div className="flex items-center space-x-3">
+                                                <FiLink className="w-4 h-4 text-blue-600" />
+                                                <div>
+                                                    <p className="text-sm font-medium text-gray-900">{file.label}</p>
+                                                    <p className="text-xs text-gray-500">ID: {file.file_id}</p>
+                                                </div>
+                                            </div>
+                                            <span className="text-xs font-semibold text-blue-600">Ver documento</span>
+                                        </a>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-sm text-gray-500">No hay documentos cargados para esta solicitud.</p>
+                            )}
                         </div>
 
                         {/* Acciones en el modal */}
