@@ -20,7 +20,6 @@ const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const gmailService = require("../../services/gmail.service");
-const { sendChatMessage } = require("../../utils/googleChat");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const crypto = require("crypto");
 const Ajv = require("ajv");
@@ -61,6 +60,21 @@ const CLIENT_FILE_LABELS = {
   legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
   operating_permit_file: "Permiso de funcionamiento (PDF)",
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
+};
+
+const parseRecipients = (value = "") =>
+  value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+const REQUEST_NOTIFICATION_EMAILS = parseRecipients(
+  process.env.REQUEST_NOTIFICATION_EMAILS || process.env.BACKOFFICE_NOTIFICATION_EMAILS || "",
+);
+
+const uniqueRecipients = (...emails) => {
+  const recipients = emails.flat().filter(Boolean);
+  return [...new Set(recipients.map((e) => e.trim().toLowerCase()))];
 };
 
 function buildDriveLink(fileId) {
@@ -810,9 +824,24 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
     `*Revisar en SPI:* ${detailLink}`,
   ].filter(Boolean);
 
-  const text = lines.map((line, index) => (index === 0 ? line : `> ${line}`)).join("\n");
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, requesterEmail);
 
-  await sendChatMessage({ text });
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud pendiente de aprobación (#${request.id})`,
+    html: `
+      <h2>Solicitud pendiente de aprobación</h2>
+      <p><strong>Tipo:</strong> ${requestTitle}</p>
+      <p><strong>Solicitante:</strong> ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}</p>
+      ${summaryBlock}
+      ${documentSection || ""}
+      <p>Revisa y gestiona la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: lines.map((line) => line.replace(/<[^>]+>/g, "")).join("\n"),
+    gmailUserId: requester?.id || null,
+    replyTo: requesterEmail || undefined,
+    from: requesterEmail || undefined,
+  });
 }
 
 /*
@@ -1002,8 +1031,23 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       });
     }
 
-    await sendChatMessage({
-      text: `*Nueva Solicitud de Cliente para Revisión*\n> *Cliente:* ${commercial_name}\n> *Tipo:* ${data.client_type}\n> *Solicitante:* ${user.email}\n> *Acción Requerida:* Revisar y aprobar/rechazar en el dashboard de Backoffice.`,
+    const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, user.email);
+    const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${newRequest.id}`;
+    await sendMail({
+      to: recipients,
+      subject: `Nueva solicitud de cliente (#${newRequest.id}) pendiente de revisión`,
+      html: `
+        <h2>Nueva solicitud de cliente</h2>
+        <p><strong>Cliente:</strong> ${commercial_name}</p>
+        <p><strong>Tipo:</strong> ${data.client_type}</p>
+        <p><strong>Solicitante:</strong> ${user.email}</p>
+        <p>Revisar y aprobar/rechazar en el dashboard de Backoffice:</p>
+        <p><a href="${detailLink}" target="_blank" rel="noopener">Abrir en SPI</a></p>
+      `,
+      text: `Nueva solicitud de cliente (#${newRequest.id})\nCliente: ${commercial_name}\nTipo: ${data.client_type}\nSolicitante: ${user.email}\nRevisar en SPI: ${detailLink}`,
+      gmailUserId: user?.id || null,
+      replyTo: user?.email || undefined,
+      from: user?.email || undefined,
     });
     return newRequest;
   } catch (error) {
@@ -1106,8 +1150,23 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     await moveClientFolderToApproved(request.drive_folder_id);
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
-  await sendChatMessage({
-    text: `*Actualización de Solicitud de Cliente*\n> *Cliente:* ${request.commercial_name} (#${request.id})\n> *Estado:* ${outcome}\n> *Procesado por:* ${user.email}\n${newStatus === 'rejected' && rejection_reason ? `> *Motivo:* ${rejection_reason}` : ''}`,
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, request.created_by, request.client_email);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${request.id}`;
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud de cliente #${request.id} ${outcome}`,
+    html: `
+      <h2>Solicitud ${outcome}</h2>
+      <p><strong>Cliente:</strong> ${request.commercial_name} (#${request.id})</p>
+      <p><strong>Estado:</strong> ${outcome}</p>
+      <p><strong>Procesado por:</strong> ${user.email}</p>
+      ${newStatus === 'rejected' && rejection_reason ? `<p><strong>Motivo:</strong> ${rejection_reason}</p>` : ''}
+      <p>Consulta el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name} (#${request.id})\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}\nDetalle: ${detailLink}`,
+    gmailUserId: user?.id || null,
+    replyTo: user?.email || undefined,
+    from: user?.email || undefined,
   });
   return updatedRequest;
 }
@@ -1176,8 +1235,19 @@ async function grantConsent({ token, audit = {} }) {
   });
 
   // Notificación interna
-  await sendChatMessage({
-    text: `📌 *Consentimiento Confirmado*\n\n🧾 Solicitud: #${updatedRequest.id}\n🏷 Cliente: ${updatedRequest.commercial_name || "N/A"}\n📧 Email: ${updatedRequest.client_email || "N/A"}\n\n⚠ Acción requerida: Revisar solicitud en Backoffice.`
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by, updatedRequest.client_email);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
+  await sendMail({
+    to: recipients,
+    subject: `Consentimiento confirmado para solicitud #${updatedRequest.id}`,
+    html: `
+      <h2>Consentimiento confirmado</h2>
+      <p><strong>Solicitud:</strong> #${updatedRequest.id}</p>
+      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name || "N/A"}</p>
+      <p><strong>Email:</strong> ${updatedRequest.client_email || "N/A"}</p>
+      <p>Revisar la solicitud en Backoffice: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Consentimiento confirmado\nSolicitud: #${updatedRequest.id}\nCliente: ${updatedRequest.commercial_name || "N/A"}\nEmail: ${updatedRequest.client_email || "N/A"}\nRevisar: ${detailLink}`,
   });
 
   return updatedRequest;
@@ -1252,7 +1322,7 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   const newStatus = request.lopdp_consent_status === 'granted' ? 'pending_approval' : 'pending_consent';
 
   const values = [];
-  let setClause = fieldsToUpdate.map((field) => {
+  const setParts = fieldsToUpdate.map((field) => {
     let val;
     if (field.endsWith("_id")) {
       if (fileIds[field]) {
@@ -1269,28 +1339,39 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
       return `${field} = $${values.length} `;
     }
     return null;
-  }).filter(Boolean).join(", ");
+  }).filter(Boolean);
 
-  if (setClause) {
-    values.push(newStatus);
-    setClause += `, status = $${values.length} `;
-    setClause += `, rejection_reason = NULL`;
-    setClause += `, updated_at = now()`;
+  values.push(newStatus);
+  setParts.push(`status = $${values.length} `);
+  setParts.push(`rejection_reason = NULL`);
+  setParts.push(`updated_at = now()`);
 
-    const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING * `;
-    values.push(id);
+  const setClause = setParts.join(", ");
 
-    const { rows: updatedRows } = await db.query(query, values);
-    const updatedRequest = updatedRows[0];
+  const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING * `;
+  values.push(id);
 
-    await sendChatMessage({
-      text: `* Solicitud Corregida y Reenviada *\n > * Cliente:* ${updatedRequest.commercial_name} (#${updatedRequest.id}) \n > * Acción:* El usuario ha corregido la solicitud rechazada.Pendiente de nueva revisión.`,
-    });
+  const { rows: updatedRows } = await db.query(query, values);
+  const updatedRequest = updatedRows[0];
 
-    return updatedRequest;
-  } else {
-    return request;
-  }
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud de cliente #${updatedRequest.id} corregida`,
+    html: `
+      <h2>Solicitud corregida y reenviada</h2>
+      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name} (#${updatedRequest.id})</p>
+      <p>El usuario ha corregido la solicitud previamente rechazada. Está pendiente de nueva revisión.</p>
+      <p>Revisar en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Solicitud corregida y reenviada\nCliente: ${updatedRequest.commercial_name} (#${updatedRequest.id})\nPendiente de nueva revisión. Ver en SPI: ${detailLink}`,
+    gmailUserId: user?.id || null,
+    replyTo: user?.email || undefined,
+    from: user?.email || undefined,
+  });
+
+  return updatedRequest;
 }
 
 module.exports = {

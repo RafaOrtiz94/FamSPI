@@ -7,11 +7,9 @@
 
 const logger = require("../config/logger");
 const gmailService = require("../services/gmail.service");
-const { sendChatMessage, htmlToText } = require("./googleChat");
+const { htmlToText } = require("./googleChat");
 require("dotenv").config();
 
-const CHAT_WEBHOOK = process.env.GCHAT_WEBHOOK_URL || process.env.GCHAT_WEBHOOK;
-const CHAT_THREAD_KEY = process.env.GCHAT_THREAD_KEY || null;
 const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
   ? Number(process.env.GMAIL_DEFAULT_USER_ID)
   : null;
@@ -32,40 +30,6 @@ const resolveFrom = ({ from, senderName }) => {
   if (!defaultFrom) return null;
   return defaultName ? `${defaultName} <${defaultFrom}>` : defaultFrom;
 };
-
-function buildChatText({ to, subject, html }) {
-  const normalizedTo = normalizeRecipients(to);
-  const plain = htmlToText(html);
-  return [
-    subject ? `📢 ${subject}` : null,
-    normalizedTo ? `Destinatarios: ${normalizedTo}` : null,
-    plain ? `\n${plain}` : null,
-  ]
-    .filter(Boolean)
-    .join("\n");
-}
-
-async function sendViaChat({ to, subject, html }) {
-  if (!CHAT_WEBHOOK) {
-    logger.warn("[GCHAT] GCHAT_WEBHOOK_URL no configurado; se omite notificación de respaldo.");
-    return { delivered: false, via: "none", reason: "missing_webhook" };
-  }
-
-  const text = buildChatText({ to, subject, html });
-  const res = await sendChatMessage({
-    text,
-    threadKey: CHAT_THREAD_KEY,
-    webhookUrl: CHAT_WEBHOOK,
-  });
-
-  logger.info("[GCHAT] Notificación enviada", {
-    to: normalizeRecipients(to),
-    subject,
-    via: "chat",
-  });
-
-  return { delivered: true, via: "chat", response: res };
-}
 
 async function sendViaGmail({
   gmailUserId,
@@ -137,14 +101,8 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
     });
   } catch (error) {
-    logger.warn({ err: error }, "[MAILER] Error enviando correo con Gmail, intentando respaldo en Chat");
-
-    try {
-      return await sendViaChat({ to, subject, html: html || text || "" });
-    } catch (chatError) {
-      logger.error({ err: chatError }, "[MAILER] Falló envío en Chat de respaldo");
-      return { delivered: false, via: "chat", reason: chatError.message };
-    }
+    logger.error({ err: error }, "[MAILER] Error enviando correo con Gmail");
+    throw error;
   }
 }
 
