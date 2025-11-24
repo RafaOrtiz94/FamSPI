@@ -8,9 +8,10 @@ import {
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
+import ClientRequestManagement from "../ClientRequestManagement";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 
-const BackofficeView = ({ stats, recentRequests, loading, onRefresh }) => {
+const BackofficeView = ({ stats, loading, onRefresh }) => {
     const navigate = useNavigate();
 
     return (
@@ -78,51 +79,9 @@ const BackofficeView = ({ stats, recentRequests, loading, onRefresh }) => {
             </div>
 
             <Card className="p-5">
-                <SectionTitle title="Solicitudes Pendientes de Proceso" />
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm text-left">
-                        <thead className="text-xs text-gray-700 uppercase bg-gray-50">
-                            <tr>
-                                <th className="px-4 py-3">ID</th>
-                                <th className="px-4 py-3">Solicitante</th>
-                                <th className="px-4 py-3">Tipo</th>
-                                <th className="px-4 py-3">Fecha</th>
-                                <th className="px-4 py-3">Estado</th>
-                                <th className="px-4 py-3">Acción</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {recentRequests && recentRequests.length > 0 ? (
-                                recentRequests.map((req) => (
-                                    <tr key={req.id} className="border-b hover:bg-gray-50">
-                                        <td className="px-4 py-3 font-medium">#{req.id}</td>
-                                        <td className="px-4 py-3">{req.solicitante || "Desconocido"}</td>
-                                        <td className="px-4 py-3">{req.type_title || "Solicitud"}</td>
-                                        <td className="px-4 py-3">{new Date(req.created_at).toLocaleDateString()}</td>
-                                        <td className="px-4 py-3">
-                                            <span className="px-2 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
-                                                {req.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <button
-                                                onClick={() => navigate(`/dashboard/comercial/solicitudes/${req.id}`)}
-                                                className="text-blue-600 hover:underline"
-                                            >
-                                                Gestionar
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))
-                            ) : (
-                                <tr>
-                                    <td colSpan="6" className="px-4 py-3 text-center text-gray-500">
-                                        No hay solicitudes pendientes de proceso.
-                                    </td>
-                                </tr>
-                            )}
-                        </tbody>
-                    </table>
+                <SectionTitle title="Gestión y Aprobación de Solicitudes" />
+                <div className="mt-4">
+                    <ClientRequestManagement />
                 </div>
             </Card>
         </>
