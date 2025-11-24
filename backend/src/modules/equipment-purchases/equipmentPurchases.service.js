@@ -121,6 +121,24 @@ async function getApprovedClients() {
 }
 
 async function getEquipmentCatalog() {
+  const { rows } = await db.query(
+    `SELECT id_equipo AS id, nombre, modelo, fabricante, categoria, descripcion, serie
+       FROM servicio.equipos
+      ORDER BY nombre ASC`
+  );
+
+  if (rows.length) {
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.nombre,
+      model: row.modelo,
+      maker: row.fabricante,
+      category: row.categoria,
+      description: row.descripcion,
+      serial: row.serie,
+    }));
+  }
+
   const items = await inventarioService.getAllInventario({});
   return items.map((item) => ({
     id: item.inventory_id || item.id,
