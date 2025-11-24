@@ -94,7 +94,8 @@ const getUserTokens = async (userId) => {
     return {
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
-        expiry_date: tokenData.expiry_date ? new Date(tokenData.expiry_date).getTime() : null
+        expiry_date: tokenData.expiry_date ? new Date(tokenData.expiry_date).getTime() : null,
+        email: tokenData.email || null
     };
 };
 
@@ -110,12 +111,23 @@ const refreshUserTokens = async (userId) => {
         throw new Error('No hay refresh token disponible. El usuario debe volver a autorizar.');
     }
 
+    // Asegurar que tengamos el email asociado para la fila de tokens
+    let userEmail = tokens.email;
+    if (!userEmail) {
+        const userQuery = 'SELECT email FROM users WHERE id = $1';
+        const userResult = await db.query(userQuery, [userId]);
+        if (userResult.rows.length === 0) {
+            throw new Error(`Usuario ${userId} no encontrado para refrescar tokens`);
+        }
+        userEmail = userResult.rows[0].email;
+    }
+
     oauth2Client.setCredentials(tokens);
 
     const { credentials } = await oauth2Client.refreshAccessToken();
 
-    // Guardar los nuevos tokens
-    await saveUserTokens(userId, null, credentials);
+    // Guardar los nuevos tokens con el email garantizado
+    await saveUserTokens(userId, userEmail, credentials);
 
     return credentials;
 };
