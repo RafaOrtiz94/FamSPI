@@ -148,10 +148,7 @@ const googleCallback = async (req, res) => {
     }
 
     // Intercambiar code por tokens de Google
-    const { tokens } = await oauth2Client.getToken({
-      code,
-      redirect_uri: process.env.GOOGLE_REDIRECT_URI,
-    });
+    const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
     // Obtener datos del usuario

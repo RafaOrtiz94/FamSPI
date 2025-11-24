@@ -101,6 +101,30 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
     });
   } catch (error) {
+    // Si el error es por falta de autorización del usuario, intentar con el usuario predeterminado
+    if (error.message?.includes("autorizar") && gmailUserId && gmailUserId !== DEFAULT_GMAIL_USER_ID) {
+      logger.warn(`[MAILER] Usuario ${gmailUserId} no tiene Gmail autorizado, usando cuenta predeterminada`);
+
+      if (DEFAULT_GMAIL_USER_ID) {
+        try {
+          return await sendViaGmail({
+            gmailUserId: DEFAULT_GMAIL_USER_ID,
+            to,
+            subject,
+            html,
+            text: text || (!html ? undefined : htmlToText(html)),
+            cc,
+            bcc,
+            replyTo,
+            from: fromAddress || delegatedUser || undefined,
+          });
+        } catch (fallbackError) {
+          logger.error({ err: fallbackError }, "[MAILER] Error con cuenta predeterminada");
+          throw new Error(`No se pudo enviar el correo. El usuario no tiene Gmail autorizado y la cuenta predeterminada falló: ${fallbackError.message}`);
+        }
+      }
+    }
+
     logger.error({ err: error }, "[MAILER] Error enviando correo con Gmail");
     throw error;
   }

@@ -75,6 +75,32 @@ exports.create = async (req, res, next) => {
 
     res.status(201).json({ ok: true, data: created });
   } catch (error) {
+    // Manejar errores de autorización de Gmail
+    if (error.message?.includes("autorizar")) {
+      await logAction({
+        user_id: req.user.id,
+        module: "equipment_purchases",
+        action: "crear_failed",
+        entity: "equipment_purchase_requests",
+        details: { error: "gmail_not_authorized" },
+      });
+
+      return res.status(401).json({
+        ok: false,
+        message: "No se pudo enviar el correo. Por favor contacta al administrador para configurar el envío de emails.",
+        error: "gmail_not_authorized",
+        details: "El sistema necesita autorización para enviar correos electrónicos."
+      });
+    }
+
+    await logAction({
+      user_id: req.user.id,
+      module: "equipment_purchases",
+      action: "crear_failed",
+      entity: "equipment_purchase_requests",
+      details: { error: error.message },
+    });
+
     next(error);
   }
 };
