@@ -335,7 +335,7 @@ async function resolveRequestTypeId(input) {
   if (q.rows.length) return q.rows[0].id;
   q = await db.query(
     `SELECT id FROM request_types WHERE code ILIKE $1 OR title ILIKE $1 LIMIT 1`,
-    [`% ${codeHint}% `]
+    [`%${codeHint}%`]
   );
   if (q.rows.length) return q.rows[0].id;
   throw new Error(
@@ -1513,7 +1513,7 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
       file.mimetype,
       driveFolderId,
     );
-    const dbFieldName = `${fieldName} _id`;
+    const dbFieldName = `${fieldName}_id`;
     fileIds[dbFieldName] = uploadedFile.id;
   });
   await Promise.all(fileUploadPromises);
