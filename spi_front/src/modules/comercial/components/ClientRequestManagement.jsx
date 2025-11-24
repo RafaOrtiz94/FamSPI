@@ -41,9 +41,17 @@ const ClientRequestManagement = () => {
         loadRequests();
     }, [statusFilter, searchQuery, page]);
 
-    const loadRequests = async () => {
+    useEffect(() => {
+        const interval = setInterval(() => {
+            loadRequests(true);
+        }, 12000);
+
+        return () => clearInterval(interval);
+    }, [statusFilter, searchQuery, page]);
+
+    const loadRequests = async (silent = false) => {
         try {
-            setLoading(true);
+            if (!silent) setLoading(true);
             const data = await getClientRequests({
                 page,
                 pageSize,
@@ -56,7 +64,7 @@ const ClientRequestManagement = () => {
             console.error('Error cargando solicitudes:', error);
             toast.error('Error al cargar solicitudes');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 

@@ -1015,13 +1015,17 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
 }
 
-async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
+async function listClientRequests({ page = 1, pageSize = 25, status, q, createdBy }) {
   const offset = (page - 1) * pageSize;
   const params = [];
   let whereClause = "WHERE 1=1";
   if (status) {
     params.push(status);
     whereClause += ` AND status = $${params.length}`;
+  }
+  if (createdBy) {
+    params.push(createdBy);
+    whereClause += ` AND created_by = $${params.length}`;
   }
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
@@ -1031,7 +1035,7 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
   const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause}`;
   const totalResult = await db.query(countQuery, params);
   const total = parseInt(totalResult.rows[0].count, 10);
-  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
   return { count: total, rows, page, pageSize };
 }

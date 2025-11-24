@@ -358,11 +358,14 @@ exports.createClientRequest = asyncHandler(async (req, res) => {
 // ============================================================
 exports.listClientRequests = asyncHandler(async (req, res) => {
   const { page = 1, pageSize = 25, status, q } = req.query;
+  const isMyRequests = req.path.includes("/my");
+
   const result = await service.listClientRequests({
     page: parseInt(page),
     pageSize: parseInt(pageSize),
     status,
     q,
+    createdBy: isMyRequests ? req.user.email : undefined,
   });
 
   await logAction({
