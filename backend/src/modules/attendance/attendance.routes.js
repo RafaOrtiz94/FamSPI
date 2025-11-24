@@ -23,8 +23,4 @@ router.get("/range", verifyToken, controller.getRange);
 // PDF generation
 router.get("/pdf/:userId", verifyToken, generatePDF);
 
-const { generateCalibrationPDF } = require("./attendance.calibration.service");
-
-router.get("/pdf/calibrate", verifyToken, generateCalibrationPDF);
-
 module.exports = router;

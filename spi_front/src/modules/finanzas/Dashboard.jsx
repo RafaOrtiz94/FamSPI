@@ -3,6 +3,7 @@ import { FiDollarSign, FiTrendingUp, FiCreditCard, FiPieChart } from "react-icon
 
 import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
+import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import Card from "../../core/ui/components/Card";
 
 const DashboardFinanzas = () => {
@@ -23,6 +24,12 @@ const DashboardFinanzas = () => {
                     <li>• Análisis de costos</li>
                 </ul>
             </header>
+
+            {/* Widgets */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <AttendanceWidget />
+                <ClientRequestWidget />
+            </div>
         </div>
     );
 };

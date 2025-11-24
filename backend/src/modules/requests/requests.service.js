@@ -19,6 +19,7 @@ const {
 const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
+const gmailService = require("../../services/gmail.service");
 const { sendChatMessage } = require("../../utils/googleChat");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const crypto = require("crypto");
@@ -140,13 +141,26 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
     <p>Si no reconoces esta solicitud, ignora este correo.</p>
   `;
 
-  await sendMail({
-    to: normalizedEmail,
-    subject: "Código de autorización para tratamiento de datos",
-    html,
-    senderName: user?.fullname || user?.name || user?.email || "SPI",
-    replyTo: user?.email || undefined,
-  });
+  try {
+    // Intentar enviar con Gmail API (usuario autenticado)
+    await gmailService.sendEmail({
+      userId: user.id,
+      to: normalizedEmail,
+      subject: "Código de autorización para tratamiento de datos",
+      html,
+      replyTo: user?.email
+    });
+  } catch (error) {
+    logger.warn(`⚠️ Falló envío con Gmail API, intentando fallback SMTP: ${error.message}`);
+    // Fallback a SMTP si falla la API
+    await sendMail({
+      to: normalizedEmail,
+      subject: "Código de autorización para tratamiento de datos",
+      html,
+      senderName: user?.fullname || user?.name || user?.email || "SPI",
+      replyTo: user?.email || undefined,
+    });
+  }
 
   return {
     token_id: insert.rows[0].id,
@@ -193,11 +207,11 @@ async function verifyConsentEmailToken({ user, token_id, code }) {
   const { rows } = await db.query(
     `UPDATE client_request_consent_tokens
       SET status = 'verified',
-          attempts = attempts + 1,
-          verified_at = now(),
-          verified_by_email = $2,
-          verified_by_user_id = $3,
-          updated_at = now()
+    attempts = attempts + 1,
+    verified_at = now(),
+    verified_by_email = $2,
+    verified_by_user_id = $3,
+    updated_at = now()
      WHERE id = $1
      RETURNING id, verified_at, expires_at, client_email, client_name, code_last_four` ,
     [tokenId, user?.email || null, user?.id || null],
@@ -254,8 +268,8 @@ async function recordConsentEvent({
   if (!client_request_id || !event_type || !method) return;
   const query = `
     INSERT INTO client_request_consents
-      (client_request_id, event_type, method, details, evidence_file_id, actor_email, actor_role, actor_name, ip, user_agent)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+    (client_request_id, event_type, method, details, evidence_file_id, actor_email, actor_role, actor_name, ip, user_agent)
+  VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
   `;
   await db.query(query, [
     client_request_id,
@@ -321,11 +335,11 @@ async function resolveRequestTypeId(input) {
   if (q.rows.length) return q.rows[0].id;
   q = await db.query(
     `SELECT id FROM request_types WHERE code ILIKE $1 OR title ILIKE $1 LIMIT 1`,
-    [`%${codeHint}%`]
+    [`% ${codeHint}% `]
   );
   if (q.rows.length) return q.rows[0].id;
   throw new Error(
-    `No se encontró tipo de solicitud correspondiente a '${input}'. Verifique la tabla request_types.`
+    `No se encontró tipo de solicitud correspondiente a '${input}'.Verifique la tabla request_types.`
   );
 }
 
@@ -361,9 +375,9 @@ async function createRequest({
 
   if (!valid) {
     const errors = validate.errors
-      .map((e) => `${e.instancePath || e.keyword} ${e.message}`)
+      .map((e) => `${e.instancePath || e.keyword} ${e.message} `)
       .join(", ");
-    const err = new Error(`Datos de solicitud inválidos (${schemaKey}): ${errors}`);
+    const err = new Error(`Datos de solicitud inválidos(${schemaKey}): ${errors} `);
     err.validationErrors = validate.errors;
     throw err;
   }
@@ -400,15 +414,15 @@ async function createRequest({
   normalizedPayload.__form_variant = schemaKey;
 
   const insert = await db.query(
-    `INSERT INTO requests (request_group_id, requester_id, request_type_id, payload, status, version_number)`
-    + `VALUES ($1,$2,$3,$4,'pendiente',$5) RETURNING *`,
+    `INSERT INTO requests(request_group_id, requester_id, request_type_id, payload, status, version_number)`
+    + `VALUES($1, $2, $3, $4, 'pendiente', $5) RETURNING * `,
     [request_group_id, requester_id, typeId, JSON.stringify(normalizedPayload), version]
   );
   const request = insert.rows[0];
 
   await db.query(
-    `INSERT INTO request_versions (request_id, version_number, payload)`
-    + `VALUES ($1,$2,$3)`,
+    `INSERT INTO request_versions(request_id, version_number, payload)`
+    + `VALUES($1, $2, $3)`,
     [request.id, version, JSON.stringify(normalizedPayload)]
   );
 
@@ -464,11 +478,11 @@ async function createRequest({
 async function getRequestContext(request_id) {
   const { rows } = await db.query(
     `SELECT r.id,
-            r.payload,
-            rt.code AS type_code,
-            rt.title AS type_title,
-            d.code AS department_code,
-            d.name AS department_name
+    r.payload,
+    rt.code AS type_code,
+      rt.title AS type_title,
+        d.code AS department_code,
+          d.name AS department_name
      FROM requests r
      JOIN request_types rt ON r.request_type_id = rt.id
      LEFT JOIN users u ON u.id = r.requester_id
@@ -489,7 +503,7 @@ async function getRequestContext(request_id) {
 
 async function resolveRequestFolder(request_id, templateCode) {
   const ctx = await getRequestContext(request_id);
-  if (!ctx) throw new Error(`No se encontró contexto para solicitud ${request_id}`);
+  if (!ctx) throw new Error(`No se encontró contexto para solicitud ${request_id} `);
   const payloadVariant = ctx.payload?.__form_variant;
   const templateHint = templateCode || payloadVariant || ctx.type_code;
 
@@ -515,7 +529,7 @@ async function resolveRequestFolder(request_id, templateCode) {
       process.env.DRIVE_FOLDER_ID ||
       process.env.DRIVE_ROOT_FOLDER_ID;
     if (!fallbackParent) throw err;
-    const fallbackFolder = await ensureFolder(`REQ-${padId(request_id)}`, fallbackParent);
+    const fallbackFolder = await ensureFolder(`REQ - ${padId(request_id)} `, fallbackParent);
     return {
       ctx,
       folders: {
@@ -540,13 +554,13 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
   const uploadedFiles = [];
   for (const f of files) {
     const base64 = f.buffer?.toString("base64") || f.base64;
-    const name = f.originalname || f.name || `archivo-${Date.now()}`;
+    const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
     const { id, webViewLink } = await uploadBase64File(name, base64, mime, parentFolder);
     uploadedFiles.push({ id, link: webViewLink });
     await db.query(
-      `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)`
-      + `VALUES ($1,$2,$3,$4,$5,$6)`,
+      `INSERT INTO request_attachments(request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)`
+      + `VALUES($1, $2, $3, $4, $5, $6)`,
       [request_id, id, webViewLink, mime, uploaded_by, name]
     );
   }
@@ -573,11 +587,11 @@ async function generateActa(request_id, uploaded_by, options = {}) {
 
   const { rows } = await db.query(
     `SELECT r.*, rt.code AS type_code, rt.title AS type_title,
-            u.fullname AS requester_name, u.email AS requester_email
+    u.fullname AS requester_name, u.email AS requester_email
      FROM requests r
-     JOIN request_types rt ON r.request_type_id=rt.id
-     LEFT JOIN users u ON u.id=r.requester_id
-     WHERE r.id=$1`,
+     JOIN request_types rt ON r.request_type_id = rt.id
+     LEFT JOIN users u ON u.id = r.requester_id
+     WHERE r.id = $1`,
     [request_id]
   );
 
@@ -588,10 +602,10 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const variantMeta = FORM_VARIANT_META[variantKey] || {};
   const paddedId = padId(request_id);
   const normalizedCode = req.type_code ? req.type_code.trim() : "ACTA";
-  const pdfBaseName = `${normalizedCode}-${paddedId}`;
+  const pdfBaseName = `${normalizedCode} -${paddedId} `;
   const docLabel = variantMeta.label || req.type_title || "Acta";
   const templateId = req.type_code === "F.ST-21" ? process.env.DOC_TEMPLATE_SOLICITUD_1 : req.type_code === "F.ST-20" ? process.env.DOC_TEMPLATE_SOLICITUD_2 : process.env.DOC_TEMPLATE_SOLICITUD_3;
-  const docName = `${docLabel} - ${pdfBaseName}`;
+  const docName = `${docLabel} - ${pdfBaseName} `;
   const doc = await copyTemplate(templateId, docName, folderId);
   const payload = payloadRaw || {};
 
@@ -599,8 +613,8 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const equipmentTags = {};
   for (let i = 0; i < 4; i += 1) {
     const equipo = equipos[i] || {};
-    equipmentTags[`<<N_Equipo${i + 1}>>`] = asText(equipo.nombre_equipo);
-    equipmentTags[`<<E_Equipo${i + 1}>>`] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+    equipmentTags[`<< N_Equipo${i + 1}>> `] = asText(equipo.nombre_equipo);
+    equipmentTags[`<< E_Equipo${i + 1}>> `] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
   }
 
   const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
@@ -786,7 +800,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
 
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
-  const requiredFileFields = ["id_file", "ruc_file"];
+  const requiredFileFields = ["id_file"];
   if ((data.client_type || "").toLowerCase() === "persona_juridica") {
     requiredFileFields.push("legal_rep_appointment_file");
   }
@@ -860,8 +874,8 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     const lopdpConsentDetails = shouldAutoApproveConsent
       ? verifiedConsentToken
         ? `Consentimiento confirmado con ${maskConsentCode(
-            verifiedConsentToken.code_last_four,
-          )} enviado a ${consentRecipientEmail || client_email}`
+          verifiedConsentToken.code_last_four,
+        )} enviado a ${consentRecipientEmail || client_email}`
         : consentCaptureDetails || "Consentimiento registrado manualmente"
       : null;
 
@@ -919,7 +933,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       await sendMail({
         to: consentRecipientEmail || client_email,
         subject: "Autorización para el Tratamiento de Datos Personales",
-        html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>` ,
+        html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
       });
 
       await recordConsentEvent({
@@ -1053,21 +1067,91 @@ async function grantConsent({ token, audit = {} }) {
     error.status = 400;
     throw error;
   }
-  const { rows } = await db.query("SELECT * FROM client_requests WHERE lopdp_token = $1", [token]);
+
+  // Buscar solicitud por token
+  const { rows } = await db.query(
+    "SELECT * FROM client_requests WHERE lopdp_token = $1",
+    [token]
+  );
   const request = rows[0];
+
   if (!request) {
     const error = new Error("Token inválido o la solicitud no existe.");
     error.status = 404;
     throw error;
   }
-  if (request.lopdp_consent_status === 'granted') {
-    logger.warn(`Intento de re-confirmar consentimiento para la solicitud #${request.id}`);
+
+  // Evitar reconfirmación
+  if (request.lopdp_consent_status === "granted") {
+    logger.warn(
+      `Intento de re-confirmar consentimiento para la solicitud #${request.id}`
+    );
     return request;
   }
+
   const clientIp = audit.ip || null;
   const userAgent = audit.userAgent || null;
+
+  // Actualizar
   const { rows: updatedRows } = await db.query(
-    `UPDATE client_requests
+    `
+    UPDATE client_requests
+    SET 
+      lopdp_consent_status = 'granted',
+      status = 'pending_approval',
+      lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
+      lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
+      lopdp_consent_at = NOW(),
+      lopdp_consent_ip = $2,
+      lopdp_consent_user_agent = $3,
+      updated_at = NOW()
+    WHERE id = $1
+    RETURNING *;
+    `,
+    [request.id, clientIp, userAgent]
+  );
+
+  const updatedRequest = updatedRows[0];
+
+  // Registrar evento de auditoría
+  await recordConsentEvent({
+    client_request_id: updatedRequest.id,
+    event_type: "granted",
+    method: "email_link",
+    details:
+      "Consentimiento confirmado por el cliente mediante enlace público.",
+    ip: clientIp,
+    user_agent: userAgent,
+  });
+
+  // Notificación interna
+  await sendChatMessage({
+    text: `📌 *Consentimiento Confirmado*\n\n🧾 Solicitud: #${updatedRequest.id}\n🏷 Cliente: ${updatedRequest.commercial_name || "N/A"}\n📧 Email: ${updatedRequest.client_email || "N/A"}\n\n⚠ Acción requerida: Revisar solicitud en Backoffice.`
+  });
+
+  return updatedRequest;
+}
+
+if (!token) {
+  const error = new Error("Token de consentimiento no proporcionado.");
+  error.status = 400;
+  throw error;
+}
+const { rows } = await db.query("SELECT * FROM client_requests WHERE lopdp_token = $1", [token]);
+const request = rows[0];
+if (!request) {
+  const error = new Error("Token inválido o la solicitud no existe.");
+  error.status = 404;
+  throw error;
+}
+if (request.lopdp_consent_status === 'granted') {
+  logger.warn(`Intento de re-confirmar consentimiento para la solicitud #${request.id}`);
+  return request;
+}
+const clientIp = audit.ip || null;
+const userAgent = audit.userAgent || null;
+const { rows: updatedRows } = await db.query(
+  `UPDATE client_requests
       SET lopdp_consent_status = 'granted',
           status = 'pending_approval',
           lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
@@ -1078,6 +1162,202 @@ async function grantConsent({ token, audit = {} }) {
           updated_at = now()
       WHERE id = $1
       RETURNING *`,
+  [request.id, clientIp, userAgent]
+);
+const updatedRequest = updatedRows[0];
+await recordConsentEvent({
+  client_request_id: updatedRequest.id,
+  event_type: "granted",
+  method: "email_link",
+  details: "Consentimiento confirmado por el cliente mediante enlace público.",
+  ip: clientIp,
+  user_agent: userAgent,
+});
+await sendChatMessage({
+  lopdpConsentAt, null, null, consentEmailTokenId || null
+    ];
+const { rows } = await dbClient.query(query, dbValues);
+const newRequest = rows[0];
+await dbClient.query("COMMIT");
+
+if (consentCaptureMethod === "email_link" && hasVerifiedToken) {
+  await markConsentEmailTokenAsUsed(consentEmailTokenId, newRequest.id);
+  await recordConsentEvent({
+    client_request_id: newRequest.id,
+    event_type: "granted",
+    method: "email_link",
+    details: `Consentimiento confirmado con ${maskConsentCode(
+      verifiedConsentToken?.code_last_four,
+    )
+      } enviado a ${consentRecipientEmail || client_email} `,
+    actor_email: user.email,
+    actor_role: user.role,
+    actor_name: user.fullname || user.name || null,
+  });
+} else if (consentCaptureMethod === "email_link") {
+  const consentLink = `${FRONTEND_URL} /auth/consent / ${lopdp_token} `;
+  await sendMail({
+    to: consentRecipientEmail || client_email,
+    subject: "Autorización para el Tratamiento de Datos Personales",
+    html: `< h2 > Confirmación de Uso de Datos</h2 ><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
+  });
+
+  await recordConsentEvent({
+    client_request_id: newRequest.id,
+    event_type: "request_sent",
+    method: "email_link",
+    details: `Correo enviado a ${consentRecipientEmail || client_email} `,
+    actor_email: user.email,
+    actor_role: user.role,
+    actor_name: user.fullname || user.name || null,
+  });
+} else {
+  await recordConsentEvent({
+    client_request_id: newRequest.id,
+    event_type: "granted",
+    method: consentCaptureMethod,
+    details: consentCaptureDetails || "Consentimiento registrado manualmente",
+    actor_email: user.email,
+    actor_role: user.role,
+    actor_name: user.fullname || user.name || null,
+    evidence_file_id: fileIds.consent_evidence_file_id || null,
+  });
+}
+
+await sendChatMessage({
+  text: `* Nueva Solicitud de Cliente para Revisión *\n > * Cliente:* ${commercial_name} \n > * Tipo:* ${data.client_type} \n > * Solicitante:* ${user.email} \n > * Acción Requerida:* Revisar y aprobar / rechazar en el dashboard de Backoffice.`,
+});
+return newRequest;
+} catch (error) {
+  await dbClient.query("ROLLBACK");
+  logger.error("Error creando la solicitud de cliente:", error);
+  throw error;
+} finally {
+  dbClient.release();
+}
+}
+
+async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
+  const offset = (page - 1) * pageSize;
+  const params = [];
+  let whereClause = "WHERE 1=1";
+  if (status) {
+    params.push(status);
+    whereClause += ` AND status = $${params.length} `;
+  }
+  if (q) {
+    params.push(`% ${q.toLowerCase()}% `);
+    const qIndex = params.length;
+    whereClause += ` AND(LOWER(commercial_name) LIKE $${qIndex} OR LOWER(ruc_cedula) LIKE $${qIndex} OR CAST(id AS TEXT) LIKE $${qIndex})`;
+  }
+  const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause} `;
+  const totalResult = await db.query(countQuery, params);
+  const total = parseInt(totalResult.rows[0].count, 10);
+  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2} `;
+  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
+  return { count: total, rows, page, pageSize };
+}
+
+async function getClientRequestById(id, user) {
+  if (!id || !user) throw new Error("ID de solicitud y usuario son obligatorios.");
+  const { rows } = await db.query(
+    `SELECT cr.*, COALESCE(
+    (
+      SELECT json_agg(row_to_json(history))
+          FROM(
+        SELECT id, event_type, method, details, evidence_file_id, actor_email, actor_role,
+        actor_name, ip, user_agent, created_at
+            FROM client_request_consents
+            WHERE client_request_id = cr.id
+            ORDER BY created_at
+      ) history
+  ), '[]':: json
+      ) AS consent_history
+     FROM client_requests cr
+     WHERE cr.id = $1`,
+    [id]
+  );
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Solicitud no encontrada.");
+    error.status = 404;
+    throw error;
+  }
+  const allowedRoles = ["backoffice_comercial", "gerencia"];
+  const isAllowed = allowedRoles.includes(user.role) || request.created_by === user.email;
+  if (!isAllowed) {
+    const error = new Error("Acceso denegado a esta solicitud.");
+    error.status = 403;
+    throw error;
+  }
+  return request;
+}
+
+async function processClientRequest({ id, user, action, rejection_reason }) {
+  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Solicitud no encontrada.");
+    error.status = 404;
+    throw error;
+  }
+  if (request.status !== 'pending_approval' && request.status !== 'pending_consent') {
+    const error = new Error(`La solicitud ya ha sido procesada(estado: ${request.status}).`);
+    error.status = 400;
+    throw error;
+  }
+  const newStatus = action === 'approve' ? 'approved' : 'rejected';
+  if (newStatus === 'approved' && request.lopdp_consent_status !== 'granted') {
+    const error = new Error("No se puede aprobar una solicitud sin el consentimiento LOPDP del cliente.");
+    error.status = 400;
+    throw error;
+  }
+  const { rows: updatedRows } = await db.query(
+    "UPDATE client_requests SET status = $1, rejection_reason = $2, updated_at = now() WHERE id = $3 RETURNING *",
+    [newStatus, newStatus === 'rejected' ? rejection_reason : null, id]
+  );
+  const updatedRequest = updatedRows[0];
+  if (newStatus === 'approved') {
+    await moveClientFolderToApproved(request.drive_folder_id);
+  }
+  const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
+  await sendChatMessage({
+    text: `* Actualización de Solicitud de Cliente *\n > * Cliente:* ${request.commercial_name} (#${request.id}) \n > * Estado:* ${outcome} \n > * Procesado por:* ${user.email} \n${newStatus === 'rejected' && rejection_reason ? `> *Motivo:* ${rejection_reason}` : ''} `,
+  });
+  return updatedRequest;
+}
+
+async function grantConsent({ token, audit = {} }) {
+  if (!token) {
+    const error = new Error("Token de consentimiento no proporcionado.");
+    error.status = 400;
+    throw error;
+  }
+  const { rows } = await db.query("SELECT * FROM client_requests WHERE lopdp_token = $1", [token]);
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Token inválido o la solicitud no existe.");
+    error.status = 404;
+    throw error;
+  }
+  if (request.lopdp_consent_status === 'granted') {
+    logger.warn(`Intento de re - confirmar consentimiento para la solicitud #${request.id} `);
+    return request;
+  }
+  const clientIp = audit.ip || null;
+  const userAgent = audit.userAgent || null;
+  const { rows: updatedRows } = await db.query(
+    `UPDATE client_requests
+      SET lopdp_consent_status = 'granted',
+  status = 'pending_approval',
+  lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
+  lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
+  lopdp_consent_at = now(),
+  lopdp_consent_ip = $2,
+  lopdp_consent_user_agent = $3,
+  updated_at = now()
+      WHERE id = $1
+RETURNING * `,
     [request.id, clientIp, userAgent]
   );
   const updatedRequest = updatedRows[0];
@@ -1090,9 +1370,213 @@ async function grantConsent({ token, audit = {} }) {
     user_agent: userAgent,
   });
   await sendChatMessage({
-    text: `*Consentimiento Recibido - Listo para Aprobación*\n> *Cliente:* ${request.commercial_name} (#${request.id})\n> *Acción Requerida:* La solicitud ha recibido el consentimiento del cliente y está lista para su revisión final.`,
+    text: `* Consentimiento Recibido - Listo para Aprobación *\n > * Cliente:* ${request.commercial_name} (#${request.id}) \n > * Acción Requerida:* La solicitud ha recibido el consentimiento del cliente y está lista para su revisión final.`,
   });
   return updatedRequest;
+}
+
+
+async function sendConsentEmailToken({ user, client_email, recipient_email, client_name }) {
+  const email = recipient_email || client_email;
+  if (!email) {
+    const error = new Error("Se requiere un correo electrónico.");
+    error.status = 400;
+    throw error;
+  }
+
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const token = crypto.randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  const { rows } = await db.query(
+    `INSERT INTO client_request_consent_tokens(token, code, client_email, created_by, expires_at)
+VALUES($1, $2, $3, $4, $5) RETURNING id, token, client_email, expires_at`,
+    [token, code, email, user.email, expiresAt]
+  );
+
+  const tokenData = rows[0];
+
+  await gmailService.sendEmail({
+    to: email,
+    subject: "Código de Verificación - FamSPI",
+    html: `
+  < h2 > Código de Verificación</h2 >
+      <p>Hola ${client_name || "Cliente"},</p>
+      <p>Para continuar con tu registro, por favor utiliza el siguiente código de verificación:</p>
+      <h1 style="color: #2563EB; font-size: 32px; letter-spacing: 5px;">${code}</h1>
+      <p>Este código expira en 24 horas.</p>
+`
+  });
+
+  return tokenData;
+}
+
+async function verifyConsentEmailToken({ user, token_id, code }) {
+  const { rows } = await db.query(
+    `SELECT * FROM client_request_consent_tokens WHERE id = $1`,
+    [token_id]
+  );
+  const tokenData = rows[0];
+
+  if (!tokenData) {
+    const error = new Error("Token de verificación no encontrado.");
+    error.status = 404;
+    throw error;
+  }
+  if (tokenData.used_at) {
+    const error = new Error("Este código ya ha sido utilizado.");
+    error.status = 400;
+    throw error;
+  }
+  if (new Date() > new Date(tokenData.expires_at)) {
+    const error = new Error("El código ha expirado.");
+    error.status = 400;
+    throw error;
+  }
+  if (tokenData.code !== code) {
+    const error = new Error("Código incorrecto.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { rows: updatedRows } = await db.query(
+    `UPDATE client_request_consent_tokens 
+     SET verified_at = NOW(), used_at = NOW() 
+     WHERE id = $1 RETURNING * `,
+    [token_id]
+  );
+
+  return updatedRows[0];
+}
+
+async function assertVerifiedConsentEmailToken({ tokenId, email }) {
+  const { rows } = await db.query(
+    `SELECT * FROM client_request_consent_tokens WHERE id = $1`,
+    [tokenId]
+  );
+  const token = rows[0];
+  if (!token) throw new Error("Token de verificación inválido.");
+  if (token.client_email !== email) throw new Error("El correo verificado no coincide con el de la solicitud.");
+  if (!token.verified_at) throw new Error("El código no ha sido verificado aún.");
+  return token;
+}
+
+async function markConsentEmailTokenAsUsed(tokenId, requestId) {
+  return true;
+}
+
+function maskConsentCode(code) {
+  return "****" + (code || "").slice(-2);
+}
+
+async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
+  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Solicitud no encontrada.");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.created_by !== user.email) {
+    const error = new Error("No tienes permiso para editar esta solicitud.");
+    error.status = 403;
+    throw error;
+  }
+
+  if (request.status !== "rejected" && request.status !== "pending_approval" && request.status !== "pending_consent") {
+    const error = new Error("Solo puedes editar solicitudes rechazadas o pendientes.");
+    error.status = 400;
+    throw error;
+  }
+
+  const data = Object.fromEntries(
+    Object.entries(rawData || {}).map(([key, value]) => [
+      key,
+      typeof value === "string" ? value.trim() : value,
+    ]),
+  );
+
+  const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
+
+  const fileIds = {};
+  const fileUploadPromises = Object.entries(normalizedFiles).map(async ([fieldName, fileArray]) => {
+    if (!Array.isArray(fileArray) || !fileArray.length) return;
+    const file = fileArray[0];
+    if (!file) return;
+
+    const driveFolderId = request.drive_folder_id;
+
+    const uploadedFile = await uploadBase64File(
+      file.originalname,
+      file.buffer.toString("base64"),
+      file.mimetype,
+      driveFolderId,
+    );
+    const dbFieldName = `${fieldName} _id`;
+    fileIds[dbFieldName] = uploadedFile.id;
+  });
+  await Promise.all(fileUploadPromises);
+
+  const fieldsToUpdate = [
+    "client_type", "legal_person_business_name", "nationality", "natural_person_firstname",
+    "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
+    "establishment_province", "establishment_city", "establishment_address",
+    "establishment_reference", "establishment_phone", "establishment_cellphone",
+    "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
+    "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
+    "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
+    "shipping_delivery_hours", "operating_permit_status"
+  ];
+
+  if (fileIds.legal_rep_appointment_file_id) fieldsToUpdate.push("legal_rep_appointment_file_id");
+  if (fileIds.ruc_file_id) fieldsToUpdate.push("ruc_file_id");
+  if (fileIds.id_file_id) fieldsToUpdate.push("id_file_id");
+  if (fileIds.operating_permit_file_id) fieldsToUpdate.push("operating_permit_file_id");
+  if (fileIds.consent_evidence_file_id) fieldsToUpdate.push("consent_evidence_file_id");
+
+  const newStatus = request.lopdp_consent_status === 'granted' ? 'pending_approval' : 'pending_consent';
+
+  const values = [];
+  let setClause = fieldsToUpdate.map((field) => {
+    let val;
+    if (field.endsWith("_id")) {
+      if (fileIds[field]) {
+        val = fileIds[field];
+      } else {
+        return null;
+      }
+    } else {
+      val = data[field];
+    }
+
+    if (val !== undefined) {
+      values.push(val);
+      return `${field} = $${values.length} `;
+    }
+    return null;
+  }).filter(Boolean).join(", ");
+
+  if (setClause) {
+    values.push(newStatus);
+    setClause += `, status = $${values.length} `;
+    setClause += `, rejection_reason = NULL`;
+    setClause += `, updated_at = now()`;
+
+    const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING * `;
+    values.push(id);
+
+    const { rows: updatedRows } = await db.query(query, values);
+    const updatedRequest = updatedRows[0];
+
+    await sendChatMessage({
+      text: `* Solicitud Corregida y Reenviada *\n > * Cliente:* ${updatedRequest.commercial_name} (#${updatedRequest.id}) \n > * Acción:* El usuario ha corregido la solicitud rechazada.Pendiente de nueva revisión.`,
+    });
+
+    return updatedRequest;
+  } else {
+    return request;
+  }
 }
 
 module.exports = {
@@ -1110,4 +1594,5 @@ module.exports = {
   grantConsent,
   sendConsentEmailToken,
   verifyConsentEmailToken,
+  updateClientRequest,
 };

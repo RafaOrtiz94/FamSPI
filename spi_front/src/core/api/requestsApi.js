@@ -26,7 +26,7 @@ export const getRequests = async (params = {}) => {
       count: data.count || data.rows.length,
     };
   }
-  
+
   if (data?.data && Array.isArray(data.data.rows)) {
     return {
       rows: data.data.rows,
@@ -40,7 +40,7 @@ export const getRequests = async (params = {}) => {
       count: data.data.length,
     };
   }
-  
+
   if (Array.isArray(data)) {
     return {
       rows: data,
@@ -128,7 +128,16 @@ export const getClientRequests = async (params = {}) => {
   return response.data?.data || response.data;
 };
 
-/** 📄 Detalle de solicitud de nuevo cliente */
+/** � Mis solicitudes de nuevos clientes */
+export const getMyClientRequests = async (params = {}) => {
+  const { page = 1, pageSize = 25, status, q } = params;
+  const response = await api.get("/requests/new-client/my", {
+    params: { page, pageSize, status, q },
+  });
+  return response.data?.data || response.data;
+};
+
+/** �📄 Detalle de solicitud de nuevo cliente */
 export const getClientRequestById = async (id) => {
   const response = await api.get(`/requests/new-client/${id}`);
   return response.data?.data || response.data;
@@ -140,5 +149,27 @@ export const processClientRequest = async (id, action, rejection_reason) => {
     action,
     rejection_reason,
   });
+  return response.data?.data || response.data;
+};
+
+/** ✏️ Actualizar solicitud de nuevo cliente (corrección) */
+export const updateClientRequest = async (id, formData = {}, files = {}) => {
+  const data = new FormData();
+
+  Object.entries(formData).forEach(([key, value]) => {
+    if (value === undefined || value === null) return;
+    const normalized = typeof value === "string" ? value.trim() : value;
+    data.append(key, normalized);
+  });
+
+  Object.entries(files).forEach(([key, file]) => {
+    if (!file) return;
+    data.append(key, file);
+  });
+
+  const response = await api.put(`/requests/new-client/${id}`, data, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
   return response.data?.data || response.data;
 };

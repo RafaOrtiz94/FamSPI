@@ -123,9 +123,9 @@ exports.createRequest = asyncHandler(async (req, res) => {
   const files = Array.isArray(req.files)
     ? req.files
     : [
-        ...(req.files?.files || []),
-        ...(req.files?.["files[]"] || []),
-      ];
+      ...(req.files?.files || []),
+      ...(req.files?.["files[]"] || []),
+    ];
 
   try {
     // 🧩 Crear solicitud base
@@ -155,14 +155,13 @@ exports.createRequest = asyncHandler(async (req, res) => {
         html: `
           <h2>Solicitud creada correctamente</h2>
           <p>Se generó la solicitud <b>#${result.request.id}</b> (${result.request.status})</p>
-          ${
-            result.document?.id
-              ? `<p>Documento asociado: 
+          ${result.document?.id
+            ? `<p>Documento asociado: 
                   <a href="https://drive.google.com/file/d/${result.document.id}/view" target="_blank">
                     Ver acta
                   </a>
                 </p>`
-              : ""
+            : ""
           }
         `,
         from: { email: user.email, name: user.fullname || user.name || user.email },
@@ -459,5 +458,28 @@ exports.grantConsent = asyncHandler(async (req, res) => {
   res.json({
     ok: true,
     message: "Gracias por confirmar. Tu autorización ha sido registrada.",
+  });
+});
+
+// ============================================================
+// ✏️ Actualizar Solicitud de Nuevo Cliente (Corrección)
+// ============================================================
+exports.updateClientRequest = asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const result = await service.updateClientRequest(id, req.user, req.body, req.files);
+
+  await logAction({
+    user_id: req.user.id,
+    module: "client_requests",
+    action: "update",
+    entity: "client_requests",
+    entity_id: id,
+    details: `Solicitud corregida por usuario`,
+  });
+
+  res.json({
+    ok: true,
+    message: "Solicitud actualizada correctamente.",
+    data: result,
   });
 });

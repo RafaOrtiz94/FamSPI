@@ -28,14 +28,14 @@ router.get("/public/consent/:token", ctrl.grantConsent);
 router.post(
   "/new-client/consent-token",
   verifyToken,
-  requireRole(["comercial", "jefe_comercial"]),
+  // requireRole eliminado para permitir acceso a todos los usuarios autenticados
   ctrl.sendConsentEmailToken,
 );
 
 router.post(
   "/new-client/consent-token/verify",
   verifyToken,
-  requireRole(["comercial", "jefe_comercial"]),
+  // requireRole eliminado para permitir acceso a todos los usuarios autenticados
   ctrl.verifyConsentEmailToken,
 );
 
@@ -54,7 +54,14 @@ router.post(
   ctrl.createClientRequest
 );
 
-// 📋 LISTAR SOLICITUDES DE NUEVOS CLIENTES (para Backoffice)
+// 📋 LISTAR MIS SOLICITUDES DE NUEVOS CLIENTES (para cualquier usuario)
+router.get(
+  "/new-client/my",
+  verifyToken,
+  ctrl.listClientRequests // El service filtrará por created_by
+);
+
+// 📋 LISTAR TODAS LAS SOLICITUDES DE NUEVOS CLIENTES (para Backoffice)
 router.get(
   "/new-client",
   verifyToken,
@@ -76,6 +83,20 @@ router.put(
   verifyToken,
   requireRole(["backoffice_comercial"]),
   ctrl.processClientRequest
+);
+
+// ✏️ ACTUALIZAR SOLICITUD DE NUEVO CLIENTE (Corrección)
+router.put(
+  "/new-client/:id",
+  verifyToken,
+  upload.fields([
+    { name: "legal_rep_appointment_file", maxCount: 1 },
+    { name: "ruc_file", maxCount: 1 },
+    { name: "id_file", maxCount: 1 },
+    { name: "operating_permit_file", maxCount: 1 },
+    { name: "consent_evidence_file", maxCount: 1 },
+  ]),
+  ctrl.updateClientRequest
 );
 
 

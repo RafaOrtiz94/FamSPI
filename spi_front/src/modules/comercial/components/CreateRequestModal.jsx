@@ -37,7 +37,7 @@ const PhoneNumberInput = ({ name, value, onChange, error }) => {
 
   const handleNumberChange = (e) => {
     // Permite solo dígitos para el número
-    const cleanNumber = e.target.value.replace(/\D/g, ''); 
+    const cleanNumber = e.target.value.replace(/\D/g, '');
     // Combina el código de país actual con el número nuevo
     onChange({ target: { name, value: country + cleanNumber } });
   };
@@ -207,7 +207,9 @@ const CreateRequestModal = ({
   onClose,
   onSubmit,
   presetType = null,
-  canUploadClientFiles = false,
+  canUploadClientFiles = true,
+  initialData = null,
+  isEditing = false,
 }) => {
   const [type, setType] = useState(null);
   const [formData, setFormData] = useState({});
@@ -227,15 +229,23 @@ const CreateRequestModal = ({
       return;
     }
 
-    if (presetType) {
+    if (isEditing && initialData) {
+      setType(presetType || (initialData.client_type ? "cliente" : null));
+      if (presetType !== "cliente") {
+        setFormData(initialData);
+      }
+    } else if (presetType) {
       setType(presetType);
     } else {
       setType(null);
     }
-    setFormData({});
-    setEquipos([]);
-    setErrors({});
-    }, [open, presetType]);
+
+    if (!isEditing) {
+      setFormData({});
+      setEquipos([]);
+      setErrors({});
+    }
+  }, [open, presetType, initialData, isEditing]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -268,14 +278,14 @@ const CreateRequestModal = ({
         newErrors.fecha_tope_instalacion = "La fecha tope no puede ser menor a la fecha de instalación.";
       }
     }
-    
+
     // 4. Validar equipos con estado
     if (requestTypes[type].equipos?.estado) {
-        equipos.forEach((eq, i) => {
-            if (!eq.nombre_equipo || !eq.estado) {
-                newErrors.equipos = "Todos los equipos deben tener nombre y estado seleccionado.";
-            }
-        });
+      equipos.forEach((eq, i) => {
+        if (!eq.nombre_equipo || !eq.estado) {
+          newErrors.equipos = "Todos los equipos deben tener nombre y estado seleccionado.";
+        }
+      });
     }
 
     setErrors(newErrors);
@@ -306,9 +316,9 @@ const CreateRequestModal = ({
     const copy = [...equipos];
     copy[index][key] = value;
     setEquipos(copy);
-     // Limpia el error de equipos si ya se ha ingresado algo en un equipo anterior
+    // Limpia el error de equipos si ya se ha ingresado algo en un equipo anterior
     if (errors.equipos) {
-        setErrors(prev => ({ ...prev, equipos: null }));
+      setErrors(prev => ({ ...prev, equipos: null }));
     }
   };
 
@@ -406,23 +416,22 @@ const CreateRequestModal = ({
                         f.includes("fecha")
                           ? "date"
                           : f.includes("email")
-                          ? "email"
-                          : "text"
+                            ? "email"
+                            : "text"
                       }
                       name={f}
                       value={formData[f] || ""}
                       onChange={handleChange}
                       min={f.includes("fecha") ? todayDateString : null} // Validación HTML5: min=fecha_actual
-                      className={`w-full p-2 rounded-lg border ${
-                        errors[f]
-                          ? "border-red-500"
-                          : "border-gray-300 dark:border-gray-600"
-                      } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+                      className={`w-full p-2 rounded-lg border ${errors[f]
+                        ? "border-red-500"
+                        : "border-gray-300 dark:border-gray-600"
+                        } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
                     />
                   )}
-                    {errors[f] && (
+                  {errors[f] && (
                     <p className="text-red-500 text-xs mt-1">{errors[f]}</p>
-                    )}
+                  )}
                 </div>
               ))}
 
@@ -493,19 +502,19 @@ const CreateRequestModal = ({
 
               {/* Botones */}
               <div className="flex justify-end gap-3 pt-4">
-                  <Button
-                    type="button"
-                    onClick={onClose}
-                    className="bg-gray-200 hover:bg-gray-300 text-gray-800"
-                  >
-                    Cancelar
-                  </Button>
-                  <Button
-                    type="submit"
-                    className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
-                  >
-                    <FiSend /> Enviar
-                  </Button>
+                <Button
+                  type="button"
+                  onClick={onClose}
+                  className="bg-gray-200 hover:bg-gray-300 text-gray-800"
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
+                >
+                  <FiSend /> Enviar
+                </Button>
               </div>
             </form>
           )}
@@ -519,7 +528,9 @@ const CreateRequestModal = ({
               onSuccess={() => {
                 onClose();
               }}
-              successMessage="Solicitud registrada. El consentimiento quedó auditado o se envió al cliente automáticamente."
+              successMessage={isEditing ? "Solicitud actualizada correctamente." : "Solicitud registrada. El consentimiento quedó auditado o se envió al cliente automáticamente."}
+              initialData={initialData}
+              isEditing={isEditing}
             />
           )}
         </Dialog.Panel>
