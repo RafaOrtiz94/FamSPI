@@ -43,7 +43,6 @@ router.post(
 router.post(
   "/new-client",
   verifyToken,
-  requireRole(["comercial", "jefe_comercial"]),
   upload.fields([
     { name: "legal_rep_appointment_file", maxCount: 1 },
     { name: "ruc_file", maxCount: 1 },

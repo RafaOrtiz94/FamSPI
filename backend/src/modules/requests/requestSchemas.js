@@ -92,7 +92,6 @@ module.exports = {
       "consent_capture_method",
       "client_type",
       "commercial_name",
-      "ruc_cedula",
       "client_email",
       "establishment_name",
       "establishment_province",

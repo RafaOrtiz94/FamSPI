@@ -823,6 +823,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
 
   const { commercial_name, client_email } = data;
+  const rucCedula = data.ruc_cedula || null;
   const consentRecipientEmail = data.consent_recipient_email || client_email;
   const consentEmailTokenId = data.consent_email_token_id?.trim() || null;
   let verifiedConsentToken = null;
@@ -901,7 +902,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       user.email, requestStatus, lopdp_token, client_email, consentRecipientEmail || client_email, data.client_type, data.data_processing_consent === true,
       consentStatus, consentCaptureMethod, storedConsentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
-      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
+      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, rucCedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
       data.establishment_reference || null, data.establishment_phone || null, data.establishment_cellphone || null,
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,
