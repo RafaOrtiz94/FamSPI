@@ -13,6 +13,19 @@ const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText, sendChatMessage } = require("./googleChat");
 require("dotenv").config();
 
+function logGoogleApiError(err, context = {}) {
+  const payload = {
+    ...context,
+    message: err?.message,
+    code: err?.code,
+    status: err?.response?.status,
+    apiError: err?.response?.data?.error,
+    apiErrorDescription: err?.response?.data?.error_description,
+  };
+
+  logger.error(payload, "[MAILER] Error detallado de Google API");
+}
+
 const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
   ? Number(process.env.GMAIL_DEFAULT_USER_ID)
   : null;
@@ -119,9 +132,15 @@ async function sendViaServiceAccount({
   try {
     await delegatedAuth.authorize();
   } catch (err) {
+    logGoogleApiError(err, {
+      step: "service_account_authorize",
+      delegatedFrom,
+      scopes: delegatedAuth?.scopes,
+      clientEmail: delegatedAuth?.email,
+    });
+
     const baseMessage = `La service account no está autorizada para enviar como ${delegatedFrom}`;
 
-    // Mejora de trazabilidad: mensaje específico cuando el problema es la delegación
     if (err?.message === "unauthorized_client") {
       throw new Error(
         `${baseMessage}: el cliente de API no tiene delegación habilitada para los scopes de Gmail. ` +
@@ -145,10 +164,21 @@ async function sendViaServiceAccount({
   });
 
   const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
-  const response = await delegatedGmail.users.messages.send({
-    userId: "me",
-    requestBody: { raw },
-  });
+  let response;
+  try {
+    response = await delegatedGmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw },
+    });
+  } catch (err) {
+    logGoogleApiError(err, {
+      step: "service_account_send",
+      delegatedFrom,
+      to: normalizeRecipients(to),
+      subject,
+    });
+    throw err;
+  }
 
   logger.info("[MAILER] Email enviado con service account", {
     to: normalizeRecipients(to),
@@ -219,6 +249,12 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
     });
   } catch (error) {
+    logGoogleApiError(error, {
+      step: "gmail_oauth_send",
+      gmailUserId: gmailUserId || DEFAULT_GMAIL_USER_ID,
+      to: normalizeRecipients(to),
+      subject,
+    });
     logger.warn(
       `[MAILER] Error enviando con Gmail OAuth (${error.message}). Intentando con service account...`
     );

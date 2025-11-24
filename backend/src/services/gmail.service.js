@@ -53,10 +53,11 @@ const getTokensFromCode = async (code) => {
         redirect_uri: gmailRedirectUri
     });
 
-    logger.info(`[GMAIL] Tokens obtenidos del código de autorización`);
-    logger.info(`[GMAIL] Access token presente: ${!!tokens.access_token}`);
-    logger.info(`[GMAIL] Refresh token presente: ${!!tokens.refresh_token}`);
-    logger.info(`[GMAIL] Expiry date: ${tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'N/A'}`);
+    logger.info(`[GMAIL] Tokens obtenidos del código de autorización`, {
+        hasAccessToken: Boolean(tokens.access_token),
+        hasRefreshToken: Boolean(tokens.refresh_token),
+        expiryDate: tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'N/A',
+    });
     return tokens;
 };
 
@@ -273,7 +274,15 @@ const sendEmail = async ({ userId, to, subject, html, text, cc, bcc, replyTo }) 
         };
 
     } catch (error) {
-        logger.error('❌ Error enviando email:', error);
+        logger.error('[GMAIL] Error enviando email', {
+            code: error.code,
+            status: error.response?.status,
+            apiError: error.response?.data?.error,
+            apiErrorDescription: error.response?.data?.error_description,
+            to,
+            subject,
+            userId,
+        });
 
         // Si el error es de autenticación, el usuario debe volver a autorizar
         if (error.code === 401 || error.code === 403) {
