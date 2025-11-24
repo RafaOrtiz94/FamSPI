@@ -1,19 +1,20 @@
 /**
- * Utils: Envío de correos (SMTP con fallback a Google Chat)
- * --------------------------------------------------------
- * Intenta enviar correos reales usando la configuración SMTP.
- * Si falta configuración, usa el webhook de Google Chat como respaldo.
+ * Utils: Envío de correos (Gmail OAuth con respaldo a Google Chat)
+ * ----------------------------------------------------------------
+ * Envía correos usando la cuenta autorizada vía Gmail OAuth.
+ * Si no hay cuenta o falla el envío, usa el webhook de Google Chat.
  */
 
-const nodemailer = require("nodemailer");
 const logger = require("../config/logger");
+const gmailService = require("../services/gmail.service");
 const { sendChatMessage, htmlToText } = require("./googleChat");
 require("dotenv").config();
 
 const CHAT_WEBHOOK = process.env.GCHAT_WEBHOOK_URL || process.env.GCHAT_WEBHOOK;
 const CHAT_THREAD_KEY = process.env.GCHAT_THREAD_KEY || null;
-
-let smtpTransport = null;
+const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
+  ? Number(process.env.GMAIL_DEFAULT_USER_ID)
+  : null;
 
 const normalizeRecipients = (value) =>
   Array.isArray(value) ? value.filter(Boolean).join(",") : value;
@@ -30,25 +31,6 @@ const resolveFrom = ({ from, senderName }) => {
   const defaultName = senderName || process.env.SMTP_FROM_NAME || null;
   if (!defaultFrom) return null;
   return defaultName ? `${defaultName} <${defaultFrom}>` : defaultFrom;
-};
-
-const getSmtpTransport = () => {
-  if (smtpTransport) return smtpTransport;
-
-  const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
-  if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    logger.warn("[MAILER] Configuración SMTP incompleta; se usará Google Chat como respaldo.");
-    return null;
-  }
-
-  smtpTransport = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: Number(SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === "true" || Number(SMTP_PORT) === 465,
-    auth: { user: SMTP_USER, pass: SMTP_PASS },
-  });
-
-  return smtpTransport;
 };
 
 function buildChatText({ to, subject, html }) {
@@ -85,6 +67,44 @@ async function sendViaChat({ to, subject, html }) {
   return { delivered: true, via: "chat", response: res };
 }
 
+async function sendViaGmail({
+  gmailUserId,
+  to,
+  subject,
+  html,
+  text,
+  cc,
+  bcc,
+  replyTo,
+  from,
+}) {
+  const userId = gmailUserId || DEFAULT_GMAIL_USER_ID;
+  if (!userId) {
+    throw new Error("No hay usuario autorizado para enviar correos via Gmail OAuth");
+  }
+
+  const response = await gmailService.sendEmail({
+    userId,
+    to,
+    subject,
+    html,
+    text,
+    cc,
+    bcc,
+    replyTo,
+    from,
+  });
+
+  logger.info("[MAILER] Email enviado", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "gmail",
+    delegatedUser: from,
+  });
+
+  return { delivered: true, via: "gmail", response };
+}
+
 async function sendMail({
   to,
   subject,
@@ -96,38 +116,28 @@ async function sendMail({
   cc = null,
   bcc = null,
   delegatedUser = null,
+  gmailUserId = null,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
   }
 
-  const transporter = getSmtpTransport();
   const fromAddress = resolveFrom({ from, senderName });
-  const mailOptions = {
-    from: fromAddress || undefined,
-    to,
-    cc: cc || undefined,
-    bcc: bcc || undefined,
-    subject,
-    html: html || undefined,
-    text: text || (!html ? undefined : htmlToText(html)),
-    replyTo: replyTo || undefined,
-  };
 
   try {
-    if (!transporter) throw new Error("SMTP no configurado");
-
-    const response = await transporter.sendMail(mailOptions);
-    logger.info("[MAILER] Email enviado", {
-      to: normalizeRecipients(to),
+    return await sendViaGmail({
+      gmailUserId,
+      to,
       subject,
-      via: "smtp",
-      delegatedUser,
+      html,
+      text: text || (!html ? undefined : htmlToText(html)),
+      cc,
+      bcc,
+      replyTo,
+      from: fromAddress || delegatedUser || undefined,
     });
-
-    return { delivered: true, via: "smtp", response };
   } catch (error) {
-    logger.warn({ err: error }, "[MAILER] Error enviando correo, intentando respaldo en Chat");
+    logger.warn({ err: error }, "[MAILER] Error enviando correo con Gmail, intentando respaldo en Chat");
 
     try {
       return await sendViaChat({ to, subject, html: html || text || "" });

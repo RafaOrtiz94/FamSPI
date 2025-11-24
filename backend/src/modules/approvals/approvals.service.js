@@ -151,6 +151,7 @@ async function approve(request_id, approver_id) {
           replyTo: approverEmail || undefined,
           senderName: approverName || undefined,
           delegatedUser: approverEmail || undefined,
+          gmailUserId: approver_id,
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de aprobación");
         });
@@ -265,6 +266,7 @@ async function reject(request_id, approver_id, note = null) {
           replyTo: approverEmail || undefined,
           senderName: approverName || undefined,
           delegatedUser: approverEmail || undefined,
+          gmailUserId: approver_id,
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de rechazo");
         });

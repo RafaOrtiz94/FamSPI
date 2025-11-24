@@ -159,6 +159,7 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
       html,
       senderName: user?.fullname || user?.name || user?.email || "SPI",
       replyTo: user?.email || undefined,
+      gmailUserId: user?.id || null,
     });
   }
 
@@ -770,7 +771,7 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const documentSection = document?.link ? `<p>Documento generado: <a href="${document.link}" target="_blank" rel="noopener">${document.name || "Abrir documento"}</a></p>` : "";
 
   const html = `<h2>Solicitud pendiente de aprobación</h2><p>Hola equipo de Servicio Técnico,</p><p><b>${requesterName}</b>${requesterEmail ? ` (${requesterEmail})` : ""} registró la solicitud <b>#${request.id}</b> (${requestTitle}).</p>${summaryBlock}${documentSection}<p>Revisa la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p><p style="margin-top:16px;">Este aviso se envió automáticamente cuando la solicitud quedó pendiente.</p>`;
-  await sendMail({ to: recipients, subject: `Solicitud #${request.id} pendiente de aprobación`, html, from: requesterEmail ? { email: requesterEmail, name: requesterName } : undefined, replyTo: requesterEmail || undefined, senderName: requesterName, delegatedUser: requesterEmail });
+  await sendMail({ to: recipients, subject: `Solicitud #${request.id} pendiente de aprobación`, html, from: requesterEmail ? { email: requesterEmail, name: requesterName } : undefined, replyTo: requesterEmail || undefined, senderName: requesterName, delegatedUser: requesterEmail, gmailUserId: request?.requester_id || null });
 }
 
 /*
@@ -934,6 +935,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
         to: consentRecipientEmail || client_email,
         subject: "Autorización para el Tratamiento de Datos Personales",
         html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
+        gmailUserId: user?.id || null,
       });
 
       await recordConsentEvent({

@@ -168,6 +168,7 @@ exports.createRequest = asyncHandler(async (req, res) => {
         replyTo: user.email,
         senderName: user.fullname || user.name || user.email,
         delegatedUser: user.email,
+        gmailUserId: user.id,
       });
     } catch (mailErr) {
       logger.warn("⚠️ No se pudo enviar correo:", mailErr.message);
