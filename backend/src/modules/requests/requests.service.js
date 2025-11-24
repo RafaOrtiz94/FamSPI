@@ -1132,22 +1132,6 @@ async function grantConsent({ token, audit = {} }) {
   return updatedRequest;
 }
 
-  );
-  const token = rows[0];
-  if (!token) throw new Error("Token de verificación inválido.");
-  if (token.client_email !== email) throw new Error("El correo verificado no coincide con el de la solicitud.");
-  if (!token.verified_at) throw new Error("El código no ha sido verificado aún.");
-  return token;
-}
-
-async function markConsentEmailTokenAsUsed(tokenId, requestId) {
-  return true;
-}
-
-function maskConsentCode(code) {
-  return "****" + (code || "").slice(-2);
-}
-
 async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
   const request = rows[0];
