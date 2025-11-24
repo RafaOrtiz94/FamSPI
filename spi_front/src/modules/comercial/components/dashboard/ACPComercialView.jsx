@@ -8,6 +8,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 
 const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
     const navigate = useNavigate();
@@ -76,20 +77,10 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
                 </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-5">
-                    <SectionTitle title="Tareas Pendientes" />
-                    <div className="text-center py-8 text-gray-500">
-                        No hay tareas asignadas por el momento.
-                    </div>
-                </Card>
-                <Card className="p-5">
-                    <SectionTitle title="Últimas Interacciones" />
-                    <div className="text-center py-8 text-gray-500">
-                        Registro de llamadas y correos vacío.
-                    </div>
-                </Card>
-            </div>
+            <Card className="p-5 mt-6">
+                <SectionTitle title="Proceso de compra de equipos" />
+                <EquipmentPurchaseWidget />
+            </Card>
         </>
     );
 };

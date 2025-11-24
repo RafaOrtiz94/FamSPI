@@ -36,6 +36,7 @@ const ROLE_META = {
   comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   jefe_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   backoffice_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  acp_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   servicio_tecnico: {
     scope: "servicio_tecnico",
     dashboard: "/dashboard/servicio-tecnico",

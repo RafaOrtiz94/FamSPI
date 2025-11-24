@@ -35,6 +35,14 @@ const comercialLinks = [
   },
 ];
 
+const acpLinks = [
+  {
+    name: "Compras de equipos",
+    icon: FiShoppingCart,
+    path: "/dashboard/comercial/equipment-purchases",
+  },
+];
+
 const talentoLinks = [
   {
     name: "Gestión de Usuarios",
@@ -62,6 +70,10 @@ const buildLinks = (scope) => {
   // Comercial links
   if (["comercial", "gerencia", "ti"].includes(scope)) {
     links.push(...comercialLinks);
+  }
+
+  if (["acp_comercial"].includes(scope)) {
+    links.push(...acpLinks);
   }
 
   // Talento Humano links
