@@ -5,8 +5,9 @@
  * Si no hay cuenta o falla el envío, usa el webhook de Google Chat.
  */
 
+const { google } = require("googleapis");
 const logger = require("../config/logger");
-const { gmail, jwtClient } = require("../config/google");
+const { gmail, createDelegatedJwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
 const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText } = require("./googleChat");
@@ -114,7 +115,14 @@ async function sendViaServiceAccount({
     throw new Error("No hay remitente delegado configurado para el envío de correos");
   }
 
-  await jwtClient.authorize();
+  const delegatedAuth = createDelegatedJwtClient(delegatedFrom);
+  try {
+    await delegatedAuth.authorize();
+  } catch (err) {
+    throw new Error(
+      `La service account no está autorizada para enviar como ${delegatedFrom}: ${err.message}`,
+    );
+  }
 
   const raw = encodeMessage({
     from: delegatedFrom,
@@ -127,7 +135,8 @@ async function sendViaServiceAccount({
     replyTo: replyTo || delegatedFrom,
   });
 
-  const response = await gmail.users.messages.send({
+  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
+  const response = await delegatedGmail.users.messages.send({
     userId: "me",
     requestBody: { raw },
   });

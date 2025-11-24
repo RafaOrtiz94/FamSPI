@@ -43,6 +43,15 @@ if (hasGoogleDelegation) {
 
 const jwtClient = new google.auth.JWT(jwtOptions);
 
+/**
+ * Crea un cliente JWT clonado con el mismo key + scopes pero sujeto dinámico.
+ * Útil para delegar a distintos remitentes en Gmail API sin reinstanciar todo
+ * el módulo de configuración.
+ */
+function createDelegatedJwtClient(subject) {
+  return new google.auth.JWT({ ...jwtOptions, subject });
+}
+
 const drive = google.drive({ version: "v3", auth: jwtClient });
 const docs = google.docs({ version: "v1", auth: jwtClient });
 const calendar = google.calendar({ version: "v3", auth: jwtClient });
@@ -77,4 +86,4 @@ if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
   );
 }
 
-module.exports = { drive, docs, calendar, gmail, jwtClient };
+module.exports = { drive, docs, calendar, gmail, jwtClient, createDelegatedJwtClient };
