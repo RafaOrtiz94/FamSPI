@@ -10,7 +10,7 @@ const logger = require("../config/logger");
 const { gmail, createDelegatedJwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
 const { resolveDelegatedUser } = require("./googleCredentials");
-const { htmlToText } = require("./googleChat");
+const { htmlToText, sendChatMessage } = require("./googleChat");
 require("dotenv").config();
 
 const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
@@ -160,6 +160,33 @@ async function sendViaServiceAccount({
   return { delivered: true, via: "service_account", response };
 }
 
+async function sendViaChatFallback({ to, subject, html, text, cc, bcc, replyTo, from, reason }) {
+  const plainBody = text || (!html ? "" : htmlToText(html));
+  const summaryLines = [
+    `✉️ Fallback Google Chat`,
+    `Asunto: ${subject}`,
+    `Para: ${normalizeRecipients(to)}`,
+  ];
+  if (cc) summaryLines.push(`CC: ${normalizeRecipients(cc)}`);
+  if (bcc) summaryLines.push(`BCC: ${normalizeRecipients(bcc)}`);
+  if (replyTo) summaryLines.push(`Reply-To: ${replyTo}`);
+  if (from) summaryLines.push(`De: ${from}`);
+  if (reason) summaryLines.push(`Motivo: ${reason}`);
+
+  const bodyPreview = plainBody ? `\n\n${plainBody}` : "";
+  const textMessage = `${summaryLines.join("\n")}\n${bodyPreview}`;
+
+  await sendChatMessage({ text: textMessage });
+
+  logger.info("[MAILER] Mensaje enviado a Google Chat como respaldo", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "google_chat",
+  });
+
+  return { delivered: true, via: "google_chat" };
+}
+
 async function sendMail({
   to,
   subject,
@@ -209,9 +236,24 @@ async function sendMail({
       });
     } catch (fallbackError) {
       logger.error({ err: fallbackError }, "[MAILER] Fallback con service account falló");
-      throw new Error(
-        `No se pudo enviar el correo (Gmail OAuth y service account fallaron): ${fallbackError.message}`
-      );
+      const reason = `Gmail OAuth y service account fallaron: ${fallbackError.message}`;
+
+      try {
+        return await sendViaChatFallback({
+          to,
+          subject,
+          html,
+          text: text || (!html ? undefined : htmlToText(html)),
+          cc,
+          bcc,
+          replyTo,
+          from: fromAddress || delegatedUser || undefined,
+          reason,
+        });
+      } catch (chatError) {
+        logger.error({ err: chatError }, "[MAILER] Fallback final a Google Chat falló");
+        throw new Error(`No se pudo enviar el correo (${reason}; Chat también falló: ${chatError.message})`);
+      }
     }
   }
 }
