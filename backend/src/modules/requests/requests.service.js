@@ -20,7 +20,6 @@ const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const gmailService = require("../../services/gmail.service");
-const { sendChatMessage } = require("../../utils/googleChat");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const crypto = require("crypto");
 const Ajv = require("ajv");
@@ -62,6 +61,51 @@ const CLIENT_FILE_LABELS = {
   operating_permit_file: "Permiso de funcionamiento (PDF)",
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
 };
+
+const parseRecipients = (value = "") =>
+  value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+
+const REQUEST_NOTIFICATION_EMAILS = parseRecipients(
+  process.env.REQUEST_NOTIFICATION_EMAILS || process.env.BACKOFFICE_NOTIFICATION_EMAILS || "",
+);
+
+const uniqueRecipients = (...emails) => {
+  const recipients = emails.flat().filter(Boolean);
+  return [...new Set(recipients.map((e) => e.trim().toLowerCase()))];
+};
+
+function buildDriveLink(fileId) {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+
+function getClientRequestAttachments(request = {}) {
+  const attachments = [
+    { key: "id_file", field: "id_file_id", label: CLIENT_FILE_LABELS.id_file },
+    { key: "ruc_file", field: "ruc_file_id", label: CLIENT_FILE_LABELS.ruc_file },
+    {
+      key: "legal_rep_appointment_file",
+      field: "legal_rep_appointment_file_id",
+      label: CLIENT_FILE_LABELS.legal_rep_appointment_file,
+    },
+    { key: "operating_permit_file", field: "operating_permit_file_id", label: CLIENT_FILE_LABELS.operating_permit_file },
+    { key: "consent_evidence_file", field: "consent_evidence_file_id", label: CLIENT_FILE_LABELS.consent_evidence_file },
+  ];
+
+  return attachments
+    .map((attachment) => {
+      const fileId = request[attachment.field];
+      if (!fileId) return null;
+      return {
+        ...attachment,
+        file_id: fileId,
+        link: buildDriveLink(fileId),
+      };
+    })
+    .filter(Boolean);
+}
 
 const FORM_VARIANT_META = {
   inspection: {
@@ -159,6 +203,7 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
       html,
       senderName: user?.fullname || user?.name || user?.email || "SPI",
       replyTo: user?.email || undefined,
+      gmailUserId: user?.id || null,
     });
   }
 
@@ -335,7 +380,7 @@ async function resolveRequestTypeId(input) {
   if (q.rows.length) return q.rows[0].id;
   q = await db.query(
     `SELECT id FROM request_types WHERE code ILIKE $1 OR title ILIKE $1 LIMIT 1`,
-    [`% ${codeHint}% `]
+    [`%${codeHint}%`]
   );
   if (q.rows.length) return q.rows[0].id;
   throw new Error(
@@ -747,13 +792,6 @@ async function resolveRequesterProfile({ requester_id, requester_email, requeste
 }
 
 async function notifyTechnicalApprovers({ request, requester, requestType, payload, document }) {
-  const { rows } = await db.query(`SELECT email, fullname FROM users WHERE role = 'jefe_servicio_tecnico' AND email IS NOT NULL`);
-  const recipients = rows.map((row) => row.email).filter(Boolean);
-  if (!recipients.length) {
-    logger.info("ℹ️ No se enviaron notificaciones porque no existen usuarios con rol jefe_servicio_tecnico.");
-    return;
-  }
-
   const requesterName = requester?.fullname || requester?.name || requester?.email || "Usuario SPI";
   const requesterEmail = requester?.email || null;
   const requestTitle = getRequestLabel(requestType?.code, requestType?.title);
@@ -769,8 +807,41 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const summaryBlock = summaryItems.length ? `<ul>${summaryItems.join("")}</ul>` : "<p>No se registraron detalles adicionales.</p>";
   const documentSection = document?.link ? `<p>Documento generado: <a href="${document.link}" target="_blank" rel="noopener">${document.name || "Abrir documento"}</a></p>` : "";
 
-  const html = `<h2>Solicitud pendiente de aprobación</h2><p>Hola equipo de Servicio Técnico,</p><p><b>${requesterName}</b>${requesterEmail ? ` (${requesterEmail})` : ""} registró la solicitud <b>#${request.id}</b> (${requestTitle}).</p>${summaryBlock}${documentSection}<p>Revisa la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p><p style="margin-top:16px;">Este aviso se envió automáticamente cuando la solicitud quedó pendiente.</p>`;
-  await sendMail({ to: recipients, subject: `Solicitud #${request.id} pendiente de aprobación`, html, from: requesterEmail ? { email: requesterEmail, name: requesterName } : undefined, replyTo: requesterEmail || undefined, senderName: requesterName, delegatedUser: requesterEmail });
+  const summaryText = summaryItems.length
+    ? summaryItems
+        .map((item) => item.replace(/<[^>]+>/g, ""))
+        .map((text) => `• ${text}`)
+        .join("\n")
+    : "• Sin detalles adicionales";
+
+  const documentLine = document?.link ? `• Documento generado: ${document.link}` : null;
+  const lines = [
+    `*Solicitud pendiente de aprobación* (#${request.id})`,
+    `*Tipo:* ${requestTitle}`,
+    `*Solicitante:* ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}`,
+    summaryText,
+    documentLine,
+    `*Revisar en SPI:* ${detailLink}`,
+  ].filter(Boolean);
+
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, requesterEmail);
+
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud pendiente de aprobación (#${request.id})`,
+    html: `
+      <h2>Solicitud pendiente de aprobación</h2>
+      <p><strong>Tipo:</strong> ${requestTitle}</p>
+      <p><strong>Solicitante:</strong> ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}</p>
+      ${summaryBlock}
+      ${documentSection || ""}
+      <p>Revisa y gestiona la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: lines.map((line) => line.replace(/<[^>]+>/g, "")).join("\n"),
+    gmailUserId: requester?.id || null,
+    replyTo: requesterEmail || undefined,
+    from: requesterEmail || undefined,
+  });
 }
 
 /*
@@ -822,6 +893,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
 
   const { commercial_name, client_email } = data;
+  const rucCedula = data.ruc_cedula || null;
   const consentRecipientEmail = data.consent_recipient_email || client_email;
   const consentEmailTokenId = data.consent_email_token_id?.trim() || null;
   let verifiedConsentToken = null;
@@ -900,7 +972,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       user.email, requestStatus, lopdp_token, client_email, consentRecipientEmail || client_email, data.client_type, data.data_processing_consent === true,
       consentStatus, consentCaptureMethod, storedConsentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
-      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, data.ruc_cedula,
+      data.natural_person_lastname || null, commercial_name, data.establishment_name || null, rucCedula,
       data.establishment_province, data.establishment_city, data.establishment_address,
       data.establishment_reference || null, data.establishment_phone || null, data.establishment_cellphone || null,
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,
@@ -934,6 +1006,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
         to: consentRecipientEmail || client_email,
         subject: "Autorización para el Tratamiento de Datos Personales",
         html: `<h2>Confirmación de Uso de Datos</h2><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
+        gmailUserId: user?.id || null,
       });
 
       await recordConsentEvent({
@@ -958,8 +1031,23 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       });
     }
 
-    await sendChatMessage({
-      text: `*Nueva Solicitud de Cliente para Revisión*\n> *Cliente:* ${commercial_name}\n> *Tipo:* ${data.client_type}\n> *Solicitante:* ${user.email}\n> *Acción Requerida:* Revisar y aprobar/rechazar en el dashboard de Backoffice.`,
+    const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, user.email);
+    const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${newRequest.id}`;
+    await sendMail({
+      to: recipients,
+      subject: `Nueva solicitud de cliente (#${newRequest.id}) pendiente de revisión`,
+      html: `
+        <h2>Nueva solicitud de cliente</h2>
+        <p><strong>Cliente:</strong> ${commercial_name}</p>
+        <p><strong>Tipo:</strong> ${data.client_type}</p>
+        <p><strong>Solicitante:</strong> ${user.email}</p>
+        <p>Revisar y aprobar/rechazar en el dashboard de Backoffice:</p>
+        <p><a href="${detailLink}" target="_blank" rel="noopener">Abrir en SPI</a></p>
+      `,
+      text: `Nueva solicitud de cliente (#${newRequest.id})\nCliente: ${commercial_name}\nTipo: ${data.client_type}\nSolicitante: ${user.email}\nRevisar en SPI: ${detailLink}`,
+      gmailUserId: user?.id || null,
+      replyTo: user?.email || undefined,
+      from: user?.email || undefined,
     });
     return newRequest;
   } catch (error) {
@@ -971,13 +1059,17 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   }
 }
 
-async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
+async function listClientRequests({ page = 1, pageSize = 25, status, q, createdBy }) {
   const offset = (page - 1) * pageSize;
   const params = [];
   let whereClause = "WHERE 1=1";
   if (status) {
     params.push(status);
     whereClause += ` AND status = $${params.length}`;
+  }
+  if (createdBy) {
+    params.push(createdBy);
+    whereClause += ` AND created_by = $${params.length}`;
   }
   if (q) {
     params.push(`%${q.toLowerCase()}%`);
@@ -987,7 +1079,7 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
   const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause}`;
   const totalResult = await db.query(countQuery, params);
   const total = parseInt(totalResult.rows[0].count, 10);
-  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
   return { count: total, rows, page, pageSize };
 }
@@ -1024,7 +1116,10 @@ async function getClientRequestById(id, user) {
     error.status = 403;
     throw error;
   }
-  return request;
+  return {
+    ...request,
+    attachments: getClientRequestAttachments(request),
+  };
 }
 
 async function processClientRequest({ id, user, action, rejection_reason }) {
@@ -1055,8 +1150,23 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     await moveClientFolderToApproved(request.drive_folder_id);
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
-  await sendChatMessage({
-    text: `*Actualización de Solicitud de Cliente*\n> *Cliente:* ${request.commercial_name} (#${request.id})\n> *Estado:* ${outcome}\n> *Procesado por:* ${user.email}\n${newStatus === 'rejected' && rejection_reason ? `> *Motivo:* ${rejection_reason}` : ''}`,
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, request.created_by, request.client_email);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${request.id}`;
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud de cliente #${request.id} ${outcome}`,
+    html: `
+      <h2>Solicitud ${outcome}</h2>
+      <p><strong>Cliente:</strong> ${request.commercial_name} (#${request.id})</p>
+      <p><strong>Estado:</strong> ${outcome}</p>
+      <p><strong>Procesado por:</strong> ${user.email}</p>
+      ${newStatus === 'rejected' && rejection_reason ? `<p><strong>Motivo:</strong> ${rejection_reason}</p>` : ''}
+      <p>Consulta el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name} (#${request.id})\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}\nDetalle: ${detailLink}`,
+    gmailUserId: user?.id || null,
+    replyTo: user?.email || undefined,
+    from: user?.email || undefined,
   });
   return updatedRequest;
 }
@@ -1125,348 +1235,22 @@ async function grantConsent({ token, audit = {} }) {
   });
 
   // Notificación interna
-  await sendChatMessage({
-    text: `📌 *Consentimiento Confirmado*\n\n🧾 Solicitud: #${updatedRequest.id}\n🏷 Cliente: ${updatedRequest.commercial_name || "N/A"}\n📧 Email: ${updatedRequest.client_email || "N/A"}\n\n⚠ Acción requerida: Revisar solicitud en Backoffice.`
-  });
-
-  return updatedRequest;
-}
-
-if (!token) {
-  const error = new Error("Token de consentimiento no proporcionado.");
-  error.status = 400;
-  throw error;
-}
-const { rows } = await db.query("SELECT * FROM client_requests WHERE lopdp_token = $1", [token]);
-const request = rows[0];
-if (!request) {
-  const error = new Error("Token inválido o la solicitud no existe.");
-  error.status = 404;
-  throw error;
-}
-if (request.lopdp_consent_status === 'granted') {
-  logger.warn(`Intento de re-confirmar consentimiento para la solicitud #${request.id}`);
-  return request;
-}
-const clientIp = audit.ip || null;
-const userAgent = audit.userAgent || null;
-const { rows: updatedRows } = await db.query(
-  `UPDATE client_requests
-      SET lopdp_consent_status = 'granted',
-          status = 'pending_approval',
-          lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
-          lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
-          lopdp_consent_at = now(),
-          lopdp_consent_ip = $2,
-          lopdp_consent_user_agent = $3,
-          updated_at = now()
-      WHERE id = $1
-      RETURNING *`,
-  [request.id, clientIp, userAgent]
-);
-const updatedRequest = updatedRows[0];
-await recordConsentEvent({
-  client_request_id: updatedRequest.id,
-  event_type: "granted",
-  method: "email_link",
-  details: "Consentimiento confirmado por el cliente mediante enlace público.",
-  ip: clientIp,
-  user_agent: userAgent,
-});
-await sendChatMessage({
-  lopdpConsentAt, null, null, consentEmailTokenId || null
-    ];
-const { rows } = await dbClient.query(query, dbValues);
-const newRequest = rows[0];
-await dbClient.query("COMMIT");
-
-if (consentCaptureMethod === "email_link" && hasVerifiedToken) {
-  await markConsentEmailTokenAsUsed(consentEmailTokenId, newRequest.id);
-  await recordConsentEvent({
-    client_request_id: newRequest.id,
-    event_type: "granted",
-    method: "email_link",
-    details: `Consentimiento confirmado con ${maskConsentCode(
-      verifiedConsentToken?.code_last_four,
-    )
-      } enviado a ${consentRecipientEmail || client_email} `,
-    actor_email: user.email,
-    actor_role: user.role,
-    actor_name: user.fullname || user.name || null,
-  });
-} else if (consentCaptureMethod === "email_link") {
-  const consentLink = `${FRONTEND_URL} /auth/consent / ${lopdp_token} `;
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by, updatedRequest.client_email);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
   await sendMail({
-    to: consentRecipientEmail || client_email,
-    subject: "Autorización para el Tratamiento de Datos Personales",
-    html: `< h2 > Confirmación de Uso de Datos</h2 ><p>Hola,</p><p>Se ha iniciado un proceso de registro como cliente en nuestro sistema. Para continuar, necesitamos tu autorización para el tratamiento de tus datos personales según la normativa vigente.</p><p>Por favor, haz clic en el siguiente enlace para confirmar tu autorización:</p><p><a href="${consentLink}" target="_blank">Autorizar y continuar</a></p><p>Si no has solicitado este registro, puedes ignorar este correo.</p>`,
-  });
-
-  await recordConsentEvent({
-    client_request_id: newRequest.id,
-    event_type: "request_sent",
-    method: "email_link",
-    details: `Correo enviado a ${consentRecipientEmail || client_email} `,
-    actor_email: user.email,
-    actor_role: user.role,
-    actor_name: user.fullname || user.name || null,
-  });
-} else {
-  await recordConsentEvent({
-    client_request_id: newRequest.id,
-    event_type: "granted",
-    method: consentCaptureMethod,
-    details: consentCaptureDetails || "Consentimiento registrado manualmente",
-    actor_email: user.email,
-    actor_role: user.role,
-    actor_name: user.fullname || user.name || null,
-    evidence_file_id: fileIds.consent_evidence_file_id || null,
-  });
-}
-
-await sendChatMessage({
-  text: `* Nueva Solicitud de Cliente para Revisión *\n > * Cliente:* ${commercial_name} \n > * Tipo:* ${data.client_type} \n > * Solicitante:* ${user.email} \n > * Acción Requerida:* Revisar y aprobar / rechazar en el dashboard de Backoffice.`,
-});
-return newRequest;
-} catch (error) {
-  await dbClient.query("ROLLBACK");
-  logger.error("Error creando la solicitud de cliente:", error);
-  throw error;
-} finally {
-  dbClient.release();
-}
-}
-
-async function listClientRequests({ page = 1, pageSize = 25, status, q }) {
-  const offset = (page - 1) * pageSize;
-  const params = [];
-  let whereClause = "WHERE 1=1";
-  if (status) {
-    params.push(status);
-    whereClause += ` AND status = $${params.length} `;
-  }
-  if (q) {
-    params.push(`% ${q.toLowerCase()}% `);
-    const qIndex = params.length;
-    whereClause += ` AND(LOWER(commercial_name) LIKE $${qIndex} OR LOWER(ruc_cedula) LIKE $${qIndex} OR CAST(id AS TEXT) LIKE $${qIndex})`;
-  }
-  const countQuery = `SELECT COUNT(*) FROM client_requests ${whereClause} `;
-  const totalResult = await db.query(countQuery, params);
-  const total = parseInt(totalResult.rows[0].count, 10);
-  const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2} `;
-  const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
-  return { count: total, rows, page, pageSize };
-}
-
-async function getClientRequestById(id, user) {
-  if (!id || !user) throw new Error("ID de solicitud y usuario son obligatorios.");
-  const { rows } = await db.query(
-    `SELECT cr.*, COALESCE(
-    (
-      SELECT json_agg(row_to_json(history))
-          FROM(
-        SELECT id, event_type, method, details, evidence_file_id, actor_email, actor_role,
-        actor_name, ip, user_agent, created_at
-            FROM client_request_consents
-            WHERE client_request_id = cr.id
-            ORDER BY created_at
-      ) history
-  ), '[]':: json
-      ) AS consent_history
-     FROM client_requests cr
-     WHERE cr.id = $1`,
-    [id]
-  );
-  const request = rows[0];
-  if (!request) {
-    const error = new Error("Solicitud no encontrada.");
-    error.status = 404;
-    throw error;
-  }
-  const allowedRoles = ["backoffice_comercial", "gerencia"];
-  const isAllowed = allowedRoles.includes(user.role) || request.created_by === user.email;
-  if (!isAllowed) {
-    const error = new Error("Acceso denegado a esta solicitud.");
-    error.status = 403;
-    throw error;
-  }
-  return request;
-}
-
-async function processClientRequest({ id, user, action, rejection_reason }) {
-  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
-  const request = rows[0];
-  if (!request) {
-    const error = new Error("Solicitud no encontrada.");
-    error.status = 404;
-    throw error;
-  }
-  if (request.status !== 'pending_approval' && request.status !== 'pending_consent') {
-    const error = new Error(`La solicitud ya ha sido procesada(estado: ${request.status}).`);
-    error.status = 400;
-    throw error;
-  }
-  const newStatus = action === 'approve' ? 'approved' : 'rejected';
-  if (newStatus === 'approved' && request.lopdp_consent_status !== 'granted') {
-    const error = new Error("No se puede aprobar una solicitud sin el consentimiento LOPDP del cliente.");
-    error.status = 400;
-    throw error;
-  }
-  const { rows: updatedRows } = await db.query(
-    "UPDATE client_requests SET status = $1, rejection_reason = $2, updated_at = now() WHERE id = $3 RETURNING *",
-    [newStatus, newStatus === 'rejected' ? rejection_reason : null, id]
-  );
-  const updatedRequest = updatedRows[0];
-  if (newStatus === 'approved') {
-    await moveClientFolderToApproved(request.drive_folder_id);
-  }
-  const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
-  await sendChatMessage({
-    text: `* Actualización de Solicitud de Cliente *\n > * Cliente:* ${request.commercial_name} (#${request.id}) \n > * Estado:* ${outcome} \n > * Procesado por:* ${user.email} \n${newStatus === 'rejected' && rejection_reason ? `> *Motivo:* ${rejection_reason}` : ''} `,
-  });
-  return updatedRequest;
-}
-
-async function grantConsent({ token, audit = {} }) {
-  if (!token) {
-    const error = new Error("Token de consentimiento no proporcionado.");
-    error.status = 400;
-    throw error;
-  }
-  const { rows } = await db.query("SELECT * FROM client_requests WHERE lopdp_token = $1", [token]);
-  const request = rows[0];
-  if (!request) {
-    const error = new Error("Token inválido o la solicitud no existe.");
-    error.status = 404;
-    throw error;
-  }
-  if (request.lopdp_consent_status === 'granted') {
-    logger.warn(`Intento de re - confirmar consentimiento para la solicitud #${request.id} `);
-    return request;
-  }
-  const clientIp = audit.ip || null;
-  const userAgent = audit.userAgent || null;
-  const { rows: updatedRows } = await db.query(
-    `UPDATE client_requests
-      SET lopdp_consent_status = 'granted',
-  status = 'pending_approval',
-  lopdp_consent_method = COALESCE(lopdp_consent_method, 'email_link'),
-  lopdp_consent_details = 'Consentimiento confirmado desde enlace público',
-  lopdp_consent_at = now(),
-  lopdp_consent_ip = $2,
-  lopdp_consent_user_agent = $3,
-  updated_at = now()
-      WHERE id = $1
-RETURNING * `,
-    [request.id, clientIp, userAgent]
-  );
-  const updatedRequest = updatedRows[0];
-  await recordConsentEvent({
-    client_request_id: updatedRequest.id,
-    event_type: "granted",
-    method: "email_link",
-    details: "Consentimiento confirmado por el cliente mediante enlace público.",
-    ip: clientIp,
-    user_agent: userAgent,
-  });
-  await sendChatMessage({
-    text: `* Consentimiento Recibido - Listo para Aprobación *\n > * Cliente:* ${request.commercial_name} (#${request.id}) \n > * Acción Requerida:* La solicitud ha recibido el consentimiento del cliente y está lista para su revisión final.`,
-  });
-  return updatedRequest;
-}
-
-
-async function sendConsentEmailToken({ user, client_email, recipient_email, client_name }) {
-  const email = recipient_email || client_email;
-  if (!email) {
-    const error = new Error("Se requiere un correo electrónico.");
-    error.status = 400;
-    throw error;
-  }
-
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
-  const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
-
-  const { rows } = await db.query(
-    `INSERT INTO client_request_consent_tokens(token, code, client_email, created_by, expires_at)
-VALUES($1, $2, $3, $4, $5) RETURNING id, token, client_email, expires_at`,
-    [token, code, email, user.email, expiresAt]
-  );
-
-  const tokenData = rows[0];
-
-  await gmailService.sendEmail({
-    to: email,
-    subject: "Código de Verificación - FamSPI",
+    to: recipients,
+    subject: `Consentimiento confirmado para solicitud #${updatedRequest.id}`,
     html: `
-  < h2 > Código de Verificación</h2 >
-      <p>Hola ${client_name || "Cliente"},</p>
-      <p>Para continuar con tu registro, por favor utiliza el siguiente código de verificación:</p>
-      <h1 style="color: #2563EB; font-size: 32px; letter-spacing: 5px;">${code}</h1>
-      <p>Este código expira en 24 horas.</p>
-`
+      <h2>Consentimiento confirmado</h2>
+      <p><strong>Solicitud:</strong> #${updatedRequest.id}</p>
+      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name || "N/A"}</p>
+      <p><strong>Email:</strong> ${updatedRequest.client_email || "N/A"}</p>
+      <p>Revisar la solicitud en Backoffice: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Consentimiento confirmado\nSolicitud: #${updatedRequest.id}\nCliente: ${updatedRequest.commercial_name || "N/A"}\nEmail: ${updatedRequest.client_email || "N/A"}\nRevisar: ${detailLink}`,
   });
 
-  return tokenData;
-}
-
-async function verifyConsentEmailToken({ user, token_id, code }) {
-  const { rows } = await db.query(
-    `SELECT * FROM client_request_consent_tokens WHERE id = $1`,
-    [token_id]
-  );
-  const tokenData = rows[0];
-
-  if (!tokenData) {
-    const error = new Error("Token de verificación no encontrado.");
-    error.status = 404;
-    throw error;
-  }
-  if (tokenData.used_at) {
-    const error = new Error("Este código ya ha sido utilizado.");
-    error.status = 400;
-    throw error;
-  }
-  if (new Date() > new Date(tokenData.expires_at)) {
-    const error = new Error("El código ha expirado.");
-    error.status = 400;
-    throw error;
-  }
-  if (tokenData.code !== code) {
-    const error = new Error("Código incorrecto.");
-    error.status = 400;
-    throw error;
-  }
-
-  const { rows: updatedRows } = await db.query(
-    `UPDATE client_request_consent_tokens 
-     SET verified_at = NOW(), used_at = NOW() 
-     WHERE id = $1 RETURNING * `,
-    [token_id]
-  );
-
-  return updatedRows[0];
-}
-
-async function assertVerifiedConsentEmailToken({ tokenId, email }) {
-  const { rows } = await db.query(
-    `SELECT * FROM client_request_consent_tokens WHERE id = $1`,
-    [tokenId]
-  );
-  const token = rows[0];
-  if (!token) throw new Error("Token de verificación inválido.");
-  if (token.client_email !== email) throw new Error("El correo verificado no coincide con el de la solicitud.");
-  if (!token.verified_at) throw new Error("El código no ha sido verificado aún.");
-  return token;
-}
-
-async function markConsentEmailTokenAsUsed(tokenId, requestId) {
-  return true;
-}
-
-function maskConsentCode(code) {
-  return "****" + (code || "").slice(-2);
+  return updatedRequest;
 }
 
 async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
@@ -1513,7 +1297,7 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
       file.mimetype,
       driveFolderId,
     );
-    const dbFieldName = `${fieldName} _id`;
+    const dbFieldName = `${fieldName}_id`;
     fileIds[dbFieldName] = uploadedFile.id;
   });
   await Promise.all(fileUploadPromises);
@@ -1538,7 +1322,7 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   const newStatus = request.lopdp_consent_status === 'granted' ? 'pending_approval' : 'pending_consent';
 
   const values = [];
-  let setClause = fieldsToUpdate.map((field) => {
+  const setParts = fieldsToUpdate.map((field) => {
     let val;
     if (field.endsWith("_id")) {
       if (fileIds[field]) {
@@ -1555,28 +1339,39 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
       return `${field} = $${values.length} `;
     }
     return null;
-  }).filter(Boolean).join(", ");
+  }).filter(Boolean);
 
-  if (setClause) {
-    values.push(newStatus);
-    setClause += `, status = $${values.length} `;
-    setClause += `, rejection_reason = NULL`;
-    setClause += `, updated_at = now()`;
+  values.push(newStatus);
+  setParts.push(`status = $${values.length} `);
+  setParts.push(`rejection_reason = NULL`);
+  setParts.push(`updated_at = now()`);
 
-    const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING * `;
-    values.push(id);
+  const setClause = setParts.join(", ");
 
-    const { rows: updatedRows } = await db.query(query, values);
-    const updatedRequest = updatedRows[0];
+  const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING * `;
+  values.push(id);
 
-    await sendChatMessage({
-      text: `* Solicitud Corregida y Reenviada *\n > * Cliente:* ${updatedRequest.commercial_name} (#${updatedRequest.id}) \n > * Acción:* El usuario ha corregido la solicitud rechazada.Pendiente de nueva revisión.`,
-    });
+  const { rows: updatedRows } = await db.query(query, values);
+  const updatedRequest = updatedRows[0];
 
-    return updatedRequest;
-  } else {
-    return request;
-  }
+  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by);
+  const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
+  await sendMail({
+    to: recipients,
+    subject: `Solicitud de cliente #${updatedRequest.id} corregida`,
+    html: `
+      <h2>Solicitud corregida y reenviada</h2>
+      <p><strong>Cliente:</strong> ${updatedRequest.commercial_name} (#${updatedRequest.id})</p>
+      <p>El usuario ha corregido la solicitud previamente rechazada. Está pendiente de nueva revisión.</p>
+      <p>Revisar en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+    `,
+    text: `Solicitud corregida y reenviada\nCliente: ${updatedRequest.commercial_name} (#${updatedRequest.id})\nPendiente de nueva revisión. Ver en SPI: ${detailLink}`,
+    gmailUserId: user?.id || null,
+    replyTo: user?.email || undefined,
+    from: user?.email || undefined,
+  });
+
+  return updatedRequest;
 }
 
 module.exports = {

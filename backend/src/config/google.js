@@ -23,6 +23,7 @@ const scopes = [
   "https://www.googleapis.com/auth/drive.file",
   "https://www.googleapis.com/auth/drive.readonly",
   "https://www.googleapis.com/auth/documents",
+  "https://www.googleapis.com/auth/calendar",
 ];
 
 const jwtOptions = {
@@ -43,6 +44,7 @@ const jwtClient = new google.auth.JWT(jwtOptions);
 
 const drive = google.drive({ version: "v3", auth: jwtClient });
 const docs = google.docs({ version: "v1", auth: jwtClient });
+const calendar = google.calendar({ version: "v3", auth: jwtClient });
 
 // ===============================================================
 // 🧪 Función de prueba rápida de autenticación
@@ -73,4 +75,4 @@ if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
   );
 }
 
-module.exports = { drive, docs, jwtClient };
+module.exports = { drive, docs, calendar, jwtClient };

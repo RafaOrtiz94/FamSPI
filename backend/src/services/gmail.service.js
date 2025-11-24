@@ -11,12 +11,10 @@ const { google } = require('googleapis');
 const db = require('../config/db');
 const logger = require('../config/logger');
 
-// Configuración OAuth 2.0 (usando las credenciales existentes del proyecto)
-const oauth2Client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GMAIL_REDIRECT_URI || `${process.env.BACKEND_URL}/api/gmail/auth/callback`
-);
+// IMPORTANTE: Usar el mismo oauth2Client que se usa para login
+// para evitar inconsistencias en redirect_uri
+const { oauth2Client } = require('../config/oauth');
+
 
 /**
  * Genera la URL de autorización para que el usuario conceda acceso
@@ -29,11 +27,15 @@ const getAuthUrl = (userEmail) => {
         'https://www.googleapis.com/auth/gmail.compose'
     ];
 
+    // IMPORTANTE: Especificar explícitamente la redirect_uri para Gmail
+    const gmailRedirectUri = process.env.GMAIL_REDIRECT_URI || `${process.env.BACKEND_URL}/api/gmail/auth/callback`;
+
     return oauth2Client.generateAuthUrl({
         access_type: 'offline', // Solicita refresh token
         scope: scopes,
         state: Buffer.from(userEmail).toString('base64'), // Pasamos el email en el state
-        prompt: 'consent' // Fuerza el consentimiento para obtener refresh token
+        prompt: 'consent', // Fuerza el consentimiento para obtener refresh token
+        redirect_uri: gmailRedirectUri // Especificar la URI de Gmail
     });
 };
 
@@ -43,7 +45,18 @@ const getAuthUrl = (userEmail) => {
  * @returns {Object} Tokens de acceso y refresh
  */
 const getTokensFromCode = async (code) => {
-    const { tokens } = await oauth2Client.getToken(code);
+    // IMPORTANTE: Pasar la misma redirect_uri que se usó en generateAuthUrl
+    const gmailRedirectUri = process.env.GMAIL_REDIRECT_URI || `${process.env.BACKEND_URL}/api/gmail/auth/callback`;
+
+    const { tokens } = await oauth2Client.getToken({
+        code,
+        redirect_uri: gmailRedirectUri
+    });
+
+    logger.info(`[GMAIL] Tokens obtenidos del código de autorización`);
+    logger.info(`[GMAIL] Access token presente: ${!!tokens.access_token}`);
+    logger.info(`[GMAIL] Refresh token presente: ${!!tokens.refresh_token}`);
+    logger.info(`[GMAIL] Expiry date: ${tokens.expiry_date ? new Date(tokens.expiry_date).toISOString() : 'N/A'}`);
     return tokens;
 };
 
@@ -94,7 +107,8 @@ const getUserTokens = async (userId) => {
     return {
         access_token: tokenData.access_token,
         refresh_token: tokenData.refresh_token,
-        expiry_date: tokenData.expiry_date ? new Date(tokenData.expiry_date).getTime() : null
+        expiry_date: tokenData.expiry_date ? new Date(tokenData.expiry_date).getTime() : null,
+        email: tokenData.email || null
     };
 };
 
@@ -110,14 +124,36 @@ const refreshUserTokens = async (userId) => {
         throw new Error('No hay refresh token disponible. El usuario debe volver a autorizar.');
     }
 
-    oauth2Client.setCredentials(tokens);
+    // Asegurar que tengamos el email asociado para la fila de tokens
+    let userEmail = tokens.email;
+    if (!userEmail) {
+        const userQuery = 'SELECT email FROM users WHERE id = $1';
+        const userResult = await db.query(userQuery, [userId]);
+        if (userResult.rows.length === 0) {
+            throw new Error(`Usuario ${userId} no encontrado para refrescar tokens`);
+        }
+        userEmail = userResult.rows[0].email;
+    }
 
-    const { credentials } = await oauth2Client.refreshAccessToken();
+    // IMPORTANTE: Configurar la redirect_uri de Gmail antes de refrescar
+    const gmailRedirectUri = process.env.GMAIL_REDIRECT_URI || `${process.env.BACKEND_URL}/api/gmail/auth/callback`;
+    const originalRedirectUri = oauth2Client.redirectUri;
 
-    // Guardar los nuevos tokens
-    await saveUserTokens(userId, null, credentials);
+    try {
+        // Temporalmente cambiar la redirect_uri para que coincida con la usada al obtener el token
+        oauth2Client.redirectUri = gmailRedirectUri;
+        oauth2Client.setCredentials(tokens);
 
-    return credentials;
+        const { credentials } = await oauth2Client.refreshAccessToken();
+
+        // Guardar los nuevos tokens con el email garantizado
+        await saveUserTokens(userId, userEmail, credentials);
+
+        return credentials;
+    } finally {
+        // Restaurar la redirect_uri original
+        oauth2Client.redirectUri = originalRedirectUri;
+    }
 };
 
 /**

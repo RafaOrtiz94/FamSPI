@@ -178,6 +178,7 @@ const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
 const attendanceRoutes = require("./modules/attendance/attendance.routes");
 const gmailRoutes = require("./modules/gmail/gmail.routes");
+const equipmentPurchaseRoutes = require("./modules/equipment-purchases/equipmentPurchases.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -233,6 +234,7 @@ app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
 app.use("/api/v1/attendance", attendanceRoutes);
 app.use("/api/v1/gmail", gmailRoutes);
+app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

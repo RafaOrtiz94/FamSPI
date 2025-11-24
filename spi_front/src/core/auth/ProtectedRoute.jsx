@@ -114,6 +114,7 @@ export const RoleRedirect = () => {
     comercial: "/dashboard/comercial",
     jefe_comercial: "/dashboard/comercial",
     backoffice_comercial: "/dashboard/comercial",
+    acp_comercial: "/dashboard/comercial",
     servicio_tecnico: "/dashboard/servicio-tecnico",
     "servicio-tecnico": "/dashboard/servicio-tecnico",
     jefe_tecnico: "/dashboard/servicio-tecnico",

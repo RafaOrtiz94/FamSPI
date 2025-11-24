@@ -207,7 +207,6 @@ const CreateRequestModal = ({
   onClose,
   onSubmit,
   presetType = null,
-  canUploadClientFiles = true,
   initialData = null,
   isEditing = false,
 }) => {
@@ -523,7 +522,6 @@ const CreateRequestModal = ({
             <NewClientRequestForm
               className="mt-2"
               showIntro={false}
-              canUploadFiles={canUploadClientFiles}
               onCancel={onClose}
               onSuccess={() => {
                 onClose();

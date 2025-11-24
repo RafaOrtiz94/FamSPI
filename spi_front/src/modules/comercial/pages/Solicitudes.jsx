@@ -3,8 +3,6 @@ import { FiSearch, FiX, FiFileText, FiPaperclip, FiClipboard } from "react-icons
 
 import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
-import { useAuth } from "../../../core/auth/AuthContext";
-import { canManageClientRequests } from "../constants/clientPermissions";
 
 import {
     getRequests,
@@ -33,7 +31,6 @@ const safeJSON = (txt) => {
 
 const SolicitudesPage = () => {
     const { showToast, confirm } = useUI();
-    const { user } = useAuth();
     const [query, setQuery] = useState("");
     const [status, setStatus] = useState("all");
     const [modalOpen, setModalOpen] = useState(false);
@@ -45,9 +42,6 @@ const SolicitudesPage = () => {
         data: null,
         error: null,
     });
-
-    const normalizedScope = (user?.scope || user?.role || "").toLowerCase();
-    const canCreateClients = canManageClientRequests(normalizedScope);
 
     // Request action cards configuration
     const requestActionCards = [
@@ -203,12 +197,10 @@ const SolicitudesPage = () => {
                             ctaLabel="Crear Solicitud"
                         />
                     ))}
-                    {canCreateClients && (
-                        <NewClientActionCard
-                            className="h-full"
-                            onClick={() => openRequestModal("cliente")}
-                        />
-                    )}
+                    <NewClientActionCard
+                        className="h-full"
+                        onClick={() => openRequestModal("cliente")}
+                    />
                 </div>
             </Card>
 
@@ -288,7 +280,6 @@ const SolicitudesPage = () => {
                 }}
                 onSubmit={handleCreate}
                 presetType={presetRequestType}
-                canUploadClientFiles={canCreateClients}
             />
 
             <RequestDetailModal

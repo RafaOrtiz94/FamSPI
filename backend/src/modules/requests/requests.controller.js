@@ -168,6 +168,7 @@ exports.createRequest = asyncHandler(async (req, res) => {
         replyTo: user.email,
         senderName: user.fullname || user.name || user.email,
         delegatedUser: user.email,
+        gmailUserId: user.id,
       });
     } catch (mailErr) {
       logger.warn("⚠️ No se pudo enviar correo:", mailErr.message);
@@ -357,11 +358,14 @@ exports.createClientRequest = asyncHandler(async (req, res) => {
 // ============================================================
 exports.listClientRequests = asyncHandler(async (req, res) => {
   const { page = 1, pageSize = 25, status, q } = req.query;
+  const isMyRequests = req.path.includes("/my");
+
   const result = await service.listClientRequests({
     page: parseInt(page),
     pageSize: parseInt(pageSize),
     status,
     q,
+    createdBy: isMyRequests ? req.user.email : undefined,
   });
 
   await logAction({

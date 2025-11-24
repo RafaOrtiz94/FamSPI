@@ -24,6 +24,7 @@ import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
 import ClientesPage from "../modules/comercial/pages/Clientes";
 import InventarioPage from "../modules/comercial/pages/Inventario";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
+import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
@@ -67,6 +68,7 @@ const AppRoutes = () => {
               "comercial",
               "jefe_comercial",
               "backoffice_comercial",
+              "acp_comercial",
               "servicio_tecnico",
               "jefe_tecnico",
               "jefe_servicio_tecnico",
@@ -89,11 +91,12 @@ const AppRoutes = () => {
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
           {/* Subrutas Comercial */}
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti"]} />}>
+          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti", "acp_comercial"]} />}>
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/inventario" element={<InventarioPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
+            <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
