@@ -6,7 +6,9 @@
  */
 
 const logger = require("../config/logger");
+const { gmail, jwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
+const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText } = require("./googleChat");
 require("dotenv").config();
 
@@ -69,6 +71,77 @@ async function sendViaGmail({
   return { delivered: true, via: "gmail", response };
 }
 
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
+  const lines = [
+    `From: ${from}`,
+    `To: ${Array.isArray(to) ? to.join(", ") : to}`,
+  ];
+
+  if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.join(", ") : cc}`);
+  if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.join(", ") : bcc}`);
+  if (replyTo) lines.push(`Reply-To: ${replyTo}`);
+
+  lines.push(`Subject: ${subject}`);
+  lines.push("MIME-Version: 1.0");
+  lines.push("Content-Type: text/html; charset=utf-8");
+  lines.push("");
+  lines.push(html || text || "");
+
+  return Buffer.from(lines.join("\r\n"))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+};
+
+async function sendViaServiceAccount({
+  to,
+  subject,
+  html,
+  text,
+  cc,
+  bcc,
+  replyTo,
+  from,
+}) {
+  const delegatedFrom =
+    resolveDelegatedUser(from) ||
+    resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
+    resolveDelegatedUser(process.env.SMTP_FROM) ||
+    resolveDelegatedUser(process.env.SMTP_USER);
+
+  if (!delegatedFrom) {
+    throw new Error("No hay remitente delegado configurado para el envío de correos");
+  }
+
+  await jwtClient.authorize();
+
+  const raw = encodeMessage({
+    from: delegatedFrom,
+    to,
+    subject,
+    html,
+    text,
+    cc,
+    bcc,
+    replyTo: replyTo || delegatedFrom,
+  });
+
+  const response = await gmail.users.messages.send({
+    userId: "me",
+    requestBody: { raw },
+  });
+
+  logger.info("[MAILER] Email enviado con service account", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "service_account",
+    delegatedUser: delegatedFrom,
+  });
+
+  return { delivered: true, via: "service_account", response };
+}
+
 async function sendMail({
   to,
   subject,
@@ -101,32 +174,27 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
     });
   } catch (error) {
-    // Si el error es por falta de autorización del usuario, intentar con el usuario predeterminado
-    if (error.message?.includes("autorizar") && gmailUserId && gmailUserId !== DEFAULT_GMAIL_USER_ID) {
-      logger.warn(`[MAILER] Usuario ${gmailUserId} no tiene Gmail autorizado, usando cuenta predeterminada`);
+    logger.warn(
+      `[MAILER] Error enviando con Gmail OAuth (${error.message}). Intentando con service account...`
+    );
 
-      if (DEFAULT_GMAIL_USER_ID) {
-        try {
-          return await sendViaGmail({
-            gmailUserId: DEFAULT_GMAIL_USER_ID,
-            to,
-            subject,
-            html,
-            text: text || (!html ? undefined : htmlToText(html)),
-            cc,
-            bcc,
-            replyTo,
-            from: fromAddress || delegatedUser || undefined,
-          });
-        } catch (fallbackError) {
-          logger.error({ err: fallbackError }, "[MAILER] Error con cuenta predeterminada");
-          throw new Error(`No se pudo enviar el correo. El usuario no tiene Gmail autorizado y la cuenta predeterminada falló: ${fallbackError.message}`);
-        }
-      }
+    try {
+      return await sendViaServiceAccount({
+        to,
+        subject,
+        html,
+        text: text || (!html ? undefined : htmlToText(html)),
+        cc,
+        bcc,
+        replyTo,
+        from: fromAddress || delegatedUser || undefined,
+      });
+    } catch (fallbackError) {
+      logger.error({ err: fallbackError }, "[MAILER] Fallback con service account falló");
+      throw new Error(
+        `No se pudo enviar el correo (Gmail OAuth y service account fallaron): ${fallbackError.message}`
+      );
     }
-
-    logger.error({ err: error }, "[MAILER] Error enviando correo con Gmail");
-    throw error;
   }
 }
 
