@@ -155,8 +155,10 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
 
-    // Set fixed fields
-    const periodDate = new Date(startDate);
+    // Parse startDate correctly to avoid timezone issues
+    // If startDate is "2025-11-01", we want Nov 2025, not Oct 2025 due to UTC offset
+    const [year, month, day] = startDate.split('-').map(Number);
+    const periodDate = new Date(year, month - 1, day); // month is 0-indexed
     const periodYear = periodDate.getFullYear();
     const periodMonth = periodDate.getMonth();
     const daysInMonth = new Date(periodYear, periodMonth + 1, 0).getDate();
@@ -197,8 +199,11 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             continue;
         }
 
-        const currentDate = new Date(periodYear, periodMonth, day);
-        const isWeekend = [0, 6].includes(currentDate.getDay());
+        // Create date at noon to avoid timezone issues
+        const currentDate = new Date(periodYear, periodMonth, day, 12, 0, 0);
+        const dayOfWeek = currentDate.getDay();
+        // 0 = Sunday, 6 = Saturday
+        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
         const horaEntrada = record ? formatTime(record.entry_time) : "";
         const horaSalidaAlmuerzo = record
@@ -209,16 +214,48 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             : "";
         const horaSalida = record ? formatTime(record.exit_time) : "";
 
+        // IMPORTANT: Field order in template
+        // hora_entrada_X = Entry time
+        // hora_salida_a_X = Lunch START (exit for lunch)
+        // hora_entrada_a_X = Lunch END (return from lunch)
+        // hora_salida_X = Exit time
         setFieldText(form, `hora_entrada_${day}`, horaEntrada);
-        setFieldText(form, `hora_salida_${day}`, horaSalida);
         setFieldText(form, `hora_salida_a_${day}`, horaSalidaAlmuerzo);
         setFieldText(form, `hora_entrada_a_${day}`, horaEntradaAlmuerzo);
+        setFieldText(form, `hora_salida_${day}`, horaSalida);
         setFieldText(
             form,
             `ra_observaciones_${day}`,
             isWeekend ? "FIN DE SEMANA" : ""
         );
 
+        // First cycle signature: entry_time + lunch_start_time
+        const hasFirstCycle = record && record.entry_time && record.lunch_start_time;
+        if (hasFirstCycle && signatureBuffer) {
+            await setFieldSignature(
+                pdfDoc,
+                form,
+                `Firma_${day}`,
+                signatureBuffer
+            );
+        } else {
+            await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
+        }
+
+        // Second cycle signature: lunch_end_time + exit_time
+        const hasSecondCycle = record && record.lunch_end_time && record.exit_time;
+        if (hasSecondCycle && signatureBuffer) {
+            await setFieldSignature(
+                pdfDoc,
+                form,
+                `Firma_S_${day}`,
+                signatureBuffer
+            );
+        } else {
+            await setFieldSignature(pdfDoc, form, `Firma_S_${day}`, null, "", true);
+        }
+
+        // Track last complete attendance date for final signature
         if (hasAllTimes(record)) {
             const recordDate = new Date(record.date);
             if (
@@ -227,48 +264,39 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
             ) {
                 lastCompleteAttendanceDate = recordDate;
             }
-
-            if (signatureBuffer) {
-                await setFieldSignature(
-                    pdfDoc,
-                    form,
-                    `Firma_${day}`,
-                    signatureBuffer
-                );
-            }
-        } else {
-            await setFieldSignature(pdfDoc, form, `Firma_${day}`, null, "", true);
         }
     }
 
     // Signatures at the bottom of the template
-    const lastAttendanceStr = lastCompleteAttendanceDate
-        ? lastCompleteAttendanceDate.toLocaleDateString("es-EC")
-        : null;
-    const signatureNote = signatureBuffer && lastAttendanceStr
-        ? `Firmado electrónicamente el ${lastAttendanceStr}`
-        : lastAttendanceStr
-        ? `Última asistencia registrada: ${lastAttendanceStr}`
+    // Use the last day of the month for the final signature
+    const lastDayOfMonth = new Date(periodYear, periodMonth + 1, 0);
+    const lastDayStr = lastDayOfMonth.toLocaleDateString("es-EC");
+
+    const signatureNote = signatureBuffer
+        ? `Firmado electrónicamente el ${lastDayStr}`
         : "Firma no disponible";
 
+    // Firma_uno should always have both the PNG and the date of the last day of the month
     await setFieldSignature(
         pdfDoc,
         form,
         "Firma_uno",
-        signatureBuffer && lastAttendanceStr ? signatureBuffer : null,
+        signatureBuffer,
         signatureNote
     );
     await setFieldSignature(
         pdfDoc,
         form,
         "Firma_dos",
-        signatureBuffer && lastAttendanceStr ? signatureBuffer : null
+        signatureBuffer,
+        signatureNote
     );
     await setFieldSignature(
         pdfDoc,
         form,
         "firma_dos",
-        signatureBuffer && lastAttendanceStr ? signatureBuffer : null
+        signatureBuffer,
+        signatureNote
     );
 
     form.flatten();

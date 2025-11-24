@@ -17,6 +17,7 @@ import { getRequests } from "../../core/api/requestsApi";
 import { getMantenimientos } from "../../core/api/mantenimientosApi";
 import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
+import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 
@@ -161,8 +162,11 @@ const DashboardOperaciones = () => {
         />
       </div>
 
-      {/* Attendance Widget */}
-      <AttendanceWidget />
+      {/* Widgets */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <AttendanceWidget />
+        <ClientRequestWidget />
+      </div>
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-5 lg:col-span-2 space-y-4">

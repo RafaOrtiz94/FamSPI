@@ -41,6 +41,7 @@ import RequestsPage from "../modules/RequestsPage";
 import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
+import ConfigurationPage from "../pages/ConfigurationPage";
 
 const AppRoutes = () => {
   return (
@@ -120,6 +121,7 @@ const AppRoutes = () => {
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
+          <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
         </Route>
       </Route>

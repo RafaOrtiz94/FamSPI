@@ -3,6 +3,7 @@ import { FiAlertCircle } from "react-icons/fi";
 import { useUI } from "../../../core/ui/useUI";
 import {
   createClientRequest,
+  updateClientRequest,
   sendConsentEmailToken,
   verifyConsentEmailToken,
 } from "../../../core/api/requestsApi";
@@ -48,7 +49,7 @@ const FILE_REQUIREMENTS = {
   },
   ruc_file: {
     label: "RUC del cliente",
-    helper: "Obligatorio para todos los clientes (PDF).",
+    helper: "Opcional (PDF).",
   },
   legal_rep_appointment_file: {
     label: "Nombramiento del representante legal",
@@ -131,7 +132,7 @@ const initialFilesState = {
 };
 
 const requiredFilesByType = (type, permitStatus, consentMethod) => {
-  const files = ["id_file", "ruc_file"];
+  const files = ["id_file"];
   if (type === "persona_juridica") {
     files.push("legal_rep_appointment_file");
   }
@@ -151,9 +152,15 @@ const NewClientRequestForm = ({
   onSuccess,
   showIntro = true,
   successMessage = "Solicitud registrada. El consentimiento se gestionará según el método elegido.",
+  initialData = null,
+  isEditing = false,
 }) => {
   const { showToast } = useUI();
-  const [formData, setFormData] = useState(initialFormState);
+  const [formData, setFormData] = useState(
+    initialData
+      ? { ...initialFormState, ...initialData, data_processing_consent: true } // Asumimos consentimiento si ya existe (o se debe volver a pedir?)
+      : initialFormState
+  );
   const [files, setFiles] = useState(initialFilesState);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -430,12 +437,18 @@ const NewClientRequestForm = ({
       if (payload.consent_capture_method !== "email_link") {
         delete payload.consent_email_token_id;
       }
-      await createClientRequest(payload, files);
-      const successCopy =
-        selectedMethod === "email_link"
-          ? successMessage
-          : "Solicitud registrada y el consentimiento quedó auditado con tu evidencia.";
-      showToast(successCopy, "success");
+
+      if (isEditing) {
+        await updateClientRequest(initialData.id, payload, files);
+        showToast("Solicitud corregida y reenviada correctamente.", "success");
+      } else {
+        await createClientRequest(payload, files);
+        const successCopy =
+          selectedMethod === "email_link"
+            ? successMessage
+            : "Solicitud registrada y el consentimiento quedó auditado con tu evidencia.";
+        showToast(successCopy, "success");
+      }
       resetForm();
       onSuccess?.();
     } catch (error) {
@@ -510,17 +523,15 @@ const NewClientRequestForm = ({
                 type="button"
                 onClick={() => handleConsentMethodChange(option.value)}
                 disabled={disabledBody}
-                className={`text-left rounded-2xl border p-4 transition focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500 ${
-                  isSelected
-                    ? "border-blue-500 bg-blue-50 text-blue-900 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-50"
-                    : "border-gray-200 bg-white hover:border-blue-300 dark:border-gray-700 dark:bg-gray-900"
-                } ${disabledBody ? "pointer-events-none" : ""}`}
+                className={`text-left rounded-2xl border p-4 transition focus:outline-none focus:ring-2 focus:ring-blue-200 dark:focus:ring-blue-500 ${isSelected
+                  ? "border-blue-500 bg-blue-50 text-blue-900 dark:border-blue-400 dark:bg-blue-950/30 dark:text-blue-50"
+                  : "border-gray-200 bg-white hover:border-blue-300 dark:border-gray-700 dark:bg-gray-900"
+                  } ${disabledBody ? "pointer-events-none" : ""}`}
               >
                 <div className="flex items-center gap-2 text-sm font-semibold">
                   <span
-                    className={`inline-flex h-4 w-4 items-center justify-center rounded-full border ${
-                      isSelected ? "border-blue-600 bg-blue-600" : "border-gray-300"
-                    }`}
+                    className={`inline-flex h-4 w-4 items-center justify-center rounded-full border ${isSelected ? "border-blue-600 bg-blue-600" : "border-gray-300"
+                      }`}
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-white" />
                   </span>
@@ -549,11 +560,10 @@ const NewClientRequestForm = ({
         )}
         {consentMethodIsEmail && (
           <div
-            className={`mt-4 rounded-2xl border p-4 text-sm shadow-sm transition ${
-              isTokenVerified
-                ? "border-emerald-300 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
-                : "border-blue-200 bg-blue-50/70 dark:border-blue-900/40 dark:bg-blue-950/10"
-            } ${disabledBody ? "opacity-60" : ""}`}
+            className={`mt-4 rounded-2xl border p-4 text-sm shadow-sm transition ${isTokenVerified
+              ? "border-emerald-300 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/20"
+              : "border-blue-200 bg-blue-50/70 dark:border-blue-900/40 dark:bg-blue-950/10"
+              } ${disabledBody ? "opacity-60" : ""}`}
           >
             <p className="text-gray-700 dark:text-gray-200">
               Envía un código automático al correo del cliente. Solo podrás continuar cuando el cliente te confirme el código y lo
@@ -607,11 +617,11 @@ const NewClientRequestForm = ({
               {isTokenVerified && consentTokenState.verifiedAt
                 ? `Consentimiento confirmado el ${new Date(consentTokenState.verifiedAt).toLocaleString("es-EC")}.`
                 : tokenExpiresAt
-                ? `El código actual vence a las ${tokenExpiresAt.toLocaleTimeString("es-EC", {
+                  ? `El código actual vence a las ${tokenExpiresAt.toLocaleTimeString("es-EC", {
                     hour: "2-digit",
                     minute: "2-digit",
                   })}.`
-                : "El cliente deberá compartir el código recibido para que puedas continuar."}
+                  : "El cliente deberá compartir el código recibido para que puedas continuar."}
             </div>
             {errors.consent_email_token_id && (
               <p className="mt-2 text-xs text-red-600 dark:text-red-400">{errors.consent_email_token_id}</p>
@@ -980,9 +990,8 @@ const InputField = ({ label, name, value, onChange, type = "text", required = fa
       onChange={onChange}
       required={required}
       disabled={disabled}
-      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
-        error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
+        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />
     {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
   </label>
@@ -997,9 +1006,8 @@ const TextAreaField = ({ label, name, value, onChange, required = false, error, 
       onChange={onChange}
       rows={rows}
       disabled={disabled}
-      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${
-        error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
+        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />
     {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
   </label>
@@ -1014,9 +1022,8 @@ const FileInput = ({ label, name, onChange, required, helper, error, disabled })
       accept="application/pdf"
       onChange={onChange}
       disabled={disabled}
-      className={`mt-2 w-full cursor-pointer rounded-xl border border-dashed px-3 py-2 text-sm text-gray-700 transition hover:border-blue-400 dark:border-gray-600 dark:text-gray-200 ${
-        error ? "border-red-400" : "border-gray-300"
-      } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+      className={`mt-2 w-full cursor-pointer rounded-xl border border-dashed px-3 py-2 text-sm text-gray-700 transition hover:border-blue-400 dark:border-gray-600 dark:text-gray-200 ${error ? "border-red-400" : "border-gray-300"
+        } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />
     <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{helper}</p>
     {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}

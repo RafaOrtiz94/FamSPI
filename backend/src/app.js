@@ -177,6 +177,7 @@ const departmentsRoutes = require("./modules/departments/departments.routes");
 const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
 const attendanceRoutes = require("./modules/attendance/attendance.routes");
+const gmailRoutes = require("./modules/gmail/gmail.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -199,6 +200,7 @@ app.use("/api/v1/auth", authRoutes);
 app.use((req, res, next) => {
   if (
     req.path.startsWith("/api/v1/auth/google") ||
+    req.path.startsWith("/api/v1/gmail/auth/callback") ||
     req.path.startsWith("/health")
   ) {
     return next();
@@ -230,6 +232,7 @@ app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
 app.use("/api/v1/attendance", attendanceRoutes);
+app.use("/api/v1/gmail", gmailRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

@@ -256,14 +256,14 @@ const AttendanceWidget = () => {
     const progress = calculateProgress();
 
     return (
-        <Card className="max-w-4xl mx-auto p-4 sm:p-5 bg-gradient-to-br from-white to-blue-50 shadow-md">
+        <Card className="p-3 sm:p-4 bg-gradient-to-br from-white to-blue-50 shadow-sm">
             {/* Header */}
-            <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-2">
                     {statusInfo.icon}
-                    <h3 className="text-lg font-bold text-gray-900">Mi Asistencia</h3>
+                    <h3 className="text-base font-bold text-gray-900">Mi Asistencia</h3>
                 </div>
-                <div className="text-2xl font-mono font-bold text-blue-600">
+                <div className="text-lg font-mono font-bold text-blue-600">
                     {currentTime.toLocaleTimeString("es-EC", {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -277,19 +277,19 @@ const AttendanceWidget = () => {
             <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className={`text-center font-semibold mb-4 ${statusInfo.color}`}
+                className={`text-center text-sm font-semibold mb-3 ${statusInfo.color}`}
             >
                 {statusInfo.message}
             </motion.div>
 
             {/* Progress Bar */}
             {attendance?.entry_time && !attendance?.exit_time && (
-                <div className="mb-6">
-                    <div className="flex justify-between text-[11px] text-gray-600 mb-2">
+                <div className="mb-4">
+                    <div className="flex justify-between text-[10px] text-gray-600 mb-1">
                         <span>Progreso del día</span>
                         <span className="font-bold">{progress}%</span>
                     </div>
-                    <div className="h-2.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
                         <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${progress}%` }}
@@ -301,43 +301,43 @@ const AttendanceWidget = () => {
             )}
 
             {/* Time Grid */}
-            <div className="grid grid-cols-2 gap-3 mb-6 text-sm">
+            <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
                 <motion.div
                     whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-xl p-3 shadow-sm border border-green-100"
+                    className="bg-white rounded-lg p-2 shadow-sm border border-green-100"
                 >
-                    <div className="text-gray-500 text-xs mb-1 font-medium">✅ Entrada</div>
-                    <div className="font-bold text-base text-green-600">
+                    <div className="text-gray-500 text-[10px] mb-1 font-medium">✅ Entrada</div>
+                    <div className="font-bold text-sm text-green-600">
                         {formatTime(attendance?.entry_time)}
                     </div>
                 </motion.div>
 
                 <motion.div
                     whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-xl p-3 shadow-sm border border-orange-100"
+                    className="bg-white rounded-lg p-2 shadow-sm border border-orange-100"
                 >
-                    <div className="text-gray-500 text-xs mb-1 font-medium">🍽️ Almuerzo</div>
-                    <div className="font-bold text-base text-orange-600">
+                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🍽️ Almuerzo</div>
+                    <div className="font-bold text-sm text-orange-600">
                         {formatTime(attendance?.lunch_start_time)}
                     </div>
                 </motion.div>
 
                 <motion.div
                     whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-xl p-3 shadow-sm border border-blue-100"
+                    className="bg-white rounded-lg p-2 shadow-sm border border-blue-100"
                 >
-                    <div className="text-gray-500 text-xs mb-1 font-medium">🔙 Regreso</div>
-                    <div className="font-bold text-base text-blue-600">
+                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🔙 Regreso</div>
+                    <div className="font-bold text-sm text-blue-600">
                         {formatTime(attendance?.lunch_end_time)}
                     </div>
                 </motion.div>
 
                 <motion.div
                     whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-xl p-3 shadow-sm border border-red-100"
+                    className="bg-white rounded-lg p-2 shadow-sm border border-red-100"
                 >
-                    <div className="text-gray-500 text-xs mb-1 font-medium">🏁 Salida</div>
-                    <div className="font-bold text-base text-red-600">
+                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🏁 Salida</div>
+                    <div className="font-bold text-sm text-red-600">
                         {formatTime(attendance?.exit_time)}
                     </div>
                 </motion.div>
