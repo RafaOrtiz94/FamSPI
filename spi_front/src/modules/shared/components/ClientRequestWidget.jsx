@@ -23,8 +23,6 @@ const ClientRequestWidget = ({ compact = false, className = "" }) => {
 
     // Cualquier usuario autenticado puede crear solicitudes de cliente
     const canCreateClient = !!user;
-    // Solo Jefe Comercial y Admin pueden subir archivos
-    const canUploadFiles = user?.role === "jefe_comercial" || user?.role === "admin";
 
     useEffect(() => {
         if (user) {
@@ -109,7 +107,6 @@ const ClientRequestWidget = ({ compact = false, className = "" }) => {
                     maxWidth="max-w-4xl"
                 >
                     <NewClientRequestForm
-                        canUploadFiles={canUploadFiles}
                         onCancel={handleCloseModal}
                         onSuccess={handleSuccess}
                         showIntro={true}
@@ -203,7 +200,6 @@ const ClientRequestWidget = ({ compact = false, className = "" }) => {
                 maxWidth="max-w-4xl"
             >
                 <NewClientRequestForm
-                    canUploadFiles={canUploadFiles}
                     onCancel={handleCloseModal}
                     onSuccess={handleSuccess}
                     showIntro={!editingRequest}

@@ -3,15 +3,10 @@ import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { FiArrowLeft } from "react-icons/fi";
 
-import { useAuth } from "../../../core/auth/AuthContext";
 import NewClientRequestForm from "../components/NewClientRequestForm";
-import { canManageClientRequests } from "../constants/clientPermissions";
 
 const NewClientRequest = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const normalizedScope = (user?.scope || user?.role || "").toLowerCase();
-  const canUploadFiles = canManageClientRequests(normalizedScope);
 
   return (
     <motion.div
@@ -37,7 +32,6 @@ const NewClientRequest = () => {
       </div>
 
       <NewClientRequestForm
-        canUploadFiles={canUploadFiles}
         onCancel={() => navigate("/dashboard/comercial")}
         onSuccess={() => navigate("/dashboard/comercial")}
       />

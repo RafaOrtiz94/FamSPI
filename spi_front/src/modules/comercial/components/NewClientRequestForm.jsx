@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { FiAlertCircle } from "react-icons/fi";
 import { useUI } from "../../../core/ui/useUI";
 import {
@@ -147,7 +147,6 @@ const requiredFilesByType = (type, permitStatus, consentMethod) => {
 
 const NewClientRequestForm = ({
   className = "",
-  canUploadFiles = true,
   onCancel,
   onSuccess,
   showIntro = true,
@@ -182,6 +181,19 @@ const NewClientRequestForm = ({
       ),
     [formData.client_type, formData.operating_permit_status, formData.consent_capture_method],
   );
+
+  useEffect(() => {
+    if (!initialData?.consent_email_token_id) return;
+
+    setConsentTokenState((prev) => ({
+      ...prev,
+      status: "verified",
+      tokenId: initialData.consent_email_token_id,
+      verifiedAt: initialData.consent_email_verified_at || prev.verifiedAt,
+      lastEmail: (initialData.consent_recipient_email || initialData.client_email || "").toLowerCase(),
+    }));
+    setConsentTokenCode("");
+  }, [initialData]);
 
   const resetConsentTokenFlow = () => {
     setConsentTokenState({ status: "idle", tokenId: null, expiresAt: null, verifiedAt: null, lastEmail: "" });
@@ -399,16 +411,12 @@ const NewClientRequestForm = ({
       LEGAL_REQUIRED_FIELDS.forEach(checkField);
     }
 
-    if (!canUploadFiles) {
-      validationErrors.filesPermission = "No tienes permisos para adjuntar documentos de clientes.";
-    } else {
-      const missingFiles = requiredFiles.filter((field) => !files[field]);
-      if (missingFiles.length) {
-        validationErrors.files = missingFiles.reduce((acc, field) => {
-          acc[field] = "Adjunta este documento";
-          return acc;
-        }, {});
-      }
+    const missingFiles = requiredFiles.filter((field) => !files[field]);
+    if (missingFiles.length) {
+      validationErrors.files = missingFiles.reduce((acc, field) => {
+        acc[field] = "Adjunta este documento";
+        return acc;
+      }, {});
     }
 
     return validationErrors;
@@ -461,7 +469,8 @@ const NewClientRequestForm = ({
   };
 
   const disabledBody = !formData.data_processing_consent;
-  const disableFiles = !canUploadFiles || disabledBody;
+  const disableFiles = disabledBody;
+  const previouslyVerifiedByCode = Boolean(initialData?.consent_email_token_id);
   const consentMethodIsEmail = formData.consent_capture_method === "email_link";
   const tokenStatus = consentTokenState.status;
   const tokenExpiresAt = consentTokenState.expiresAt
@@ -569,6 +578,12 @@ const NewClientRequestForm = ({
               Envía un código automático al correo del cliente. Solo podrás continuar cuando el cliente te confirme el código y lo
               registres aquí mismo.
             </p>
+            {previouslyVerifiedByCode && (
+              <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/20 dark:text-emerald-100">
+                Ya se aprobó el consentimiento mediante código anteriormente. Puedes reenviar o validar un nuevo código si el
+                cliente lo solicita, sin perder el registro previo.
+              </div>
+            )}
             <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
               <InputField
                 name="consent_recipient_email"
@@ -939,14 +954,6 @@ const NewClientRequestForm = ({
               );
             })}
           </div>
-          {!canUploadFiles && (
-            <p className="md:col-span-2 text-xs text-amber-600 dark:text-amber-300">
-              Contacta a tu jefe comercial para habilitar la carga de documentos.
-            </p>
-          )}
-          {errors.filesPermission && (
-            <p className="md:col-span-2 text-xs text-red-600 dark:text-red-400">{errors.filesPermission}</p>
-          )}
         </Section>
       </fieldset>
 
