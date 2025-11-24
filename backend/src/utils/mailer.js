@@ -119,9 +119,18 @@ async function sendViaServiceAccount({
   try {
     await delegatedAuth.authorize();
   } catch (err) {
-    throw new Error(
-      `La service account no está autorizada para enviar como ${delegatedFrom}: ${err.message}`,
-    );
+    const baseMessage = `La service account no está autorizada para enviar como ${delegatedFrom}`;
+
+    // Mejora de trazabilidad: mensaje específico cuando el problema es la delegación
+    if (err?.message === "unauthorized_client") {
+      throw new Error(
+        `${baseMessage}: el cliente de API no tiene delegación habilitada para los scopes de Gmail. ` +
+          "Valida en la consola de Admin que la delegación esté activa para la Service Account " +
+          "y que incluya el scope https://www.googleapis.com/auth/gmail.send",
+      );
+    }
+
+    throw new Error(`${baseMessage}: ${err.message}`);
   }
 
   const raw = encodeMessage({
