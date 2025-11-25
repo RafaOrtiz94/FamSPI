@@ -42,4 +42,26 @@ router.post(
   ctrl.uploadContract,
 );
 
+router.post(
+  "/:id/renew-reservation",
+  verifyToken,
+  requireRole(allowedRoles),
+  ctrl.renewReservation,
+);
+
+router.post(
+  "/:id/cancel-order",
+  verifyToken,
+  requireRole(allowedRoles),
+  ctrl.cancelOrder,
+);
+
+router.post(
+  "/:id/submit-signed-proforma-with-inspection",
+  verifyToken,
+  requireRole(allowedRoles),
+  ctrl.upload.single("file"),
+  ctrl.submitSignedProformaWithInspection,
+);
+
 module.exports = router;

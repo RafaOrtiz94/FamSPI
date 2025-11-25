@@ -48,7 +48,7 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    const { client_id, client_name, client_email, provider_email, equipment, notes } = req.body;
+    const { client_id, client_name, client_business_name, client_email, client_sector, provider_email, equipment, notes } = req.body;
     const parsedEquipment = Array.isArray(equipment)
       ? equipment
       : typeof equipment === "string"
@@ -59,7 +59,9 @@ exports.create = async (req, res, next) => {
       user: req.user,
       clientId: client_id,
       clientName: client_name,
+      clientBusinessName: client_business_name,
       clientEmail: client_email,
+      clientSector: client_sector,
       providerEmail: provider_email,
       equipment: parsedEquipment,
       notes,
@@ -184,6 +186,49 @@ exports.uploadContract = async (req, res, next) => {
       file: req.file,
     });
     res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.renewReservation = async (req, res, next) => {
+  try {
+    const updated = await service.renewReservation({ id: req.params.id, user: req.user });
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.cancelOrder = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    const updated = await service.cancelOrder({ id: req.params.id, user: req.user, reason });
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.submitSignedProformaWithInspection = async (req, res, next) => {
+  try {
+    const { inspection_min_date, inspection_max_date, includes_starter_kit } = req.body;
+    const file = req.file; // Multer pone el archivo en req.file, no en req.body
+
+    const result = await service.submitSignedProformaWithInspection({
+      id: req.params.id,
+      user: req.user,
+      file,
+      inspection_min_date,
+      inspection_max_date,
+      includes_starter_kit: includes_starter_kit === 'true' || includes_starter_kit === true
+    });
+
+    res.json({
+      ok: true,
+      message: "Proforma firmada subida e inspección de ambiente creada",
+      data: result
+    });
   } catch (error) {
     next(error);
   }

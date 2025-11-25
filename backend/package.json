@@ -38,6 +38,7 @@
     "joi": "^18.0.1",
     "jsonwebtoken": "^9.0.2",
     "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
     "nodemailer": "^7.0.10",
     "oracledb": "^6.10.0",
     "pdf-lib": "^1.17.1",
