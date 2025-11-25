@@ -5,6 +5,7 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
+const { createRequest } = require("../requests/requests.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -80,6 +81,44 @@ async function getRootFolder() {
   const rootId = DEFAULT_ROOT_ENV_KEYS.map((key) => process.env[key]).find(Boolean);
   if (rootId) return { id: rootId };
   return ensureFolder(ROOT_FOLDER_NAME);
+}
+
+async function getClientDetails(clientId) {
+  if (!clientId) return null;
+  const { rows } = await db.query(
+    `SELECT id, commercial_name, client_email, shipping_contact_name, shipping_phone, shipping_cellphone, shipping_address
+       FROM client_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [clientId],
+  );
+  return rows[0] || null;
+}
+
+function buildInspectionPayload({ request, clientInfo, inspection_min_date, inspection_max_date, includes_starter_kit }) {
+  const equipment = Array.isArray(request.equipment) ? request.equipment : [];
+  const equipos = equipment.map((item) => ({
+    nombre_equipo: item.name || item.sku || item.id || "Equipo",
+    estado: item.type || item.estado || item.serial || "",
+  }));
+
+  const anotaciones = includes_starter_kit
+    ? "Incluye kit de arranque"
+    : "No incluye kit de arranque";
+
+  return {
+    nombre_cliente: request.client_name || clientInfo?.commercial_name || "",
+    direccion_cliente: clientInfo?.shipping_address || "",
+    persona_contacto: clientInfo?.shipping_contact_name || "",
+    celular_contacto: clientInfo?.shipping_phone || clientInfo?.shipping_cellphone || "",
+    fecha_instalacion: inspection_min_date,
+    fecha_tope_instalacion: inspection_max_date || "",
+    requiere_lis: false,
+    equipos,
+    anotaciones,
+    accesorios: "",
+    observaciones: request.notes || "",
+  };
 }
 
 async function ensureRequestFolder(clientName, requestId, requestDate) {
@@ -474,7 +513,14 @@ async function submitSignedProformaWithInspection({
   inspection_max_date,
   includes_starter_kit,
 }) {
-  return uploadSignedProforma({
+  if (!inspection_min_date || !inspection_max_date) {
+    throw new Error("Las fechas de inspección mínima y máxima son obligatorias");
+  }
+
+  const request = await getById(id, user.id);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const signedResult = await uploadSignedProforma({
     id,
     user,
     file,
@@ -482,6 +528,25 @@ async function submitSignedProformaWithInspection({
     inspection_max_date,
     includes_starter_kit,
   });
+
+  const clientInfo = await getClientDetails(request.client_id);
+  const payload = buildInspectionPayload({
+    request,
+    clientInfo,
+    inspection_min_date,
+    inspection_max_date,
+    includes_starter_kit,
+  });
+
+  const inspectionRequest = await createRequest({
+    requester_id: user.id,
+    requester_email: user.email,
+    requester_name: user.fullname || user.name || null,
+    request_type_id: "F.ST-20",
+    payload,
+  });
+
+  return { purchase_request: signedResult, inspection_request: inspectionRequest };
 }
 
 async function uploadContract({ id, user, file }) {
