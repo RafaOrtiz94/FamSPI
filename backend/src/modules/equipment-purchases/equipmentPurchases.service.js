@@ -6,7 +6,10 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
 
+const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
+const COMMERCIAL_FOLDER_NAME = "Comercial";
+const PURCHASES_FOLDER_NAME = "Solicitudes de Compra de Equipos";
 const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
@@ -74,14 +77,23 @@ async function ensureTables() {
 }
 
 async function getRootFolder() {
+  const rootId = DEFAULT_ROOT_ENV_KEYS.map((key) => process.env[key]).find(Boolean);
+  if (rootId) return { id: rootId };
   return ensureFolder(ROOT_FOLDER_NAME);
 }
 
-async function ensureRequestFolder(clientName, requestId) {
+async function ensureRequestFolder(clientName, requestId, requestDate) {
   const root = await getRootFolder();
-  const clientFolder = await ensureFolder(clientName, root.id);
-  const safeRequestName = `Solicitud ${requestId}`;
-  const requestFolder = await ensureFolder(safeRequestName, clientFolder.id);
+
+  const comercialFolder = await ensureFolder(COMMERCIAL_FOLDER_NAME, root.id);
+  const purchasesFolder = await ensureFolder(PURCHASES_FOLDER_NAME, comercialFolder.id);
+
+  const paddedId = String(requestId).padStart(4, "0");
+  const safeName = (clientName || "").trim().replace(/[\/\\:*?"<>|]/g, "-");
+  const dateStr = requestDate ? new Date(requestDate).toISOString().split("T")[0] : "";
+  const requestFolderName = `${paddedId} - ${safeName}${dateStr ? ` - ${dateStr}` : ""}`;
+
+  const requestFolder = await ensureFolder(requestFolderName, purchasesFolder.id);
   return requestFolder.id;
 }
 
@@ -186,7 +198,8 @@ async function createRequest({ user, clientId, clientName, clientEmail, provider
   }
 
   const id = uuidv4();
-  const folderId = await ensureRequestFolder(clientName, id);
+  const createdAt = new Date();
+  const folderId = await ensureRequestFolder(clientName, id, createdAt);
 
   const equipmentList = equipment
     .map((item) => `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}`)
