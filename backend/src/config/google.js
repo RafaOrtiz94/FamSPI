@@ -1,14 +1,14 @@
 // src/config/google.js
+
 const { google } = require("googleapis");
 const logger = require("./logger");
 const {
   googleDelegatedUser,
   googleKeyPath,
-  hasGoogleDelegation,
 } = require("../utils/googleCredentials");
 
 // ===============================================================
-// 🔐 Autenticación con cuenta de servicio + delegación de dominio
+// 🔐 Cargar clave JSON de la Service Account
 // ===============================================================
 let key;
 try {
@@ -18,61 +18,75 @@ try {
   throw err;
 }
 
+// ===============================================================
+// 📌 Scopes permitidos en tu dominio Workspace (actualizado)
+// ===============================================================
 const scopes = [
   "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/drive.readonly",
+  "https://www.googleapis.com/auth/drive.metadata",
+  "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/documents",
-  "https://www.googleapis.com/auth/calendar",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/calendar", // 👈 agregado correctamente
 ];
 
-const jwtOptions = {
-  email: process.env.GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL || key.client_email,
-  key: key.private_key,
-  scopes,
-};
+// ===============================================================
+// 👤 Impersonación obligatoria (Domain-wide Delegation)
+// ===============================================================
+if (!googleDelegatedUser) {
+  logger.error(`
+❌ ERROR FATAL: No se definió GOOGLE_SUBJECT en el archivo .env
 
-if (hasGoogleDelegation) {
-  jwtOptions.subject = googleDelegatedUser; // Impersonación dominio
-} else {
-  logger.info(
-    "Google APIs sin delegación: asegúrate de compartir los recursos con la Service Account."
-  );
+Debes agregar por ejemplo:
+
+GOOGLE_SUBJECT=automatizaciones@famproject.com.ec
+
+`);
+  process.exit(1);
 }
 
-const jwtClient = new google.auth.JWT(jwtOptions);
+const jwtClient = new google.auth.JWT({
+  email: key.client_email,
+  key: key.private_key.replace(/\\n/g, "\n"), // versión correcta
+  scopes,
+  subject: googleDelegatedUser,
+});
+
+// ===============================================================
+// 🔧 Clientes Google API
+// ===============================================================
+
+function createDelegatedJwtClient(subject) {
+  return new google.auth.JWT({
+    email: key.client_email,
+    key: key.private_key.replace(/\\n/g, "\n"),
+    scopes,
+    subject,
+  });
+}
 
 const drive = google.drive({ version: "v3", auth: jwtClient });
 const docs = google.docs({ version: "v1", auth: jwtClient });
+const gmail = google.gmail({ version: "v1", auth: jwtClient });
 const calendar = google.calendar({ version: "v3", auth: jwtClient });
 
 // ===============================================================
-// 🧪 Función de prueba rápida de autenticación
+// 🧪 Test opcional
 // ===============================================================
 async function testGoogleAuth() {
   try {
-    const res = await drive.files.list({ pageSize: 1, supportsAllDrives: true });
-    logger.info("✅ Conexión Drive OK →", res.data.files?.[0]?.name || "sin archivos");
+    const res = await drive.files.list({ pageSize: 1 });
+    logger.info(`✅ Google Drive OK → ${res.data.files?.[0]?.name || "sin archivos"}`);
   } catch (error) {
-    logger.error("❌ Error autenticando con Google APIs:", error.message);
-    const detail =
-      error.response?.data?.error_description ||
-      error.response?.data?.error?.message ||
-      error.message;
-    if (detail) {
-      logger.error("ℹ️ Detalle:", detail);
-    }
+    logger.error("❌ Error autenticando Google:", error.response?.data || error.message);
   }
 }
 
 if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
-  testGoogleAuth().catch((error) =>
-    logger.warn("⚠️ testGoogleAuth falló:", error.message)
-  );
+  testGoogleAuth();
 } else {
-  logger.info(
-    "🔕 testGoogleAuth deshabilitado (define ENABLE_GOOGLE_SELF_TEST=true para ejecutarlo en el arranque)"
-  );
+  logger.info("🔕 testGoogleAuth deshabilitado");
 }
 
-module.exports = { drive, docs, calendar, jwtClient };
+module.exports = { drive, docs, gmail, calendar, jwtClient, createDelegatedJwtClient };

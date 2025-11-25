@@ -553,6 +553,7 @@ async function resolveRequestFolder(request_id, templateCode) {
   const templateHint = templateCode || payloadVariant || ctx.type_code;
 
   try {
+    const clientName = ctx.payload?.nombre_cliente || null;
     const folders = await resolveRequestDriveFolders({
       requestId: request_id,
       requestTypeCode: ctx.type_code,
@@ -560,6 +561,7 @@ async function resolveRequestFolder(request_id, templateCode) {
       departmentCode: ctx.department_code,
       departmentName: ctx.department_name,
       templateCode: templateHint,
+      clientName, // ← Pasar nombre de cliente para carpetas identificables
     });
     return { ctx, folders };
   } catch (err) {
@@ -809,9 +811,9 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
 
   const summaryText = summaryItems.length
     ? summaryItems
-        .map((item) => item.replace(/<[^>]+>/g, ""))
-        .map((text) => `• ${text}`)
-        .join("\n")
+      .map((item) => item.replace(/<[^>]+>/g, ""))
+      .map((text) => `• ${text}`)
+      .join("\n")
     : "• Sin detalles adicionales";
 
   const documentLine = document?.link ? `• Documento generado: ${document.link}` : null;

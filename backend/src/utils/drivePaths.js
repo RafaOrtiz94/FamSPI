@@ -42,6 +42,7 @@ async function resolveRequestDriveFolders({
   departmentCode,
   departmentName,
   templateCode,
+  clientName, // ← NUEVO parámetro
 }) {
   const rootId =
     DEFAULT_ROOT_ENV_KEYS.map((key) => process.env[key]).find(Boolean) || null;
@@ -68,9 +69,9 @@ async function resolveRequestDriveFolders({
   const typeLabel = aliasLabel
     ? aliasLabel
     : sanitizeName(
-        requestTypeCode ? `${requestTypeCode} - ${requestTypeTitle || ""}`.trim() : "SinTipo",
-        "SinTipo"
-      );
+      requestTypeCode ? `${requestTypeCode} - ${requestTypeTitle || ""}`.trim() : "SinTipo",
+      "SinTipo"
+    );
   const typeKey = aliasLabel
     ? templateKey
     : (requestTypeCode || typeLabel).toLowerCase();
@@ -81,10 +82,11 @@ async function resolveRequestDriveFolders({
     mapKey: typeKey,
   });
 
-  const templateSuffix = templateCode
-    ? templateCode.replace(/[^a-z0-9]/gi, "")
-    : requestTypeCode?.replace(/[^a-z0-9]/gi, "") || "GEN";
-  const requestFolderName = `REQ-${padId(requestId)}-${templateSuffix}`;
+  // Mejorar nombre de carpeta individual con número y cliente
+  const paddedId = padId(requestId);
+  const clientPart = clientName ? ` - ${sanitizeName(clientName, "")}` : "";
+  const requestFolderName = `REQ-${paddedId}${clientPart}`;
+
   const requestFolder = await ensurePathSegment({
     name: requestFolderName,
     parentId: typeFolder.id,

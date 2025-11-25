@@ -13,6 +13,7 @@ const app = require("./app");
 const logger = require("./config/logger");
 const { checkDbSchema } = require("./utils/dbHealth");
 const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
+const startExpiredReservationsJob = require("./jobs/checkExpiredReservations");
 
 const PORT = process.env.PORT || 4000;
 const ENV = process.env.NODE_ENV || "development";
@@ -23,6 +24,7 @@ const server = app.listen(PORT, () => {
     logger.error({ err }, "❌ Falló la verificación de tablas críticas");
   });
   startReminderScheduler();
+  startExpiredReservationsJob();
 });
 
 // ======================================================

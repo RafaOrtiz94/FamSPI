@@ -92,6 +92,7 @@ const initialFormState = {
   consent_capture_details: "",
   consent_email_token_id: "",
   consent_recipient_email: "",
+  client_sector: "privado", // Nuevo campo: público o privado
   client_type: "persona_natural",
   natural_person_firstname: "",
   natural_person_lastname: "",
@@ -213,11 +214,19 @@ const NewClientRequestForm = ({
     setFormData((prev) => {
       const nextValue = type === "checkbox" ? checked : value;
       const nextState = { ...prev, [name]: nextValue };
+
+      // Si cambia el email del cliente, sincronizar con consent_recipient_email
       if (name === "client_email") {
         if (!prev.consent_recipient_email || prev.consent_recipient_email === prev.client_email) {
           nextState.consent_recipient_email = nextValue;
         }
       }
+
+      // Si el sector es público, siempre debe ser persona jurídica
+      if (name === "client_sector" && value === "publico") {
+        nextState.client_type = "persona_juridica";
+      }
+
       return nextState;
     });
     setErrors((prev) => {
@@ -649,19 +658,40 @@ const NewClientRequestForm = ({
         disabled={disabledBody}
         className={`space-y-6 ${disabledBody ? "cursor-not-allowed opacity-60" : ""}`}
       >
-        <Section title="Tipo de cliente">
+        <Section title="Sector del cliente">
           <div className="md:col-span-2">
             <RadioGroup
-              name="client_type"
-              value={formData.client_type}
+              name="client_sector"
+              value={formData.client_sector}
               onChange={handleChange}
               options={[
-                { label: "Persona natural", value: "persona_natural" },
-                { label: "Persona jurídica", value: "persona_juridica" },
+                { label: "Privado", value: "privado" },
+                { label: "Público", value: "publico" },
               ]}
             />
+            {formData.client_sector === "publico" && (
+              <p className="mt-2 text-sm text-blue-600">
+                Los clientes públicos siempre son personas jurídicas
+              </p>
+            )}
           </div>
         </Section>
+
+        {formData.client_sector === "privado" && (
+          <Section title="Tipo de cliente">
+            <div className="md:col-span-2">
+              <RadioGroup
+                name="client_type"
+                value={formData.client_type}
+                onChange={handleChange}
+                options={[
+                  { label: "Persona natural", value: "persona_natural" },
+                  { label: "Persona jurídica", value: "persona_juridica" },
+                ]}
+              />
+            </div>
+          </Section>
+        )}
 
         {formData.client_type === "persona_natural" ? (
           <Section title="Datos del cliente (persona natural)">

@@ -5,10 +5,26 @@
  * Si no hay cuenta o falla el envío, usa el webhook de Google Chat.
  */
 
+const { google } = require("googleapis");
 const logger = require("../config/logger");
+const { gmail, createDelegatedJwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
-const { htmlToText } = require("./googleChat");
+const { resolveDelegatedUser } = require("./googleCredentials");
+const { htmlToText, sendChatMessage } = require("./googleChat");
 require("dotenv").config();
+
+function logGoogleApiError(err, context = {}) {
+  const payload = {
+    ...context,
+    message: err?.message,
+    code: err?.code,
+    status: err?.response?.status,
+    apiError: err?.response?.data?.error,
+    apiErrorDescription: err?.response?.data?.error_description,
+  };
+
+  logger.error(payload, "[MAILER] Error detallado de Google API");
+}
 
 const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
   ? Number(process.env.GMAIL_DEFAULT_USER_ID)
@@ -69,6 +85,138 @@ async function sendViaGmail({
   return { delivered: true, via: "gmail", response };
 }
 
+const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
+  const lines = [
+    `From: ${from}`,
+    `To: ${Array.isArray(to) ? to.join(", ") : to}`,
+  ];
+
+  if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.join(", ") : cc}`);
+  if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.join(", ") : bcc}`);
+  if (replyTo) lines.push(`Reply-To: ${replyTo}`);
+
+  lines.push(`Subject: ${subject}`);
+  lines.push("MIME-Version: 1.0");
+  lines.push("Content-Type: text/html; charset=utf-8");
+  lines.push("");
+  lines.push(html || text || "");
+
+  return Buffer.from(lines.join("\r\n"))
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+};
+
+async function sendViaServiceAccount({
+  to,
+  subject,
+  html,
+  text,
+  cc,
+  bcc,
+  replyTo,
+  from,
+}) {
+  const delegatedFrom =
+    resolveDelegatedUser(from) ||
+    resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
+    resolveDelegatedUser(process.env.SMTP_FROM) ||
+    resolveDelegatedUser(process.env.SMTP_USER);
+
+  if (!delegatedFrom) {
+    throw new Error("No hay remitente delegado configurado para el envío de correos");
+  }
+
+  const delegatedAuth = createDelegatedJwtClient(delegatedFrom);
+  try {
+    await delegatedAuth.authorize();
+  } catch (err) {
+    logGoogleApiError(err, {
+      step: "service_account_authorize",
+      delegatedFrom,
+      scopes: delegatedAuth?.scopes,
+      clientEmail: delegatedAuth?.email,
+    });
+
+    const baseMessage = `La service account no está autorizada para enviar como ${delegatedFrom}`;
+
+    if (err?.message === "unauthorized_client") {
+      throw new Error(
+        `${baseMessage}: el cliente de API no tiene delegación habilitada para los scopes de Gmail. ` +
+          "Valida en la consola de Admin que la delegación esté activa para la Service Account " +
+          "y que incluya el scope https://www.googleapis.com/auth/gmail.send",
+      );
+    }
+
+    throw new Error(`${baseMessage}: ${err.message}`);
+  }
+
+  const raw = encodeMessage({
+    from: delegatedFrom,
+    to,
+    subject,
+    html,
+    text,
+    cc,
+    bcc,
+    replyTo: replyTo || delegatedFrom,
+  });
+
+  const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
+  let response;
+  try {
+    response = await delegatedGmail.users.messages.send({
+      userId: "me",
+      requestBody: { raw },
+    });
+  } catch (err) {
+    logGoogleApiError(err, {
+      step: "service_account_send",
+      delegatedFrom,
+      to: normalizeRecipients(to),
+      subject,
+    });
+    throw err;
+  }
+
+  logger.info("[MAILER] Email enviado con service account", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "service_account",
+    delegatedUser: delegatedFrom,
+  });
+
+  return { delivered: true, via: "service_account", response };
+}
+
+async function sendViaChatFallback({ to, subject, html, text, cc, bcc, replyTo, from, reason }) {
+  const plainBody = text || (!html ? "" : htmlToText(html));
+  const summaryLines = [
+    `✉️ Fallback Google Chat`,
+    `Asunto: ${subject}`,
+    `Para: ${normalizeRecipients(to)}`,
+  ];
+  if (cc) summaryLines.push(`CC: ${normalizeRecipients(cc)}`);
+  if (bcc) summaryLines.push(`BCC: ${normalizeRecipients(bcc)}`);
+  if (replyTo) summaryLines.push(`Reply-To: ${replyTo}`);
+  if (from) summaryLines.push(`De: ${from}`);
+  if (reason) summaryLines.push(`Motivo: ${reason}`);
+
+  const bodyPreview = plainBody ? `\n\n${plainBody}` : "";
+  const textMessage = `${summaryLines.join("\n")}\n${bodyPreview}`;
+
+  await sendChatMessage({ text: textMessage });
+
+  logger.info("[MAILER] Mensaje enviado a Google Chat como respaldo", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "google_chat",
+  });
+
+  return { delivered: true, via: "google_chat" };
+}
+
 async function sendMail({
   to,
   subject,
@@ -101,32 +249,48 @@ async function sendMail({
       from: fromAddress || delegatedUser || undefined,
     });
   } catch (error) {
-    // Si el error es por falta de autorización del usuario, intentar con el usuario predeterminado
-    if (error.message?.includes("autorizar") && gmailUserId && gmailUserId !== DEFAULT_GMAIL_USER_ID) {
-      logger.warn(`[MAILER] Usuario ${gmailUserId} no tiene Gmail autorizado, usando cuenta predeterminada`);
+    logGoogleApiError(error, {
+      step: "gmail_oauth_send",
+      gmailUserId: gmailUserId || DEFAULT_GMAIL_USER_ID,
+      to: normalizeRecipients(to),
+      subject,
+    });
+    logger.warn(
+      `[MAILER] Error enviando con Gmail OAuth (${error.message}). Intentando con service account...`
+    );
 
-      if (DEFAULT_GMAIL_USER_ID) {
-        try {
-          return await sendViaGmail({
-            gmailUserId: DEFAULT_GMAIL_USER_ID,
-            to,
-            subject,
-            html,
-            text: text || (!html ? undefined : htmlToText(html)),
-            cc,
-            bcc,
-            replyTo,
-            from: fromAddress || delegatedUser || undefined,
-          });
-        } catch (fallbackError) {
-          logger.error({ err: fallbackError }, "[MAILER] Error con cuenta predeterminada");
-          throw new Error(`No se pudo enviar el correo. El usuario no tiene Gmail autorizado y la cuenta predeterminada falló: ${fallbackError.message}`);
-        }
+    try {
+      return await sendViaServiceAccount({
+        to,
+        subject,
+        html,
+        text: text || (!html ? undefined : htmlToText(html)),
+        cc,
+        bcc,
+        replyTo,
+        from: fromAddress || delegatedUser || undefined,
+      });
+    } catch (fallbackError) {
+      logger.error({ err: fallbackError }, "[MAILER] Fallback con service account falló");
+      const reason = `Gmail OAuth y service account fallaron: ${fallbackError.message}`;
+
+      try {
+        return await sendViaChatFallback({
+          to,
+          subject,
+          html,
+          text: text || (!html ? undefined : htmlToText(html)),
+          cc,
+          bcc,
+          replyTo,
+          from: fromAddress || delegatedUser || undefined,
+          reason,
+        });
+      } catch (chatError) {
+        logger.error({ err: chatError }, "[MAILER] Fallback final a Google Chat falló");
+        throw new Error(`No se pudo enviar el correo (${reason}; Chat también falló: ${chatError.message})`);
       }
     }
-
-    logger.error({ err: error }, "[MAILER] Error enviando correo con Gmail");
-    throw error;
   }
 }
 

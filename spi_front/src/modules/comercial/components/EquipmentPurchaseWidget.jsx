@@ -9,6 +9,7 @@ import {
   uploadContract,
   uploadProforma,
   uploadSignedProforma,
+  submitSignedProformaWithInspection,
 } from "../../../core/api/equipmentPurchasesApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -33,6 +34,14 @@ const EquipmentPurchaseWidget = () => {
   const [form, setForm] = useState({ clientId: "", providerEmail: "", equipmentIds: [], notes: "" });
   const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "" });
   const [inspectionDraft, setInspectionDraft] = useState({});
+  const [inspectionModal, setInspectionModal] = useState({
+    open: false,
+    requestId: null,
+    file: null,
+    minDate: "",
+    maxDate: "",
+    includesKit: false
+  });
 
   const loadAll = async () => {
     setLoading(true);
@@ -155,6 +164,30 @@ const EquipmentPurchaseWidget = () => {
     } catch (error) {
       console.error(error);
       showToast("No se pudo enviar la reserva", "error");
+    }
+  };
+  const handleSubmitInspection = async () => {
+    const { requestId, file, minDate, maxDate, includesKit } = inspectionModal;
+
+    if (!file || !minDate || !maxDate) {
+      showToast("Archivo y fechas son obligatorios", "warning");
+      return;
+    }
+
+    try {
+      await submitSignedProformaWithInspection(requestId, {
+        file,
+        inspection_min_date: minDate,
+        inspection_max_date: maxDate,
+        includes_starter_kit: includesKit
+      });
+
+      showToast("Proforma subida e inspección creada exitosamente", "success");
+      setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false });
+      loadAll();
+    } catch (error) {
+      console.error(error);
+      showToast("Error al procesar la solicitud", "error");
     }
   };
 
@@ -292,43 +325,20 @@ const EquipmentPurchaseWidget = () => {
                         <Button size="sm" onClick={() => handleReserve(req.id)}>Enviar reserva</Button>
                       )}
                       {req.status === "waiting_signed_proforma" && (
-                        <div className="space-y-1">
-                          <label className="text-xs text-gray-600 flex items-center gap-2">
-                            <input
-                              type="file"
-                              onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`signed-${req.id}`]: e.target.files?.[0] })}
-                            />
-                          </label>
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                            <input
-                              type="date"
-                              className="border rounded p-1"
-                              placeholder="Fecha mínima inspección"
-                              onChange={(e) => setInspectionDraft((prev) => ({ ...prev, [`min-${req.id}`]: e.target.value }))}
-                            />
-                            <input
-                              type="date"
-                              className="border rounded p-1"
-                              placeholder="Fecha máxima"
-                              onChange={(e) => setInspectionDraft((prev) => ({ ...prev, [`max-${req.id}`]: e.target.value }))}
-                            />
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                onChange={(e) => setInspectionDraft((prev) => ({ ...prev, [`kit-${req.id}`]: e.target.checked }))}
-                              />
-                              Incluye kit de arranque
-                            </label>
-                          </div>
+                        <div className="space-y-2">
                           <Button
                             size="sm"
-                            onClick={() => handleUpload(req.id, "signed", inspectionDraft[`signed-${req.id}`], {
-                              inspection_min_date: inspectionDraft[`min-${req.id}`],
-                              inspection_max_date: inspectionDraft[`max-${req.id}`],
-                              includes_starter_kit: inspectionDraft[`kit-${req.id}`],
+                            fullWidth
+                            onClick={() => setInspectionModal({
+                              open: true,
+                              requestId: req.id,
+                              file: null,
+                              minDate: "",
+                              maxDate: "",
+                              includesKit: false
                             })}
                           >
-                            Subir proforma firmada
+                            📄 Subir proforma firmada e inspección
                           </Button>
                         </div>
                       )}
@@ -359,7 +369,74 @@ const EquipmentPurchaseWidget = () => {
           </table>
         </div>
       </Card>
+      {inspectionModal.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 className="text-lg font-semibold mb-4">Solicitud de Inspección de Ambiente</h3>
 
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Proforma firmada <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => setInspectionModal(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
+                  className="w-full text-sm border rounded p-2"
+                />
+                {inspectionModal.file && (
+                  <p className="text-xs text-green-600 mt-1">✓ {inspectionModal.file.name}</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Fecha mínima de inspección <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={inspectionModal.minDate}
+                  onChange={(e) => setInspectionModal(prev => ({ ...prev, minDate: e.target.value }))}
+                  className="w-full border rounded-lg p-2"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Fecha máxima de inspección <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={inspectionModal.maxDate}
+                  onChange={(e) => setInspectionModal(prev => ({ ...prev, maxDate: e.target.value }))}
+                  className="w-full border rounded-lg p-2"
+                />
+              </div>
+
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={inspectionModal.includesKit}
+                  onChange={(e) => setInspectionModal(prev => ({ ...prev, includesKit: e.target.checked }))}
+                />
+                <span className="text-sm text-gray-700">Incluye kit de arranque</span>
+              </label>
+            </div>
+
+            <div className="flex justify-end gap-3 mt-6">
+              <Button
+                variant="ghost"
+                onClick={() => setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false })}
+              >
+                Cancelar</Button>
+              <Button onClick={handleSubmitInspection}>
+                Crear Solicitud
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
       {responseDraft.open && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-lg p-5 w-full max-w-md">
@@ -410,6 +487,7 @@ const EquipmentPurchaseWidget = () => {
         </div>
       )}
     </div>
+
   );
 };
 
