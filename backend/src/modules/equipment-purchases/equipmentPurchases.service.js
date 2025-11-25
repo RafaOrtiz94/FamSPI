@@ -5,7 +5,7 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
-const { createRequest } = require("../requests/requests.service");
+const { createRequest: createServiceRequest } = require("../requests/requests.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -230,7 +230,15 @@ async function getById(id, userId) {
   };
 }
 
-async function createRequest({ user, clientId, clientName, clientEmail, providerEmail, equipment = [], notes }) {
+async function createPurchaseRequest({
+  user,
+  clientId,
+  clientName,
+  clientEmail,
+  providerEmail,
+  equipment = [],
+  notes,
+}) {
   await ensureTables();
   if (!clientName || !providerEmail || !equipment.length) {
     throw new Error("Cliente, proveedor y al menos un equipo son obligatorios");
@@ -538,7 +546,7 @@ async function submitSignedProformaWithInspection({
     includes_starter_kit,
   });
 
-  const inspectionRequest = await createRequest({
+  const inspectionRequest = await createServiceRequest({
     requester_id: user.id,
     requester_email: user.email,
     requester_name: user.fullname || user.name || null,
@@ -576,7 +584,7 @@ module.exports = {
   getEquipmentCatalog,
   listByUser,
   getById,
-  createRequest,
+  createPurchaseRequest,
   saveProviderResponse,
   requestProforma,
   uploadProforma,

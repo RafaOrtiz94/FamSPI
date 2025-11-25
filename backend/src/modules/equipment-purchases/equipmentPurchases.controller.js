@@ -55,7 +55,7 @@ exports.create = async (req, res, next) => {
         ? JSON.parse(equipment)
         : [];
 
-    const created = await service.createRequest({
+    const created = await service.createPurchaseRequest({
       user: req.user,
       clientId: client_id,
       clientName: client_name,
