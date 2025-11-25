@@ -466,6 +466,24 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
   return rows[0];
 }
 
+async function submitSignedProformaWithInspection({
+  id,
+  user,
+  file,
+  inspection_min_date,
+  inspection_max_date,
+  includes_starter_kit,
+}) {
+  return uploadSignedProforma({
+    id,
+    user,
+    file,
+    inspection_min_date,
+    inspection_max_date,
+    includes_starter_kit,
+  });
+}
+
 async function uploadContract({ id, user, file }) {
   await ensureTables();
   const request = await getById(id, user.id);
@@ -499,6 +517,7 @@ module.exports = {
   uploadProforma,
   reserveEquipment,
   uploadSignedProforma,
+  submitSignedProformaWithInspection,
   uploadContract,
   STATUS,
 };
