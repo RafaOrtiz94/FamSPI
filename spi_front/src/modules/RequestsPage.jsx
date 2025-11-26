@@ -25,6 +25,9 @@ import Select from "../core/ui/components/Select";
 import Card from "../core/ui/components/Card";
 import Modal from "../core/ui/components/Modal";
 import FileUploader from "../core/ui/components/FileUploader";
+import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
+import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
+import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
 
 // ======= Utilidades locales =======
 const statusStyles = {
@@ -65,6 +68,12 @@ const RequestsPage = () => {
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const canCreateRequests = role === "jefe_comercial";
+  const canViewAllRequests = ["jefe_comercial", "administrador", "admin", "gerencia", "gerente"].includes(role);
+  const defaultRequestParams = useMemo(
+    () => (canViewAllRequests ? { pageSize: 30 } : { mine: true, pageSize: 30 }),
+    [canViewAllRequests]
+  );
+  const [showClientManager, setShowClientManager] = useState(false);
 
   // Estado UI
   const [query, setQuery] = useState("");
@@ -96,8 +105,15 @@ const RequestsPage = () => {
 
   // ======= Cargar inicialmente =======
   const load = useCallback(async () => {
-    await fetchRequests();
-  }, [fetchRequests]);
+    try {
+      await fetchRequests(defaultRequestParams);
+    } catch (err) {
+      if (err?.response?.status === 403) {
+        showToast("Mostrando solo tus solicitudes por permisos de acceso.", "warning");
+        await fetchRequests({ ...defaultRequestParams, mine: true });
+      }
+    }
+  }, [fetchRequests, defaultRequestParams, showToast]);
 
   useEffect(() => {
     load();
@@ -186,7 +202,7 @@ const RequestsPage = () => {
       const { files = [], ...payload } = formPayload;
       await createRequest({ request_type_id, payload, files });
       showToast("Solicitud enviada correctamente ✅", "success");
-      await fetchRequests();
+      await fetchRequests(defaultRequestParams);
       handleCloseCreate();
     } catch (err) {
       console.error("❌ Error creando solicitud:", err);
@@ -231,7 +247,7 @@ const RequestsPage = () => {
         const { data } = await api.post(`/requests/${req.id}/cancel`);
         if (data?.ok || data?.success) {
           showToast(`Solicitud #${req.id} cancelada ✅`, "success");
-          await fetchRequests();
+          await fetchRequests(defaultRequestParams);
         } else {
           showToast("No se pudo cancelar la solicitud.", "error");
         }
@@ -247,158 +263,130 @@ const RequestsPage = () => {
   // ======= UI =======
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3 }}>
-      {/* Título + acciones */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
+      {/* Encabezado compacto */}
+      <div className="mb-6 flex flex-col gap-2">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Solicitudes</h1>
-
-        {canCreateRequests ? (
-          <div className="flex flex-wrap gap-2">
-            <Button variant="primary" icon={FiPlus} onClick={() => handleOpenCreate("inspection")}>
-              Nueva inspección
-            </Button>
-            <Button variant="secondary" onClick={() => handleOpenCreate("purchase")}>
-              Compra
-            </Button>
-            <Button variant="secondary" onClick={() => handleOpenCreate("retirement")}>
-              Retiro
-            </Button>
-            <Button variant="secondary" onClick={() => handleOpenCreate("client")}>
-              Cliente
-            </Button>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Solo el Jefe Comercial puede registrar nuevas solicitudes.
-          </p>
-        )}
+        <p className="text-sm text-gray-500 dark:text-gray-400">
+          Solicitudes de cliente, compras y flujos en curso se gestionan desde esta sección.
+        </p>
       </div>
 
-      {canCreateRequests && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <Card>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase">Total</p>
-            <p className="text-2xl font-bold">{solicitudes?.length || 0}</p>
-          </Card>
-          <Card>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase">Aprobadas</p>
-            <p className="text-2xl font-bold">
-              {solicitudes?.filter((s) => (s.status || "").toLowerCase() === "aprobado").length ||
-                0}
+      {/* Accesos compactos */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 mb-6">
+        <Card className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase text-gray-500">Solicitudes de Cliente</p>
+            <p className="text-sm text-gray-800 dark:text-gray-200">Gestiona tus solicitudes</p>
+          </div>
+          <Button
+            size="sm"
+            className="text-xs"
+            onClick={() => setShowClientManager((prev) => !prev)}
+          >
+            {showClientManager ? "Ocultar" : "Abrir"}
+          </Button>
+        </Card>
+
+        <Card className="flex items-center justify-between">
+          <PurchaseHandoffWidget />
+        </Card>
+
+        <Card className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase text-gray-500">Accesos rápidos</p>
+            <p className="text-sm text-gray-800 dark:text-gray-200">Registrar nuevas solicitudes</p>
+          </div>
+          {canCreateRequests ? (
+            <div className="flex flex-col gap-2 text-xs text-right">
+              <Button size="sm" variant="primary" icon={FiPlus} onClick={() => handleOpenCreate("inspection")}>
+                Inspección
+              </Button>
+              <div className="grid grid-cols-3 gap-1">
+                <Button size="xs" variant="secondary" onClick={() => handleOpenCreate("purchase")}>Compra</Button>
+                <Button size="xs" variant="secondary" onClick={() => handleOpenCreate("retirement")}>Retiro</Button>
+                <Button size="xs" variant="secondary" onClick={() => handleOpenCreate("client")}>Cliente</Button>
+              </div>
+            </div>
+          ) : (
+            <p className="w-36 text-right text-xs text-gray-500">
+              Solo el Jefe Comercial puede registrar solicitudes directas.
             </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase">Rechazadas</p>
-            <p className="text-2xl font-bold">
-              {solicitudes?.filter((s) => (s.status || "").toLowerCase() === "rechazado").length ||
-                0}
-            </p>
-          </Card>
-          <Card>
-            <p className="text-xs text-gray-500 dark:text-gray-400 uppercase">Pendientes</p>
-            <p className="text-2xl font-bold">
-              {solicitudes?.filter((s) => (s.status || "").toLowerCase() === "pendiente").length ||
-                0}
-            </p>
-          </Card>
-        </div>
-      )}
+          )}
+        </Card>
+      </div>
 
       {/* Filtros */}
-      <Card className="mb-6">
-        <div className="flex flex-col md:flex-row gap-3 md:items-center">
-          <div className="relative w-full md:max-w-sm">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Buscar por cliente, contacto, observación..."
-              className="w-full pl-10 pr-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-800 dark:text-gray-100 focus:ring-2 focus:ring-blue-500"
+      <Card className="mb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:gap-3">
+            <div className="relative w-full md:max-w-sm">
+              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar por cliente, contacto, observación..."
+                className="w-full rounded-lg border border-gray-300 bg-white py-2 pl-10 pr-3 text-sm text-gray-800 focus:ring-2 focus:ring-blue-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+            </div>
+
+            <Select
+              label=""
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              options={[
+                { value: "all", label: "Todos" },
+                { value: "pendiente", label: "Pendiente" },
+                { value: "en_revision", label: "En revisión" },
+                { value: "aprobado", label: "Aprobado" },
+                { value: "rechazado", label: "Rechazado" },
+                { value: "cancelado", label: "Cancelado" },
+              ]}
+              className="md:w-48"
             />
           </div>
 
-          <Select
-            label=""
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            options={[
-              { value: "all", label: "Todos" },
-              { value: "pendiente", label: "Pendiente" },
-              { value: "en_revision", label: "En revisión" },
-              { value: "aprobado", label: "Aprobado" },
-              { value: "rechazado", label: "Rechazado" },
-              { value: "cancelado", label: "Cancelado" },
-            ]}
-            className="md:w-48"
-          />
+          <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
+            <div>
+              <p className="font-semibold text-gray-800 dark:text-gray-100">{solicitudes?.length || 0}</p>
+              <p>Total</p>
+            </div>
+            <div>
+              <p className="font-semibold text-green-600 dark:text-green-400">
+                {solicitudes?.filter((s) => (s.status || "").toLowerCase() === "aprobado").length || 0}
+              </p>
+              <p>Aprobadas</p>
+            </div>
+            <div>
+              <p className="font-semibold text-amber-600 dark:text-amber-400">
+                {solicitudes?.filter((s) => (s.status || "").toLowerCase() === "pendiente").length || 0}
+              </p>
+              <p>Pendientes</p>
+            </div>
+          </div>
         </div>
       </Card>
 
-      {/* Grid de tarjetas */}
-      {loadingList ? (
-        <div className="text-center py-20 text-gray-500">Cargando...</div>
-      ) : filtered?.length ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filtered.map((req) => {
-            const payload =
-              typeof req.payload === "string" ? safeJSON(req.payload) : (req.payload || {});
-            return (
-              <div
-                key={req.id}
-                className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 flex flex-col gap-3 hover:shadow-lg transition"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-blue-600 dark:text-blue-400">
-                    Solicitud #{req.id}
-                  </span>
-                  <StatusBadge status={req.status} />
-                </div>
-
-                <div className="text-sm space-y-2">
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 dark:text-gray-400">Cliente:</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
-                      {payload?.nombre_cliente || "—"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 dark:text-gray-400">Contacto:</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200 truncate">
-                      {payload?.persona_contacto || "—"}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-gray-500 dark:text-gray-400">Fecha:</span>
-                    <span className="font-medium text-gray-800 dark:text-gray-200">
-                      {new Date(req.created_at).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-3 border-t border-gray-100 dark:border-gray-700">
-                  <button
-                    onClick={() => openDetail(req)}
-                    className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900/40 rounded-lg transition"
-                  >
-                    <FiEye size={16} /> Ver
-                  </button>
-
-                  {canCreateRequests && ["pendiente", "en_revision"].includes(req.status) && (
-                    <button
-                      onClick={() => cancelRequest(req)}
-                      className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 rounded-lg transition"
-                    >
-                      <FiTrash2 size={16} /> Cancelar
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
+      <Card className="mb-6">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Solicitudes en curso</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Usa la barra de búsqueda y la paginación para revisar rápidamente cada tarjeta.
+            </p>
+          </div>
         </div>
-      ) : (
-        <div className="text-center py-16 text-gray-500 dark:text-gray-400 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
-          No se encontraron solicitudes.
-        </div>
+
+        {loadingList ? (
+          <div className="py-10 text-center text-gray-500">Cargando...</div>
+        ) : (
+          <SolicitudesGrid items={filtered || []} onView={openDetail} onCancel={cancelRequest} />
+        )}
+      </Card>
+
+      {showClientManager && (
+        <Card className="mb-6">
+          <ClientRequestManagement />
+        </Card>
       )}
 
       {/* ===== Modal de creación ===== */}
@@ -418,37 +406,37 @@ const RequestsPage = () => {
             onSubmit={submitCreate}
             className={`space-y-4 ${submitting ? "opacity-50 pointer-events-none" : ""}`}
           >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="md:col-span-2 rounded-2xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-100">
-              <p className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-300">
-                Tipo seleccionado
-              </p>
-              <p className="text-lg font-semibold text-blue-900 dark:text-blue-100">
-                {REQUEST_TYPE_LABELS[createModal.type] || "—"}
-              </p>
-              <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
-                Cierra este modal y usa los accesos rápidos para elegir otro flujo.
-              </p>
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div className="md:col-span-2 rounded-2xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/20 dark:text-blue-100">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-500 dark:text-blue-300">
+                  Tipo seleccionado
+                </p>
+                <p className="text-lg font-semibold text-blue-900 dark:text-blue-100">
+                  {REQUEST_TYPE_LABELS[createModal.type] || "—"}
+                </p>
+                <p className="text-xs text-blue-800/80 dark:text-blue-200/80">
+                  Cierra este modal y usa los accesos rápidos para elegir otro flujo.
+                </p>
+              </div>
+              <Input
+                label="Nombre del Cliente"
+                value={formPayload.nombre_cliente}
+                onChange={(e) => setFormPayload((p) => ({ ...p, nombre_cliente: e.target.value }))}
+                placeholder="ACME S.A."
+              />
+              <Input
+                label="Persona de contacto"
+                value={formPayload.persona_contacto}
+                onChange={(e) => setFormPayload((p) => ({ ...p, persona_contacto: e.target.value }))}
+                placeholder="Juan Pérez"
+              />
+              <Input
+                label="Observación"
+                value={formPayload.observacion}
+                onChange={(e) => setFormPayload((p) => ({ ...p, observacion: e.target.value }))}
+                placeholder="Detalles breves…"
+              />
             </div>
-            <Input
-              label="Nombre del Cliente"
-              value={formPayload.nombre_cliente}
-              onChange={(e) => setFormPayload((p) => ({ ...p, nombre_cliente: e.target.value }))}
-              placeholder="ACME S.A."
-            />
-            <Input
-              label="Persona de contacto"
-              value={formPayload.persona_contacto}
-              onChange={(e) => setFormPayload((p) => ({ ...p, persona_contacto: e.target.value }))}
-              placeholder="Juan Pérez"
-            />
-            <Input
-              label="Observación"
-              value={formPayload.observacion}
-              onChange={(e) => setFormPayload((p) => ({ ...p, observacion: e.target.value }))}
-              placeholder="Detalles breves…"
-            />
-          </div>
 
           <div className="mt-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
