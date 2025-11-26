@@ -493,7 +493,6 @@ async function createRequest({
   if (shouldGenerateActa) {
     try {
       doc = await generateActa(request.id, requester_id, schemaKey);
-      await updateRequestStatus(request.id, "acta_generada");
     } catch (e) {
       logger.error("❌ Error generando acta:", e);
     }
@@ -723,7 +722,6 @@ async function generateActa(request_id, uploaded_by, options = {}) {
 
   if (pdf) await drive.files.delete({ fileId: doc.id, supportsAllDrives: true });
 
-  await updateRequestStatus(request_id, "acta_generada");
   await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta", entity: "requests", entity_id: request_id });
 
   return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
