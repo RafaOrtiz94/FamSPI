@@ -10,13 +10,26 @@ import {
   uploadProforma,
   uploadSignedProforma,
   submitSignedProformaWithInspection,
+  startAvailability,
 } from "../../../core/api/equipmentPurchasesApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
-import { FiPackage, FiMail, FiFileText, FiCheckCircle, FiClock, FiAlertCircle, FiDownload } from "react-icons/fi";
+import { useAuth } from "../../../core/auth/AuthContext";
+import { FiPackage, FiMail, FiFileText, FiCheckCircle, FiClock, FiAlertCircle, FiDownload, FiUser } from "react-icons/fi";
 
 const STATUS_CONFIG = {
+  pending_provider_assignment: {
+    label: "Pendiente datos de proveedor (ACP)",
+    icon: FiClock,
+    ledColor: "bg-gray-400",
+    ledGlow: "shadow-lg shadow-gray-400/50",
+    cardBg: "bg-gradient-to-br from-gray-100 via-gray-50 to-white",
+    cardBorder: "border-l-4 border-gray-300",
+    cardShadow: "shadow-gray-200/60",
+    badgeBg: "bg-gray-100",
+    badgeText: "text-gray-700",
+  },
   waiting_provider_response: {
     label: "Esperando respuesta de proveedor",
     icon: FiClock,
@@ -125,11 +138,14 @@ const normalizeResponseItems = (request) => {
 
 const EquipmentPurchaseWidget = () => {
   const { showToast } = useUI();
-  const [meta, setMeta] = useState({ clients: [], equipment: [] });
+  const { user } = useAuth();
+  const role = (user?.role || "").toLowerCase();
+  const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].includes(role);
+  const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ clientId: "", providerEmail: "", equipment: [], notes: "" });
+  const [form, setForm] = useState({ clientId: "", providerEmail: "", assignedTo: "", equipment: [], notes: "" });
   const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "", items: [] });
   const [inspectionDraft, setInspectionDraft] = useState({});
   const [inspectionModal, setInspectionModal] = useState({
@@ -140,6 +156,7 @@ const EquipmentPurchaseWidget = () => {
     maxDate: "",
     includesKit: false
   });
+  const [availabilityDrafts, setAvailabilityDrafts] = useState({});
 
   const loadAll = async () => {
     setLoading(true);
@@ -148,7 +165,7 @@ const EquipmentPurchaseWidget = () => {
         getEquipmentPurchaseMeta(),
         listEquipmentPurchases(),
       ]);
-      setMeta({ clients: metaRes.clients || [], equipment: metaRes.equipment || [] });
+      setMeta({ clients: metaRes.clients || [], equipment: metaRes.equipment || [], acpUsers: metaRes.acp_users || [] });
       setRequests(listRes || []);
     } catch (error) {
       console.error(error);
@@ -161,6 +178,12 @@ const EquipmentPurchaseWidget = () => {
   useEffect(() => {
     loadAll();
   }, []);
+
+  useEffect(() => {
+    if (!isManager && meta.acpUsers?.length && !form.assignedTo) {
+      setForm((prev) => ({ ...prev, assignedTo: meta.acpUsers[0].id }));
+    }
+  }, [isManager, meta.acpUsers, form.assignedTo]);
 
   const selectedClient = useMemo(
     () => meta.clients.find((c) => `${c.id}` === `${form.clientId}`),
@@ -189,8 +212,12 @@ const EquipmentPurchaseWidget = () => {
   };
 
   const handleCreate = async () => {
-    if (!form.clientId || !form.providerEmail || !form.equipment.length) {
-      showToast("Cliente, proveedor y equipos son obligatorios", "warning");
+    if (!form.clientId || !form.equipment.length) {
+      showToast("Cliente y equipos son obligatorios", "warning");
+      return;
+    }
+    if (!isManager && !form.assignedTo) {
+      showToast("Debes asignar la solicitud a un ACP Comercial", "warning");
       return;
     }
     setCreating(true);
@@ -210,12 +237,22 @@ const EquipmentPurchaseWidget = () => {
         client_id: form.clientId,
         client_name: selectedClient?.name,
         client_email: selectedClient?.client_email,
-        provider_email: form.providerEmail,
+        provider_email: isManager ? form.providerEmail : undefined,
+        assigned_to: form.assignedTo || null,
         equipment: equipmentPayload,
         notes: form.notes,
       });
-      showToast("Solicitud creada y correo enviado al proveedor", "success");
-      setForm({ clientId: "", providerEmail: "", equipment: [], notes: "" });
+      const successMessage = isManager && form.providerEmail
+        ? "Solicitud creada y correo enviado al proveedor"
+        : "Solicitud creada y enviada a ACP Comercial para gestionar proveedor";
+      showToast(successMessage, "success");
+      setForm({
+        clientId: "",
+        providerEmail: "",
+        assignedTo: isManager ? "" : meta.acpUsers?.[0]?.id || "",
+        equipment: [],
+        notes: "",
+      });
       loadAll();
     } catch (error) {
       console.error(error);
@@ -297,6 +334,27 @@ const EquipmentPurchaseWidget = () => {
       showToast("No se pudo enviar la reserva", "error");
     }
   };
+
+  const handleStartAvailability = async (request) => {
+    const draft = availabilityDrafts[request.id] || {};
+    const providerEmail = draft.provider_email ?? request.provider_email ?? "";
+    const notes = draft.notes ?? request.notes ?? "";
+
+    if (!providerEmail) {
+      showToast("Debes ingresar el correo del proveedor", "warning");
+      return;
+    }
+
+    try {
+      await startAvailability(request.id, { provider_email: providerEmail, notes });
+      showToast("Correo de disponibilidad enviado", "success");
+      setAvailabilityDrafts((prev) => ({ ...prev, [request.id]: {} }));
+      loadAll();
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo enviar el correo de disponibilidad", "error");
+    }
+  };
   const handleSubmitInspection = async () => {
     const { requestId, file, minDate, maxDate, includesKit } = inspectionModal;
 
@@ -328,7 +386,7 @@ const EquipmentPurchaseWidget = () => {
         <div className="flex items-center justify-between mb-4">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Nueva solicitud de compra</h2>
-            <p className="text-sm text-gray-500">Disponible solo para ACP Comercial</p>
+            <p className="text-sm text-gray-500">Cualquier comercial puede registrar y asignar al ACP Comercial</p>
           </div>
           <Button onClick={loadAll} variant="ghost">Refrescar</Button>
         </div>
@@ -354,7 +412,29 @@ const EquipmentPurchaseWidget = () => {
               className="w-full mt-1 rounded-lg border border-gray-300 p-2"
               value={form.providerEmail}
               onChange={(e) => setForm((prev) => ({ ...prev, providerEmail: e.target.value }))}
+              placeholder={isManager ? "correo@proveedor.com" : "Solo ACP Comercial"}
+              disabled={!isManager}
             />
+            {!isManager && (
+              <p className="text-xs text-gray-500 mt-1">El ACP Comercial completará el proveedor y enviará el correo.</p>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+          <div>
+            <label className="text-sm text-gray-600">Asignar a ACP Comercial</label>
+            <select
+              className="w-full mt-1 rounded-lg border border-gray-300 p-2"
+              value={form.assignedTo}
+              onChange={(e) => setForm((prev) => ({ ...prev, assignedTo: e.target.value }))}
+              disabled={meta.acpUsers.length === 0}
+            >
+              <option value="">{meta.acpUsers.length ? "Selecciona un ACP" : "Sin ACP disponibles"}</option>
+              {meta.acpUsers.map((user) => (
+                <option key={user.id} value={user.id}>{user.name}</option>
+              ))}
+            </select>
           </div>
         </div>
 
@@ -459,6 +539,9 @@ const EquipmentPurchaseWidget = () => {
               const equipmentTitle = showAvailableItems
                 ? "Equipos disponibles (respuesta del proveedor):"
                 : "Equipos solicitados:";
+              const availabilityDraft = availabilityDrafts[req.id] || {};
+              const draftProviderEmail = availabilityDraft.provider_email ?? req.provider_email ?? "";
+              const draftNotes = availabilityDraft.notes ?? req.notes ?? "";
 
               return (
                 <Card
@@ -499,8 +582,15 @@ const EquipmentPurchaseWidget = () => {
                   {/* Provider */}
                   <div className="mb-3 flex items-center gap-2 text-sm">
                     <FiMail className="text-gray-500" size={14} />
-                    <span className="text-gray-700 font-medium">{req.provider_email}</span>
+                    <span className="text-gray-700 font-medium">{req.provider_email || "Proveedor pendiente"}</span>
                   </div>
+
+                  {(req.assigned_to_name || req.assigned_to_email) && (
+                    <div className="mb-3 flex items-center gap-2 text-sm text-gray-700">
+                      <FiUser className="text-gray-500" size={14} />
+                      <span className="font-medium">Asignado a: {req.assigned_to_name || req.assigned_to_email}</span>
+                    </div>
+                  )}
 
                   {/* Provider Response */}
                   {providerResponse && (
@@ -626,86 +716,124 @@ const EquipmentPurchaseWidget = () => {
                   )}
 
                   {/* Actions */}
-                  <div className="flex flex-wrap gap-2 pt-3 border-t border-white/50">
-                    {req.status === "waiting_provider_response" && (
-                      <Button size="sm" onClick={() => openResponse(req)} fullWidth>
-                        Registrar respuesta
-                      </Button>
-                    )}
-                    {req.status === "waiting_proforma" && (
-                      <>
-                        <Button size="sm" variant="secondary" onClick={() => handleRequestProforma(req.id)}>
-                          Pedir proforma
-                        </Button>
-                        <div className="flex items-center gap-2 flex-1">
-                          <input
-                            type="file"
-                            id={`proforma-${req.id}`}
-                            onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`proforma-${req.id}`]: e.target.files?.[0] })}
-                            className="hidden"
-                          />
-                          <label
-                            htmlFor={`proforma-${req.id}`}
-                            className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
-                          >
-                            Elegir archivo
-                          </label>
-                          <Button
-                            size="sm"
-                            onClick={() => handleUpload(req.id, "proforma", inspectionDraft[`proforma-${req.id}`])}
-                            disabled={!inspectionDraft[`proforma-${req.id}`]}
-                          >
-                            Subir
+                  {isManager && (
+                    <div className="flex flex-wrap gap-2 pt-3 border-t border-white/50">
+                      {req.status === "pending_provider_assignment" ? (
+                        <div className="w-full space-y-2">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-xs text-gray-600">Correo de proveedor</label>
+                              <input
+                                type="email"
+                                className="w-full border rounded px-2 py-1 text-sm"
+                                value={draftProviderEmail}
+                                onChange={(e) => setAvailabilityDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: { ...prev[req.id], provider_email: e.target.value },
+                                }))}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-xs text-gray-600">Notas para el correo</label>
+                              <textarea
+                                rows={2}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                                value={draftNotes}
+                                onChange={(e) => setAvailabilityDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: { ...prev[req.id], notes: e.target.value },
+                                }))}
+                              />
+                            </div>
+                          </div>
+                          <Button size="sm" onClick={() => handleStartAvailability(req)}>
+                            Enviar correo de disponibilidad
                           </Button>
                         </div>
-                      </>
-                    )}
-                    {req.status === "proforma_received" && (
-                      <Button size="sm" onClick={() => handleReserve(req.id)} fullWidth>
-                        Enviar reserva
-                      </Button>
-                    )}
-                    {req.status === "waiting_signed_proforma" && (
-                      <Button
-                        size="sm"
-                        fullWidth
-                        onClick={() => setInspectionModal({
-                          open: true,
-                          requestId: req.id,
-                          file: null,
-                          minDate: "",
-                          maxDate: "",
-                          includesKit: false
-                        })}
-                      >
-                        📄 Subir proforma firmada e inspección
-                      </Button>
-                    )}
-                    {req.status === "pending_contract" && (
-                      <div className="flex items-center gap-2 w-full">
-                        <input
-                          type="file"
-                          id={`contract-${req.id}`}
-                          onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`contract-${req.id}`]: e.target.files?.[0] })}
-                          className="hidden"
-                        />
-                        <label
-                          htmlFor={`contract-${req.id}`}
-                          className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
-                        >
-                          Elegir contrato
-                        </label>
-                        <Button
-                          size="sm"
-                          onClick={() => handleUpload(req.id, "contract", inspectionDraft[`contract-${req.id}`])}
-                          disabled={!inspectionDraft[`contract-${req.id}`]}
-                          className="flex-1"
-                        >
-                          Subir contrato
-                        </Button>
-                      </div>
-                    )}
-                  </div>
+                      ) : (
+                        <>
+                          {req.status === "waiting_provider_response" && (
+                            <Button size="sm" onClick={() => openResponse(req)} fullWidth>
+                              Registrar respuesta
+                            </Button>
+                          )}
+                          {req.status === "waiting_proforma" && (
+                            <>
+                              <Button size="sm" variant="secondary" onClick={() => handleRequestProforma(req.id)}>
+                                Pedir proforma
+                              </Button>
+                              <div className="flex items-center gap-2 flex-1">
+                                <input
+                                  type="file"
+                                  id={`proforma-${req.id}`}
+                                  onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`proforma-${req.id}`]: e.target.files?.[0] })}
+                                  className="hidden"
+                                />
+                                <label
+                                  htmlFor={`proforma-${req.id}`}
+                                  className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
+                                >
+                                  Elegir archivo
+                                </label>
+                                <Button
+                                  size="sm"
+                                  onClick={() => handleUpload(req.id, "proforma", inspectionDraft[`proforma-${req.id}`])}
+                                  disabled={!inspectionDraft[`proforma-${req.id}`]}
+                                >
+                                  Subir
+                                </Button>
+                              </div>
+                            </>
+                          )}
+                          {req.status === "proforma_received" && (
+                            <Button size="sm" onClick={() => handleReserve(req.id)} fullWidth>
+                              Enviar reserva
+                            </Button>
+                          )}
+                          {req.status === "waiting_signed_proforma" && (
+                            <Button
+                              size="sm"
+                              fullWidth
+                              onClick={() => setInspectionModal({
+                                open: true,
+                                requestId: req.id,
+                                file: null,
+                                minDate: "",
+                                maxDate: "",
+                                includesKit: false
+                              })}
+                            >
+                              📄 Subir proforma firmada e inspección
+                            </Button>
+                          )}
+                          {req.status === "pending_contract" && (
+                            <div className="flex items-center gap-2 w-full">
+                              <input
+                                type="file"
+                                id={`contract-${req.id}`}
+                                onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`contract-${req.id}`]: e.target.files?.[0] })}
+                                className="hidden"
+                              />
+                              <label
+                                htmlFor={`contract-${req.id}`}
+                                className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
+                              >
+                                Elegir contrato
+                              </label>
+                              <Button
+                                size="sm"
+                                onClick={() => handleUpload(req.id, "contract", inspectionDraft[`contract-${req.id}`])}
+                                disabled={!inspectionDraft[`contract-${req.id}`]}
+                                className="flex-1"
+                              >
+                                Subir contrato
+                              </Button>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
                 </Card>
               );
             })}

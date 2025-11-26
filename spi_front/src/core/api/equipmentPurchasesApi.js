@@ -16,6 +16,11 @@ export const createEquipmentPurchase = async (payload) => {
   return data.data;
 };
 
+export const startAvailability = async (id, payload) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/start-availability`, payload);
+  return data.data;
+};
+
 export const saveProviderResponse = async (id, payload) => {
   const { data } = await api.post(`/equipment-purchases/${id}/provider-response`, payload);
   return data.data;

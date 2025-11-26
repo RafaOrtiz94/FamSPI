@@ -8,9 +8,10 @@ exports.upload = upload;
 
 exports.getMeta = async (req, res, next) => {
   try {
-    const [clients, equipment] = await Promise.all([
+    const [clients, equipment, acpUsers] = await Promise.all([
       service.getApprovedClients(),
       service.getEquipmentCatalog(),
+      service.getAcpCommercialUsers(),
     ]);
 
     await logAction({
@@ -21,7 +22,7 @@ exports.getMeta = async (req, res, next) => {
       details: { clients: clients.length, equipment: equipment.length },
     });
 
-    res.json({ ok: true, data: { clients, equipment } });
+    res.json({ ok: true, data: { clients, equipment, acp_users: acpUsers } });
   } catch (error) {
     next(error);
   }
@@ -29,7 +30,7 @@ exports.getMeta = async (req, res, next) => {
 
 exports.listMine = async (req, res, next) => {
   try {
-    const data = await service.listByUser(req.user.id);
+    const data = await service.listByUser(req.user);
     res.json({ ok: true, data });
   } catch (error) {
     next(error);
@@ -38,7 +39,7 @@ exports.listMine = async (req, res, next) => {
 
 exports.getOne = async (req, res, next) => {
   try {
-    const item = await service.getById(req.params.id, req.user.id);
+    const item = await service.getById(req.params.id, req.user);
     if (!item) return res.status(404).json({ ok: false, message: "No encontrado" });
     res.json({ ok: true, data: item });
   } catch (error) {
@@ -48,7 +49,17 @@ exports.getOne = async (req, res, next) => {
 
 exports.create = async (req, res, next) => {
   try {
-    const { client_id, client_name, client_business_name, client_email, client_sector, provider_email, equipment, notes } = req.body;
+    const {
+      client_id,
+      client_name,
+      client_business_name,
+      client_email,
+      client_sector,
+      provider_email,
+      assigned_to,
+      equipment,
+      notes,
+    } = req.body;
     const parsedEquipment = Array.isArray(equipment)
       ? equipment
       : typeof equipment === "string"
@@ -63,6 +74,7 @@ exports.create = async (req, res, next) => {
       clientEmail: client_email,
       clientSector: client_sector,
       providerEmail: provider_email,
+      assignedTo: assigned_to,
       equipment: parsedEquipment,
       notes,
     });
@@ -118,7 +130,7 @@ exports.saveProviderResponse = async (req, res, next) => {
 
     const updated = await service.saveProviderResponse({
       id: req.params.id,
-      userId: req.user.id,
+      user: req.user,
       outcome,
       items: parsedItems,
       notes,
@@ -229,6 +241,22 @@ exports.submitSignedProformaWithInspection = async (req, res, next) => {
       message: "Proforma firmada subida e inspección de ambiente creada",
       data: result
     });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.startAvailability = async (req, res, next) => {
+  try {
+    const { provider_email, notes } = req.body;
+    const updated = await service.startAvailabilityRequest({
+      id: req.params.id,
+      user: req.user,
+      providerEmail: provider_email,
+      notes,
+    });
+
+    res.json({ ok: true, data: updated });
   } catch (error) {
     next(error);
   }

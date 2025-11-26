@@ -23,6 +23,7 @@ const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días ante
 let initialized = false;
 
 const STATUS = {
+  PENDING_PROVIDER: "pending_provider_assignment",
   WAITING_PROVIDER: "waiting_provider_response",
   NO_STOCK: "no_stock",
   WAITING_PROFORMA: "waiting_proforma",
@@ -32,8 +33,27 @@ const STATUS = {
   COMPLETED: "completed",
 };
 
+const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
+
+function normalizeRole(role) {
+  return String(role || "").trim().toLowerCase();
+}
+
+function canManageAll(user) {
+  return MANAGER_ROLES.has(normalizeRole(user?.role));
+}
+
 function driveLink(fileId) {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
+}
+
+function mapRequestRow(row = {}) {
+  return {
+    ...row,
+    proforma_file_link: driveLink(row.proforma_file_id),
+    signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
+    contract_file_link: driveLink(row.contract_file_id),
+  };
 }
 
 function getAcceptedItems(request) {
@@ -132,9 +152,13 @@ async function ensureTables() {
       id UUID PRIMARY KEY,
       created_by INTEGER,
       created_by_email TEXT,
+      assigned_to INTEGER,
+      assigned_to_email TEXT,
+      assigned_to_name TEXT,
       client_id INTEGER,
       client_name TEXT NOT NULL,
       client_email TEXT,
+      notes TEXT,
       provider_email TEXT,
       equipment JSONB NOT NULL DEFAULT '[]',
       status TEXT NOT NULL,
@@ -168,6 +192,16 @@ async function ensureTables() {
       updated_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS assigned_to INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS assigned_to_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS assigned_to_name TEXT`,
+  );
+  await db.query(`ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS notes TEXT`);
   initialized = true;
 }
 
@@ -287,6 +321,21 @@ async function getApprovedClients() {
   return rows;
 }
 
+async function getAcpCommercialUsers() {
+  const { rows } = await db.query(
+    `SELECT id, email, fullname, name
+       FROM users
+      WHERE lower(role) = 'acp_comercial'
+      ORDER BY fullname NULLS LAST, email ASC`,
+  );
+
+  return rows.map((row) => ({
+    id: row.id,
+    email: row.email,
+    name: row.fullname || row.name || row.email,
+  }));
+}
+
 async function getEquipmentCatalog() {
   const { rows } = await db.query(
     `SELECT id_equipo AS id, nombre, modelo, fabricante, categoria, descripcion, serie
@@ -316,34 +365,47 @@ async function getEquipmentCatalog() {
   }));
 }
 
-async function listByUser(userId) {
+async function listByUser(user) {
   await ensureTables();
-  const { rows } = await db.query(
-    `SELECT * FROM equipment_purchase_requests WHERE created_by = $1 ORDER BY created_at DESC`,
-    [userId],
-  );
-  return rows.map((row) => ({
-    ...row,
-    proforma_file_link: driveLink(row.proforma_file_id),
-    signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
-    contract_file_link: driveLink(row.contract_file_id),
-  }));
+  const params = [];
+  let query = `SELECT * FROM equipment_purchase_requests`;
+
+  if (!canManageAll(user)) {
+    query += ` WHERE created_by = $1 OR assigned_to = $1`;
+    params.push(user.id);
+  }
+
+  query += ` ORDER BY created_at DESC`;
+
+  const { rows } = await db.query(query, params);
+  return rows.map(mapRequestRow);
 }
 
-async function getById(id, userId) {
+async function getById(id, user) {
   await ensureTables();
-  const { rows } = await db.query(
-    `SELECT * FROM equipment_purchase_requests WHERE id = $1 AND created_by = $2 LIMIT 1`,
-    [id, userId],
-  );
+  const { rows } = await db.query(`SELECT * FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`, [id]);
   const row = rows[0];
-  if (!row) return null;
-  return {
-    ...row,
-    proforma_file_link: driveLink(row.proforma_file_id),
-    signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
-    contract_file_link: driveLink(row.contract_file_id),
-  };
+  const isCreator = row?.created_by === user?.id;
+  const isAssignee = row?.assigned_to === user?.id;
+  if (!row || (!isCreator && !isAssignee && !canManageAll(user))) return null;
+  return mapRequestRow(row);
+}
+
+async function getUserById(id) {
+  if (!id) return null;
+  try {
+    const { rows } = await db.query(
+      `SELECT id, email, fullname, name, role
+         FROM users
+        WHERE id = $1
+        LIMIT 1`,
+      [id],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    logger.warn("No se pudo obtener datos de usuario %s: %s", id, error.message);
+    return null;
+  }
 }
 
 async function createPurchaseRequest({
@@ -352,12 +414,23 @@ async function createPurchaseRequest({
   clientName,
   clientEmail,
   providerEmail,
+  assignedTo,
   equipment = [],
   notes,
 }) {
   await ensureTables();
-  if (!clientName || !providerEmail || !equipment.length) {
-    throw new Error("Cliente, proveedor y al menos un equipo son obligatorios");
+  if (!clientName || !equipment.length) {
+    throw new Error("Cliente y al menos un equipo son obligatorios");
+  }
+
+  const canSendAvailability = canManageAll(user);
+  const provider = canSendAvailability ? providerEmail : null;
+
+  const assigneeUser = assignedTo ? await getUserById(assignedTo) : null;
+  const resolvedAssignee = assigneeUser || (canSendAvailability ? user : null);
+
+  if (!resolvedAssignee) {
+    throw new Error("Debes asignar la solicitud a un ACP Comercial");
   }
 
   const id = uuidv4();
@@ -382,49 +455,128 @@ async function createPurchaseRequest({
   const requestSnapshot = {
     id,
     client_name: clientName,
-    provider_email: providerEmail,
+    provider_email: provider,
     equipment,
     created_at: createdAt,
+    notes,
+  };
+
+  let emailFileId = null;
+  let status = STATUS.PENDING_PROVIDER;
+
+  if (provider) {
+    emailFileId = await sendAndArchive({
+      user,
+      to: provider,
+      subject: `Disponibilidad de equipos - ${clientName}`,
+      html,
+      folderId,
+      prefix: "disponibilidad",
+      request: requestSnapshot,
+      actionLabel: "Informe de disponibilidad de equipos",
+    });
+    status = STATUS.WAITING_PROVIDER;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO equipment_purchase_requests (
+        id, created_by, created_by_email, assigned_to, assigned_to_email, assigned_to_name,
+        client_id, client_name, client_email, notes, provider_email,
+        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+     RETURNING *`,
+    [
+      id,
+      user.id,
+      user.email,
+      resolvedAssignee?.id || null,
+      resolvedAssignee?.email || null,
+      resolvedAssignee?.fullname || resolvedAssignee?.name || resolvedAssignee?.email || null,
+      clientId || null,
+      clientName,
+      clientEmail || null,
+      notes || null,
+      provider,
+      JSON.stringify(equipment),
+      status,
+      provider ? new Date() : null,
+      emailFileId,
+      folderId,
+    ],
+  );
+
+  return mapRequestRow(rows[0]);
+}
+
+async function startAvailabilityRequest({ id, user, providerEmail, notes }) {
+  await ensureTables();
+  if (!canManageAll(user)) {
+    throw new Error("Solo el ACP Comercial puede enviar el correo de disponibilidad");
+  }
+  const request = await getById(id, user);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+  if (!providerEmail) throw new Error("El correo del proveedor es obligatorio");
+  if (request.status !== STATUS.PENDING_PROVIDER) {
+    throw new Error("La solicitud ya tiene proveedor asignado o está en curso");
+  }
+
+  const equipment = Array.isArray(request.equipment) ? request.equipment : [];
+  if (!equipment.length) throw new Error("No hay equipos registrados para solicitar disponibilidad");
+
+  const equipmentList = equipment
+    .map((item) => {
+      const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
+      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+    })
+    .join("<br>");
+
+  const html = `
+    <h2>Solicitud de disponibilidad</h2>
+    <p>Cliente: <strong>${request.client_name}</strong></p>
+    <p>Equipos requeridos:</p>
+    <p>${equipmentList}</p>
+    ${notes ? `<p>Notas: ${notes}</p>` : request.notes ? `<p>Notas: ${request.notes}</p>` : ""}
+  `;
+
+  const requestSnapshot = {
+    id: request.id,
+    client_name: request.client_name,
+    provider_email: providerEmail,
+    equipment,
+    created_at: request.created_at,
+    notes: notes || request.notes,
   };
 
   const emailFileId = await sendAndArchive({
     user,
     to: providerEmail,
-    subject: `Disponibilidad de equipos - ${clientName}`,
+    subject: `Disponibilidad de equipos - ${request.client_name}`,
     html,
-    folderId,
+    folderId: request.drive_folder_id,
     prefix: "disponibilidad",
     request: requestSnapshot,
     actionLabel: "Informe de disponibilidad de equipos",
   });
 
   const { rows } = await db.query(
-    `INSERT INTO equipment_purchase_requests (
-        id, created_by, created_by_email, client_id, client_name, client_email, provider_email,
-        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now(), $10, $11)
-     RETURNING *`,
-    [
-      id,
-      user.id,
-      user.email,
-      clientId || null,
-      clientName,
-      clientEmail || null,
-      providerEmail,
-      JSON.stringify(equipment),
-      STATUS.WAITING_PROVIDER,
-      emailFileId,
-      folderId,
-    ],
+    `UPDATE equipment_purchase_requests
+        SET provider_email = $1,
+            notes = $2,
+            status = $3,
+            availability_email_sent_at = now(),
+            availability_email_file_id = $4,
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [providerEmail, notes || request.notes || null, STATUS.WAITING_PROVIDER, emailFileId, id],
   );
 
-  return rows[0];
+  return mapRequestRow(rows[0]);
 }
 
-async function saveProviderResponse({ id, userId, outcome, items = [], notes }) {
+async function saveProviderResponse({ id, user, outcome, items = [], notes }) {
   await ensureTables();
-  const request = await getById(id, userId);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.WAITING_PROVIDER) {
     throw new Error("Esta solicitud ya tiene respuesta del proveedor");
@@ -437,13 +589,12 @@ async function saveProviderResponse({ id, userId, outcome, items = [], notes }) 
             provider_response_at = now(),
             status = $2,
             updated_at = now()
-      WHERE id = $3 AND created_by = $4
+      WHERE id = $3
       RETURNING *`,
     [
       { outcome, items, notes },
       normalizedOutcome,
       id,
-      userId,
     ],
   );
   return rows[0];
@@ -451,7 +602,7 @@ async function saveProviderResponse({ id, userId, outcome, items = [], notes }) 
 
 async function requestProforma({ id, user }) {
   await ensureTables();
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.WAITING_PROFORMA) {
     throw new Error("La solicitud no está lista para pedir proforma");
@@ -486,9 +637,9 @@ async function requestProforma({ id, user }) {
             proforma_requested_at = now(),
             proforma_request_email_file_id = $2,
             updated_at = now()
-      WHERE id = $3 AND created_by = $4
+      WHERE id = $3
       RETURNING *`,
-    [STATUS.WAITING_PROFORMA, emailFileId, id, user.id],
+    [STATUS.WAITING_PROFORMA, emailFileId, id],
   );
   return rows[0];
 }
@@ -502,7 +653,7 @@ async function uploadDocument(file, folderId, prefix) {
 
 async function uploadProforma({ id, user, file }) {
   await ensureTables();
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.WAITING_PROFORMA) {
     throw new Error("La solicitud debe estar esperando proforma");
@@ -515,16 +666,16 @@ async function uploadProforma({ id, user, file }) {
             proforma_uploaded_at = now(),
             status = $2,
             updated_at = now()
-      WHERE id = $3 AND created_by = $4
+      WHERE id = $3
       RETURNING *`,
-    [fileId, STATUS.PROFORMA_RECEIVED, id, user.id],
+    [fileId, STATUS.PROFORMA_RECEIVED, id],
   );
   return rows[0];
 }
 
 async function reserveEquipment({ id, user }) {
   await ensureTables();
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.PROFORMA_RECEIVED) {
     throw new Error("Se requiere tener la proforma para reservar");
@@ -574,7 +725,7 @@ async function reserveEquipment({ id, user }) {
             reservation_calendar_event_id = $3,
             reservation_calendar_event_link = $4,
             updated_at = now()
-      WHERE id = $5 AND created_by = $6
+      WHERE id = $5
       RETURNING *`,
     [
       STATUS.WAITING_SIGNED_PROFORMA,
@@ -582,7 +733,6 @@ async function reserveEquipment({ id, user }) {
       calendarEvent.id || null,
       calendarEvent.htmlLink || null,
       id,
-      user.id,
     ],
   );
   return rows[0];
@@ -590,7 +740,7 @@ async function reserveEquipment({ id, user }) {
 
 async function uploadSignedProforma({ id, user, file, inspection_min_date, inspection_max_date, includes_starter_kit }) {
   await ensureTables();
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.WAITING_SIGNED_PROFORMA) {
     throw new Error("Se requiere estar esperando la proforma firmada");
@@ -644,7 +794,7 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
             contract_reminder_event_link = $7,
             status = $8,
             updated_at = now()
-      WHERE id = $9 AND created_by = $10
+      WHERE id = $9
       RETURNING *`,
     [
       fileId,
@@ -656,7 +806,6 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
       contractReminder.htmlLink || null,
       STATUS.PENDING_CONTRACT,
       id,
-      user.id,
     ],
   );
   return rows[0];
@@ -674,7 +823,7 @@ async function submitSignedProformaWithInspection({
     throw new Error("Las fechas de inspección mínima y máxima son obligatorias");
   }
 
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
 
   const signedResult = await uploadSignedProforma({
@@ -713,7 +862,7 @@ async function submitSignedProformaWithInspection({
 
 async function uploadContract({ id, user, file }) {
   await ensureTables();
-  const request = await getById(id, user.id);
+  const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
   if (request.status !== STATUS.PENDING_CONTRACT) {
     throw new Error("La solicitud no está pendiente de contrato");
@@ -726,19 +875,21 @@ async function uploadContract({ id, user, file }) {
             contract_uploaded_at = now(),
             status = $2,
             updated_at = now()
-      WHERE id = $3 AND created_by = $4
+      WHERE id = $3
       RETURNING *`,
-    [fileId, STATUS.COMPLETED, id, user.id],
+    [fileId, STATUS.COMPLETED, id],
   );
   return rows[0];
 }
 
 module.exports = {
   getApprovedClients,
+  getAcpCommercialUsers,
   getEquipmentCatalog,
   listByUser,
   getById,
   createPurchaseRequest,
+  startAvailabilityRequest,
   saveProviderResponse,
   requestProforma,
   uploadProforma,
