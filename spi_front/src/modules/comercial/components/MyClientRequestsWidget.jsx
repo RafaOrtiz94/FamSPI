@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { FiUser, FiClock, FiCheckCircle, FiXCircle } from 'react-icons/fi';
 import { useAuth } from '../../../core/auth/AuthContext';
 import { getMyClientRequests } from '../../../core/api/requestsApi';
+import { listEquipmentPurchases } from '../../../core/api/equipmentPurchasesApi';
 import Card from '../../../core/ui/components/Card';
 import { toast } from 'react-hot-toast';
 
@@ -15,6 +16,10 @@ const MyClientRequestsWidget = () => {
         approved: 0,
         rejected: 0
     });
+    const [equipmentStats, setEquipmentStats] = useState({
+        total: 0,
+        active: 0
+    });
 
     useEffect(() => {
         const loadMyRequests = async () => {
@@ -22,13 +27,16 @@ const MyClientRequestsWidget = () => {
 
             try {
                 setLoading(true);
-                const data = await getMyClientRequests({
-                    page: 1,
-                    pageSize: 100,
-                    // No necesitamos createdBy porque el endpoint /my ya filtra por el usuario autenticado
-                });
+                const [clientData, equipmentData] = await Promise.all([
+                    getMyClientRequests({
+                        page: 1,
+                        pageSize: 100,
+                        // No necesitamos createdBy porque el endpoint /my ya filtra por el usuario autenticado
+                    }),
+                    listEquipmentPurchases(),
+                ]);
 
-                const userRequests = (data.rows || []).filter(
+                const userRequests = (clientData.rows || []).filter(
                     req => req.created_by === user.email
                 );
 
@@ -40,6 +48,12 @@ const MyClientRequestsWidget = () => {
                     pending: userRequests.filter(r => r.status === 'pending_approval').length,
                     approved: userRequests.filter(r => r.status === 'approved').length,
                     rejected: userRequests.filter(r => r.status === 'rejected').length
+                });
+
+                const equipmentRequests = Array.isArray(equipmentData) ? equipmentData : [];
+                setEquipmentStats({
+                    total: equipmentRequests.length,
+                    active: equipmentRequests.filter(r => r.status !== 'completed').length
                 });
             } catch (error) {
                 console.error('Error cargando solicitudes:', error);
@@ -105,16 +119,16 @@ const MyClientRequestsWidget = () => {
                     <div>
                         <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                             <FiUser className="w-5 h-5 text-blue-600" />
-                            Mis Solicitudes de Clientes
+                            Mis Solicitudes y Compras
                         </h3>
                         <p className="text-sm text-gray-600 mt-1">
-                            Solicitudes de registro de clientes que has creado
+                            Solicitudes de registro de clientes que has creado y las compras de equipos que ves en la sección de solicitudes en curso.
                         </p>
                     </div>
                 </div>
 
                 {/* Estadísticas */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                     <div className="bg-gray-50 rounded-lg p-3 text-center">
                         <p className="text-xs text-gray-500 font-medium mb-1">Total</p>
                         <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
@@ -130,6 +144,11 @@ const MyClientRequestsWidget = () => {
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                         <p className="text-xs text-red-700 font-medium mb-1">Rechazadas</p>
                         <p className="text-2xl font-bold text-red-700">{stats.rejected}</p>
+                    </div>
+                    <div className="bg-indigo-50 rounded-lg p-3 text-center">
+                        <p className="text-xs text-indigo-700 font-medium mb-1">Solicitudes de compra</p>
+                        <p className="text-2xl font-bold text-indigo-700">{equipmentStats.total}</p>
+                        <p className="text-[11px] text-indigo-600 mt-1">{equipmentStats.active} activas en solicitudes en curso</p>
                     </div>
                 </div>
             </Card>
