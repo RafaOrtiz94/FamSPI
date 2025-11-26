@@ -5,8 +5,12 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
+const { createRequest: createServiceRequest } = require("../requests/requests.service");
 
+const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
+const COMMERCIAL_FOLDER_NAME = "Comercial";
+const PURCHASES_FOLDER_NAME = "Solicitudes de Compra de Equipos";
 const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
@@ -74,14 +78,61 @@ async function ensureTables() {
 }
 
 async function getRootFolder() {
+  const rootId = DEFAULT_ROOT_ENV_KEYS.map((key) => process.env[key]).find(Boolean);
+  if (rootId) return { id: rootId };
   return ensureFolder(ROOT_FOLDER_NAME);
 }
 
-async function ensureRequestFolder(clientName, requestId) {
+async function getClientDetails(clientId) {
+  if (!clientId) return null;
+  const { rows } = await db.query(
+    `SELECT id, commercial_name, client_email, shipping_contact_name, shipping_phone, shipping_cellphone, shipping_address
+       FROM client_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [clientId],
+  );
+  return rows[0] || null;
+}
+
+function buildInspectionPayload({ request, clientInfo, inspection_min_date, inspection_max_date, includes_starter_kit }) {
+  const equipment = Array.isArray(request.equipment) ? request.equipment : [];
+  const equipos = equipment.map((item) => ({
+    nombre_equipo: item.name || item.sku || item.id || "Equipo",
+    estado: item.type || item.estado || item.serial || "",
+  }));
+
+  const anotaciones = includes_starter_kit
+    ? "Incluye kit de arranque"
+    : "No incluye kit de arranque";
+
+  return {
+    nombre_cliente: request.client_name || clientInfo?.commercial_name || "",
+    direccion_cliente: clientInfo?.shipping_address || "",
+    persona_contacto: clientInfo?.shipping_contact_name || "",
+    celular_contacto: clientInfo?.shipping_phone || clientInfo?.shipping_cellphone || "",
+    fecha_instalacion: inspection_min_date,
+    fecha_tope_instalacion: inspection_max_date || "",
+    requiere_lis: false,
+    equipos,
+    anotaciones,
+    accesorios: "",
+    observaciones: request.notes || "",
+  };
+}
+
+async function ensureRequestFolder(clientName, requestId, requestDate) {
   const root = await getRootFolder();
-  const clientFolder = await ensureFolder(clientName, root.id);
-  const safeRequestName = `Solicitud ${requestId}`;
-  const requestFolder = await ensureFolder(safeRequestName, clientFolder.id);
+
+  const comercialFolder = await ensureFolder(COMMERCIAL_FOLDER_NAME, root.id);
+  const purchasesFolder = await ensureFolder(PURCHASES_FOLDER_NAME, comercialFolder.id);
+
+  const paddedId = String(requestId).padStart(4, "0");
+  const safeName = (clientName || "").trim().replace(/[\/\\:*?"<>|]/g, "-");
+  const dateStr = requestDate ? new Date(requestDate).toISOString().split("T")[0] : "";
+  const requestFolderName = `${paddedId} - ${safeName}${dateStr ? ` - ${dateStr}` : ""}`;
+
+  const requestFolder = await ensureFolder(requestFolderName, purchasesFolder.id);
   return requestFolder.id;
 }
 
@@ -179,17 +230,29 @@ async function getById(id, userId) {
   };
 }
 
-async function createRequest({ user, clientId, clientName, clientEmail, providerEmail, equipment = [], notes }) {
+async function createPurchaseRequest({
+  user,
+  clientId,
+  clientName,
+  clientEmail,
+  providerEmail,
+  equipment = [],
+  notes,
+}) {
   await ensureTables();
   if (!clientName || !providerEmail || !equipment.length) {
     throw new Error("Cliente, proveedor y al menos un equipo son obligatorios");
   }
 
   const id = uuidv4();
-  const folderId = await ensureRequestFolder(clientName, id);
+  const createdAt = new Date();
+  const folderId = await ensureRequestFolder(clientName, id, createdAt);
 
   const equipmentList = equipment
-    .map((item) => `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}`)
+    .map((item) => {
+      const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
+      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+    })
     .join("<br>");
 
   const html = `
@@ -453,6 +516,50 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
   return rows[0];
 }
 
+async function submitSignedProformaWithInspection({
+  id,
+  user,
+  file,
+  inspection_min_date,
+  inspection_max_date,
+  includes_starter_kit,
+}) {
+  if (!inspection_min_date || !inspection_max_date) {
+    throw new Error("Las fechas de inspección mínima y máxima son obligatorias");
+  }
+
+  const request = await getById(id, user.id);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const signedResult = await uploadSignedProforma({
+    id,
+    user,
+    file,
+    inspection_min_date,
+    inspection_max_date,
+    includes_starter_kit,
+  });
+
+  const clientInfo = await getClientDetails(request.client_id);
+  const payload = buildInspectionPayload({
+    request,
+    clientInfo,
+    inspection_min_date,
+    inspection_max_date,
+    includes_starter_kit,
+  });
+
+  const inspectionRequest = await createServiceRequest({
+    requester_id: user.id,
+    requester_email: user.email,
+    requester_name: user.fullname || user.name || null,
+    request_type_id: "F.ST-20",
+    payload,
+  });
+
+  return { purchase_request: signedResult, inspection_request: inspectionRequest };
+}
+
 async function uploadContract({ id, user, file }) {
   await ensureTables();
   const request = await getById(id, user.id);
@@ -480,12 +587,13 @@ module.exports = {
   getEquipmentCatalog,
   listByUser,
   getById,
-  createRequest,
+  createPurchaseRequest,
   saveProviderResponse,
   requestProforma,
   uploadProforma,
   reserveEquipment,
   uploadSignedProforma,
+  submitSignedProformaWithInspection,
   uploadContract,
   STATUS,
 };

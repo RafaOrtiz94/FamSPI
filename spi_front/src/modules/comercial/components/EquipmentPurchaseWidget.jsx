@@ -14,15 +14,86 @@ import {
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
+import { FiPackage, FiMail, FiFileText, FiCheckCircle, FiClock, FiAlertCircle, FiDownload } from "react-icons/fi";
 
-const STATUS_LABELS = {
-  waiting_provider_response: "Esperando respuesta de proveedor",
-  no_stock: "Sin stock",
-  waiting_proforma: "Solicitando proforma",
-  proforma_received: "Proforma recibida",
-  waiting_signed_proforma: "Esperando proforma firmada",
-  pending_contract: "Pendiente contrato",
-  completed: "Completado",
+const STATUS_CONFIG = {
+  waiting_provider_response: {
+    label: "Esperando respuesta de proveedor",
+    icon: FiClock,
+    ledColor: "bg-amber-500",
+    ledGlow: "shadow-lg shadow-amber-500/50",
+    cardBg: "bg-gradient-to-br from-amber-100 via-amber-50 to-white",
+    cardBorder: "border-l-4 border-amber-500",
+    cardShadow: "shadow-amber-300/60",
+    badgeBg: "bg-amber-100",
+    badgeText: "text-amber-800"
+  },
+  no_stock: {
+    label: "Sin stock",
+    icon: FiAlertCircle,
+    ledColor: "bg-red-600",
+    ledGlow: "shadow-lg shadow-red-600/50",
+    cardBg: "bg-gradient-to-br from-red-100 via-red-50 to-white",
+    cardBorder: "border-l-4 border-red-600",
+    cardShadow: "shadow-red-300/60",
+    badgeBg: "bg-red-100",
+    badgeText: "text-red-800"
+  },
+  waiting_proforma: {
+    label: "Solicitando proforma",
+    icon: FiMail,
+    ledColor: "bg-blue-500",
+    ledGlow: "shadow-lg shadow-blue-500/50",
+    cardBg: "bg-gradient-to-br from-blue-100 via-blue-50 to-white",
+    cardBorder: "border-l-4 border-blue-500",
+    cardShadow: "shadow-blue-300/60",
+    badgeBg: "bg-blue-100",
+    badgeText: "text-blue-800"
+  },
+  proforma_received: {
+    label: "Proforma recibida",
+    icon: FiFileText,
+    ledColor: "bg-indigo-500",
+    ledGlow: "shadow-lg shadow-indigo-500/50",
+    cardBg: "bg-gradient-to-br from-indigo-100 via-indigo-50 to-white",
+    cardBorder: "border-l-4 border-indigo-500",
+    cardShadow: "shadow-indigo-300/60",
+    badgeBg: "bg-indigo-100",
+    badgeText: "text-indigo-800"
+  },
+  waiting_signed_proforma: {
+    label: "Esperando proforma firmada",
+    icon: FiFileText,
+    ledColor: "bg-purple-500",
+    ledGlow: "shadow-lg shadow-purple-500/50",
+    cardBg: "bg-gradient-to-br from-purple-100 via-purple-50 to-white",
+    cardBorder: "border-l-4 border-purple-500",
+    cardShadow: "shadow-purple-300/60",
+    badgeBg: "bg-purple-100",
+    badgeText: "text-purple-800"
+  },
+  pending_contract: {
+    label: "Pendiente contrato",
+    icon: FiFileText,
+    ledColor: "bg-orange-500",
+    ledGlow: "shadow-lg shadow-orange-500/50",
+    cardBg: "bg-gradient-to-br from-orange-100 via-orange-50 to-white",
+    cardBorder: "border-l-4 border-orange-500",
+    cardShadow: "shadow-orange-300/60",
+    badgeBg: "bg-orange-100",
+    badgeText: "text-orange-800"
+  },
+  completed: {
+    label: "Completado",
+    icon: FiCheckCircle,
+    ledColor: "bg-green-500",
+    ledGlow: "shadow-lg shadow-green-500/50",
+    cardBg: "bg-gradient-to-br from-green-100 via-green-50 to-white",
+    cardBorder: "border-l-4 border-green-500",
+    cardShadow: "shadow-green-300/60",
+    badgeBg: "bg-green-100",
+    badgeText: "text-green-800"
+  },
 };
 
 const EquipmentPurchaseWidget = () => {
@@ -31,7 +102,7 @@ const EquipmentPurchaseWidget = () => {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ clientId: "", providerEmail: "", equipmentIds: [], notes: "" });
+  const [form, setForm] = useState({ clientId: "", providerEmail: "", equipment: [], notes: "" });
   const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "" });
   const [inspectionDraft, setInspectionDraft] = useState({});
   const [inspectionModal, setInspectionModal] = useState({
@@ -71,26 +142,42 @@ const EquipmentPurchaseWidget = () => {
 
   const toggleEquipment = (id) => {
     setForm((prev) => {
-      const exists = prev.equipmentIds.includes(id);
+      const exists = prev.equipment.find((eq) => eq.id === id);
       return {
         ...prev,
-        equipmentIds: exists
-          ? prev.equipmentIds.filter((x) => x !== id)
-          : [...prev.equipmentIds, id],
+        equipment: exists
+          ? prev.equipment.filter((x) => x.id !== id)
+          : [...prev.equipment, { id, type: "new" }],
       };
     });
   };
 
+  const updateEquipmentType = (id, type) => {
+    setForm((prev) => ({
+      ...prev,
+      equipment: prev.equipment.map((eq) =>
+        eq.id === id ? { ...eq, type } : eq
+      ),
+    }));
+  };
+
   const handleCreate = async () => {
-    if (!form.clientId || !form.providerEmail || !form.equipmentIds.length) {
+    if (!form.clientId || !form.providerEmail || !form.equipment.length) {
       showToast("Cliente, proveedor y equipos son obligatorios", "warning");
       return;
     }
     setCreating(true);
     try {
-      const equipmentPayload = meta.equipment
-        .filter((eq) => form.equipmentIds.includes(eq.id))
-        .map((eq) => ({ id: eq.id, name: eq.name, sku: eq.sku, serial: eq.serial }));
+      const equipmentPayload = form.equipment.map((formEq) => {
+        const eq = meta.equipment.find((e) => e.id === formEq.id);
+        return {
+          id: eq.id,
+          name: eq.name,
+          sku: eq.sku,
+          serial: eq.serial,
+          type: formEq.type
+        };
+      });
 
       await createEquipmentPurchase({
         client_id: form.clientId,
@@ -101,7 +188,7 @@ const EquipmentPurchaseWidget = () => {
         notes: form.notes,
       });
       showToast("Solicitud creada y correo enviado al proveedor", "success");
-      setForm({ clientId: "", providerEmail: "", equipmentIds: [], notes: "" });
+      setForm({ clientId: "", providerEmail: "", equipment: [], notes: "" });
       loadAll();
     } catch (error) {
       console.error(error);
@@ -228,21 +315,47 @@ const EquipmentPurchaseWidget = () => {
         </div>
 
         <div className="mt-4">
-          <p className="text-sm text-gray-600 mb-2">Equipos</p>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2 max-h-48 overflow-auto border rounded-lg p-3">
-            {meta.equipment.map((eq) => (
-              <label key={eq.id} className="flex items-start gap-2 text-sm text-gray-700">
-                <input
-                  type="checkbox"
-                  checked={form.equipmentIds.includes(eq.id)}
-                  onChange={() => toggleEquipment(eq.id)}
-                />
-                <div>
-                  <p className="font-medium">{eq.name}</p>
-                  <p className="text-xs text-gray-500">SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""}</p>
+          <p className="text-sm text-gray-600 mb-2">Equipos y tipo</p>
+          <div className="grid grid-cols-1 gap-3 max-h-64 overflow-auto border rounded-lg p-3">
+            {meta.equipment.map((eq) => {
+              const selected = form.equipment.find((e) => e.id === eq.id);
+              return (
+                <div key={eq.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${selected ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200'}`}>
+                  <input
+                    type="checkbox"
+                    checked={!!selected}
+                    onChange={() => toggleEquipment(eq.id)}
+                    className="w-4 h-4"
+                  />
+                  <div className="flex-1">
+                    <p className="font-medium text-sm">{eq.name}</p>
+                    <p className="text-xs text-gray-500">SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""}</p>
+                  </div>
+                  {selected && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => updateEquipmentType(eq.id, "new")}
+                        className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "new"
+                          ? 'bg-green-500 text-white shadow-md'
+                          : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                          }`}
+                      >
+                        Nuevo
+                      </button>
+                      <button
+                        onClick={() => updateEquipmentType(eq.id, "cu")}
+                        className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "cu"
+                          ? 'bg-blue-500 text-white shadow-md'
+                          : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                          }`}
+                      >
+                        CU
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </label>
-            ))}
+              );
+            })}
           </div>
         </div>
 
@@ -261,114 +374,210 @@ const EquipmentPurchaseWidget = () => {
         </div>
       </Card>
 
-      <Card className="p-5">
+      <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Solicitudes en curso</h2>
-          {loading && <span className="text-sm text-gray-500">Actualizando...</span>}
+          <h2 className="text-xl font-bold text-gray-900">Solicitudes en curso</h2>
+          {loading && <span className="text-sm text-gray-500 animate-pulse">Actualizando...</span>}
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gray-600 border-b">
-                <th className="py-2">Cliente</th>
-                <th className="py-2">Proveedor</th>
-                <th className="py-2">Equipos</th>
-                <th className="py-2">Estado</th>
-                <th className="py-2">Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((req) => (
-                <tr key={req.id} className="border-b">
-                  <td className="py-2">
-                    <div className="font-medium">{req.client_name}</div>
-                    <div className="text-xs text-gray-500">Creado: {new Date(req.created_at).toLocaleString()}</div>
-                  </td>
-                  <td className="py-2 text-gray-700">{req.provider_email}</td>
-                  <td className="py-2 text-gray-700">
-                    <ul className="list-disc pl-4">
-                      {(req.equipment || []).map((eq, idx) => (
-                        <li key={idx}>{eq.name || eq.sku}</li>
-                      ))}
-                    </ul>
-                    <div className="flex flex-wrap gap-2 mt-2">
-                      {req.proforma_file_link && <a className="text-blue-600 underline" href={req.proforma_file_link} target="_blank" rel="noreferrer">Proforma</a>}
-                      {req.signed_proforma_file_link && <a className="text-blue-600 underline" href={req.signed_proforma_file_link} target="_blank" rel="noreferrer">Proforma firmada</a>}
-                      {req.contract_file_link && <a className="text-blue-600 underline" href={req.contract_file_link} target="_blank" rel="noreferrer">Contrato</a>}
+
+        {requests.length === 0 ? (
+          <Card className="p-12 text-center">
+            <FiPackage className="mx-auto text-gray-300 mb-4" size={48} />
+            <p className="text-gray-500">Sin solicitudes registradas</p>
+          </Card>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {requests.map((req) => {
+              const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
+              const StatusIcon = statusConfig.icon;
+
+              return (
+                <Card
+                  key={req.id}
+                  className={`relative p-5 ${statusConfig.cardBg} ${statusConfig.cardBorder} border shadow-lg ${statusConfig.cardShadow} hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden`}
+                >
+                  {/* LED de Estado - Esquina Superior Derecha */}
+                  <div className="absolute top-4 right-4 flex items-center gap-2">
+                    <div className="relative">
+                      <div className={`w-4 h-4 rounded-full ${statusConfig.ledColor} ${statusConfig.ledGlow} animate-pulse`}></div>
+                      <div className={`absolute inset-0 w-4 h-4 rounded-full ${statusConfig.ledColor} animate-ping opacity-75`}></div>
+                      <div className={`absolute inset-0.5 w-3 h-3 rounded-full bg-white/30 blur-sm`}></div>
                     </div>
-                  </td>
-                  <td className="py-2">
-                    <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">
-                      {STATUS_LABELS[req.status] || req.status}
-                    </span>
-                  </td>
-                  <td className="py-2">
-                    <div className="flex flex-wrap gap-2">
-                      {req.status === "waiting_provider_response" && (
-                        <Button size="sm" onClick={() => openResponse(req.id)}>Registrar respuesta</Button>
-                      )}
-                      {req.status === "waiting_proforma" && (
-                        <>
-                          <Button size="sm" variant="secondary" onClick={() => handleRequestProforma(req.id)}>Pedir proforma</Button>
-                          <label className="text-xs text-gray-600 flex items-center gap-2">
-                            <input type="file" onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`proforma-${req.id}`]: e.target.files?.[0] })} />
-                            <Button
-                              size="sm"
-                              onClick={() => handleUpload(req.id, "proforma", inspectionDraft[`proforma-${req.id}`])}
-                            >
-                              Subir proforma
-                            </Button>
-                          </label>
-                        </>
-                      )}
-                      {req.status === "proforma_received" && (
-                        <Button size="sm" onClick={() => handleReserve(req.id)}>Enviar reserva</Button>
-                      )}
-                      {req.status === "waiting_signed_proforma" && (
-                        <div className="space-y-2">
-                          <Button
-                            size="sm"
-                            fullWidth
-                            onClick={() => setInspectionModal({
-                              open: true,
-                              requestId: req.id,
-                              file: null,
-                              minDate: "",
-                              maxDate: "",
-                              includesKit: false
-                            })}
-                          >
-                            📄 Subir proforma firmada e inspección
-                          </Button>
+                  </div>
+
+                  {/* Header */}
+                  <div className="flex items-start justify-between mb-4 pr-8">
+                    <div className="flex-1">
+                      <h3 className="font-bold text-lg text-gray-900">{req.client_name}</h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Creado: {new Date(req.created_at).toLocaleDateString('es-ES', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Badge de Estado */}
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${statusConfig.badgeBg} ${statusConfig.badgeText} shadow-sm mb-3`}>
+                    <StatusIcon size={14} />
+                    <span className="text-xs font-semibold">{statusConfig.label}</span>
+                  </div>
+
+                  {/* Provider */}
+                  <div className="mb-3 flex items-center gap-2 text-sm">
+                    <FiMail className="text-gray-500" size={14} />
+                    <span className="text-gray-700 font-medium">{req.provider_email}</span>
+                  </div>
+
+                  {/* Equipment List */}
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Equipos solicitados:</p>
+                    <div className="space-y-1">
+                      {(req.equipment || []).map((eq, idx) => (
+                        <div key={idx} className="flex items-center gap-2 text-sm bg-white/60 rounded px-2 py-1">
+                          <FiPackage size={14} className="text-gray-500" />
+                          <span className="font-medium text-gray-800">{eq.name || eq.sku}</span>
+                          {eq.type && (
+                            <span className={`ml-auto px-2 py-0.5 text-xs rounded-full font-semibold ${eq.type === 'new' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                              }`}>
+                              {eq.type === 'new' ? 'Nuevo' : 'CU'}
+                            </span>
+                          )}
                         </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Files */}
+                  {(req.proforma_file_link || req.signed_proforma_file_link || req.contract_file_link) && (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {req.proforma_file_link && (
+                        <a
+                          href={req.proforma_file_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-blue-600 hover:bg-blue-50 transition-colors shadow-sm"
+                        >
+                          <FiDownload size={12} />
+                          Proforma
+                        </a>
                       )}
-                      {req.status === "pending_contract" && (
-                        <label className="text-xs text-gray-600 flex items-center gap-2">
+                      {req.signed_proforma_file_link && (
+                        <a
+                          href={req.signed_proforma_file_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors shadow-sm"
+                        >
+                          <FiDownload size={12} />
+                          Proforma firmada
+                        </a>
+                      )}
+                      {req.contract_file_link && (
+                        <a
+                          href={req.contract_file_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-green-600 hover:bg-green-50 transition-colors shadow-sm"
+                        >
+                          <FiDownload size={12} />
+                          Contrato
+                        </a>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Actions */}
+                  <div className="flex flex-wrap gap-2 pt-3 border-t border-white/50">
+                    {req.status === "waiting_provider_response" && (
+                      <Button size="sm" onClick={() => openResponse(req.id)} fullWidth>
+                        Registrar respuesta
+                      </Button>
+                    )}
+                    {req.status === "waiting_proforma" && (
+                      <>
+                        <Button size="sm" variant="secondary" onClick={() => handleRequestProforma(req.id)}>
+                          Pedir proforma
+                        </Button>
+                        <div className="flex items-center gap-2 flex-1">
                           <input
                             type="file"
-                            onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`contract-${req.id}`]: e.target.files?.[0] })}
+                            id={`proforma-${req.id}`}
+                            onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`proforma-${req.id}`]: e.target.files?.[0] })}
+                            className="hidden"
                           />
+                          <label
+                            htmlFor={`proforma-${req.id}`}
+                            className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
+                          >
+                            Elegir archivo
+                          </label>
                           <Button
                             size="sm"
-                            onClick={() => handleUpload(req.id, "contract", inspectionDraft[`contract-${req.id}`])}
+                            onClick={() => handleUpload(req.id, "proforma", inspectionDraft[`proforma-${req.id}`])}
+                            disabled={!inspectionDraft[`proforma-${req.id}`]}
                           >
-                            Subir contrato
+                            Subir
                           </Button>
+                        </div>
+                      </>
+                    )}
+                    {req.status === "proforma_received" && (
+                      <Button size="sm" onClick={() => handleReserve(req.id)} fullWidth>
+                        Enviar reserva
+                      </Button>
+                    )}
+                    {req.status === "waiting_signed_proforma" && (
+                      <Button
+                        size="sm"
+                        fullWidth
+                        onClick={() => setInspectionModal({
+                          open: true,
+                          requestId: req.id,
+                          file: null,
+                          minDate: "",
+                          maxDate: "",
+                          includesKit: false
+                        })}
+                      >
+                        📄 Subir proforma firmada e inspección
+                      </Button>
+                    )}
+                    {req.status === "pending_contract" && (
+                      <div className="flex items-center gap-2 w-full">
+                        <input
+                          type="file"
+                          id={`contract-${req.id}`}
+                          onChange={(e) => setInspectionDraft({ ...inspectionDraft, [`contract-${req.id}`]: e.target.files?.[0] })}
+                          className="hidden"
+                        />
+                        <label
+                          htmlFor={`contract-${req.id}`}
+                          className="text-xs px-3 py-1 bg-white rounded cursor-pointer hover:bg-gray-50 transition-colors"
+                        >
+                          Elegir contrato
                         </label>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!requests.length && (
-                <tr>
-                  <td colSpan="5" className="py-6 text-center text-gray-500">Sin solicitudes registradas</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+                        <Button
+                          size="sm"
+                          onClick={() => handleUpload(req.id, "contract", inspectionDraft[`contract-${req.id}`])}
+                          disabled={!inspectionDraft[`contract-${req.id}`]}
+                          className="flex-1"
+                        >
+                          Subir contrato
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
       {inspectionModal.open && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 backdrop-blur-sm">
           <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">

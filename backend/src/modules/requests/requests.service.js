@@ -546,11 +546,19 @@ async function getRequestContext(request_id) {
   return ctx;
 }
 
+function inferDepartmentFallback(typeCode) {
+  if ((typeCode || "").toUpperCase().startsWith("F.ST")) return "Servicio Técnico";
+  return null;
+}
+
 async function resolveRequestFolder(request_id, templateCode) {
   const ctx = await getRequestContext(request_id);
   if (!ctx) throw new Error(`No se encontró contexto para solicitud ${request_id} `);
   const payloadVariant = ctx.payload?.__form_variant;
   const templateHint = templateCode || payloadVariant || ctx.type_code;
+  const inferredDepartment = inferDepartmentFallback(ctx.type_code);
+  const departmentName = ctx.department_name || inferredDepartment || ctx.department_code;
+  const departmentCode = ctx.department_code || inferredDepartment || ctx.department_name;
 
   try {
     const clientName = ctx.payload?.nombre_cliente || null;
@@ -558,8 +566,8 @@ async function resolveRequestFolder(request_id, templateCode) {
       requestId: request_id,
       requestTypeCode: ctx.type_code,
       requestTypeTitle: ctx.type_title,
-      departmentCode: ctx.department_code,
-      departmentName: ctx.department_name,
+      departmentCode,
+      departmentName,
       templateCode: templateHint,
       clientName, // ← Pasar nombre de cliente para carpetas identificables
     });
