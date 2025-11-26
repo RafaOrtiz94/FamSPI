@@ -487,8 +487,10 @@ async function createRequest({
     });
   }
 
+  const shouldGenerateActa = isJefeComercial || code === "F.ST-20";
+
   let doc = null;
-  if (isJefeComercial) {
+  if (shouldGenerateActa) {
     try {
       doc = await generateActa(request.id, requester_id, schemaKey);
       await updateRequestStatus(request.id, "acta_generada");
