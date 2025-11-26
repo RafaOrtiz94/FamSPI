@@ -136,7 +136,7 @@ const normalizeResponseItems = (request) => {
   }));
 };
 
-const EquipmentPurchaseWidget = () => {
+const EquipmentPurchaseWidget = ({ showCreation = true }) => {
   const { showToast } = useUI();
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
@@ -162,7 +162,7 @@ const EquipmentPurchaseWidget = () => {
     setLoading(true);
     try {
       const [metaRes, listRes] = await Promise.all([
-        getEquipmentPurchaseMeta(),
+        showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [] }),
         listEquipmentPurchases(),
       ]);
       setMeta({ clients: metaRes.clients || [], equipment: metaRes.equipment || [], acpUsers: metaRes.acp_users || [] });
@@ -180,14 +180,14 @@ const EquipmentPurchaseWidget = () => {
   }, []);
 
   useEffect(() => {
-    if (!isManager && meta.acpUsers?.length && !form.assignedTo) {
+    if (showCreation && !isManager && meta.acpUsers?.length && !form.assignedTo) {
       setForm((prev) => ({ ...prev, assignedTo: meta.acpUsers[0].id }));
     }
-  }, [isManager, meta.acpUsers, form.assignedTo]);
+  }, [showCreation, isManager, meta.acpUsers, form.assignedTo]);
 
   const selectedClient = useMemo(
-    () => meta.clients.find((c) => `${c.id}` === `${form.clientId}`),
-    [meta.clients, form.clientId],
+    () => (showCreation ? meta.clients.find((c) => `${c.id}` === `${form.clientId}`) : null),
+    [showCreation, meta.clients, form.clientId],
   );
 
   const toggleEquipment = (id) => {
@@ -382,126 +382,133 @@ const EquipmentPurchaseWidget = () => {
 
   return (
     <div className="space-y-6">
-      <Card className="p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Nueva solicitud de compra</h2>
-            <p className="text-sm text-gray-500">Cualquier comercial puede registrar y asignar al ACP Comercial</p>
+      {showCreation && (
+        <Card className="p-5">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Nueva solicitud de compra</h2>
+              <p className="text-sm text-gray-500">Cualquier comercial puede registrar y asignar al ACP Comercial</p>
+            </div>
+            <Button onClick={loadAll} variant="ghost">Refrescar</Button>
           </div>
-          <Button onClick={loadAll} variant="ghost">Refrescar</Button>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="text-sm text-gray-600">Cliente</label>
-            <select
-              className="w-full mt-1 rounded-lg border border-gray-300 p-2"
-              value={form.clientId}
-              onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
-            >
-              <option value="">Selecciona un cliente</option>
-              {meta.clients.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-sm text-gray-600">Cliente</label>
+              <select
+                className="w-full mt-1 rounded-lg border border-gray-300 p-2"
+                value={form.clientId}
+                onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+              >
+                <option value="">Selecciona un cliente</option>
+                {meta.clients.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-sm text-gray-600">Proveedor (correo)</label>
+              <input
+                type="email"
+                className="w-full mt-1 rounded-lg border border-gray-300 p-2"
+                value={form.providerEmail}
+                onChange={(e) => setForm((prev) => ({ ...prev, providerEmail: e.target.value }))}
+                placeholder={isManager ? "correo@proveedor.com" : "Solo ACP Comercial"}
+                disabled={!isManager}
+              />
+              {!isManager && (
+                <p className="text-xs text-gray-500 mt-1">El ACP Comercial completará el proveedor y enviará el correo.</p>
+              )}
+            </div>
           </div>
-          <div>
-            <label className="text-sm text-gray-600">Proveedor (correo)</label>
-            <input
-              type="email"
-              className="w-full mt-1 rounded-lg border border-gray-300 p-2"
-              value={form.providerEmail}
-              onChange={(e) => setForm((prev) => ({ ...prev, providerEmail: e.target.value }))}
-              placeholder={isManager ? "correo@proveedor.com" : "Solo ACP Comercial"}
-              disabled={!isManager}
-            />
-            {!isManager && (
-              <p className="text-xs text-gray-500 mt-1">El ACP Comercial completará el proveedor y enviará el correo.</p>
-            )}
-          </div>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
-          <div>
-            <label className="text-sm text-gray-600">Asignar a ACP Comercial</label>
-            <select
-              className="w-full mt-1 rounded-lg border border-gray-300 p-2"
-              value={form.assignedTo}
-              onChange={(e) => setForm((prev) => ({ ...prev, assignedTo: e.target.value }))}
-              disabled={meta.acpUsers.length === 0}
-            >
-              <option value="">{meta.acpUsers.length ? "Selecciona un ACP" : "Sin ACP disponibles"}</option>
-              {meta.acpUsers.map((user) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
-              ))}
-            </select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+            <div>
+              <label className="text-sm text-gray-600">Asignar a ACP Comercial</label>
+              <select
+                className="w-full mt-1 rounded-lg border border-gray-300 p-2"
+                value={form.assignedTo}
+                onChange={(e) => setForm((prev) => ({ ...prev, assignedTo: e.target.value }))}
+                disabled={meta.acpUsers.length === 0}
+              >
+                <option value="">{meta.acpUsers.length ? "Selecciona un ACP" : "Sin ACP disponibles"}</option>
+                {meta.acpUsers.map((user) => (
+                  <option key={user.id} value={user.id}>{user.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
-        </div>
 
-        <div className="mt-4">
-          <p className="text-sm text-gray-600 mb-2">Equipos y tipo</p>
-          <div className="grid grid-cols-1 gap-3 max-h-64 overflow-auto border rounded-lg p-3">
-            {meta.equipment.map((eq) => {
-              const selected = form.equipment.find((e) => e.id === eq.id);
-              return (
-                <div key={eq.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${selected ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200'}`}>
-                  <input
-                    type="checkbox"
-                    checked={!!selected}
-                    onChange={() => toggleEquipment(eq.id)}
-                    className="w-4 h-4"
-                  />
-                  <div className="flex-1">
-                    <p className="font-medium text-sm">{eq.name}</p>
-                    <p className="text-xs text-gray-500">SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""}</p>
-                  </div>
-                  {selected && (
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => updateEquipmentType(eq.id, "new")}
-                        className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "new"
-                          ? 'bg-green-500 text-white shadow-md'
-                          : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                          }`}
-                      >
-                        Nuevo
-                      </button>
-                      <button
-                        onClick={() => updateEquipmentType(eq.id, "cu")}
-                        className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "cu"
-                          ? 'bg-blue-500 text-white shadow-md'
-                          : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
-                          }`}
-                      >
-                        CU
-                      </button>
+          <div className="mt-4">
+            <p className="text-sm text-gray-600 mb-2">Equipos y tipo</p>
+            <div className="grid grid-cols-1 gap-3 max-h-64 overflow-auto border rounded-lg p-3">
+              {meta.equipment.map((eq) => {
+                const selected = form.equipment.find((e) => e.id === eq.id);
+                return (
+                  <div key={eq.id} className={`flex items-center gap-3 p-3 rounded-lg border transition-all ${selected ? 'bg-blue-50 border-blue-300' : 'bg-white border-gray-200'}`}>
+                    <input
+                      type="checkbox"
+                      checked={!!selected}
+                      onChange={() => toggleEquipment(eq.id)}
+                      className="w-4 h-4"
+                    />
+                    <div className="flex-1">
+                      <p className="font-medium text-sm">{eq.name}</p>
+                      <p className="text-xs text-gray-500">SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""}</p>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    {selected && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => updateEquipmentType(eq.id, "new")}
+                          className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "new"
+                            ? 'bg-green-500 text-white shadow-md'
+                            : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                            }`}
+                        >
+                          Nuevo
+                        </button>
+                        <button
+                          onClick={() => updateEquipmentType(eq.id, "cu")}
+                          className={`px-3 py-1 text-xs rounded-full font-medium transition-all ${selected.type === "cu"
+                            ? 'bg-blue-500 text-white shadow-md'
+                            : 'bg-gray-200 text-gray-600 hover:bg-gray-300'
+                            }`}
+                        >
+                          CU
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
 
-        <div className="mt-4">
-          <label className="text-sm text-gray-600">Notas al proveedor</label>
-          <textarea
-            className="w-full mt-1 rounded-lg border border-gray-300 p-2"
-            rows={3}
-            value={form.notes}
-            onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-          />
-        </div>
+          <div className="mt-4">
+            <label className="text-sm text-gray-600">Notas al proveedor</label>
+            <textarea
+              className="w-full mt-1 rounded-lg border border-gray-300 p-2"
+              rows={3}
+              value={form.notes}
+              onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+            />
+          </div>
 
-        <div className="mt-4">
-          <Button onClick={handleCreate} loading={creating}>Enviar correo de disponibilidad</Button>
-        </div>
-      </Card>
+          <div className="mt-4">
+            <Button onClick={handleCreate} loading={creating}>Enviar correo de disponibilidad</Button>
+          </div>
+        </Card>
+      )}
 
       <div>
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-xl font-bold text-gray-900">Solicitudes en curso</h2>
-          {loading && <span className="text-sm text-gray-500 animate-pulse">Actualizando...</span>}
+          <div>
+            <h2 className="text-xl font-bold text-gray-900">Solicitudes en curso</h2>
+            {loading && <span className="block text-sm text-gray-500 animate-pulse">Actualizando...</span>}
+          </div>
+          {!showCreation && (
+            <Button onClick={loadAll} variant="ghost">Refrescar</Button>
+          )}
         </div>
 
         {requests.length === 0 ? (

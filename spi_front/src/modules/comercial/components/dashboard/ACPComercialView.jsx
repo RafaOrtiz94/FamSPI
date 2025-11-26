@@ -86,7 +86,7 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
 
                 <Card className="p-5">
                     <SectionTitle title="Proceso de compra de equipos" />
-                    <EquipmentPurchaseWidget />
+                    <EquipmentPurchaseWidget showCreation={false} />
                 </Card>
             </div>
         </>
