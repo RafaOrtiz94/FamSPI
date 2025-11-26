@@ -11,6 +11,7 @@ import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard"
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
     return (
@@ -75,6 +76,11 @@ const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
                     </div>
                 </Card>
             </div>
+
+            <Card className="p-5 mt-6">
+                <SectionTitle title="Solicitud rápida de compra" />
+                <PurchaseHandoffWidget />
+            </Card>
         </>
     );
 };

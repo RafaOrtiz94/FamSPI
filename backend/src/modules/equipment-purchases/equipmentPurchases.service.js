@@ -47,9 +47,19 @@ function driveLink(fileId) {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
 }
 
+function safeJsonParse(value, fallback = {}) {
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    return fallback;
+  }
+}
+
 function mapRequestRow(row = {}) {
+  const extra = typeof row.extra === "string" ? safeJsonParse(row.extra) : row.extra;
   return {
     ...row,
+    extra,
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
@@ -225,6 +235,10 @@ async function getClientDetails(clientId) {
 
 function buildInspectionPayload({ request, clientInfo, inspection_min_date, inspection_max_date, includes_starter_kit }) {
   const equipment = Array.isArray(request.equipment) ? request.equipment : [];
+  const extra = request?.extra || {};
+  const requiresLis = Boolean(extra.requires_lis || extra.requiere_lis);
+  const lisSystem = extra.lis_system || extra.lis_option || extra.lis;
+  const lisValue = requiresLis ? (lisSystem || "Sí") : "No";
   const equipos = equipment.map((item) => ({
     nombre_equipo: item.name || item.sku || item.id || "Equipo",
     estado: item.type || item.estado || item.serial || "",
@@ -241,7 +255,7 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
     celular_contacto: clientInfo?.shipping_phone || clientInfo?.shipping_cellphone || "",
     fecha_instalacion: inspection_min_date,
     fecha_tope_instalacion: inspection_max_date || "",
-    requiere_lis: false,
+    requiere_lis: lisValue,
     equipos,
     anotaciones,
     accesorios: "",
@@ -417,6 +431,7 @@ async function createPurchaseRequest({
   assignedTo,
   equipment = [],
   notes,
+  extra,
 }) {
   await ensureTables();
   if (!clientName || !equipment.length) {
@@ -436,6 +451,12 @@ async function createPurchaseRequest({
   const id = uuidv4();
   const createdAt = new Date();
   const folderId = await ensureRequestFolder(clientName, id, createdAt);
+
+  const extraPayload = {
+    ...(extra || {}),
+    requires_lis: Boolean(extra?.requires_lis),
+    lis_system: extra?.requires_lis ? (extra?.lis_system || null) : null,
+  };
 
   const equipmentList = equipment
     .map((item) => {
@@ -482,8 +503,8 @@ async function createPurchaseRequest({
     `INSERT INTO equipment_purchase_requests (
         id, created_by, created_by_email, assigned_to, assigned_to_email, assigned_to_name,
         client_id, client_name, client_email, notes, provider_email,
-        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      RETURNING *`,
     [
       id,
@@ -502,6 +523,7 @@ async function createPurchaseRequest({
       provider ? new Date() : null,
       emailFileId,
       folderId,
+      JSON.stringify(extraPayload || {}),
     ],
   );
 

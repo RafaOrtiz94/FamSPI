@@ -59,12 +59,20 @@ exports.create = async (req, res, next) => {
       assigned_to,
       equipment,
       notes,
+      extra,
     } = req.body;
     const parsedEquipment = Array.isArray(equipment)
       ? equipment
       : typeof equipment === "string"
         ? JSON.parse(equipment)
         : [];
+
+    let parsedExtra = extra;
+    try {
+      parsedExtra = typeof extra === "string" ? JSON.parse(extra) : extra;
+    } catch (parseError) {
+      parsedExtra = null;
+    }
 
     const created = await service.createPurchaseRequest({
       user: req.user,
@@ -77,6 +85,7 @@ exports.create = async (req, res, next) => {
       assignedTo: assigned_to,
       equipment: parsedEquipment,
       notes,
+      extra: parsedExtra,
     });
 
     await logAction({

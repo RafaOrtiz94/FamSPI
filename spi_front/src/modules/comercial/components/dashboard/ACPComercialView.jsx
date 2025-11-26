@@ -9,6 +9,7 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
+import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
     const navigate = useNavigate();
@@ -77,10 +78,17 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
                 </Card>
             </div>
 
-            <Card className="p-5 mt-6">
-                <SectionTitle title="Proceso de compra de equipos" />
-                <EquipmentPurchaseWidget />
-            </Card>
+            <div className="mt-6 space-y-6">
+                <Card className="p-5">
+                    <SectionTitle title="Nueva solicitud desde Comercial" />
+                    <PurchaseHandoffWidget />
+                </Card>
+
+                <Card className="p-5">
+                    <SectionTitle title="Proceso de compra de equipos" />
+                    <EquipmentPurchaseWidget />
+                </Card>
+            </div>
         </>
     );
 };

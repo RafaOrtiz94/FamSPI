@@ -9,6 +9,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 import ClientRequestManagement from "../ClientRequestManagement";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const BackofficeView = ({ stats, loading, onRefresh }) => {
     const navigate = useNavigate();
@@ -80,6 +81,11 @@ const BackofficeView = ({ stats, loading, onRefresh }) => {
                 <div className="mt-4">
                     <ClientRequestManagement />
                 </div>
+            </Card>
+
+            <Card className="p-5 mt-6">
+                <SectionTitle title="Solicitar compra para ACP Comercial" />
+                <PurchaseHandoffWidget />
             </Card>
         </>
     );

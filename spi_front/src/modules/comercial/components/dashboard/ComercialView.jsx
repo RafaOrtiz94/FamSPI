@@ -10,6 +10,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const ComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
     const navigate = useNavigate();
@@ -149,6 +150,13 @@ const ComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
                                 <span className="font-bold text-blue-600">{stats.total || 0}</span>
                             </div>
                         </div>
+                    </Card>
+                </div>
+
+                <div className="lg:col-span-1">
+                    <Card className="p-5 h-full">
+                        <SectionTitle title="Nueva solicitud de compra" />
+                        <PurchaseHandoffWidget />
                     </Card>
                 </div>
             </div>
