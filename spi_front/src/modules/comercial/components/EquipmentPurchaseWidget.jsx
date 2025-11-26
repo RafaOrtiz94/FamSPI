@@ -99,7 +99,7 @@ const STATUS_CONFIG = {
 const formatProviderOutcome = (outcome) => {
   switch (outcome) {
     case "new":
-      return "El proveedor confirmó disponibilidad de equipos nuevos";
+      return "El proveedor confirmó disponibilidad de equipos";
     case "cu":
       return "El proveedor confirmó disponibilidad de equipos CU";
     case "none":
@@ -109,6 +109,19 @@ const formatProviderOutcome = (outcome) => {
   }
 };
 
+const normalizeResponseItems = (request) => {
+  const equipment = Array.isArray(request?.equipment) ? request.equipment : [];
+
+  return equipment.map((item) => ({
+    id: item.id,
+    name: item.name || item.label || item.sku || item.id || "Equipo",
+    sku: item.sku,
+    serial: item.serial,
+    requested_type: item.type,
+    available_type: item.type,
+  }));
+};
+
 const EquipmentPurchaseWidget = () => {
   const { showToast } = useUI();
   const [meta, setMeta] = useState({ clients: [], equipment: [] });
@@ -116,7 +129,7 @@ const EquipmentPurchaseWidget = () => {
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ clientId: "", providerEmail: "", equipment: [], notes: "" });
-  const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "" });
+  const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "", items: [] });
   const [inspectionDraft, setInspectionDraft] = useState({});
   const [inspectionModal, setInspectionModal] = useState({
     open: false,
@@ -211,16 +224,26 @@ const EquipmentPurchaseWidget = () => {
     }
   };
 
-  const openResponse = (id) => setResponseDraft({ open: true, id, outcome: "new", notes: "" });
+  const openResponse = (request) => setResponseDraft({
+    open: true,
+    id: request.id,
+    outcome: "new",
+    notes: "",
+    items: normalizeResponseItems(request),
+  });
 
   const submitResponse = async () => {
     try {
+      const responseItems = responseDraft.items || [];
+      const hasAvailability = responseItems.some((item) => item.available_type && item.available_type !== "none");
+      const normalizedOutcome = hasAvailability ? "new" : "none";
       await saveProviderResponse(responseDraft.id, {
-        outcome: responseDraft.outcome,
+        outcome: normalizedOutcome,
         notes: responseDraft.notes,
+        items: responseItems,
       });
       showToast("Respuesta registrada", "success");
-      setResponseDraft({ open: false, id: null, outcome: "new", notes: "" });
+      setResponseDraft({ open: false, id: null, outcome: "new", notes: "", items: [] });
       loadAll();
     } catch (error) {
       console.error(error);
@@ -404,9 +427,26 @@ const EquipmentPurchaseWidget = () => {
               const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
               const StatusIcon = statusConfig.icon;
               const providerResponse = req.provider_response || null;
-              const availableItems = Array.isArray(providerResponse?.items) ? providerResponse.items : [];
+              const requestedMap = new Map((req.equipment || []).map((item) => [item.id, item]));
+              const availableItems = Array.isArray(providerResponse?.items)
+                ? providerResponse.items.map((item) => {
+                  const requestedItem = requestedMap.get(item.id) || {};
+                  return {
+                    ...item,
+                    name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || item.id || "Equipo",
+                    requested_type: item.requested_type || requestedItem.type,
+                    available_type: item.available_type || item.type,
+                  };
+                })
+                : [];
               const showAvailableItems = !!providerResponse && availableItems.length > 0;
-              const equipmentList = showAvailableItems ? availableItems : (req.equipment || []);
+              const equipmentList = showAvailableItems
+                ? availableItems
+                : (req.equipment || []).map((item) => ({
+                  ...item,
+                  requested_type: item.type,
+                  available_type: item.type,
+                }));
               const equipmentTitle = showAvailableItems
                 ? "Equipos disponibles (respuesta del proveedor):"
                 : "Equipos solicitados:";
@@ -488,17 +528,38 @@ const EquipmentPurchaseWidget = () => {
                     <div className="space-y-1">
                       {equipmentList.map((eq, idx) => {
                         const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
-                        const eqType = typeof eq === "object" ? eq.type : null;
+                        const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
+                        const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
+                        const hasMismatch = requestedType && availableType && requestedType !== availableType;
+
+                        const typeBadge = (type, label) => (
+                          <span
+                            className={`px-2 py-0.5 text-xs rounded-full font-semibold ${type === 'new'
+                              ? 'bg-green-100 text-green-700'
+                              : type === 'cu'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-gray-100 text-gray-600'
+                              }`}
+                          >
+                            {label}: {type === 'new' ? 'Nuevo' : type === 'cu' ? 'CU' : 'Sin stock'}
+                          </span>
+                        );
+
                         return (
-                          <div key={idx} className="flex items-center gap-2 text-sm bg-white/60 rounded px-2 py-1">
-                            <FiPackage size={14} className="text-gray-500" />
-                            <span className="font-medium text-gray-800">{eqName}</span>
-                            {eqType && (
-                              <span className={`ml-auto px-2 py-0.5 text-xs rounded-full font-semibold ${eqType === 'new' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                                }`}>
-                                {eqType === 'new' ? 'Nuevo' : 'CU'}
-                              </span>
-                            )}
+                          <div key={idx} className="flex flex-col gap-1 text-sm bg-white/60 rounded px-2 py-1">
+                            <div className="flex items-center gap-2">
+                              <FiPackage size={14} className="text-gray-500" />
+                              <span className="font-medium text-gray-800">{eqName}</span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {requestedType && typeBadge(requestedType, "Solicitado")}
+                              {availableType && typeBadge(availableType, "Disponible")}
+                              {hasMismatch && (
+                                <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
+                                  Diferente a lo solicitado
+                                </span>
+                              )}
+                            </div>
                           </div>
                         );
                       })}
@@ -547,7 +608,7 @@ const EquipmentPurchaseWidget = () => {
                   {/* Actions */}
                   <div className="flex flex-wrap gap-2 pt-3 border-t border-white/50">
                     {req.status === "waiting_provider_response" && (
-                      <Button size="sm" onClick={() => openResponse(req.id)} fullWidth>
+                      <Button size="sm" onClick={() => openResponse(req)} fullWidth>
                         Registrar respuesta
                       </Button>
                     )}
@@ -703,36 +764,45 @@ const EquipmentPurchaseWidget = () => {
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-lg p-5 w-full max-w-md">
             <h3 className="text-lg font-semibold">Respuesta del proveedor</h3>
-            <div className="mt-3 space-y-2 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="outcome"
-                  checked={responseDraft.outcome === "new"}
-                  onChange={() => setResponseDraft((prev) => ({ ...prev, outcome: "new" }))}
-                />
-                Equipos nuevos
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="outcome"
-                  checked={responseDraft.outcome === "cu"}
-                  onChange={() => setResponseDraft((prev) => ({ ...prev, outcome: "cu" }))}
-                />
-                CU (mantener CU)
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  name="outcome"
-                  checked={responseDraft.outcome === "none"}
-                  onChange={() => setResponseDraft((prev) => ({ ...prev, outcome: "none" }))}
-                />
-                No hay equipo
-              </label>
+            <div className="mt-3 space-y-3 text-sm">
+              {responseDraft.items?.map((item, idx) => (
+                <div key={item.id || idx} className="border rounded-lg p-3 bg-gray-50/60">
+                  <div className="flex justify-between items-center mb-2">
+                    <div>
+                      <p className="font-medium text-gray-800">{item.name}</p>
+                      <p className="text-xs text-gray-500">
+                        Solicitado: {item.requested_type === "cu" ? "CU" : item.requested_type === "new" ? "Nuevo" : "Sin especificar"}
+                      </p>
+                    </div>
+                    {item.sku && <span className="text-[11px] text-gray-500">SKU: {item.sku}</span>}
+                  </div>
+                  <div className="space-y-1">
+                    {[
+                      { value: "new", label: "Disponible en Nuevo" },
+                      { value: "cu", label: "Disponible en CU" },
+                      { value: "none", label: "Sin stock" },
+                    ].map((option) => (
+                      <label key={option.value} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`availability-${item.id}`}
+                          checked={item.available_type === option.value}
+                          onChange={() => {
+                            setResponseDraft((prev) => {
+                              const items = [...prev.items];
+                              items[idx] = { ...items[idx], available_type: option.value };
+                              return { ...prev, items };
+                            });
+                          }}
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
               <textarea
-                className="w-full border rounded p-2 mt-2"
+                className="w-full border rounded p-2"
                 rows={3}
                 placeholder="Detalles del proveedor"
                 value={responseDraft.notes}
