@@ -6,7 +6,11 @@ const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
-const { createRequest: createServiceRequest } = require("../requests/requests.service");
+const {
+  createRequest: createServiceRequest,
+  generateActa,
+  updateRequestStatus,
+} = require("../requests/requests.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -209,6 +213,27 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
     accesorios: "",
     observaciones: request.notes || "",
   };
+}
+
+async function ensureActaForInspection({ inspectionRequest, user }) {
+  const requestId = inspectionRequest?.request?.id;
+  const hasActa =
+    inspectionRequest?.document || inspectionRequest?.request?.status === "acta_generada";
+
+  if (!requestId || hasActa) return inspectionRequest;
+
+  try {
+    const document = await generateActa(requestId, user.id, "inspection");
+    await updateRequestStatus(requestId, "acta_generada");
+    return { ...inspectionRequest, document };
+  } catch (error) {
+    logger.error(
+      "No se pudo generar acta de inspección automática para solicitud %s: %s",
+      requestId,
+      error.message,
+    );
+    return inspectionRequest;
+  }
 }
 
 async function ensureRequestFolder(clientName, requestId, requestDate) {
@@ -678,7 +703,12 @@ async function submitSignedProformaWithInspection({
     payload,
   });
 
-  return { purchase_request: signedResult, inspection_request: inspectionRequest };
+  const inspectionWithActa = await ensureActaForInspection({
+    inspectionRequest,
+    user,
+  });
+
+  return { purchase_request: signedResult, inspection_request: inspectionWithActa };
 }
 
 async function uploadContract({ id, user, file }) {
