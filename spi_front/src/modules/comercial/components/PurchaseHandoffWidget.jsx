@@ -8,12 +8,22 @@ const LIS_OPTIONS = [
   { value: "Orion", label: "Orion" },
 ];
 
-const PurchaseHandoffWidget = () => {
+const PurchaseHandoffWidget = ({ isOpen: externalIsOpen, onOpenChange, hideButton = false }) => {
   const { showToast } = useUI();
   const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalIsOpen, setInternalIsOpen] = useState(false);
+
+  // Use external control if provided, otherwise use internal state
+  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+  const setIsOpen = (value) => {
+    if (onOpenChange) {
+      onOpenChange(value);
+    } else {
+      setInternalIsOpen(value);
+    }
+  };
   const [form, setForm] = useState({
     clientId: "",
     equipment: [],
@@ -133,14 +143,22 @@ const PurchaseHandoffWidget = () => {
   };
 
   return (
-    <div className="flex items-center justify-between">
-      <div>
-        <h3 className="text-sm font-semibold text-gray-900">Nueva solicitud de compra</h3>
-        <p className="text-xs text-gray-500">Envía al ACP Comercial para gestionar proveedor</p>
-      </div>
-      <Button className="px-3 py-1.5 text-xs" onClick={() => setIsOpen(true)}>
-        Abrir formulario
-      </Button>
+    <>
+      {!hideButton && (
+        <div className="flex flex-col justify-between h-full">
+          <div className="mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
+              Nueva Solicitud de Compra
+            </p>
+            <p className="text-sm text-gray-700">
+              Envía al ACP Comercial para gestionar proveedor
+            </p>
+          </div>
+          <Button size="sm" className="w-full" onClick={() => setIsOpen(true)}>
+            Abrir Formulario
+          </Button>
+        </div>
+      )}
 
       {isOpen && (
         <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/40 backdrop-blur-sm p-4 overflow-y-auto">
@@ -162,7 +180,7 @@ const PurchaseHandoffWidget = () => {
                 <Button className="px-3 py-1.5 text-xs" loading={creating} onClick={handleSubmit} disabled={loading || creating}>
                   Enviar a ACP
                 </Button>
-            </div>
+              </div>
             </div>
 
             <div className="px-6 py-5 space-y-4">
@@ -299,7 +317,7 @@ const PurchaseHandoffWidget = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 
