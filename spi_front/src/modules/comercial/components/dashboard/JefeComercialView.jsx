@@ -1,18 +1,12 @@
 import React from "react";
-import {
-    FiTrendingUp,
-    FiCheckCircle,
-    FiXCircle,
-    FiUsers,
-    FiActivity,
-} from "react-icons/fi";
-import { Bar, Line, Doughnut } from "react-chartjs-2";
+import { FiTrendingUp, FiUsers, FiClipboard, FiPackage } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
-const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
+const JefeComercialView = ({ onRefresh }) => {
     return (
         <>
             <DashboardHeader
@@ -28,50 +22,46 @@ const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
                 }
             />
 
-
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <ExecutiveStatCard
                     icon={<FiTrendingUp size={22} />}
-                    label="Total Solicitudes"
-                    value={stats.total}
+                    label="Crecimiento"
+                    value="--"
                     from="from-blue-600"
                     to="to-blue-500"
                 />
                 <ExecutiveStatCard
-                    icon={<FiCheckCircle size={22} />}
-                    label="Aprobadas"
-                    value={stats.aprobadas}
-                    from="from-green-600"
-                    to="to-green-500"
-                />
-                <ExecutiveStatCard
-                    icon={<FiXCircle size={22} />}
-                    label="Rechazadas"
-                    value={stats.rechazadas}
-                    from="from-rose-600"
-                    to="to-pink-500"
-                />
-                <ExecutiveStatCard
                     icon={<FiUsers size={22} />}
                     label="Equipo Activo"
-                    value="8" // Placeholder or real data if available
+                    value="8"
                     from="from-purple-600"
                     to="to-purple-500"
                 />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-5">
-                    <SectionTitle title="Tendencia de Ventas" />
-                    <div className="h-64">
-                        {chartData?.line ? <Line data={chartData.line} options={{ maintainAspectRatio: false }} /> : <p>Cargando...</p>}
+            <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 rounded-md text-blue-600">
+                            <FiClipboard size={18} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-semibold text-gray-900">Solicitudes</p>
+                            <p className="text-xs text-gray-500">Gestionar en el módulo</p>
+                        </div>
                     </div>
                 </Card>
-                <Card className="p-5">
-                    <SectionTitle title="Distribución por Estado" />
-                    <div className="h-64 flex justify-center">
-                        {chartData?.doughnut ? <Doughnut data={chartData.doughnut} options={{ maintainAspectRatio: false }} /> : <p>Cargando...</p>}
+
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-50 rounded-md text-amber-600">
+                            <FiPackage size={18} />
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-sm font-semibold text-gray-900">Solicitud de compra</p>
+                            <p className="text-xs text-gray-500">Derivar a ACP</p>
+                        </div>
+                        <PurchaseHandoffWidget />
                     </div>
                 </Card>
             </div>

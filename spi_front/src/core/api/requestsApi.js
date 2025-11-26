@@ -4,9 +4,20 @@ import api from "./index";
 /** 📋 Lista paginada de solicitudes */
 export const getRequests = async (params = {}) => {
   const { page = 1, pageSize = 12, mine, status, q } = params;
-  const response = await api.get("/requests", {
-    params: { page, pageSize, mine, status, q },
-  });
+  const requestParams = { page, pageSize, mine, status, q };
+
+  let response;
+
+  try {
+    response = await api.get("/requests", { params: requestParams });
+  } catch (err) {
+    if (err?.response?.status === 403 && mine !== true) {
+      console.warn("⚠️ /requests 403 recibido, reintentando con mine=true");
+      response = await api.get("/requests", { params: { ...requestParams, mine: true } });
+    } else {
+      throw err;
+    }
+  }
 
   console.log("📡 API /requests respondió:", response.data);
 

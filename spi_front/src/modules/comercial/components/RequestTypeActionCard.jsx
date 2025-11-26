@@ -41,14 +41,13 @@ const RequestTypeActionCard = ({
 
   return (
     <div
-      className={`flex h-full flex-col justify-between rounded-2xl border p-5 shadow-sm transition dark:border-opacity-50 ${
-        palette.border
-      } ${palette.bg}`}
+      className={`flex h-full flex-col justify-between rounded-2xl border p-6 shadow-sm transition hover:shadow-md dark:border-opacity-50 ${palette.border
+        } ${palette.bg}`}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex flex-col items-center text-center space-y-3">
         {Icon ? (
-          <div className={`rounded-2xl p-3 text-white shadow-sm ${palette.icon}`}>
-            <Icon size={22} />
+          <div className={`rounded-2xl p-4 text-white shadow-sm ${palette.icon}`}>
+            <Icon size={28} />
           </div>
         ) : null}
         <div className="space-y-2">
@@ -57,17 +56,17 @@ const RequestTypeActionCard = ({
               {subtitle}
             </p>
           ) : null}
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{title}</h3>
-          <p className="text-sm text-gray-600 dark:text-gray-400">{description}</p>
+          <h3 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">{title}</h3>
+          <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
         </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-2">
+      <div className="mt-5 flex flex-col items-center gap-3">
+        <div className="flex flex-wrap gap-2 justify-center">
           {chips.map((chip) => (
             <span
               key={chip}
-              className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${palette.chip}`}
+              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${palette.chip}`}
             >
               {chip}
             </span>
@@ -77,7 +76,7 @@ const RequestTypeActionCard = ({
           <button
             type="button"
             onClick={onClick}
-            className={`ml-auto inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold text-white transition ${palette.button}`}
+            className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${palette.button}`}
           >
             {ctaLabel}
           </button>

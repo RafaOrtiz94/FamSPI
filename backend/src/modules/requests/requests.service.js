@@ -487,11 +487,12 @@ async function createRequest({
     });
   }
 
+  const shouldGenerateActa = isJefeComercial || code === "F.ST-20";
+
   let doc = null;
-  if (isJefeComercial) {
+  if (shouldGenerateActa) {
     try {
       doc = await generateActa(request.id, requester_id, schemaKey);
-      await updateRequestStatus(request.id, "acta_generada");
     } catch (e) {
       logger.error("❌ Error generando acta:", e);
     }
@@ -607,8 +608,22 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
     folders.rootId;
 
   const uploadedFiles = [];
-  for (const f of files) {
-    const base64 = f.buffer?.toString("base64") || f.base64;
+  for (const f of files || []) {
+    const rawBase64 = f?.buffer?.toString("base64") || f?.base64;
+    const base64 = typeof rawBase64 === "string" ? rawBase64.split(",").pop()?.trim() : "";
+
+    if (!base64) {
+      logger.warn(
+        {
+          file: f?.name || f?.originalname,
+          hasBuffer: !!f?.buffer,
+          hasBase64: !!f?.base64,
+          skippedBase64: rawBase64 === undefined,
+        },
+        "Ignorando archivo sin contenido para adjuntar"
+      );
+      continue;
+    }
     const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
     const { id, webViewLink } = await uploadBase64File(name, base64, mime, parentFolder);
@@ -667,9 +682,17 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const equipos = Array.isArray(payload.equipos) ? payload.equipos.slice(0, 4) : [];
   const equipmentTags = {};
   for (let i = 0; i < 4; i += 1) {
-    const equipo = equipos[i] || {};
-    equipmentTags[`<< N_Equipo${i + 1}>> `] = asText(equipo.nombre_equipo);
-    equipmentTags[`<< E_Equipo${i + 1}>> `] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+    const equipo = equipos[i];
+    const nameTag = `<<N_Equipo${i + 1}>>`;
+    const stateTag = `<<E_Equipo${i + 1}>>`;
+
+    if (equipo) {
+      equipmentTags[nameTag] = asText(equipo.nombre_equipo);
+      equipmentTags[stateTag] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+    } else {
+      equipmentTags[nameTag] = "";
+      equipmentTags[stateTag] = "";
+    }
   }
 
   const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
@@ -721,7 +744,6 @@ async function generateActa(request_id, uploaded_by, options = {}) {
 
   if (pdf) await drive.files.delete({ fileId: doc.id, supportsAllDrives: true });
 
-  await updateRequestStatus(request_id, "acta_generada");
   await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta", entity: "requests", entity_id: request_id });
 
   return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
