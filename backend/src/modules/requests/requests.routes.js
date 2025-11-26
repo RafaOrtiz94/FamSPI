@@ -132,6 +132,8 @@ router.get(
   requireRole([
     "gerencia",
     "comercial",
+    "acp_comercial",
+    "backoffice_comercial",
     "tecnico",
     "finanzas",
     "calidad",
@@ -159,6 +161,8 @@ router.get(
   requireRole([
     "gerencia",
     "comercial",
+    "acp_comercial",
+    "backoffice_comercial",
     "tecnico",
     "finanzas",
     "calidad",
