@@ -610,6 +610,13 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
   const uploadedFiles = [];
   for (const f of files) {
     const base64 = f.buffer?.toString("base64") || f.base64;
+    if (!base64) {
+      logger.warn(
+        { file: f?.name || f?.originalname, hasBuffer: !!f?.buffer, hasBase64: !!f?.base64 },
+        "Ignorando archivo sin contenido para adjuntar"
+      );
+      continue;
+    }
     const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
     const { id, webViewLink } = await uploadBase64File(name, base64, mime, parentFolder);
