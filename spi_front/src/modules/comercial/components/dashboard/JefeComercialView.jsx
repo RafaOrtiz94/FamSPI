@@ -1,19 +1,12 @@
 import React from "react";
-import {
-    FiTrendingUp,
-    FiCheckCircle,
-    FiXCircle,
-    FiUsers,
-    FiActivity,
-} from "react-icons/fi";
-import { Bar, Line, Doughnut } from "react-chartjs-2";
+import { FiTrendingUp, FiUsers } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
-const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
+const JefeComercialView = ({ onRefresh }) => {
     return (
         <>
             <DashboardHeader
@@ -29,53 +22,33 @@ const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
                 }
             />
 
-
-
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <ExecutiveStatCard
                     icon={<FiTrendingUp size={22} />}
-                    label="Total Solicitudes"
-                    value={stats.total}
+                    label="Crecimiento"
+                    value="--"
                     from="from-blue-600"
                     to="to-blue-500"
                 />
                 <ExecutiveStatCard
-                    icon={<FiCheckCircle size={22} />}
-                    label="Aprobadas"
-                    value={stats.aprobadas}
-                    from="from-green-600"
-                    to="to-green-500"
-                />
-                <ExecutiveStatCard
-                    icon={<FiXCircle size={22} />}
-                    label="Rechazadas"
-                    value={stats.rechazadas}
-                    from="from-rose-600"
-                    to="to-pink-500"
-                />
-                <ExecutiveStatCard
                     icon={<FiUsers size={22} />}
                     label="Equipo Activo"
-                    value="8" // Placeholder or real data if available
+                    value="8"
                     from="from-purple-600"
                     to="to-purple-500"
                 />
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-5">
-                    <SectionTitle title="Tendencia de Ventas" />
-                    <div className="h-64">
-                        {chartData?.line ? <Line data={chartData.line} options={{ maintainAspectRatio: false }} /> : <p>Cargando...</p>}
-                    </div>
-                </Card>
-                <Card className="p-5">
-                    <SectionTitle title="Distribución por Estado" />
-                    <div className="h-64 flex justify-center">
-                        {chartData?.doughnut ? <Doughnut data={chartData.doughnut} options={{ maintainAspectRatio: false }} /> : <p>Cargando...</p>}
-                    </div>
-                </Card>
-            </div>
+            <Card className="p-5 mt-6">
+                <SectionTitle
+                    title="Gestiona las solicitudes en la sección dedicada"
+                    action={<span className="text-sm text-gray-500">Ir al menú "Solicitudes"</span>}
+                />
+                <p className="text-sm text-gray-600 mt-2">
+                    El monitoreo y la creación de solicitudes se centralizan en el apartado "Solicitudes" de la barra
+                    de navegación para mantener el inicio enfocado en otros indicadores comerciales.
+                </p>
+            </Card>
 
             <Card className="p-5 mt-6">
                 <SectionTitle title="Solicitud rápida de compra" />

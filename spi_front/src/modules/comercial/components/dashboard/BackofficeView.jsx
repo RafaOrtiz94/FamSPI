@@ -2,16 +2,14 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import {
     FiBox,
-    FiClipboard,
     FiTruck,
     FiSearch,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
-import ClientRequestManagement from "../ClientRequestManagement";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
-const BackofficeView = ({ stats, loading, onRefresh }) => {
+const BackofficeView = ({ onRefresh }) => {
     const navigate = useNavigate();
 
     return (
@@ -46,21 +44,6 @@ const BackofficeView = ({ stats, loading, onRefresh }) => {
                 </Card>
 
                 <Card
-                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-orange-500"
-                    onClick={() => navigate("/dashboard/comercial/solicitudes")}
-                >
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-orange-100 rounded-full text-orange-600">
-                            <FiClipboard size={24} />
-                        </div>
-                        <div>
-                            <h3 className="font-semibold text-gray-900">Procesar Pedidos</h3>
-                            <p className="text-sm text-gray-500">Solicitudes pendientes</p>
-                        </div>
-                    </div>
-                </Card>
-
-                <Card
                     className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-teal-500"
                     onClick={() => navigate("/dashboard/comercial/logistica")} // Assuming this route might exist or map to requests
                 >
@@ -74,13 +57,39 @@ const BackofficeView = ({ stats, loading, onRefresh }) => {
                         </div>
                     </div>
                 </Card>
+
+                <Card
+                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-orange-500"
+                    onClick={() => navigate("/dashboard/comercial/solicitudes")}
+                >
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-orange-100 rounded-full text-orange-600">
+                            <FiSearch size={24} />
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-gray-900">Solicitudes</h3>
+                            <p className="text-sm text-gray-500">Accede al módulo dedicado</p>
+                        </div>
+                    </div>
+                </Card>
             </div>
 
-            <Card className="p-5">
-                <SectionTitle title="Gestión y Aprobación de Solicitudes" />
-                <div className="mt-4">
-                    <ClientRequestManagement />
-                </div>
+            <Card className="p-5 mt-6">
+                <SectionTitle
+                    title="Gestiona las solicitudes en su apartado dedicado"
+                    action={
+                        <button
+                            onClick={() => navigate("/dashboard/comercial/solicitudes")}
+                            className="text-sm text-blue-600 hover:underline"
+                        >
+                            Ir a Solicitudes
+                        </button>
+                    }
+                />
+                <p className="text-sm text-gray-600 mt-2">
+                    La creación y administración completa de solicitudes está disponible desde la pestaña
+                    "Solicitudes" en la barra de navegación.
+                </p>
             </Card>
 
             <Card className="p-5 mt-6">

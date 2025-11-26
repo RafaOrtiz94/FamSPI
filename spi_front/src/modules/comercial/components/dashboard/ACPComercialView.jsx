@@ -11,7 +11,7 @@ import { DashboardHeader, SectionTitle } from "../../../shared/components/Dashbo
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
-const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
+const ACPComercialView = ({ onRefresh }) => {
     const navigate = useNavigate();
 
     return (
@@ -28,8 +28,6 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
                     </button>
                 }
             />
-
-
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card
@@ -49,15 +47,15 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
 
                 <Card
                     className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-cyan-500"
-                    onClick={() => navigate("/dashboard/comercial/solicitudes")}
+                    onClick={() => navigate("/dashboard/comercial/equipment-purchases")}
                 >
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-cyan-100 rounded-full text-cyan-600">
                             <FiFileText size={24} />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-gray-900">Gestión Solicitudes</h3>
-                            <p className="text-sm text-gray-500">Apoyo operativo</p>
+                            <h3 className="font-semibold text-gray-900">Procesos de compra</h3>
+                            <p className="text-sm text-gray-500">Seguimiento de equipos</p>
                         </div>
                     </div>
                 </Card>
