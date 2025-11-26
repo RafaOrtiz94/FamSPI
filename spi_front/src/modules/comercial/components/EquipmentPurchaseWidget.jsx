@@ -119,6 +119,7 @@ const normalizeResponseItems = (request) => {
     serial: item.serial,
     requested_type: item.type,
     available_type: item.type,
+    decision: item.type === "none" ? "reject" : "accept",
   }));
 };
 
@@ -234,9 +235,16 @@ const EquipmentPurchaseWidget = () => {
 
   const submitResponse = async () => {
     try {
-      const responseItems = responseDraft.items || [];
-      const hasAvailability = responseItems.some((item) => item.available_type && item.available_type !== "none");
-      const normalizedOutcome = hasAvailability ? "new" : "none";
+      const responseItems = (responseDraft.items || []).map((item) => {
+        const availableType = item.available_type || "none";
+        const decision = availableType === "none" ? "reject" : item.decision || "reject";
+        return { ...item, available_type: availableType, decision };
+      });
+
+      const acceptedItems = responseItems.filter(
+        (item) => item.available_type !== "none" && item.decision !== "reject",
+      );
+      const normalizedOutcome = acceptedItems.length > 0 ? "new" : "none";
       await saveProviderResponse(responseDraft.id, {
         outcome: normalizedOutcome,
         notes: responseDraft.notes,
@@ -436,6 +444,7 @@ const EquipmentPurchaseWidget = () => {
                     name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || item.id || "Equipo",
                     requested_type: item.requested_type || requestedItem.type,
                     available_type: item.available_type || item.type,
+                    decision: item.decision || (item.available_type === "none" ? "reject" : "accept"),
                   };
                 })
                 : [];
@@ -526,11 +535,12 @@ const EquipmentPurchaseWidget = () => {
                   <div className="mb-4">
                     <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{equipmentTitle}</p>
                     <div className="space-y-1">
-                      {equipmentList.map((eq, idx) => {
-                        const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
-                        const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
-                        const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
-                        const hasMismatch = requestedType && availableType && requestedType !== availableType;
+                        {equipmentList.map((eq, idx) => {
+                          const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
+                          const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
+                          const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
+                          const decision = typeof eq === "object" ? eq.decision : null;
+                          const hasMismatch = requestedType && availableType && requestedType !== availableType;
 
                         const typeBadge = (type, label) => (
                           <span
@@ -551,14 +561,24 @@ const EquipmentPurchaseWidget = () => {
                               <FiPackage size={14} className="text-gray-500" />
                               <span className="font-medium text-gray-800">{eqName}</span>
                             </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              {requestedType && typeBadge(requestedType, "Solicitado")}
-                              {availableType && typeBadge(availableType, "Disponible")}
-                              {hasMismatch && (
-                                <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
-                                  Diferente a lo solicitado
-                                </span>
-                              )}
+                              <div className="flex flex-wrap items-center gap-2">
+                                {requestedType && typeBadge(requestedType, "Solicitado")}
+                                {availableType && typeBadge(availableType, "Disponible")}
+                                {decision && (
+                                  <span
+                                    className={`px-2 py-0.5 text-xs rounded-full font-semibold ${decision === 'reject'
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-emerald-100 text-emerald-700'
+                                      }`}
+                                  >
+                                    {decision === "reject" ? "Rechazado" : "Aceptado"}
+                                  </span>
+                                )}
+                                {hasMismatch && (
+                                  <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
+                                    Diferente a lo solicitado
+                                  </span>
+                                )}
                             </div>
                           </div>
                         );
@@ -777,27 +797,57 @@ const EquipmentPurchaseWidget = () => {
                     {item.sku && <span className="text-[11px] text-gray-500">SKU: {item.sku}</span>}
                   </div>
                   <div className="space-y-1">
-                    {[
-                      { value: "new", label: "Disponible en Nuevo" },
-                      { value: "cu", label: "Disponible en CU" },
-                      { value: "none", label: "Sin stock" },
-                    ].map((option) => (
-                      <label key={option.value} className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name={`availability-${item.id}`}
-                          checked={item.available_type === option.value}
-                          onChange={() => {
-                            setResponseDraft((prev) => {
-                              const items = [...prev.items];
-                              items[idx] = { ...items[idx], available_type: option.value };
-                              return { ...prev, items };
-                            });
-                          }}
-                        />
-                        {option.label}
-                      </label>
-                    ))}
+                    {[{ value: "new", label: "Disponible en Nuevo" }, { value: "cu", label: "Disponible en CU" }, { value: "none", label: "Sin stock" }]
+                      .map((option) => (
+                        <label key={option.value} className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`availability-${item.id}`}
+                            checked={item.available_type === option.value}
+                            onChange={() => {
+                              setResponseDraft((prev) => {
+                                const items = [...prev.items];
+                                items[idx] = {
+                                  ...items[idx],
+                                  available_type: option.value,
+                                  decision: option.value === "none" ? "reject" : items[idx].decision,
+                                };
+                                return { ...prev, items };
+                              });
+                            }}
+                          />
+                          {option.label}
+                        </label>
+                      ))}
+                  </div>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {[{ value: "accept", label: "Aceptar producto" }, { value: "reject", label: "Rechazar producto" }]
+                      .map((option) => {
+                        const disabled = option.value === "accept" && item.available_type === "none";
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => {
+                              if (disabled) return;
+                              setResponseDraft((prev) => {
+                                const items = [...prev.items];
+                                items[idx] = { ...items[idx], decision: option.value };
+                                return { ...prev, items };
+                              });
+                            }}
+                            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${item.decision === option.value
+                              ? option.value === "accept"
+                                ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+                                : "bg-red-100 text-red-700 border-red-200"
+                              : "bg-white text-gray-600 border-gray-200 hover:bg-gray-50"}
+                              ${disabled ? " opacity-50 cursor-not-allowed" : ""}`}
+                            disabled={disabled}
+                          >
+                            {option.label}
+                          </button>
+                        );
+                      })}
                   </div>
                 </div>
               ))}
@@ -810,7 +860,7 @@ const EquipmentPurchaseWidget = () => {
               />
             </div>
             <div className="flex justify-end gap-2 mt-4">
-              <Button variant="ghost" onClick={() => setResponseDraft({ open: false, id: null, outcome: "new", notes: "" })}>
+              <Button variant="ghost" onClick={() => setResponseDraft({ open: false, id: null, outcome: "new", notes: "", items: [] })}>
                 Cancelar
               </Button>
               <Button onClick={submitResponse}>Guardar</Button>
