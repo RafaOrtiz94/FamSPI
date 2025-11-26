@@ -1,9 +1,9 @@
 import React from "react";
-import { FiTrendingUp, FiUsers } from "react-icons/fi";
+import { FiTrendingUp, FiUsers, FiClipboard, FiPackage } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const JefeComercialView = ({ onRefresh }) => {
@@ -39,21 +39,32 @@ const JefeComercialView = ({ onRefresh }) => {
                 />
             </div>
 
-            <Card className="p-5 mt-6">
-                <SectionTitle
-                    title="Gestiona las solicitudes en la sección dedicada"
-                    action={<span className="text-sm text-gray-500">Ir al menú "Solicitudes"</span>}
-                />
-                <p className="text-sm text-gray-600 mt-2">
-                    El monitoreo y la creación de solicitudes se centralizan en el apartado "Solicitudes" de la barra
-                    de navegación para mantener el inicio enfocado en otros indicadores comerciales.
-                </p>
-            </Card>
+            <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 rounded-md text-blue-600">
+                            <FiClipboard size={18} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-semibold text-gray-900">Solicitudes</p>
+                            <p className="text-xs text-gray-500">Gestionar en el módulo</p>
+                        </div>
+                    </div>
+                </Card>
 
-            <Card className="p-5 mt-6">
-                <SectionTitle title="Solicitud rápida de compra" />
-                <PurchaseHandoffWidget />
-            </Card>
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-50 rounded-md text-amber-600">
+                            <FiPackage size={18} />
+                        </div>
+                        <div className="flex-1">
+                            <p className="text-sm font-semibold text-gray-900">Solicitud de compra</p>
+                            <p className="text-xs text-gray-500">Derivar a ACP</p>
+                        </div>
+                        <PurchaseHandoffWidget />
+                    </div>
+                </Card>
+            </div>
         </>
     );
 };

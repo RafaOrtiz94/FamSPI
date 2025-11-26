@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router-dom";
-import { FiList, FiUsers, FiPackage } from "react-icons/fi";
+import { FiClipboard, FiUsers, FiPackage, FiCheckSquare } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const ComercialView = () => {
@@ -15,78 +15,69 @@ const ComercialView = () => {
                 subtitle="Panel de control para asesores comerciales"
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 rounded-md text-emerald-600">
+                            <FiCheckSquare size={18} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-semibold text-gray-900">Registro de asistencia</p>
+                            <p className="text-xs text-gray-500">Disponible desde el menú</p>
+                        </div>
+                    </div>
+                </Card>
+
                 <Card
-                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-green-500"
+                    className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
                     onClick={() => navigate("/dashboard/comercial/clientes")}
                 >
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-green-100 rounded-full text-green-600">
-                            <FiUsers size={24} />
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-green-50 rounded-md text-green-600">
+                            <FiUsers size={18} />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-gray-900">Mis Clientes</h3>
-                            <p className="text-sm text-gray-500">Gestionar cartera</p>
+                            <p className="text-sm font-semibold text-gray-900">Clientes</p>
+                            <p className="text-xs text-gray-500">Gestión desde navegación</p>
                         </div>
                     </div>
                 </Card>
 
                 <Card
-                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-purple-500"
+                    className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
                     onClick={() => navigate("/dashboard/comercial/inventario")}
                 >
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-purple-100 rounded-full text-purple-600">
-                            <FiPackage size={24} />
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-50 rounded-md text-purple-600">
+                            <FiPackage size={18} />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-gray-900">Consultar Stock</h3>
-                            <p className="text-sm text-gray-500">Ver disponibilidad</p>
+                            <p className="text-sm font-semibold text-gray-900">Inventario</p>
+                            <p className="text-xs text-gray-500">Consulta de stock</p>
                         </div>
                     </div>
                 </Card>
 
                 <Card
-                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-blue-500"
+                    className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
                     onClick={() => navigate("/dashboard/comercial/solicitudes")}
                 >
-                    <div className="flex items-center gap-4">
-                        <div className="p-3 bg-blue-100 rounded-full text-blue-600">
-                            <FiList size={24} />
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 rounded-md text-blue-600">
+                            <FiClipboard size={18} />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-gray-900">Solicitudes</h3>
-                            <p className="text-sm text-gray-500">Gestiona y crea solicitudes</p>
+                            <p className="text-sm font-semibold text-gray-900">Solicitudes</p>
+                            <p className="text-xs text-gray-500">Módulo dedicado</p>
                         </div>
                     </div>
                 </Card>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-                <Card className="p-5 h-full lg:col-span-2">
-                    <SectionTitle
-                        title="Gestiona las solicitudes desde su sección dedicada"
-                        action={
-                            <button
-                                onClick={() => navigate("/dashboard/comercial/solicitudes")}
-                                className="text-sm text-blue-600 hover:underline"
-                            >
-                                Ir a Solicitudes
-                            </button>
-                        }
-                    />
-                    <p className="text-sm text-gray-600 mt-2">
-                        Consulta, crea y administra todas las solicitudes directamente desde el menú
-                        "Solicitudes" en la barra de navegación.
-                    </p>
+            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card className="p-4 border border-gray-200">
+                    <PurchaseHandoffWidget />
                 </Card>
-
-                <div className="lg:col-span-1">
-                    <Card className="p-5 h-full">
-                        <SectionTitle title="Nueva solicitud de compra" />
-                        <PurchaseHandoffWidget />
-                    </Card>
-                </div>
             </div>
         </>
     );
