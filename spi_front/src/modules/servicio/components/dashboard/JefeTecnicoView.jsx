@@ -7,7 +7,7 @@ import {
 } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
-import AttendanceWidget from "../../../shared/components/AttendanceWidget";
+
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PendingApprovals from "../../components/PendingApprovals";
 
@@ -27,7 +27,7 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                 }
             />
 
-            <AttendanceWidget />
+
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <ExecutiveStatCard

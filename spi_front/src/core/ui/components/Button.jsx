@@ -3,15 +3,15 @@ import clsx from "clsx";
 
 const variantClasses = {
   primary:
-    "bg-gradient-to-r from-accent to-emerald-400 text-white shadow-lg shadow-emerald-500/30 hover:opacity-90 focus:ring-accent/30",
+    "bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:shadow focus:ring-blue-500/30 active:bg-blue-800",
   secondary:
-    "bg-white text-primary border border-white/60 shadow-sm hover:-translate-y-0.5 hover:shadow-lg focus:ring-primary/20",
+    "bg-white text-gray-700 border border-gray-300 shadow-sm hover:bg-gray-50 focus:ring-gray-200 active:bg-gray-100",
   outline:
-    "border border-primary/60 text-primary hover:bg-primary/5 focus:ring-primary/30",
+    "border border-blue-600 text-blue-600 hover:bg-blue-50 focus:ring-blue-500/30 active:bg-blue-100",
   danger:
-    "bg-gradient-to-r from-rose-500 to-amber-500 text-white shadow-lg shadow-rose-500/30 hover:opacity-90 focus:ring-rose-300/40",
+    "bg-red-600 text-white shadow-sm hover:bg-red-700 hover:shadow focus:ring-red-500/30 active:bg-red-800",
   ghost:
-    "text-white/80 hover:text-white hover:bg-white/10 focus:ring-white/20",
+    "text-gray-600 hover:bg-gray-100 hover:text-gray-900 focus:ring-gray-200",
 };
 
 const renderIcon = (maybeIcon) => {

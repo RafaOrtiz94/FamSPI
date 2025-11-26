@@ -9,7 +9,7 @@ import {
 import { Bar, Line, Doughnut } from "react-chartjs-2";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
-import AttendanceWidget from "../../../shared/components/AttendanceWidget";
+
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 
 const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
@@ -28,7 +28,7 @@ const JefeComercialView = ({ stats, chartData, loading, onRefresh }) => {
                 }
             />
 
-            <AttendanceWidget />
+
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <ExecutiveStatCard

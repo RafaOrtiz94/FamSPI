@@ -249,7 +249,10 @@ async function createPurchaseRequest({
   const folderId = await ensureRequestFolder(clientName, id, createdAt);
 
   const equipmentList = equipment
-    .map((item) => `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}`)
+    .map((item) => {
+      const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
+      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+    })
     .join("<br>");
 
   const html = `

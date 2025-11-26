@@ -6,7 +6,7 @@ import {
     FiFileText,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
-import AttendanceWidget from "../../../shared/components/AttendanceWidget";
+
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 
@@ -28,7 +28,7 @@ const ACPComercialView = ({ stats, recentRequests, loading, onRefresh }) => {
                 }
             />
 
-            <AttendanceWidget />
+
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card
