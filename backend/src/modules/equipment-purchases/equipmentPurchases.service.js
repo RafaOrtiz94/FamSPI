@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
+const PDFDocument = require("pdfkit");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
@@ -29,6 +30,95 @@ const STATUS = {
 
 function driveLink(fileId) {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
+}
+
+function getAcceptedItems(request) {
+  if (!request?.provider_response?.items) return [];
+  return request.provider_response.items.filter(
+    (item) => item && item.decision !== "reject" && item.available_type !== "none",
+  );
+}
+
+function formatEquipmentList(items) {
+  const list = (items || []).map((item) => {
+    const label = item.available_type === "cu" ? "CU" : "Nuevo";
+    const name = item.name || item.sku || item.id || "Equipo";
+    const serial = item.serial ? ` (Serie: ${item.serial})` : "";
+    return `<li>${name}${serial} (${label})</li>`;
+  });
+  return list.length ? `<ul>${list.join("")}</ul>` : "<p>Sin equipos disponibles</p>";
+}
+
+function stripHtml(text) {
+  if (!text) return "";
+  return text
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function buildReport({ subject, html, request, actionLabel, user }) {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ margin: 50 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("error", reject);
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+
+    const acceptedItems = getAcceptedItems(request);
+    const requestedItems = Array.isArray(request?.equipment) ? request.equipment : [];
+    const now = new Date();
+
+    doc.fontSize(18).text(actionLabel || "Informe de disponibilidad de equipos", {
+      underline: true,
+    });
+    doc.moveDown();
+    doc.fontSize(12).text(`Fecha y hora: ${now.toLocaleString("es-ES")}`);
+    if (subject) doc.text(`Asunto: ${subject}`);
+    if (user?.fullname || user?.name || user?.email) {
+      const author = user.fullname || user.name || user.email;
+      doc.text(`Usuario: ${author}${user.email && author !== user.email ? ` (${user.email})` : ""}`);
+    }
+    if (request?.client_name) doc.text(`Cliente: ${request.client_name}`);
+    if (request?.provider_email) doc.text(`Proveedor: ${request.provider_email}`);
+    if (request?.id) doc.text(`Solicitud: ${request.id}`);
+    if (request?.provider_response?.notes) doc.text(`Notas del proveedor: ${request.provider_response.notes}`);
+
+    doc.moveDown();
+    doc.fontSize(14).text("Equipos aceptados");
+    doc.fontSize(12);
+    if (acceptedItems.length) {
+      acceptedItems.forEach((item, idx) => {
+        const label = item.available_type === "cu" ? "CU" : "Nuevo";
+        const name = item.name || item.sku || item.id || `Equipo ${idx + 1}`;
+        const serial = item.serial ? ` - Serie: ${item.serial}` : "";
+        doc.text(`• ${name}${serial} (${label})`);
+      });
+    } else {
+      doc.text("Sin equipos aceptados registrados");
+    }
+
+    if (requestedItems.length) {
+      doc.moveDown();
+      doc.fontSize(14).text("Equipos solicitados");
+      doc.fontSize(12);
+      requestedItems.forEach((item, idx) => {
+        const label = item.type === "cu" ? "CU" : "Nuevo";
+        const name = item.name || item.sku || item.id || `Equipo ${idx + 1}`;
+        const serial = item.serial ? ` - Serie: ${item.serial}` : "";
+        doc.text(`• ${name}${serial} (${label})`);
+      });
+    }
+
+    const body = stripHtml(html) || "Sin detalle de mensaje";
+    doc.moveDown();
+    doc.fontSize(14).text("Detalle del mensaje enviado");
+    doc.fontSize(12).text(body, { align: "left" });
+
+    doc.end();
+  });
 }
 
 async function ensureTables() {
@@ -136,18 +226,19 @@ async function ensureRequestFolder(clientName, requestId, requestDate) {
   return requestFolder.id;
 }
 
-async function archiveEmail({ html, subject, folderId, prefix = "correo" }) {
-  const base64 = Buffer.from(`<!-- ${subject} -->\n${html}`).toString("base64");
+async function archiveEmail({ html, subject, folderId, prefix = "correo", request, actionLabel, user }) {
+  const report = await buildReport({ subject, html, request, actionLabel, user });
+  const base64 = report.toString("base64");
   const stored = await uploadBase64File(
-    `${prefix}-${new Date().toISOString()}.html`,
+    `${prefix}-${new Date().toISOString()}.pdf`,
     base64,
-    "text/html",
+    "application/pdf",
     folderId,
   );
   return stored?.id || null;
 }
 
-async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix }) {
+async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, request, actionLabel }) {
   await sendMail({
     to,
     cc,
@@ -157,7 +248,7 @@ async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix })
     from: user?.email,
     replyTo: user?.email,
   });
-  return archiveEmail({ html, subject, folderId, prefix });
+  return archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
 }
 
 async function getApprovedClients() {
@@ -263,6 +354,14 @@ async function createPurchaseRequest({
     ${notes ? `<p>Notas: ${notes}</p>` : ""}
   `;
 
+  const requestSnapshot = {
+    id,
+    client_name: clientName,
+    provider_email: providerEmail,
+    equipment,
+    created_at: createdAt,
+  };
+
   const emailFileId = await sendAndArchive({
     user,
     to: providerEmail,
@@ -270,6 +369,8 @@ async function createPurchaseRequest({
     html,
     folderId,
     prefix: "disponibilidad",
+    request: requestSnapshot,
+    actionLabel: "Informe de disponibilidad de equipos",
   });
 
   const { rows } = await db.query(
@@ -331,28 +432,16 @@ async function requestProforma({ id, user }) {
     throw new Error("La solicitud no está lista para pedir proforma");
   }
 
-  const acceptedItems = Array.isArray(request.provider_response?.items)
-    ? request.provider_response.items.filter(
-        (item) => item && item.decision !== "reject" && item.available_type !== "none",
-      )
-    : [];
+  const acceptedItems = getAcceptedItems(request);
 
   if (acceptedItems.length === 0) {
     throw new Error("No hay equipos aceptados para solicitar proforma");
   }
 
-  const equipmentList = acceptedItems
-    .map((e) => {
-      const label = e.available_type === "cu" ? "CU" : "Nuevo";
-      const name = e.name || e.sku || e.id || "Equipo";
-      return `<li>${name} (${label})</li>`;
-    })
-    .join("");
-
   const html = `
     <p>Hola,</p>
     <p>Por favor envíanos la proforma de los siguientes equipos para <strong>${request.client_name}</strong>:</p>
-    <ul>${equipmentList}</ul>
+    ${formatEquipmentList(acceptedItems)}
   `;
 
   const emailFileId = await sendAndArchive({
@@ -362,6 +451,8 @@ async function requestProforma({ id, user }) {
     html,
     folderId: request.drive_folder_id,
     prefix: "proforma",
+    request,
+    actionLabel: "Solicitud de proforma",
   });
 
   const { rows } = await db.query(
@@ -414,9 +505,15 @@ async function reserveEquipment({ id, user }) {
     throw new Error("Se requiere tener la proforma para reservar");
   }
 
+  const acceptedItems = getAcceptedItems(request);
+  if (!acceptedItems.length) {
+    throw new Error("No hay equipos aceptados para enviar reserva");
+  }
+
   const html = `
     <p>Solicitamos reservar los equipos cotizados para <strong>${request.client_name}</strong>.</p>
-    <p>Adjuntamos la proforma recibida.</p>
+    <p>Adjuntamos la proforma recibida y confirmamos reserva para:</p>
+    ${formatEquipmentList(acceptedItems)}
   `;
 
   const emailFileId = await sendAndArchive({
@@ -426,6 +523,8 @@ async function reserveEquipment({ id, user }) {
     html,
     folderId: request.drive_folder_id,
     prefix: "reserva",
+    request,
+    actionLabel: "Confirmación de reserva",
   });
 
   const reminderDate = new Date();
@@ -474,9 +573,11 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
 
   const fileId = await uploadDocument(file, request.drive_folder_id, "proforma-firmada");
 
+  const acceptedItems = getAcceptedItems(request);
   const arrivalHtml = `
     <p>Hemos recibido la proforma firmada de <strong>${request.client_name}</strong>.</p>
-    <p>Por favor confirma el tiempo de llegada de los equipos solicitados.</p>
+    <p>Por favor confirma el tiempo de llegada de los siguientes equipos:</p>
+    ${formatEquipmentList(acceptedItems)}
   `;
 
   const arrivalFileId = await sendAndArchive({
@@ -486,6 +587,8 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
     html: arrivalHtml,
     folderId: request.drive_folder_id,
     prefix: "tiempo-llegada",
+    request,
+    actionLabel: "Solicitud de tiempo de llegada",
   });
 
   const dueDate = new Date();
