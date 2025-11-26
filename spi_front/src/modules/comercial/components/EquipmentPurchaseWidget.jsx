@@ -16,7 +16,17 @@ import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
 import { useAuth } from "../../../core/auth/AuthContext";
-import { FiPackage, FiMail, FiFileText, FiCheckCircle, FiClock, FiAlertCircle, FiDownload, FiUser } from "react-icons/fi";
+import {
+  FiPackage,
+  FiMail,
+  FiFileText,
+  FiCheckCircle,
+  FiClock,
+  FiAlertCircle,
+  FiDownload,
+  FiUser,
+  FiSearch,
+} from "react-icons/fi";
 
 const STATUS_CONFIG = {
   pending_provider_assignment: {
@@ -136,13 +146,15 @@ const normalizeResponseItems = (request) => {
   }));
 };
 
-const EquipmentPurchaseWidget = ({ showCreation = true }) => {
+const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) => {
   const { showToast } = useUI();
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].includes(role);
   const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
   const [requests, setRequests] = useState([]);
+  const [listQuery, setListQuery] = useState("");
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ clientId: "", providerEmail: "", assignedTo: "", equipment: [], notes: "" });
@@ -180,6 +192,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true }) => {
   }, []);
 
   useEffect(() => {
+    setPage(1);
+  }, [listQuery]);
+
+  useEffect(() => {
     if (showCreation && !isManager && meta.acpUsers?.length && !form.assignedTo) {
       setForm((prev) => ({ ...prev, assignedTo: meta.acpUsers[0].id }));
     }
@@ -189,6 +205,31 @@ const EquipmentPurchaseWidget = ({ showCreation = true }) => {
     () => (showCreation ? meta.clients.find((c) => `${c.id}` === `${form.clientId}`) : null),
     [showCreation, meta.clients, form.clientId],
   );
+
+  const filteredRequests = useMemo(() => {
+    const q = (listQuery || "").trim().toLowerCase();
+    if (!q) return requests;
+    return requests.filter((req) =>
+      [req.client_name, req.provider_email, req.assigned_to_name, req.assigned_to_email]
+        .filter(Boolean)
+        .some((val) => String(val).toLowerCase().includes(q))
+    );
+  }, [listQuery, requests]);
+
+  const perPage = compactList ? 4 : Math.max(filteredRequests.length, 1);
+  const totalPages = Math.max(1, Math.ceil((filteredRequests.length || 0) / perPage));
+  const currentPage = Math.min(page, totalPages);
+  const visibleRequests = useMemo(() => {
+    if (!compactList) return filteredRequests;
+    const start = (currentPage - 1) * perPage;
+    return filteredRequests.slice(start, start + perPage);
+  }, [compactList, filteredRequests, currentPage, perPage]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const toggleEquipment = (id) => {
     setForm((prev) => {
@@ -501,24 +542,64 @@ const EquipmentPurchaseWidget = ({ showCreation = true }) => {
       )}
 
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
           <div>
             <h2 className="text-xl font-bold text-gray-900">Solicitudes en curso</h2>
             {loading && <span className="block text-sm text-gray-500 animate-pulse">Actualizando...</span>}
           </div>
-          {!showCreation && (
-            <Button onClick={loadAll} variant="ghost">Refrescar</Button>
-          )}
+          <div className="flex flex-col items-end gap-2 w-full md:w-auto">
+            {compactList && (
+              <div className="relative w-full md:w-72">
+                <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={14} />
+                <input
+                  value={listQuery}
+                  onChange={(e) => setListQuery(e.target.value)}
+                  className="w-full rounded-lg border border-gray-300 pl-9 pr-3 py-2 text-sm focus:ring-2 focus:ring-blue-500"
+                  placeholder="Buscar cliente o proveedor"
+                />
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              {!showCreation && (
+                <Button onClick={loadAll} variant="ghost" className="text-sm px-3 py-1.5">
+                  Refrescar
+                </Button>
+              )}
+              {compactList && (
+                <div className="flex items-center gap-2 text-xs text-gray-600">
+                  <Button
+                    variant="secondary"
+                    className="px-3 py-1"
+                    disabled={currentPage <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Anterior
+                  </Button>
+                  <span className="text-gray-700">
+                    Página {currentPage} de {totalPages}
+                  </span>
+                  <Button
+                    variant="secondary"
+                    className="px-3 py-1"
+                    disabled={currentPage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
-        {requests.length === 0 ? (
+        {visibleRequests.length === 0 ? (
           <Card className="p-12 text-center">
             <FiPackage className="mx-auto text-gray-300 mb-4" size={48} />
             <p className="text-gray-500">Sin solicitudes registradas</p>
           </Card>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {requests.map((req) => {
+            {visibleRequests.map((req) => {
               const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
               const StatusIcon = statusConfig.icon;
               const providerResponse = req.provider_response || null;

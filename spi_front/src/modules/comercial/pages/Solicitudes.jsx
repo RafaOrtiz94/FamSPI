@@ -20,6 +20,9 @@ import CreateRequestModal from "../components/CreateRequestModal";
 import RequestTypeActionCard from "../components/RequestTypeActionCard";
 import NewClientActionCard from "../components/NewClientActionCard";
 import LoadingOverlay from "../../../core/ui/components/LoadingOverlay";
+import PurchaseHandoffWidget from "../components/PurchaseHandoffWidget";
+import ClientRequestManagement from "../components/ClientRequestManagement";
+import EquipmentPurchaseWidget from "../components/EquipmentPurchaseWidget";
 
 const safeJSON = (txt) => {
     try {
@@ -36,6 +39,7 @@ const SolicitudesPage = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [loadingMessage, setLoadingMessage] = useState("");
+    const [showClientManager, setShowClientManager] = useState(false);
     const [detail, setDetail] = useState({
         open: false,
         loading: false,
@@ -162,6 +166,13 @@ const SolicitudesPage = () => {
         setModalOpen(true);
     };
 
+    const scrollToTracker = () => {
+        const anchor = document.getElementById("purchase-tracker");
+        if (anchor) {
+            anchor.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+    };
+
     return (
         <div className="p-6 space-y-6">
             <LoadingOverlay message={loadingMessage} />
@@ -177,6 +188,47 @@ const SolicitudesPage = () => {
                     </p>
                 </div>
             </header>
+
+            {/* Accesos principales compactos */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <Card className="flex items-center justify-between p-4">
+                    <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">Solicitudes de Cliente</p>
+                        <p className="text-sm text-gray-800">Gestiona tus solicitudes</p>
+                    </div>
+                    <Button
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => setShowClientManager((prev) => !prev)}
+                    >
+                        {showClientManager ? "Ocultar" : "Abrir"}
+                    </Button>
+                </Card>
+
+                <Card className="p-4">
+                    <PurchaseHandoffWidget />
+                </Card>
+
+                <Card className="flex items-center justify-between p-4">
+                    <div>
+                        <p className="text-xs font-semibold uppercase text-gray-500">Solicitudes en curso</p>
+                        <p className="text-sm text-gray-800">Busca o revisa las compras activas</p>
+                    </div>
+                    <Button size="sm" className="text-xs" variant="secondary" onClick={scrollToTracker}>
+                        Ver seguimiento
+                    </Button>
+                </Card>
+            </div>
+
+            {showClientManager && (
+                <Card className="p-4">
+                    <ClientRequestManagement />
+                </Card>
+            )}
+
+            <div id="purchase-tracker">
+                <EquipmentPurchaseWidget showCreation={false} compactList />
+            </div>
 
             {/* TARJETAS DE ACCIÓN RÁPIDA */}
             <Card className="p-5">
