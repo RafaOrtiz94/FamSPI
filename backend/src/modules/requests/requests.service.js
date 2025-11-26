@@ -682,9 +682,17 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const equipos = Array.isArray(payload.equipos) ? payload.equipos.slice(0, 4) : [];
   const equipmentTags = {};
   for (let i = 0; i < 4; i += 1) {
-    const equipo = equipos[i] || {};
-    equipmentTags[`<< N_Equipo${i + 1}>> `] = asText(equipo.nombre_equipo);
-    equipmentTags[`<< E_Equipo${i + 1}>> `] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+    const equipo = equipos[i];
+    const nameTag = `<<N_Equipo${i + 1}>>`;
+    const stateTag = `<<E_Equipo${i + 1}>>`;
+
+    if (equipo) {
+      equipmentTags[nameTag] = asText(equipo.nombre_equipo);
+      equipmentTags[stateTag] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+    } else {
+      equipmentTags[nameTag] = "";
+      equipmentTags[stateTag] = "";
+    }
   }
 
   const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
