@@ -27,6 +27,7 @@ import Modal from "../core/ui/components/Modal";
 import FileUploader from "../core/ui/components/FileUploader";
 import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
 import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
+import EquipmentPurchaseWidget from "./comercial/components/EquipmentPurchaseWidget";
 import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
 
 // ======= Utilidades locales =======
@@ -313,6 +314,10 @@ const RequestsPage = () => {
             </p>
           )}
         </Card>
+      </div>
+
+      <div className="mb-6">
+        <EquipmentPurchaseWidget showCreation={false} />
       </div>
 
       {/* Filtros */}

@@ -1,7 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
 import AttendanceWidget from "./AttendanceWidget";
-import ClientRequestWidget from "./ClientRequestWidget";
 
 export const DashboardLayout = ({ children, className = "", includeWidgets = true }) => {
     return (
@@ -11,9 +10,8 @@ export const DashboardLayout = ({ children, className = "", includeWidgets = tru
             className={`p-6 space-y-6 bg-gradient-to-b from-gray-50 to-white min-h-screen ${className}`}
         >
             {includeWidgets && (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4">
                     <AttendanceWidget />
-                    <ClientRequestWidget />
                 </div>
             )}
             {children}

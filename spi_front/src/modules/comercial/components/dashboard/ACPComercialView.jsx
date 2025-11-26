@@ -4,8 +4,6 @@ import { FiPhone, FiUserCheck, FiFileText, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader } from "../../../shared/components/DashboardComponents";
-import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const ACPComercialView = ({ onRefresh }) => {
     const navigate = useNavigate();
@@ -87,15 +85,6 @@ const ACPComercialView = ({ onRefresh }) => {
                 </Card>
             </div>
 
-            <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <Card className="p-4 border border-gray-200">
-                    <PurchaseHandoffWidget />
-                </Card>
-
-                <Card className="p-4 border border-gray-200">
-                    <EquipmentPurchaseWidget showCreation={false} />
-                </Card>
-            </div>
         </>
     );
 };
