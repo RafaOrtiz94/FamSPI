@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { FiUser, FiClock, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { FiUser, FiClock, FiCheckCircle, FiXCircle, FiPackage } from 'react-icons/fi';
 import { useAuth } from '../../../core/auth/AuthContext';
 import { getMyClientRequests } from '../../../core/api/requestsApi';
 import { listEquipmentPurchases } from '../../../core/api/equipmentPurchasesApi';
@@ -119,16 +119,16 @@ const MyClientRequestsWidget = () => {
                     <div>
                         <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
                             <FiUser className="w-5 h-5 text-blue-600" />
-                            Mis Solicitudes y Compras
+                            Mis Solicitudes de Clientes
                         </h3>
                         <p className="text-sm text-gray-600 mt-1">
-                            Solicitudes de registro de clientes que has creado y las compras de equipos que ves en la sección de solicitudes en curso.
+                            Solicitudes de registro de clientes que has creado.
                         </p>
                     </div>
                 </div>
 
                 {/* Estadísticas */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                     <div className="bg-gray-50 rounded-lg p-3 text-center">
                         <p className="text-xs text-gray-500 font-medium mb-1">Total</p>
                         <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
@@ -145,10 +145,31 @@ const MyClientRequestsWidget = () => {
                         <p className="text-xs text-red-700 font-medium mb-1">Rechazadas</p>
                         <p className="text-2xl font-bold text-red-700">{stats.rejected}</p>
                     </div>
-                    <div className="bg-indigo-50 rounded-lg p-3 text-center">
+                </div>
+            </Card>
+
+            {/* Resumen de solicitudes de compra */}
+            <Card className="p-5">
+                <div className="flex items-start justify-between mb-4">
+                    <div>
+                        <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                            <FiPackage className="w-4 h-4 text-indigo-600" />
+                            Compras de equipos en Solicitudes en curso
+                        </h4>
+                        <p className="text-xs text-gray-600 mt-1">
+                            Totales de las solicitudes que ves en el listado de compras de equipos.
+                        </p>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-indigo-50 rounded-lg p-3">
                         <p className="text-xs text-indigo-700 font-medium mb-1">Solicitudes de compra</p>
                         <p className="text-2xl font-bold text-indigo-700">{equipmentStats.total}</p>
-                        <p className="text-[11px] text-indigo-600 mt-1">{equipmentStats.active} activas en solicitudes en curso</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-700 font-medium mb-1">Activas</p>
+                        <p className="text-2xl font-bold text-blue-700">{equipmentStats.active}</p>
+                        <p className="text-[11px] text-blue-600 mt-1">En curso o por completar</p>
                     </div>
                 </div>
             </Card>
