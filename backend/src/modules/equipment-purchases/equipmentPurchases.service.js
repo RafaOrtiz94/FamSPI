@@ -331,10 +331,28 @@ async function requestProforma({ id, user }) {
     throw new Error("La solicitud no está lista para pedir proforma");
   }
 
+  const acceptedItems = Array.isArray(request.provider_response?.items)
+    ? request.provider_response.items.filter(
+        (item) => item && item.decision !== "reject" && item.available_type !== "none",
+      )
+    : [];
+
+  if (acceptedItems.length === 0) {
+    throw new Error("No hay equipos aceptados para solicitar proforma");
+  }
+
+  const equipmentList = acceptedItems
+    .map((e) => {
+      const label = e.available_type === "cu" ? "CU" : "Nuevo";
+      const name = e.name || e.sku || e.id || "Equipo";
+      return `<li>${name} (${label})</li>`;
+    })
+    .join("");
+
   const html = `
     <p>Hola,</p>
     <p>Por favor envíanos la proforma de los siguientes equipos para <strong>${request.client_name}</strong>:</p>
-    <ul>${(request.equipment || []).map((e) => `<li>${e.name || e.sku}</li>`).join("")}</ul>
+    <ul>${equipmentList}</ul>
   `;
 
   const emailFileId = await sendAndArchive({
