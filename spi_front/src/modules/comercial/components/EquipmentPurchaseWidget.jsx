@@ -96,6 +96,19 @@ const STATUS_CONFIG = {
   },
 };
 
+const formatProviderOutcome = (outcome) => {
+  switch (outcome) {
+    case "new":
+      return "El proveedor confirmó disponibilidad de equipos nuevos";
+    case "cu":
+      return "El proveedor confirmó disponibilidad de equipos CU";
+    case "none":
+      return "El proveedor indicó que no hay stock disponible";
+    default:
+      return "Respuesta registrada del proveedor";
+  }
+};
+
 const EquipmentPurchaseWidget = () => {
   const { showToast } = useUI();
   const [meta, setMeta] = useState({ clients: [], equipment: [] });
@@ -390,6 +403,13 @@ const EquipmentPurchaseWidget = () => {
             {requests.map((req) => {
               const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
               const StatusIcon = statusConfig.icon;
+              const providerResponse = req.provider_response || null;
+              const availableItems = Array.isArray(providerResponse?.items) ? providerResponse.items : [];
+              const showAvailableItems = !!providerResponse && availableItems.length > 0;
+              const equipmentList = showAvailableItems ? availableItems : (req.equipment || []);
+              const equipmentTitle = showAvailableItems
+                ? "Equipos disponibles (respuesta del proveedor):"
+                : "Equipos solicitados:";
 
               return (
                 <Card
@@ -433,22 +453,55 @@ const EquipmentPurchaseWidget = () => {
                     <span className="text-gray-700 font-medium">{req.provider_email}</span>
                   </div>
 
-                  {/* Equipment List */}
-                  <div className="mb-4">
-                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Equipos solicitados:</p>
-                    <div className="space-y-1">
-                      {(req.equipment || []).map((eq, idx) => (
-                        <div key={idx} className="flex items-center gap-2 text-sm bg-white/60 rounded px-2 py-1">
-                          <FiPackage size={14} className="text-gray-500" />
-                          <span className="font-medium text-gray-800">{eq.name || eq.sku}</span>
-                          {eq.type && (
-                            <span className={`ml-auto px-2 py-0.5 text-xs rounded-full font-semibold ${eq.type === 'new' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
-                              }`}>
-                              {eq.type === 'new' ? 'Nuevo' : 'CU'}
-                            </span>
+                  {/* Provider Response */}
+                  {providerResponse && (
+                    <div className="mb-4 bg-white/60 border border-white/70 rounded-lg p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Respuesta del proveedor</p>
+                          <p className="text-sm font-medium text-gray-800">{formatProviderOutcome(providerResponse.outcome)}</p>
+                          {providerResponse.notes && (
+                            <p className="text-sm text-gray-700 mt-1 whitespace-pre-line">{providerResponse.notes}</p>
                           )}
                         </div>
-                      ))}
+                        {req.provider_response_at && (
+                          <div className="flex items-center gap-1 text-[11px] text-gray-500">
+                            <FiClock size={12} />
+                            <span>
+                              {new Date(req.provider_response_at).toLocaleDateString('es-ES', {
+                                year: 'numeric',
+                                month: 'short',
+                                day: 'numeric',
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Equipment List */}
+                  <div className="mb-4">
+                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{equipmentTitle}</p>
+                    <div className="space-y-1">
+                      {equipmentList.map((eq, idx) => {
+                        const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
+                        const eqType = typeof eq === "object" ? eq.type : null;
+                        return (
+                          <div key={idx} className="flex items-center gap-2 text-sm bg-white/60 rounded px-2 py-1">
+                            <FiPackage size={14} className="text-gray-500" />
+                            <span className="font-medium text-gray-800">{eqName}</span>
+                            {eqType && (
+                              <span className={`ml-auto px-2 py-0.5 text-xs rounded-full font-semibold ${eqType === 'new' ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'
+                                }`}>
+                                {eqType === 'new' ? 'Nuevo' : 'CU'}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
