@@ -608,11 +608,18 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
     folders.rootId;
 
   const uploadedFiles = [];
-  for (const f of files) {
-    const base64 = f.buffer?.toString("base64") || f.base64;
+  for (const f of files || []) {
+    const rawBase64 = f?.buffer?.toString("base64") || f?.base64;
+    const base64 = typeof rawBase64 === "string" ? rawBase64.split(",").pop()?.trim() : "";
+
     if (!base64) {
       logger.warn(
-        { file: f?.name || f?.originalname, hasBuffer: !!f?.buffer, hasBase64: !!f?.base64 },
+        {
+          file: f?.name || f?.originalname,
+          hasBuffer: !!f?.buffer,
+          hasBase64: !!f?.base64,
+          skippedBase64: rawBase64 === undefined,
+        },
         "Ignorando archivo sin contenido para adjuntar"
       );
       continue;
