@@ -8,6 +8,7 @@ import Button from "../../core/ui/components/Button";
 import Select from "../../core/ui/components/Select";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
+import HRPersonnelRequestsWidget from "../shared/components/HRPersonnelRequestsWidget";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import { downloadAttendancePDF } from "../../core/api/attendanceApi";
@@ -115,6 +116,9 @@ const TalentoDashboard = () => {
         <AttendanceWidget />
         <ClientRequestWidget />
       </div>
+
+      {/* Widget de Solicitudes de Personal */}
+      <HRPersonnelRequestsWidget />
 
       {/* Reporte PDF asistencia */}
       <Card className="p-5 space-y-4">

@@ -10,6 +10,7 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PendingApprovals from "../../components/PendingApprovals";
+import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
 
 const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
     return (
@@ -120,6 +121,11 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                         </div>
                     </Card>
                 </div>
+            </div>
+
+            {/* Widget de Solicitudes de Personal */}
+            <div className="mt-6">
+                <PersonnelRequestWidget />
             </div>
         </>
     );

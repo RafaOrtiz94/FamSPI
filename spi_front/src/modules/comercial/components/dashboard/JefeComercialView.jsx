@@ -5,6 +5,7 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
+import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
 
 const JefeComercialView = ({ onRefresh }) => {
     return (
@@ -64,6 +65,11 @@ const JefeComercialView = ({ onRefresh }) => {
                         <PurchaseHandoffWidget />
                     </div>
                 </Card>
+            </div>
+
+            {/* Widget de Solicitudes de Personal */}
+            <div className="mt-6">
+                <PersonnelRequestWidget />
             </div>
         </>
     );
