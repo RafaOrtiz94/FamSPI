@@ -7,6 +7,14 @@ const { requireRole } = require("../../middlewares/roles");
 
 const managerRoles = ["acp_comercial", "gerencia", "jefe_comercial"];
 const creatorRoles = ["comercial", ...managerRoles];
+const businessCaseRoles = [
+  "comercial",
+  "acp_comercial",
+  "gerencia",
+  "jefe_comercial",
+  "jefe_tecnico",
+  "jefe_operaciones",
+];
 
 router.get("/meta", verifyToken, requireRole(creatorRoles), ctrl.getMeta);
 router.get("/", verifyToken, requireRole(creatorRoles), ctrl.listMine);
@@ -42,6 +50,27 @@ router.post(
   requireRole(managerRoles),
   ctrl.upload.single("file"),
   ctrl.uploadContract,
+);
+
+router.get(
+  "/:id/business-case/items",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.listBusinessCaseItems,
+);
+
+router.post(
+  "/:id/business-case/fields",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.updateBusinessCaseFields,
+);
+
+router.post(
+  "/:id/business-case/items",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.addBusinessCaseItem,
 );
 
 router.post(

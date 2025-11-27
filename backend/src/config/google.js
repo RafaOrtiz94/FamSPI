@@ -70,6 +70,7 @@ const drive = google.drive({ version: "v3", auth: jwtClient });
 const docs = google.docs({ version: "v1", auth: jwtClient });
 const gmail = google.gmail({ version: "v1", auth: jwtClient });
 const calendar = google.calendar({ version: "v3", auth: jwtClient });
+const sheets = google.sheets({ version: "v4", auth: jwtClient });
 
 // ===============================================================
 // 🧪 Test opcional
@@ -89,4 +90,4 @@ if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
   logger.info("🔕 testGoogleAuth deshabilitado");
 }
 
-module.exports = { drive, docs, gmail, calendar, jwtClient, createDelegatedJwtClient };
+module.exports = { drive, docs, gmail, calendar, sheets, jwtClient, createDelegatedJwtClient };

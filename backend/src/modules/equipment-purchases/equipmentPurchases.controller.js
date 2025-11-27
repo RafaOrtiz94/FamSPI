@@ -231,6 +231,37 @@ exports.cancelOrder = async (req, res, next) => {
   }
 };
 
+exports.updateBusinessCaseFields = async (req, res, next) => {
+  try {
+    const updated = await service.updateBusinessCaseFields({
+      id: req.params.id,
+      user: req.user,
+      fields: req.body.fields || req.body,
+    });
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.addBusinessCaseItem = async (req, res, next) => {
+  try {
+    const created = await service.addBusinessCaseItem({ id: req.params.id, user: req.user, item: req.body });
+    res.json({ ok: true, data: created });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.listBusinessCaseItems = async (req, res, next) => {
+  try {
+    const items = await service.listBusinessCaseItems({ id: req.params.id, user: req.user });
+    res.json({ ok: true, data: items });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.submitSignedProformaWithInspection = async (req, res, next) => {
   try {
     const { inspection_min_date, inspection_max_date, includes_starter_kit } = req.body;

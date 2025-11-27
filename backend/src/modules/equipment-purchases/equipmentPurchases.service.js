@@ -2,9 +2,10 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
 const PDFDocument = require("pdfkit");
-const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const { ensureFolder, uploadBase64File, copyTemplate } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
+const { sheets } = require("../../config/google");
 const inventarioService = require("../inventario/inventario.service");
 const {
   createRequest: createServiceRequest,
@@ -34,6 +35,8 @@ const STATUS = {
 };
 
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
+const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
+const BUSINESS_CASE_SHEET_RANGE = "A1:F200";
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -63,6 +66,7 @@ function mapRequestRow(row = {}) {
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
+    business_case_link: row.bc_spreadsheet_url || driveLink(row.bc_spreadsheet_id),
   };
 }
 
@@ -212,6 +216,29 @@ async function ensureTables() {
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS assigned_to_name TEXT`,
   );
   await db.query(`ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS notes TEXT`);
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_spreadsheet_id TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_spreadsheet_url TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_created_at TIMESTAMPTZ`,
+  );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
+      id UUID PRIMARY KEY,
+      request_id UUID REFERENCES equipment_purchase_requests(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      characteristics TEXT,
+      status TEXT,
+      quantity NUMERIC,
+      price NUMERIC,
+      total NUMERIC,
+      created_by INTEGER,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
   initialized = true;
 }
 
@@ -262,6 +289,184 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
     accesorios: "",
     observaciones: request.notes || "",
   };
+}
+
+async function getFirstSheetTitle(spreadsheetId) {
+  const meta = await sheets.spreadsheets.get({ spreadsheetId });
+  return meta.data?.sheets?.[0]?.properties?.title;
+}
+
+async function updateSheetByLabel({ spreadsheetId, updates }) {
+  if (!spreadsheetId || !Object.keys(updates || {}).length) return false;
+  const sheetTitle = await getFirstSheetTitle(spreadsheetId);
+  if (!sheetTitle) return false;
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetTitle}!${BUSINESS_CASE_SHEET_RANGE}`,
+  });
+
+  const rows = data.values || [];
+  const ranges = [];
+  Object.entries(updates).forEach(([label, value]) => {
+    const rowIndex = rows.findIndex((row) => String(row?.[0] || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
+    if (rowIndex >= 0) {
+      ranges.push({
+        range: `${sheetTitle}!B${rowIndex + 1}`,
+        values: [[value ?? ""]],
+      });
+    }
+  });
+
+  if (!ranges.length) return false;
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      valueInputOption: "USER_ENTERED",
+      data: ranges,
+    },
+  });
+  return true;
+}
+
+async function syncBusinessCaseItemsToSheet({ spreadsheetId, items }) {
+  if (!spreadsheetId) return false;
+  const sheetTitle = await getFirstSheetTitle(spreadsheetId);
+  if (!sheetTitle) return false;
+
+  const { data } = await sheets.spreadsheets.values.get({
+    spreadsheetId,
+    range: `${sheetTitle}!${BUSINESS_CASE_SHEET_RANGE}`,
+  });
+
+  const rows = data.values || [];
+  const startIndex = rows.findIndex((row) => String(row?.[0] || "").toLowerCase().includes("inversiones adicionales"));
+  if (startIndex === -1) return false;
+
+  const subtotalIndex = rows.findIndex((row) => String(row?.[0] || "").toLowerCase().includes("sub total"));
+  const writableStart = startIndex + 2; // deja fila de título y cabecera
+  const maxRows = subtotalIndex > writableStart ? subtotalIndex - writableStart : items.length;
+  const normalizedItems = Array.isArray(items) ? items.slice(0, maxRows) : [];
+  const fillRows = Math.max(normalizedItems.length, 8);
+
+  const emptyBlock = Array.from({ length: fillRows }, () => ["", "", "", "", "", ""]);
+  const itemBlock = normalizedItems.map((item) => [
+    item.name || "",
+    item.characteristics || "",
+    item.status || "",
+    item.quantity ?? "",
+    item.price ?? "",
+    item.total ?? "",
+  ]);
+
+  const requests = [
+    {
+      range: `${sheetTitle}!A${writableStart}:F${writableStart + fillRows - 1}`,
+      values: emptyBlock,
+    },
+  ];
+
+  if (itemBlock.length) {
+    requests.push({
+      range: `${sheetTitle}!A${writableStart}:F${writableStart + itemBlock.length - 1}`,
+      values: itemBlock,
+    });
+  }
+
+  await sheets.spreadsheets.values.batchUpdate({
+    spreadsheetId,
+    requestBody: { valueInputOption: "USER_ENTERED", data: requests },
+  });
+
+  return true;
+}
+
+function buildBusinessCaseName(request) {
+  const monthYear = new Date().toLocaleDateString("es-EC", { month: "long", year: "numeric" }).toUpperCase();
+  const equipmentLabels = Array.isArray(request?.equipment)
+    ? request.equipment
+        .map((item) => item?.name || item?.sku || item?.id)
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(",")
+    : "";
+  const suffix = equipmentLabels ? `-${equipmentLabels}` : "";
+  return `BC-${request?.client_name || "CLIENTE"}${suffix ? `-${suffix}` : ""}-${monthYear}`;
+}
+
+function buildBusinessCasePrefill({ request, clientInfo }) {
+  const extra = request?.extra || {};
+  return {
+    "TIPO DE CLIENTE": extra.tipo_cliente || "",
+    "ENTIDAD CONTRATANTE": extra.entidad_contratante || "",
+    CLIENTE: request?.client_name || clientInfo?.commercial_name || "",
+    "Provincia /Ciudad": extra.ciudad || extra.provincia || "",
+    "Código del Proceso": extra.codigo_proceso || "",
+    "Objeto de contratación": extra.objeto_contratacion || "",
+    "Número de días por semana que trabaja el laboratorio": extra.dias_lab || "",
+    "Turnos por dia": extra.turnos_dia || "",
+    "Horas por turno": extra.horas_turno || "",
+    "Controles de calidad por turno": extra.controles_por_turno || "",
+    "Niveles de Control": extra.niveles_control || "",
+    "Frecuencia de controles de calidad  (Rutina)": extra.frecuencia_calidad || "",
+    "Pruebas Especiales": extra.pruebas_especiales || "",
+    "Frecuencia de controles de calidad pruebas especiales": extra.frecuencia_especiales || "",
+    "Nombre de Equipo Principal": extra.equipo_principal || "",
+    "Estado de equipo principal (nuevo / usado/ año de fabricación) TDR": extra.estado_equipo_principal || "",
+    "Estado de equipo: Propio / Alquilado /Nuevo /Reservado/ Serie (FAM)": extra.estado_equipo_propiedad || "",
+    "Imagen reserva de equipo": extra.imagen_reserva_equipo || "",
+    "Nombre de Equipo Back up": extra.equipo_backup || "",
+    "Estado de equipo back up (nuevo / usado/ año de fabricación)": extra.estado_equipo_backup || "",
+    "Se debe instalar a la par del equipo principal? SI/NO": extra.backup_paralelo || "",
+    "Ubicación de los equipos a instalar": extra.ubicacion_equipos || "",
+    "Permite equipo provisional": extra.permite_equipo_provisional || "",
+    "Requiere equipo complementario) SI/NO": extra.requiere_equipo_complementario || "",
+    "Equipo complementario, para que prueba": extra.equipo_complementario_para || "",
+    "Incluye LIS : Si / No": extra.incluye_lis || "",
+    "Proveedor del sistema a trabajar": extra.proveedor_lis || "",
+    "Incluye Hadware: Si/No": extra.incluye_hardware || "",
+    "Número de pacientes MENSUAL": extra.pacientes_mensual || "",
+    "Interfaz a sistema actual": extra.interfaz_sistema_actual || "",
+    "Nombre del sistema": extra.nombre_sistema || "",
+    Proveedor: extra.proveedor_sistema || "",
+    "Incluye Hadware: Si/No ": extra.incluye_hardware_actual || "",
+    "Interfaz de equipos": extra.interfaz_equipos || "",
+    "Modelo / Proveedor": extra.interfaz_modelo_1 || "",
+    "Modelo / Proveedor ": extra.interfaz_modelo_2 || "",
+    "Modelo / Proveedor  ": extra.interfaz_modelo_3 || "",
+    Plazo: extra.plazo || "",
+    "Proyección de plazo": extra.proyeccion_plazo || "",
+    "Total/Parcial - tiempo/Parcial a necesidad del laboratorio": extra.entregas_plan || "",
+    "Determinacion Efectiva Si/No": extra.determinacion_efectiva || "",
+  };
+}
+
+async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
+  if (request?.bc_spreadsheet_id) return request;
+  if (!request?.drive_folder_id || !BUSINESS_CASE_TEMPLATE_ID) return request;
+
+  try {
+    const name = buildBusinessCaseName(request);
+    const copy = await copyTemplate(BUSINESS_CASE_TEMPLATE_ID, name, request.drive_folder_id);
+    const prefills = buildBusinessCasePrefill({ request, clientInfo });
+    await updateSheetByLabel({ spreadsheetId: copy.id, updates: prefills });
+
+    await db.query(
+      `UPDATE equipment_purchase_requests
+          SET bc_spreadsheet_id = $1,
+              bc_spreadsheet_url = $2,
+              bc_created_at = now(),
+              updated_at = now()
+        WHERE id = $3`,
+      [copy.id, copy.webViewLink || null, request.id],
+    );
+
+    return { ...request, bc_spreadsheet_id: copy.id, bc_spreadsheet_url: copy.webViewLink };
+  } catch (error) {
+    logger.warn("No se pudo generar Business Case automático: %s", error.message);
+    return request;
+  }
 }
 
 async function ensureActaForInspection({ inspectionRequest, user }) {
@@ -693,7 +898,16 @@ async function uploadProforma({ id, user, file }) {
       RETURNING *`,
     [fileId, STATUS.PROFORMA_RECEIVED, id],
   );
-  return rows[0];
+  const updated = mapRequestRow(rows[0]);
+
+  try {
+    const clientInfo = await getClientDetails(request.client_id);
+    await ensureBusinessCaseDocument({ request: updated, clientInfo, user });
+  } catch (error) {
+    logger.warn("No se pudo crear Business Case tras proforma: %s", error.message);
+  }
+
+  return updated;
 }
 
 async function reserveEquipment({ id, user }) {
@@ -905,6 +1119,132 @@ async function uploadContract({ id, user, file }) {
   return rows[0];
 }
 
+async function updateBusinessCaseFields({ id, user, fields }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const clientInfo = await getClientDetails(request.client_id);
+  const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
+  if (!ensured?.bc_spreadsheet_id) {
+    throw new Error("No se pudo inicializar el Business Case para esta solicitud");
+  }
+
+  const role = normalizeRole(user.role);
+  const baseAllowed = new Set([
+    "comercial",
+    "acp_comercial",
+    "gerencia",
+    "jefe_comercial",
+    "jefe_tecnico",
+    "jefe_operaciones",
+  ]);
+
+  if (!baseAllowed.has(role)) {
+    throw new Error("No tienes permisos para editar el Business Case");
+  }
+
+  const commercialFields = new Set(Object.keys(buildBusinessCasePrefill({ request, clientInfo })));
+  const gerenciaFields = new Set([
+    "Cobro de arriendo de equipamento",
+    "Compromiso de compra",
+  ]);
+  const acpFields = new Set([
+    "Presupuesto Referencial de proceso",
+    "Observaciones",
+  ]);
+
+  let allowedLabels = new Set();
+  if (role === "gerencia") allowedLabels = new Set([...commercialFields, ...gerenciaFields]);
+  else if (role === "acp_comercial" || role === "jefe_comercial") allowedLabels = new Set([...commercialFields, ...acpFields]);
+  else if (role === "jefe_operaciones") {
+    allowedLabels = new Set([
+      ...commercialFields,
+      ...gerenciaFields,
+      ...acpFields,
+      "Observaciones de Jefe de Operaciones",
+    ]);
+  } else {
+    allowedLabels = commercialFields;
+  }
+
+  const filtered = Object.fromEntries(
+    Object.entries(fields || {}).filter(([label]) => allowedLabels.has(label)),
+  );
+
+  await updateSheetByLabel({ spreadsheetId: ensured.bc_spreadsheet_id, updates: filtered });
+  return { ...ensured, bc_updates: filtered };
+}
+
+async function addBusinessCaseItem({ id, user, item }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const clientInfo = await getClientDetails(request.client_id);
+  const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
+
+  const role = normalizeRole(user.role);
+  const canEditPrice = role === "jefe_operaciones";
+  const allowedRoles = new Set([
+    "comercial",
+    "acp_comercial",
+    "jefe_tecnico",
+    "jefe_operaciones",
+    "jefe_comercial",
+    "gerencia",
+  ]);
+
+  if (!allowedRoles.has(role)) {
+    throw new Error("No tienes permisos para registrar inversiones adicionales");
+  }
+
+  const sanitizedItem = {
+    name: item?.name || item?.concepto || "Concepto",
+    characteristics: item?.characteristics || item?.descripcion || "",
+    status: item?.status || "",
+    quantity: item?.quantity ?? null,
+    price: canEditPrice ? item?.price ?? null : null,
+    total: canEditPrice ? item?.total ?? null : null,
+  };
+
+  const { rows } = await db.query(
+    `INSERT INTO equipment_purchase_bc_items (id, request_id, name, characteristics, status, quantity, price, total, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING *`,
+    [
+      uuidv4(),
+      id,
+      sanitizedItem.name,
+      sanitizedItem.characteristics,
+      sanitizedItem.status,
+      sanitizedItem.quantity,
+      sanitizedItem.price,
+      sanitizedItem.total,
+      user.id,
+    ],
+  );
+
+  const items = await listBusinessCaseItems({ id, user });
+  if (ensured.bc_spreadsheet_id) {
+    await syncBusinessCaseItemsToSheet({ spreadsheetId: ensured.bc_spreadsheet_id, items });
+  }
+
+  return rows[0];
+}
+
+async function listBusinessCaseItems({ id, user }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const { rows } = await db.query(
+    `SELECT * FROM equipment_purchase_bc_items WHERE request_id = $1 ORDER BY created_at ASC`,
+    [id],
+  );
+  return rows;
+}
+
 module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
@@ -920,5 +1260,8 @@ module.exports = {
   uploadSignedProforma,
   submitSignedProformaWithInspection,
   uploadContract,
+  updateBusinessCaseFields,
+  addBusinessCaseItem,
+  listBusinessCaseItems,
   STATUS,
 };
