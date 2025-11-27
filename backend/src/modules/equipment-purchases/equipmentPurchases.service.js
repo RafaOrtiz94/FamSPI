@@ -251,6 +251,7 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
   return {
     nombre_cliente: request.client_name || clientInfo?.commercial_name || "",
     direccion_cliente: clientInfo?.shipping_address || "",
+    email_cliente: request.client_email || clientInfo?.client_email || "",
     persona_contacto: clientInfo?.shipping_contact_name || "",
     celular_contacto: clientInfo?.shipping_phone || clientInfo?.shipping_cellphone || "",
     fecha_instalacion: inspection_min_date,

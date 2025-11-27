@@ -668,13 +668,22 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const req = rows[0];
   if (!req) throw new Error("Solicitud no encontrada");
   const payloadRaw = typeof req.payload === "string" ? JSON.parse(req.payload) : req.payload || {};
+  const typeCode = (req.type_code || "").trim().toUpperCase();
   const variantKey = (formVariant || payloadRaw.__form_variant || ctx.payload?.__form_variant || "").toLowerCase();
   const variantMeta = FORM_VARIANT_META[variantKey] || {};
   const paddedId = padId(request_id);
-  const normalizedCode = req.type_code ? req.type_code.trim() : "ACTA";
+  const normalizedCode = typeCode || "ACTA";
   const pdfBaseName = `${normalizedCode} -${paddedId} `;
   const docLabel = variantMeta.label || req.type_title || "Acta";
-  const templateId = req.type_code === "F.ST-21" ? process.env.DOC_TEMPLATE_SOLICITUD_1 : req.type_code === "F.ST-20" ? process.env.DOC_TEMPLATE_SOLICITUD_2 : process.env.DOC_TEMPLATE_SOLICITUD_3;
+  const templateId =
+    typeCode === "F.ST-21"
+      ? process.env.DOC_TEMPLATE_SOLICITUD_1
+      : typeCode === "F.ST-20"
+        ? process.env.DOC_TEMPLATE_SOLICITUD_2
+        : process.env.DOC_TEMPLATE_SOLICITUD_3;
+  if (!templateId) {
+    throw new Error(`No se encontró plantilla para el tipo de solicitud ${typeCode || "desconocido"}`);
+  }
   const docName = `${docLabel} - ${pdfBaseName} `;
   const doc = await copyTemplate(templateId, docName, folderId);
   const payload = payloadRaw || {};
