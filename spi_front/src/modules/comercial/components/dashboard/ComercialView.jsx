@@ -4,6 +4,7 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
+import BusinessCaseWidget from "../../../shared/components/BusinessCaseWidget";
 
 const ComercialView = () => {
     const navigate = useNavigate();
@@ -78,6 +79,7 @@ const ComercialView = () => {
                 <Card className="p-4 border border-gray-200">
                     <PurchaseHandoffWidget />
                 </Card>
+                <BusinessCaseWidget compact />
             </div>
         </>
     );

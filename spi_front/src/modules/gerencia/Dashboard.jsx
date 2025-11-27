@@ -26,6 +26,7 @@ import { logout } from "../../core/api";
 import KpiCard from "./components/KpiCard";
 import ChartCard from "./components/ChartCard";
 import RequestCard from "./components/RequestCard";
+import BusinessCaseWidget from "../shared/components/BusinessCaseWidget";
 
 import {
   Chart as ChartJS,
@@ -176,6 +177,10 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
         <AttendanceWidget />
         <ClientRequestWidget />
+      </div>
+
+      <div className="mb-6">
+        <BusinessCaseWidget title="Business Case (Gerencia)" />
       </div>
 
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

@@ -4,6 +4,7 @@ import { FiPhone, FiUserCheck, FiFileText, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import BusinessCaseWidget from "../../../shared/components/BusinessCaseWidget";
 
 const ACPComercialView = ({ onRefresh }) => {
     const navigate = useNavigate();
@@ -83,6 +84,10 @@ const ACPComercialView = ({ onRefresh }) => {
                         </div>
                     </div>
                 </Card>
+            </div>
+
+            <div className="mt-6">
+                <BusinessCaseWidget />
             </div>
 
         </>
