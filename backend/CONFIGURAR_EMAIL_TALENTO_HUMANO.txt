@@ -1,0 +1,9 @@
+# Configuración de Notificaciones para Solicitudes de Personal
+# ===========================================================
+# 
+# Agrega esta línea al archivo .env del backend:
+
+HR_NOTIFICATION_EMAILS=talento@famproject.com.ec
+
+# Si necesitas agregar más correos, sepáralos con comas:
+# HR_NOTIFICATION_EMAILS=talento@famproject.com.ec,rh@famproject.com.ec,admin@famproject.com.ec

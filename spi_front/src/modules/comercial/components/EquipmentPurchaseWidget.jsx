@@ -216,7 +216,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     );
   }, [listQuery, requests]);
 
-  const perPage = compactList ? 4 : Math.max(filteredRequests.length, 1);
+  const perPage = compactList ? 9 : Math.max(filteredRequests.length, 1);
   const totalPages = Math.max(1, Math.ceil((filteredRequests.length || 0) / perPage));
   const currentPage = Math.min(page, totalPages);
   const visibleRequests = useMemo(() => {
@@ -598,7 +598,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             <p className="text-gray-500">Sin solicitudes registradas</p>
           </Card>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {visibleRequests.map((req) => {
               const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
               const StatusIcon = statusConfig.icon;
@@ -634,7 +634,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
               return (
                 <Card
                   key={req.id}
-                  className={`relative p-5 ${statusConfig.cardBg} ${statusConfig.cardBorder} border shadow-lg ${statusConfig.cardShadow} hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden`}
+                  className={`relative h-full flex flex-col p-4 md:p-5 ${statusConfig.cardBg} ${statusConfig.cardBorder} border shadow-lg ${statusConfig.cardShadow} hover:shadow-xl transition-all duration-300 transform hover:-translate-y-1 overflow-hidden`}
                 >
                   {/* LED de Estado - Esquina Superior Derecha */}
                   <div className="absolute top-4 right-4 flex items-center gap-2">

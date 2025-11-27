@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { FiUser, FiClock, FiCheckCircle, FiXCircle } from 'react-icons/fi';
+import { FiUser, FiClock, FiCheckCircle, FiXCircle, FiPackage } from 'react-icons/fi';
 import { useAuth } from '../../../core/auth/AuthContext';
 import { getMyClientRequests } from '../../../core/api/requestsApi';
+import { listEquipmentPurchases } from '../../../core/api/equipmentPurchasesApi';
 import Card from '../../../core/ui/components/Card';
 import { toast } from 'react-hot-toast';
 
@@ -15,6 +16,10 @@ const MyClientRequestsWidget = () => {
         approved: 0,
         rejected: 0
     });
+    const [equipmentStats, setEquipmentStats] = useState({
+        total: 0,
+        active: 0
+    });
 
     useEffect(() => {
         const loadMyRequests = async () => {
@@ -22,13 +27,16 @@ const MyClientRequestsWidget = () => {
 
             try {
                 setLoading(true);
-                const data = await getMyClientRequests({
-                    page: 1,
-                    pageSize: 100,
-                    // No necesitamos createdBy porque el endpoint /my ya filtra por el usuario autenticado
-                });
+                const [clientData, equipmentData] = await Promise.all([
+                    getMyClientRequests({
+                        page: 1,
+                        pageSize: 100,
+                        // No necesitamos createdBy porque el endpoint /my ya filtra por el usuario autenticado
+                    }),
+                    listEquipmentPurchases(),
+                ]);
 
-                const userRequests = (data.rows || []).filter(
+                const userRequests = (clientData.rows || []).filter(
                     req => req.created_by === user.email
                 );
 
@@ -40,6 +48,12 @@ const MyClientRequestsWidget = () => {
                     pending: userRequests.filter(r => r.status === 'pending_approval').length,
                     approved: userRequests.filter(r => r.status === 'approved').length,
                     rejected: userRequests.filter(r => r.status === 'rejected').length
+                });
+
+                const equipmentRequests = Array.isArray(equipmentData) ? equipmentData : [];
+                setEquipmentStats({
+                    total: equipmentRequests.length,
+                    active: equipmentRequests.filter(r => r.status !== 'completed').length
                 });
             } catch (error) {
                 console.error('Error cargando solicitudes:', error);
@@ -108,7 +122,7 @@ const MyClientRequestsWidget = () => {
                             Mis Solicitudes de Clientes
                         </h3>
                         <p className="text-sm text-gray-600 mt-1">
-                            Solicitudes de registro de clientes que has creado
+                            Solicitudes de registro de clientes que has creado.
                         </p>
                     </div>
                 </div>
@@ -130,6 +144,32 @@ const MyClientRequestsWidget = () => {
                     <div className="bg-red-50 rounded-lg p-3 text-center">
                         <p className="text-xs text-red-700 font-medium mb-1">Rechazadas</p>
                         <p className="text-2xl font-bold text-red-700">{stats.rejected}</p>
+                    </div>
+                </div>
+            </Card>
+
+            {/* Resumen de solicitudes de compra */}
+            <Card className="p-5">
+                <div className="flex items-start justify-between mb-4">
+                    <div>
+                        <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                            <FiPackage className="w-4 h-4 text-indigo-600" />
+                            Compras de equipos en Solicitudes en curso
+                        </h4>
+                        <p className="text-xs text-gray-600 mt-1">
+                            Totales de las solicitudes que ves en el listado de compras de equipos.
+                        </p>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-indigo-50 rounded-lg p-3">
+                        <p className="text-xs text-indigo-700 font-medium mb-1">Solicitudes de compra</p>
+                        <p className="text-2xl font-bold text-indigo-700">{equipmentStats.total}</p>
+                    </div>
+                    <div className="bg-blue-50 rounded-lg p-3">
+                        <p className="text-xs text-blue-700 font-medium mb-1">Activas</p>
+                        <p className="text-2xl font-bold text-blue-700">{equipmentStats.active}</p>
+                        <p className="text-[11px] text-blue-600 mt-1">En curso o por completar</p>
                     </div>
                 </div>
             </Card>

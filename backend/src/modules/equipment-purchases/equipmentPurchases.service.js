@@ -237,8 +237,8 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
   const equipment = Array.isArray(request.equipment) ? request.equipment : [];
   const extra = request?.extra || {};
   const requiresLis = Boolean(extra.requires_lis || extra.requiere_lis);
-  const lisSystem = extra.lis_system || extra.lis_option || extra.lis;
-  const lisValue = requiresLis ? (lisSystem || "Sí") : "No";
+  // El esquema espera un booleano para requiere_lis
+  const lisValue = requiresLis;
   const equipos = equipment.map((item) => ({
     nombre_equipo: item.name || item.sku || item.id || "Equipo",
     estado: item.type || item.estado || item.serial || "",
