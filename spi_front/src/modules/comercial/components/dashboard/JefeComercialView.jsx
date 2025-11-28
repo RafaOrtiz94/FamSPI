@@ -71,6 +71,7 @@ const JefeComercialView = ({ onRefresh }) => {
             <div className="mt-6">
                 <PersonnelRequestWidget />
             </div>
+
         </>
     );
 };

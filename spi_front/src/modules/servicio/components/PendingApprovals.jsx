@@ -158,7 +158,7 @@ const PendingApprovals = ({ onActionComplete }) => {
       const parsed = {
         request: requestData?.request || requestData,
         documents: documents || [],
-        files: files || [],
+        files: files?.length ? files : requestData?.attachments || [],
       };
       setDetail({ open: true, loading: false, data: parsed, error: null });
     } catch (err) {
@@ -280,6 +280,54 @@ const RequestDetailModal = ({ detail, onClose }) => {
   const documents = Array.isArray(detail.data?.documents) ? detail.data.documents : [];
   const files = Array.isArray(detail.data?.files) ? detail.data.files : [];
 
+  const buildDriveLink = useCallback((doc) => {
+    const link =
+      doc?.drive_url ||
+      doc?.drive_link ||
+      doc?.url ||
+      doc?.link ||
+      (doc?.doc_drive_id ? `https://drive.google.com/file/d/${doc.doc_drive_id}/view` : null) ||
+      (doc?.drive_file_id ? `https://drive.google.com/file/d/${doc.drive_file_id}/view` : null);
+    return link || null;
+  }, []);
+
+  const generatedDocuments = useMemo(() => {
+    const normalizedDocs = documents.map((doc) => ({
+      ...doc,
+      viewLink: buildDriveLink(doc),
+      displayName: doc.name || doc.title || doc.filename || `Documento ${doc.id}`,
+    }));
+
+    const systemFiles = files.filter((file) => {
+      const mime = (file.mime_type || file.mimetype || "").toLowerCase();
+      return mime.startsWith("application/pdf") || mime.includes("google-apps.document");
+    });
+
+    const mappedFiles = systemFiles.map((file) => ({
+      ...file,
+      viewLink: buildDriveLink(file),
+      displayName: file.title || file.filename || file.name || `Archivo ${file.id}`,
+    }));
+
+    const seenIds = new Set();
+    const all = [...normalizedDocs, ...mappedFiles].filter((doc) => {
+      const key = doc.id || doc.doc_drive_id || doc.drive_file_id || doc.viewLink;
+      if (!key) return true;
+      if (seenIds.has(key)) return false;
+      seenIds.add(key);
+      return true;
+    });
+
+    return all;
+  }, [buildDriveLink, documents, files]);
+
+  const requesterFiles = useMemo(() => {
+    return files.filter((file) => {
+      const mime = (file.mime_type || file.mimetype || "").toLowerCase();
+      return !mime.startsWith("application/pdf") && !mime.includes("google-apps.document");
+    });
+  }, [files]);
+
   return (
     <Transition.Root show={detail.open} as={Fragment}>
       <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -397,21 +445,21 @@ const RequestDetailModal = ({ detail, onClose }) => {
                       <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                         Documentos generados
                       </h4>
-                      {documents.length === 0 ? (
+                      {generatedDocuments.length === 0 ? (
                         <p className="text-sm text-gray-500">Sin documentos.</p>
                       ) : (
                         <ul className="space-y-2 text-sm">
-                          {documents.map((doc) => (
+                          {generatedDocuments.map((doc) => (
                             <li
-                              key={doc.id}
+                              key={doc.id || doc.drive_file_id || doc.doc_drive_id || doc.viewLink}
                               className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-3 py-2 border border-gray-100 dark:border-gray-700"
                             >
                               <span className="font-medium text-gray-900 dark:text-gray-100">
-                                {doc.name || doc.title || `Documento ${doc.id}`}
+                                {doc.displayName}
                               </span>
-                              {doc.drive_url || doc.url || doc.link ? (
+                              {doc.viewLink ? (
                                 <a
-                                  href={doc.drive_url || doc.url || doc.link}
+                                  href={doc.viewLink}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-blue-600 text-sm hover:underline"
@@ -429,32 +477,35 @@ const RequestDetailModal = ({ detail, onClose }) => {
                       <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                         Adjuntos del solicitante
                       </h4>
-                      {files.length === 0 ? (
+                      {requesterFiles.length === 0 ? (
                         <p className="text-sm text-gray-500">
                           No hay archivos adjuntos.
                         </p>
                       ) : (
                         <ul className="space-y-2 text-sm">
-                          {files.map((file) => (
-                            <li
-                              key={file.id}
-                              className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-3 py-2 border border-gray-100 dark:border-gray-700"
-                            >
-                              <span className="font-medium text-gray-900 dark:text-gray-100">
-                                {file.filename || file.originalname || `Archivo ${file.id}`}
-                              </span>
-                              {file.url ? (
-                                <a
-                                  href={file.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="text-blue-600 text-sm hover:underline"
-                                >
-                                  Descargar
-                                </a>
-                              ) : null}
-                            </li>
-                          ))}
+                          {requesterFiles.map((file) => {
+                            const link = buildDriveLink(file) || file.url;
+                            return (
+                              <li
+                                key={file.id || file.drive_file_id}
+                                className="flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-3 py-2 border border-gray-100 dark:border-gray-700"
+                              >
+                                <span className="font-medium text-gray-900 dark:text-gray-100">
+                                  {file.filename || file.originalname || file.title || `Archivo ${file.id}`}
+                                </span>
+                                {link ? (
+                                  <a
+                                    href={link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-blue-600 text-sm hover:underline"
+                                  >
+                                    Descargar
+                                  </a>
+                                ) : null}
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
                     </section>

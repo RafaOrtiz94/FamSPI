@@ -178,6 +178,9 @@ const Dashboard = () => {
         <ClientRequestWidget />
       </div>
 
+      <div className="mb-6">
+      </div>
+
       <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <KpiCard
           title="Total Solicitudes"
