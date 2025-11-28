@@ -12,7 +12,6 @@ import NewClientActionCard from "../NewClientActionCard";
 import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import MyClientRequestsWidget from "../MyClientRequestsWidget";
 
 const ComercialSolicitudesView = () => {
     const { showToast, confirm } = useUI();
@@ -147,9 +146,6 @@ const ComercialSolicitudesView = () => {
                     </div>
                 </div>
             </section>
-
-            {/* WIDGET DE MIS SOLICITUDES DE CLIENTES */}
-            <MyClientRequestsWidget />
 
             {/* WIDGET DE SEGUIMIENTO DE COMPRAS */}
             <div id="purchase-tracker">

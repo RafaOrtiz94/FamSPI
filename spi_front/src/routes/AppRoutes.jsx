@@ -127,6 +127,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/ti" element={<DashboardTI />} />
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
+          <Route path="/dashboard/clientes" element={<ClientesPage />} />
 
           {/* Subrutas Backoffice */}
           <Route element={<ProtectedRoute allowedRoles={["backoffice_comercial", "gerencia"]} />}>

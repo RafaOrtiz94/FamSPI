@@ -4,7 +4,6 @@ import CreateRequestModal from "../CreateRequestModal";
 import NewClientActionCard from "../NewClientActionCard";
 import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
-import MyClientRequestsWidget from "../MyClientRequestsWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 
 const ACPComercialSolicitudesView = () => {
@@ -59,9 +58,6 @@ const ACPComercialSolicitudesView = () => {
                     </div>
                 </div>
             </section>
-
-            {/* WIDGET DE MIS SOLICITUDES DE CLIENTES */}
-            <MyClientRequestsWidget />
 
             {/* WIDGET DE SEGUIMIENTO DE COMPRAS */}
             <div id="purchase-tracker">
