@@ -4,10 +4,10 @@ import {
   FiHome,
   FiUsers,
   FiBriefcase,
-  FiFileText,
   FiPackage,
   FiClipboard,
   FiShoppingCart,
+  FiFileText,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -40,6 +40,11 @@ const acpLinks = [
     name: "Compras de equipos",
     icon: FiShoppingCart,
     path: "/dashboard/comercial/equipment-purchases",
+  },
+  {
+    name: "BussinesCase",
+    icon: FiFileText,
+    path: "/dashboard/comercial/business-case",
   },
 ];
 
