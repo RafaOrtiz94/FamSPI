@@ -16,7 +16,7 @@ const {
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
 const COMMERCIAL_FOLDER_NAME = "Comercial";
-const PURCHASES_FOLDER_NAME = "Solicitudes de Compra de Equipos";
+const BUSINESS_CASE_FOLDER_NAME = "businnesCase";
 const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
@@ -569,19 +569,18 @@ async function ensureActaForInspection({ inspectionRequest, user }) {
   }
 }
 
-async function ensureRequestFolder(clientName, requestId, requestDate) {
+async function ensureBusinessCaseFolder(clientName) {
   const root = await getRootFolder();
-
   const comercialFolder = await ensureFolder(COMMERCIAL_FOLDER_NAME, root.id);
-  const purchasesFolder = await ensureFolder(PURCHASES_FOLDER_NAME, comercialFolder.id);
+  const businessCaseFolder = await ensureFolder(BUSINESS_CASE_FOLDER_NAME, comercialFolder.id);
 
-  const paddedId = String(requestId).padStart(4, "0");
-  const safeName = (clientName || "").trim().replace(/[\/\\:*?"<>|]/g, "-");
-  const dateStr = requestDate ? new Date(requestDate).toISOString().split("T")[0] : "";
-  const requestFolderName = `${paddedId} - ${safeName}${dateStr ? ` - ${dateStr}` : ""}`;
+  const safeName = (() => {
+    const cleaned = String(clientName || "Cliente").trim().replace(/[\/\\:*?"<>|]/g, "-");
+    return cleaned.length ? cleaned : "Cliente";
+  })();
 
-  const requestFolder = await ensureFolder(requestFolderName, purchasesFolder.id);
-  return requestFolder.id;
+  const clientFolder = await ensureFolder(safeName, businessCaseFolder.id);
+  return clientFolder.id;
 }
 
 async function archiveEmail({ html, subject, folderId, prefix = "correo", request, actionLabel, user }) {
@@ -801,7 +800,7 @@ async function createPurchaseRequest({
 
   const id = uuidv4();
   const createdAt = new Date();
-  const folderId = await ensureRequestFolder(clientName, id, createdAt);
+  const folderId = await ensureBusinessCaseFolder(clientName);
 
   const extraPayload = {
     ...(extra || {}),
