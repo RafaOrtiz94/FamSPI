@@ -1,13 +1,11 @@
 import React from "react";
 import BusinessCaseWidget from "../../shared/components/BusinessCaseWidget";
-
-import NewBusinessCaseCard from "../components/NewBusinessCaseCard";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const BusinessCasePage = () => {
-  const handleCreate = () => {
-    // TODO: Implement creation logic
-    console.log("Create Business Case");
-  };
+  const { user } = useAuth();
+  const normalizedRole = (user?.role || "").toLowerCase();
+  const allowCommercialStarts = normalizedRole === "comercial";
 
   return (
     <div className="p-6 space-y-6">
@@ -15,13 +13,7 @@ const BusinessCasePage = () => {
         <h1 className="text-2xl font-bold text-gray-900">Business Case</h1>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="md:col-span-1">
-          <NewBusinessCaseCard onClick={handleCreate} />
-        </div>
-      </div>
-
-      <BusinessCaseWidget showCommercialStartCards={false} />
+      <BusinessCaseWidget showCommercialStartCards={allowCommercialStarts} />
     </div>
   );
 };

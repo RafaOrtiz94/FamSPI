@@ -2,7 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
 const PDFDocument = require("pdfkit");
-const { ensureFolder, uploadBase64File, copyTemplate } = require("../../utils/drive");
+const { ensureFolder, uploadBase64File, copyTemplate, replaceTags } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const { sheets } = require("../../config/google");
@@ -16,7 +16,7 @@ const {
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
 const COMMERCIAL_FOLDER_NAME = "Comercial";
-const PURCHASES_FOLDER_NAME = "Solicitudes de Compra de Equipos";
+const BUSINESS_CASE_FOLDER_NAME = "businnesCase";
 const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
@@ -36,6 +36,8 @@ const STATUS = {
 
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
 const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
+const PURCHASE_PROCESS_TEMPLATE_ID =
+  process.env.PURCHASE_PROCESS_TEMPLATE_ID || process.env.EQUIPMENT_PURCHASE_PROCESS_TEMPLATE_ID || null;
 const BUSINESS_CASE_SHEET_RANGE = "A1:F200";
 const ADDITIONAL_INVESTMENT_CATALOG = [
   "Control externo de tercera opinión",
@@ -126,11 +128,13 @@ function mapRequestRow(row = {}) {
   return {
     ...row,
     extra,
+    request_type: row.request_type || "purchase",
     bc_progress: progress || {},
     bc_stage: row.bc_stage || "pending_comercial",
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
+    process_doc_link: row.process_doc_url || driveLink(row.process_doc_id),
     business_case_link: row.bc_spreadsheet_url || driveLink(row.bc_spreadsheet_id),
   };
 }
@@ -275,6 +279,7 @@ async function ensureTables() {
       bc_stage TEXT DEFAULT 'pending_comercial',
       bc_progress JSONB DEFAULT '{}',
       extra JSONB,
+      request_type TEXT DEFAULT 'purchase',
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
@@ -299,10 +304,22 @@ async function ensureTables() {
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_created_at TIMESTAMPTZ`,
   );
   await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_id TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_url TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_created_at TIMESTAMPTZ`,
+  );
+  await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_stage TEXT DEFAULT 'pending_comercial'`,
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_progress JSONB DEFAULT '{}'`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS request_type TEXT DEFAULT 'purchase'`,
   );
   await db.query(`
     CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
@@ -548,6 +565,52 @@ async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
   }
 }
 
+function buildPurchaseDocumentName(request) {
+  const datePart = new Date().toISOString().slice(0, 10);
+  const clientPart = String(request?.client_name || "Cliente")
+    .trim()
+    .replace(/[\\\\/:*?"<>|]/g, "-")
+    .slice(0, 80);
+  return `Proceso de compra - ${clientPart || "Cliente"} - ${datePart}`;
+}
+
+async function ensurePurchaseProcessDocument({ request, clientInfo }) {
+  if (request?.process_doc_id) return request;
+  if (!request?.drive_folder_id || !PURCHASE_PROCESS_TEMPLATE_ID) return request;
+
+  try {
+    const name = buildPurchaseDocumentName(request);
+    const copy = await copyTemplate(PURCHASE_PROCESS_TEMPLATE_ID, name, request.drive_folder_id);
+    const prefills = {
+      CLIENTE: request?.client_name || clientInfo?.commercial_name || "",
+      CONTACTO: clientInfo?.shipping_contact_name || "",
+      CORREO_CLIENTE: request?.client_email || clientInfo?.client_email || "",
+      DIRECCION: clientInfo?.shipping_address || "",
+    };
+
+    try {
+      await replaceTags(copy.id, prefills);
+    } catch (tagError) {
+      logger.warn("No se pudieron aplicar etiquetas en documento de compra: %s", tagError.message);
+    }
+
+    await db.query(
+      `UPDATE equipment_purchase_requests
+          SET process_doc_id = $1,
+              process_doc_url = $2,
+              process_doc_created_at = now(),
+              updated_at = now()
+        WHERE id = $3`,
+      [copy.id, copy.webViewLink || null, request.id],
+    );
+
+    return { ...request, process_doc_id: copy.id, process_doc_url: copy.webViewLink };
+  } catch (error) {
+    logger.warn("No se pudo generar documento de proceso: %s", error.message);
+    return request;
+  }
+}
+
 async function ensureActaForInspection({ inspectionRequest, user }) {
   const requestId = inspectionRequest?.request?.id;
   const hasActa =
@@ -569,19 +632,18 @@ async function ensureActaForInspection({ inspectionRequest, user }) {
   }
 }
 
-async function ensureRequestFolder(clientName, requestId, requestDate) {
+async function ensureBusinessCaseFolder(clientName) {
   const root = await getRootFolder();
-
   const comercialFolder = await ensureFolder(COMMERCIAL_FOLDER_NAME, root.id);
-  const purchasesFolder = await ensureFolder(PURCHASES_FOLDER_NAME, comercialFolder.id);
+  const businessCaseFolder = await ensureFolder(BUSINESS_CASE_FOLDER_NAME, comercialFolder.id);
 
-  const paddedId = String(requestId).padStart(4, "0");
-  const safeName = (clientName || "").trim().replace(/[\/\\:*?"<>|]/g, "-");
-  const dateStr = requestDate ? new Date(requestDate).toISOString().split("T")[0] : "";
-  const requestFolderName = `${paddedId} - ${safeName}${dateStr ? ` - ${dateStr}` : ""}`;
+  const safeName = (() => {
+    const cleaned = String(clientName || "Cliente").trim().replace(/[\/\\:*?"<>|]/g, "-");
+    return cleaned.length ? cleaned : "Cliente";
+  })();
 
-  const requestFolder = await ensureFolder(requestFolderName, purchasesFolder.id);
-  return requestFolder.id;
+  const clientFolder = await ensureFolder(safeName, businessCaseFolder.id);
+  return clientFolder.id;
 }
 
 async function archiveEmail({ html, subject, folderId, prefix = "correo", request, actionLabel, user }) {
@@ -753,7 +815,14 @@ async function getById(id, user) {
   const isAssignee = row?.assigned_to === user?.id;
   const isBcSupport = (role === "jefe_tecnico" || role === "jefe_operaciones") && row?.bc_stage === "investments";
   if (!row || (!isCreator && !isAssignee && !canManageAll(user) && !isBcSupport)) return null;
-  return mapRequestRow(row);
+  let mapped = mapRequestRow(row);
+
+  if (!mapped.process_doc_link && PURCHASE_PROCESS_TEMPLATE_ID) {
+    const clientInfo = await getClientDetails(row.client_id);
+    mapped = await ensurePurchaseProcessDocument({ request: mapped, clientInfo });
+  }
+
+  return mapped;
 }
 
 async function getUserById(id) {
@@ -783,17 +852,23 @@ async function createPurchaseRequest({
   equipment = [],
   notes,
   extra,
+  requestType = "purchase",
 }) {
   await ensureTables();
-  if (!clientName || !equipment.length) {
+  if (!clientName) {
+    throw new Error("El cliente es obligatorio");
+  }
+
+  if (requestType !== "business_case" && !equipment.length) {
     throw new Error("Cliente y al menos un equipo son obligatorios");
   }
 
   const canSendAvailability = canManageAll(user);
+  const isBusinessCaseOnly = requestType === "business_case";
   const provider = canSendAvailability ? providerEmail : null;
 
   const assigneeUser = assignedTo ? await getUserById(assignedTo) : null;
-  const resolvedAssignee = assigneeUser || (canSendAvailability ? user : null);
+  const resolvedAssignee = assigneeUser || (canSendAvailability || isBusinessCaseOnly ? user : null);
 
   if (!resolvedAssignee) {
     throw new Error("Debes asignar la solicitud a un ACP Comercial");
@@ -801,7 +876,7 @@ async function createPurchaseRequest({
 
   const id = uuidv4();
   const createdAt = new Date();
-  const folderId = await ensureRequestFolder(clientName, id, createdAt);
+  const folderId = await ensureBusinessCaseFolder(clientName);
 
   const extraPayload = {
     ...(extra || {}),
@@ -809,53 +884,55 @@ async function createPurchaseRequest({
     lis_system: extra?.requires_lis ? (extra?.lis_system || null) : null,
   };
 
-  const equipmentList = equipment
-    .map((item) => {
-      const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
-      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
-    })
-    .join("<br>");
-
-  const html = `
-    <h2>Solicitud de disponibilidad</h2>
-    <p>Cliente: <strong>${clientName}</strong></p>
-    <p>Equipos requeridos:</p>
-    <p>${equipmentList}</p>
-    ${notes ? `<p>Notas: ${notes}</p>` : ""}
-  `;
-
-  const requestSnapshot = {
-    id,
-    client_name: clientName,
-    provider_email: provider,
-    equipment,
-    created_at: createdAt,
-    notes,
-  };
-
   let emailFileId = null;
   let status = STATUS.PENDING_PROVIDER;
 
-  if (provider) {
-    emailFileId = await sendAndArchive({
-      user,
-      to: provider,
-      subject: `Disponibilidad de equipos - ${clientName}`,
-      html,
-      folderId,
-      prefix: "disponibilidad",
-      request: requestSnapshot,
-      actionLabel: "Informe de disponibilidad de equipos",
-    });
-    status = STATUS.WAITING_PROVIDER;
+  if (!isBusinessCaseOnly) {
+    const equipmentList = equipment
+      .map((item) => {
+        const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
+        return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+      })
+      .join("<br>");
+
+    const html = `
+      <h2>Solicitud de disponibilidad</h2>
+      <p>Cliente: <strong>${clientName}</strong></p>
+      <p>Equipos requeridos:</p>
+      <p>${equipmentList}</p>
+      ${notes ? `<p>Notas: ${notes}</p>` : ""}
+    `;
+
+    const requestSnapshot = {
+      id,
+      client_name: clientName,
+      provider_email: provider,
+      equipment,
+      created_at: createdAt,
+      notes,
+    };
+
+    if (provider) {
+      emailFileId = await sendAndArchive({
+        user,
+        to: provider,
+        subject: `Disponibilidad de equipos - ${clientName}`,
+        html,
+        folderId,
+        prefix: "disponibilidad",
+        request: requestSnapshot,
+        actionLabel: "Informe de disponibilidad de equipos",
+      });
+      status = STATUS.WAITING_PROVIDER;
+    }
   }
 
   const { rows } = await db.query(
     `INSERT INTO equipment_purchase_requests (
         id, created_by, created_by_email, assigned_to, assigned_to_email, assigned_to_name,
         client_id, client_name, client_email, notes, provider_email,
-        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra, request_type
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
     [
       id,
@@ -875,10 +952,34 @@ async function createPurchaseRequest({
       emailFileId,
       folderId,
       JSON.stringify(extraPayload || {}),
+      requestType || "purchase",
     ],
   );
 
-  return mapRequestRow(rows[0]);
+  let created = mapRequestRow(rows[0]);
+
+  let clientInfo = null;
+  try {
+    clientInfo = await getClientDetails(clientId);
+  } catch (error) {
+    logger.warn("No se pudieron obtener los datos del cliente %s: %s", clientId, error.message);
+  }
+
+  if (!isBusinessCaseOnly) {
+    try {
+      created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
+    } catch (error) {
+      logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
+    }
+  }
+
+  try {
+    created = await ensureBusinessCaseDocument({ request: created, clientInfo, user });
+  } catch (error) {
+    logger.warn("No se pudo crear Business Case automático al iniciar: %s", error.message);
+  }
+
+  return created;
 }
 
 async function startAvailabilityRequest({ id, user, providerEmail, notes }) {

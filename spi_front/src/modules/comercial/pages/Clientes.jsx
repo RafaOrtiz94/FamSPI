@@ -4,6 +4,7 @@ import { FiSearch, FiPlus, FiEdit2, FiTrash2, FiUser } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
+import MyClientRequestsWidget from "../components/MyClientRequestsWidget";
 
 const ClientesPage = () => {
     const { showToast } = useUI();
@@ -100,6 +101,9 @@ const ClientesPage = () => {
                     </p>
                 </Card>
             </div>
+
+            {/* MIS SOLICITUDES DE CLIENTES */}
+            <MyClientRequestsWidget />
 
             {/* TABLA DE CLIENTES */}
             <Card className="p-5">
