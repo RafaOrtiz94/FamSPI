@@ -2,7 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
 const PDFDocument = require("pdfkit");
-const { ensureFolder, uploadBase64File, copyTemplate } = require("../../utils/drive");
+const { ensureFolder, uploadBase64File, copyTemplate, replaceTags } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const { sheets } = require("../../config/google");
@@ -36,6 +36,8 @@ const STATUS = {
 
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
 const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
+const PURCHASE_PROCESS_TEMPLATE_ID =
+  process.env.PURCHASE_PROCESS_TEMPLATE_ID || process.env.EQUIPMENT_PURCHASE_PROCESS_TEMPLATE_ID || null;
 const BUSINESS_CASE_SHEET_RANGE = "A1:F200";
 const ADDITIONAL_INVESTMENT_CATALOG = [
   "Control externo de tercera opinión",
@@ -131,6 +133,7 @@ function mapRequestRow(row = {}) {
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
+    process_doc_link: row.process_doc_url || driveLink(row.process_doc_id),
     business_case_link: row.bc_spreadsheet_url || driveLink(row.bc_spreadsheet_id),
   };
 }
@@ -297,6 +300,15 @@ async function ensureTables() {
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_created_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_id TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_url TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_created_at TIMESTAMPTZ`,
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_stage TEXT DEFAULT 'pending_comercial'`,
@@ -548,6 +560,52 @@ async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
   }
 }
 
+function buildPurchaseDocumentName(request) {
+  const datePart = new Date().toISOString().slice(0, 10);
+  const clientPart = String(request?.client_name || "Cliente")
+    .trim()
+    .replace(/[\\\\/:*?"<>|]/g, "-")
+    .slice(0, 80);
+  return `Proceso de compra - ${clientPart || "Cliente"} - ${datePart}`;
+}
+
+async function ensurePurchaseProcessDocument({ request, clientInfo }) {
+  if (request?.process_doc_id) return request;
+  if (!request?.drive_folder_id || !PURCHASE_PROCESS_TEMPLATE_ID) return request;
+
+  try {
+    const name = buildPurchaseDocumentName(request);
+    const copy = await copyTemplate(PURCHASE_PROCESS_TEMPLATE_ID, name, request.drive_folder_id);
+    const prefills = {
+      CLIENTE: request?.client_name || clientInfo?.commercial_name || "",
+      CONTACTO: clientInfo?.shipping_contact_name || "",
+      CORREO_CLIENTE: request?.client_email || clientInfo?.client_email || "",
+      DIRECCION: clientInfo?.shipping_address || "",
+    };
+
+    try {
+      await replaceTags(copy.id, prefills);
+    } catch (tagError) {
+      logger.warn("No se pudieron aplicar etiquetas en documento de compra: %s", tagError.message);
+    }
+
+    await db.query(
+      `UPDATE equipment_purchase_requests
+          SET process_doc_id = $1,
+              process_doc_url = $2,
+              process_doc_created_at = now(),
+              updated_at = now()
+        WHERE id = $3`,
+      [copy.id, copy.webViewLink || null, request.id],
+    );
+
+    return { ...request, process_doc_id: copy.id, process_doc_url: copy.webViewLink };
+  } catch (error) {
+    logger.warn("No se pudo generar documento de proceso: %s", error.message);
+    return request;
+  }
+}
+
 async function ensureActaForInspection({ inspectionRequest, user }) {
   const requestId = inspectionRequest?.request?.id;
   const hasActa =
@@ -752,7 +810,14 @@ async function getById(id, user) {
   const isAssignee = row?.assigned_to === user?.id;
   const isBcSupport = (role === "jefe_tecnico" || role === "jefe_operaciones") && row?.bc_stage === "investments";
   if (!row || (!isCreator && !isAssignee && !canManageAll(user) && !isBcSupport)) return null;
-  return mapRequestRow(row);
+  let mapped = mapRequestRow(row);
+
+  if (!mapped.process_doc_link && PURCHASE_PROCESS_TEMPLATE_ID) {
+    const clientInfo = await getClientDetails(row.client_id);
+    mapped = await ensurePurchaseProcessDocument({ request: mapped, clientInfo });
+  }
+
+  return mapped;
 }
 
 async function getUserById(id) {
@@ -877,7 +942,16 @@ async function createPurchaseRequest({
     ],
   );
 
-  return mapRequestRow(rows[0]);
+  let created = mapRequestRow(rows[0]);
+
+  try {
+    const clientInfo = await getClientDetails(clientId);
+    created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
+  } catch (error) {
+    logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
+  }
+
+  return created;
 }
 
 async function startAvailabilityRequest({ id, user, providerEmail, notes }) {

@@ -765,8 +765,19 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   </div>
 
                   {/* Files */}
-                  {(req.proforma_file_link || req.signed_proforma_file_link || req.contract_file_link) && (
+                  {(req.process_doc_link || req.proforma_file_link || req.signed_proforma_file_link || req.contract_file_link) && (
                     <div className="mb-4 flex flex-wrap gap-2">
+                      {req.process_doc_link && (
+                        <a
+                          href={req.process_doc_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-sky-700 hover:bg-sky-50 transition-colors shadow-sm"
+                        >
+                          <FiFileText size={12} />
+                          Documento de proceso
+                        </a>
+                      )}
                       {req.proforma_file_link && (
                         <a
                           href={req.proforma_file_link}
