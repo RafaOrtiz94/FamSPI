@@ -1,119 +1,104 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiExternalLink, FiRefreshCw, FiSend, FiPlus, FiClipboard, FiDatabase } from "react-icons/fi";
+import {
+  FiExternalLink,
+  FiRefreshCw,
+  FiSend,
+  FiPlus,
+  FiClipboard,
+  FiDatabase,
+  FiCheckCircle,
+  FiClock,
+  FiEdit2,
+} from "react-icons/fi";
 import {
   addBusinessCaseItem,
+  getBusinessCaseOptions,
   listBusinessCaseItems,
   listEquipmentPurchases,
   updateBusinessCaseFields,
 } from "../../../core/api/equipmentPurchasesApi";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
+import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/useUI";
 
-const FIELD_GROUPS = [
-  {
-    title: "Identificación",
-    description: "Datos generales del proceso y ubicación",
-    fields: [
-      { label: "TIPO DE CLIENTE", placeholder: "Público / Privado" },
-      { label: "ENTIDAD CONTRATANTE", placeholder: "Entidad contratante" },
-      { label: "CLIENTE", placeholder: "Razón social o nombre comercial" },
-      { label: "Provincia /Ciudad", placeholder: "Provincia / Ciudad" },
-      { label: "Código del Proceso", placeholder: "Código interno o referencia" },
-      { label: "Objeto de contratación", placeholder: "Objeto o alcance" },
-    ],
-  },
-  {
-    title: "Ambiente de laboratorio",
-    description: "Carga operacional y controles de calidad",
-    fields: [
-      { label: "Número de días por semana que trabaja el laboratorio", placeholder: "5" },
-      { label: "Turnos por dia", placeholder: "2" },
-      { label: "Horas por turno", placeholder: "8" },
-      { label: "Controles de calidad por turno", placeholder: "2" },
-      { label: "Niveles de Control", placeholder: "2 niveles" },
-      { label: "Frecuencia de controles de calidad  (Rutina)", placeholder: "Semanal" },
-      { label: "Pruebas Especiales", placeholder: "Lista de pruebas" },
-      { label: "Frecuencia de controles de calidad pruebas especiales", placeholder: "Mensual" },
-    ],
-  },
-  {
-    title: "Equipamiento",
-    description: "Inventario requerido y estado del equipo",
-    fields: [
-      { label: "Nombre de Equipo Principal", placeholder: "Analizador" },
-      { label: "Estado de equipo principal (nuevo / usado/ año de fabricación) TDR", placeholder: "Nuevo" },
-      { label: "Estado de equipo: Propio / Alquilado /Nuevo /Reservado/ Serie (FAM)", placeholder: "Reservado" },
-      { label: "Imagen reserva de equipo", placeholder: "URL o referencia" },
-      { label: "Nombre de Equipo Back up", placeholder: "Equipo respaldo" },
-      { label: "Estado de equipo back up (nuevo / usado/ año de fabricación)", placeholder: "Usado 2022" },
-      { label: "Se debe instalar a la par del equipo principal? SI/NO", placeholder: "Sí/No" },
-      { label: "Ubicación de los equipos a instalar", placeholder: "Área o sala" },
-      { label: "Permite equipo provisional", placeholder: "Sí/No" },
-      { label: "Requiere equipo complementario) SI/NO", placeholder: "Sí/No" },
-      { label: "Equipo complementario, para que prueba", placeholder: "Detalle" },
-    ],
-  },
-  {
-    title: "LIS",
-    description: "Integraciones y flujos informáticos",
-    fields: [
-      { label: "Incluye LIS : Si / No", placeholder: "Sí/No" },
-      { label: "Proveedor del sistema a trabajar", placeholder: "Proveedor" },
-      { label: "Incluye Hadware: Si/No", placeholder: "Sí/No" },
-      { label: "Número de pacientes MENSUAL", placeholder: "1200" },
-      { label: "Interfaz a sistema actual", placeholder: "Sí/No" },
-      { label: "Nombre del sistema", placeholder: "Sistema actual" },
-      { label: "Proveedor", placeholder: "Proveedor actual" },
-      { label: "Incluye Hadware: Si/No ", placeholder: "Sí/No" },
-      { label: "Interfaz de equipos", placeholder: "Descripción" },
-      { label: "Modelo / Proveedor", placeholder: "Modelo / Proveedor" },
-      { label: "Modelo / Proveedor ", placeholder: "Modelo / Proveedor" },
-      { label: "Modelo / Proveedor  ", placeholder: "Modelo / Proveedor" },
-    ],
-  },
-  {
-    title: "Requerimiento del BC",
-    description: "Plazos y proyecciones de entrega",
-    fields: [
-      { label: "Plazo", placeholder: "30 días" },
-      { label: "Proyección de plazo", placeholder: "60 días" },
-      { label: "Total/Parcial - tiempo/Parcial a necesidad del laboratorio", placeholder: "Total" },
-      { label: "Determinacion Efectiva Si/No", placeholder: "Sí/No" },
-      { label: "Cobro de arriendo de equipamento", placeholder: "Monto o condición" },
-      { label: "Compromiso de compra", placeholder: "Compromiso u observación" },
-      { label: "Presupuesto Referencial de proceso", placeholder: "Valor referencial" },
-      { label: "Observaciones", placeholder: "Notas adicionales" },
-      { label: "Observaciones de Jefe de Operaciones", placeholder: "Notas operativas" },
-    ],
-  },
+const BOOLEAN_OPTIONS = ["SI", "NO"];
+
+const COMMERCIAL_FIELDS = [
+  { label: "TIPO DE CLIENTE", optionsKey: "client_types" },
+  { label: "ENTIDAD CONTRATANTE", optionsKey: "contract_entities" },
+  { label: "CLIENTE", optionsKey: "clients" },
+  { label: "Provincia /Ciudad", optionsKey: "locations" },
+  { label: "Código del Proceso", optionsKey: "bc_codes" },
+  { label: "Objeto de contratación", optionsKey: "bc_objects", type: "textarea" },
+  { label: "Número de días por semana que trabaja el laboratorio", type: "number" },
+  { label: "Turnos por dia", type: "number" },
+  { label: "Horas por turno", type: "number" },
+  { label: "Controles de calidad por turno", type: "number" },
+  { label: "Niveles de Control" },
+  { label: "Frecuencia de controles de calidad  (Rutina)" },
+  { label: "Pruebas Especiales" },
+  { label: "Frecuencia de controles de calidad pruebas especiales" },
+  { label: "Nombre de Equipo Principal", optionsKey: "equipment_names" },
+  { label: "Estado de equipo principal (nuevo / usado/ año de fabricación) TDR" },
+  { label: "Estado de equipo: Propio / Alquilado /Nuevo /Reservado/ Serie (FAM)" },
+  { label: "Imagen reserva de equipo" },
+  { label: "Nombre de Equipo Back up", optionsKey: "equipment_names" },
+  { label: "Estado de equipo back up (nuevo / usado/ año de fabricación)" },
+  { label: "Se debe instalar a la par del equipo principal? SI/NO", optionsKey: "boolean" },
+  { label: "Ubicación de los equipos a instalar" },
+  { label: "Permite equipo provisional", optionsKey: "boolean" },
+  { label: "Requiere equipo complementario) SI/NO", optionsKey: "boolean" },
+  { label: "Equipo complementario, para que prueba", optionsKey: "equipment_names" },
+  { label: "Incluye LIS : Si / No", optionsKey: "boolean" },
+  { label: "Proveedor del sistema a trabajar", optionsKey: "lis_providers" },
+  { label: "Incluye Hadware: Si/No", optionsKey: "boolean" },
+  { label: "Número de pacientes MENSUAL", type: "number" },
+  { label: "Interfaz a sistema actual", optionsKey: "boolean" },
+  { label: "Nombre del sistema", optionsKey: "lis_systems" },
+  { label: "Proveedor", optionsKey: "lis_providers" },
+  { label: "Incluye Hadware: Si/No ", optionsKey: "boolean" },
+  { label: "Interfaz de equipos" },
+  { label: "Modelo / Proveedor", optionsKey: "equipment_names" },
+  { label: "Modelo / Proveedor ", optionsKey: "equipment_names" },
+  { label: "Modelo / Proveedor  ", optionsKey: "equipment_names" },
+  { label: "Plazo" },
+  { label: "Proyección de plazo" },
+  { label: "Total/Parcial - tiempo/Parcial a necesidad del laboratorio" },
+  { label: "Determinacion Efectiva Si/No", optionsKey: "boolean" },
 ];
 
+const ACP_FIELDS = [
+  { label: "Presupuesto Referencial de proceso" },
+  { label: "Observaciones", type: "textarea" },
+];
+
+const GERENCIA_FIELDS = [
+  { label: "Cobro de arriendo de equipamento" },
+  { label: "Compromiso de compra" },
+];
+
+const OPERATIONS_FIELDS = [{ label: "Observaciones de Jefe de Operaciones", type: "textarea" }];
+
 const ROLE_FIELD_MAP = {
-  gerencia: [
-    ...FIELD_GROUPS.flatMap((group) => group.fields.map((f) => f.label)),
-    "Cobro de arriendo de equipamento",
-    "Compromiso de compra",
-  ],
-  acp_comercial: [
-    ...FIELD_GROUPS.flatMap((group) => group.fields.map((f) => f.label)),
-    "Presupuesto Referencial de proceso",
-    "Observaciones",
-  ],
-  jefe_comercial: [
-    ...FIELD_GROUPS.flatMap((group) => group.fields.map((f) => f.label)),
-    "Presupuesto Referencial de proceso",
-    "Observaciones",
-  ],
+  comercial: COMMERCIAL_FIELDS.map((f) => f.label),
+  acp_comercial: [...COMMERCIAL_FIELDS.map((f) => f.label), ...ACP_FIELDS.map((f) => f.label)],
+  gerencia: [...COMMERCIAL_FIELDS.map((f) => f.label), ...GERENCIA_FIELDS.map((f) => f.label)],
+  jefe_comercial: [...COMMERCIAL_FIELDS.map((f) => f.label), ...ACP_FIELDS.map((f) => f.label)],
   jefe_operaciones: [
-    ...FIELD_GROUPS.flatMap((group) => group.fields.map((f) => f.label)),
-    "Cobro de arriendo de equipamento",
-    "Compromiso de compra",
-    "Presupuesto Referencial de proceso",
-    "Observaciones",
-    "Observaciones de Jefe de Operaciones",
+    ...COMMERCIAL_FIELDS.map((f) => f.label),
+    ...GERENCIA_FIELDS.map((f) => f.label),
+    ...ACP_FIELDS.map((f) => f.label),
+    ...OPERATIONS_FIELDS.map((f) => f.label),
   ],
+  jefe_tecnico: COMMERCIAL_FIELDS.map((f) => f.label),
+};
+
+const STAGE_LABELS = {
+  pending_comercial: { label: "Pendiente Comercial", className: "bg-amber-100 text-amber-700" },
+  pending_managerial: { label: "Pendiente ACP + Gerencia", className: "bg-blue-100 text-blue-700" },
+  investments: { label: "Inversiones adicionales", className: "bg-emerald-100 text-emerald-700" },
 };
 
 const STATUS_LABELS = {
@@ -124,10 +109,73 @@ const STATUS_LABELS = {
   completed: "Completado",
 };
 
+const INVESTMENT_ROLES = new Set(["comercial", "acp_comercial", "jefe_tecnico", "jefe_operaciones"]);
+
+const FieldInput = ({
+  field,
+  value,
+  onChange,
+  options,
+}) => {
+  const resolvedOptions = useMemo(() => {
+    if (field.optionsKey === "boolean") return BOOLEAN_OPTIONS;
+    return options?.[field.optionsKey] || [];
+  }, [field.optionsKey, options]);
+
+  const handleChange = (val) => {
+    if (val === "__custom__") {
+      const custom = window.prompt("Ingresa el nuevo valor");
+      if (custom) onChange(custom);
+      return;
+    }
+    onChange(val);
+  };
+
+  if (resolvedOptions?.length) {
+    return (
+      <select
+        value={value ?? ""}
+        onChange={(e) => handleChange(e.target.value)}
+        className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full"
+      >
+        <option value="">Selecciona</option>
+        {resolvedOptions.map((opt) => (
+          <option key={opt} value={opt}>
+            {opt}
+          </option>
+        ))}
+        <option value="__custom__">Otro / Nuevo valor</option>
+      </select>
+    );
+  }
+
+  if (field.type === "textarea") {
+    return (
+      <textarea
+        className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full"
+        placeholder={field.placeholder || field.label}
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+
+  return (
+    <input
+      type={field.type === "number" ? "number" : "text"}
+      className="border border-gray-200 rounded-lg px-3 py-2 text-sm w-full"
+      placeholder={field.placeholder || field.label}
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+    />
+  );
+};
+
 const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
   const { user } = useAuth();
   const { showToast } = useUI();
   const [loading, setLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(false);
   const [requests, setRequests] = useState([]);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState(null);
@@ -136,15 +184,18 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
   const [itemsByRequest, setItemsByRequest] = useState({});
   const [itemsLoading, setItemsLoading] = useState({});
   const [newItem, setNewItem] = useState({});
+  const [activeForm, setActiveForm] = useState(null);
+  const [bcOptions, setBcOptions] = useState({});
 
   const normalizedRole = useMemo(() => (user?.role || "").toLowerCase(), [user]);
 
   const allowedLabels = useMemo(() => {
-    const base = FIELD_GROUPS.flatMap((group) => group.fields.map((f) => f.label));
+    const base = COMMERCIAL_FIELDS.map((f) => f.label);
     return new Set(ROLE_FIELD_MAP[normalizedRole] || base);
   }, [normalizedRole]);
 
   const canEditPrices = normalizedRole === "jefe_operaciones";
+  const canHandleInvestments = INVESTMENT_ROLES.has(normalizedRole) || canEditPrices;
 
   const buildDraftFromRequest = (req) => {
     const extra = req.extra || {};
@@ -216,8 +267,22 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
     }
   };
 
+  const loadOptions = async () => {
+    setOptionsLoading(true);
+    try {
+      const data = await getBusinessCaseOptions();
+      setBcOptions(data || {});
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudieron cargar las listas para el Business Case", "error");
+    } finally {
+      setOptionsLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadRequests();
+    loadOptions();
   }, []);
 
   const filteredRequests = useMemo(() => {
@@ -233,10 +298,14 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
 
   const visibleRequests = compact ? filteredRequests.slice(0, 3) : filteredRequests;
 
-  const handleSave = async (id) => {
+  const handleSave = async (id, fieldsToSend) => {
     const current = drafts[id] || {};
     const payload = Object.fromEntries(
-      Object.entries(current).filter(([label]) => allowedLabels.has(label)),
+      fieldsToSend
+        .map((f) => (typeof f === "string" ? f : f.label))
+        .filter(Boolean)
+        .map((label) => [label, current[label]])
+        .filter(([label]) => allowedLabels.has(label)),
     );
 
     if (!Object.keys(payload).length) {
@@ -246,11 +315,14 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
 
     setSaving(true);
     try {
-      await updateBusinessCaseFields(id, payload);
+      const updated = await updateBusinessCaseFields(id, payload);
       showToast("Business Case actualizado", "success");
+      setRequests((prev) => prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
+      setDrafts((prev) => ({ ...prev, [id]: buildDraftFromRequest(updated) }));
+      setActiveForm(null);
     } catch (error) {
       console.error(error);
-      showToast("No se pudieron guardar los campos", "error");
+      showToast(error?.response?.data?.message || "No se pudieron guardar los campos", "error");
     } finally {
       setSaving(false);
     }
@@ -269,32 +341,57 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
     }
   };
 
-  const handleAddItem = async (id) => {
-    const draft = newItem[id] || {};
+  const handleAddItem = async (req) => {
+    const draft = newItem[req.id] || {};
+    if (req.bc_stage !== "investments") {
+      showToast("Completa primero Comercial, ACP Comercial y Gerencia", "warning");
+      return;
+    }
     if (!draft.name) {
-      showToast("Ingresa un concepto para la inversión adicional", "warning");
+      showToast("Selecciona o ingresa un concepto de inversión", "warning");
       return;
     }
 
     try {
-      await addBusinessCaseItem(id, draft);
+      await addBusinessCaseItem(req.id, draft);
       showToast("Inversión registrada", "success");
-      setNewItem((prev) => ({ ...prev, [id]: {} }));
-      await loadItems(id);
+      setNewItem((prev) => ({ ...prev, [req.id]: {} }));
+      await loadItems(req.id);
     } catch (error) {
       console.error(error);
-      showToast("No se pudo guardar la inversión", "error");
+      showToast(error?.response?.data?.message || "No se pudo guardar la inversión", "error");
     }
   };
 
-  const fieldGroups = useMemo(
-    () =>
-      FIELD_GROUPS.map((group) => ({
-        ...group,
-        fields: group.fields.filter((field) => allowedLabels.has(field.label)),
-      })).filter((group) => group.fields.length > 0),
-    [allowedLabels],
+  const openForm = (reqId, type) => {
+    setActiveForm({ id: reqId, type });
+    setExpanded(reqId);
+  };
+
+  const formFields = useMemo(() => {
+    if (!activeForm) return [];
+    if (activeForm.type === "commercial") return COMMERCIAL_FIELDS;
+    if (activeForm.type === "acp") return ACP_FIELDS;
+    if (activeForm.type === "gerencia") return GERENCIA_FIELDS;
+    if (activeForm.type === "operations") return OPERATIONS_FIELDS;
+    return [];
+  }, [activeForm]);
+
+  const progressChip = (label, done) => (
+    <span
+      key={label}
+      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
+        done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"
+      }`}
+    >
+      {done ? <FiCheckCircle /> : <FiClock />} {label}
+    </span>
   );
+
+  const renderStageBadge = (stage) => {
+    const data = STAGE_LABELS[stage] || { label: stage, className: "bg-gray-100 text-gray-700" };
+    return <span className={`text-xxs px-2 py-1 rounded-full font-semibold ${data.className}`}>{data.label}</span>;
+  };
 
   return (
     <Card className="p-4 border border-gray-200">
@@ -302,6 +399,7 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
         <div>
           <p className="text-xs uppercase text-gray-500 font-semibold">{title}</p>
           <h3 className="text-lg font-semibold text-gray-900">Seguimiento de Business Case</h3>
+          <p className="text-xs text-gray-500">Flujo guiado por rol y etapa</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -323,215 +421,235 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
         <p className="text-sm text-gray-500">No hay solicitudes en etapa de Business Case.</p>
       ) : (
         <div className="space-y-3">
-          {visibleRequests.map((req) => (
-            <div key={req.id} className="border border-gray-100 rounded-lg p-3 bg-white shadow-sm">
-              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                    <FiClipboard className="text-blue-500" /> {req.client_name}
-                  </p>
-                  <p className="text-xs text-gray-500">Asignado a: {req.assigned_to_name || req.assigned_to_email || "Sin asignar"}</p>
-                  <p className="text-xs text-gray-500">
-                    Estado: {STATUS_LABELS[req.status] || req.status || "-"}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {req.business_case_link && (
-                    <a
-                      href={req.business_case_link}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-blue-700 bg-blue-50 rounded-lg border border-blue-100"
-                    >
-                      <FiExternalLink /> Abrir en Sheets
-                    </a>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="secondary"
-                    onClick={() => {
-                      setExpanded((prev) => (prev === req.id ? null : req.id));
-                      if (!itemsByRequest[req.id]) {
-                        loadItems(req.id);
-                      }
-                    }}
-                  >
-                    Detalles BC
-                  </Button>
-                </div>
-              </div>
+          {visibleRequests.map((req) => {
+            const progress = req.bc_progress || {};
+            const items = itemsByRequest[req.id] || [];
+            const stage = req.bc_stage || "pending_comercial";
+            const canSeeCommercial = ["comercial", "acp_comercial"].includes(normalizedRole);
+            const canSeeAcp = ["acp_comercial", "jefe_comercial"].includes(normalizedRole);
+            const canSeeGerencia = normalizedRole === "gerencia" || normalizedRole === "jefe_operaciones";
+            const canSeeOperations = normalizedRole === "jefe_operaciones";
 
-              {expanded === req.id && (
-                <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
-                  <div className="space-y-3">
-                    {fieldGroups.map((group) => (
-                      <div key={group.title} className="border border-gray-100 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <FiDatabase className="text-gray-500" />
-                          <div>
-                            <p className="text-sm font-semibold text-gray-900">{group.title}</p>
-                            <p className="text-xs text-gray-500">{group.description}</p>
-                          </div>
+            return (
+              <div key={req.id} className="border border-gray-100 rounded-lg p-3 bg-white shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                      <FiClipboard className="text-blue-500" /> {req.client_name}
+                    </p>
+                    <p className="text-xs text-gray-500">Asignado a: {req.assigned_to_name || req.assigned_to_email || "Sin asignar"}</p>
+                    <p className="text-xs text-gray-500">Estado: {STATUS_LABELS[req.status] || req.status || "-"}</p>
+                    <div className="mt-1 flex flex-wrap gap-1">{renderStageBadge(stage)}</div>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {progressChip("Comercial", progress.comercial)}
+                      {progressChip("ACP Comercial", progress.acp_comercial)}
+                      {progressChip("Gerencia", progress.gerencia)}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {req.business_case_link && (
+                      <a
+                        href={req.business_case_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-sm inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:text-blue-600"
+                      >
+                        <FiExternalLink /> Ver en Sheets
+                      </a>
+                    )}
+                    {stage === "pending_comercial" && canSeeCommercial && (
+                      <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "commercial")}>
+                        Completar Comercial
+                      </Button>
+                    )}
+                    {stage === "pending_managerial" && canSeeAcp && (
+                      <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "acp")}>
+                        ACP Comercial
+                      </Button>
+                    )}
+                    {stage === "pending_managerial" && canSeeGerencia && (
+                      <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "gerencia")}>
+                        Gerencia
+                      </Button>
+                    )}
+                    {stage === "investments" && canSeeOperations && (
+                      <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "operations")}>
+                        Operaciones
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      icon={expanded === req.id ? FiDatabase : FiClipboard}
+                      onClick={() => {
+                        setExpanded(expanded === req.id ? null : req.id);
+                        if (!itemsByRequest[req.id]) loadItems(req.id);
+                      }}
+                    >
+                      {expanded === req.id ? "Ocultar detalle" : "Ver detalle"}
+                    </Button>
+                  </div>
+                </div>
+
+                {expanded === req.id && (
+                  <div className="mt-3 space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2 bg-gray-50 p-3 rounded-lg">
+                      {["TIPO DE CLIENTE", "ENTIDAD CONTRATANTE", "CLIENTE", "Provincia /Ciudad"].map((label) => (
+                        <div key={label}>
+                          <p className="text-xxs uppercase text-gray-500">{label}</p>
+                          <p className="text-sm font-semibold text-gray-900">{drafts[req.id]?.[label] || "-"}</p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {stage === "investments" && canHandleInvestments && (
+                      <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                        <div className="flex items-center justify-between mb-2">
+                          <p className="text-sm font-semibold text-gray-800">Inversiones adicionales</p>
+                          <Button size="xs" variant="ghost" icon={FiRefreshCw} onClick={() => loadItems(req.id)} loading={!!itemsLoading[req.id]}>
+                            Recargar
+                          </Button>
                         </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {group.fields.map((field) => (
-                            <label key={field.label} className="text-xs text-gray-600 space-y-1">
-                              <span className="block font-semibold">{field.label}</span>
-                              <input
-                                type="text"
-                                value={(drafts[req.id] || {})[field.label] || ""}
-                                onChange={(e) =>
-                                  setDrafts((prev) => ({
-                                    ...prev,
-                                    [req.id]: { ...(prev[req.id] || {}), [field.label]: e.target.value },
-                                  }))
-                                }
-                                placeholder={field.placeholder}
-                                className="w-full border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                              />
-                            </label>
-                          ))}
+                          <FieldInput
+                            field={{ label: "Concepto", optionsKey: "investment_catalog" }}
+                            value={(newItem[req.id] || {}).name || ""}
+                            options={bcOptions}
+                            onChange={(val) =>
+                              setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), name: val } }))
+                            }
+                          />
+                          <FieldInput
+                            field={{ label: "Estado" }}
+                            value={(newItem[req.id] || {}).status || ""}
+                            onChange={(val) =>
+                              setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), status: val } }))
+                            }
+                          />
+                          <FieldInput
+                            field={{ label: "Características" }}
+                            value={(newItem[req.id] || {}).characteristics || ""}
+                            onChange={(val) =>
+                              setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), characteristics: val } }))
+                            }
+                          />
+                          <FieldInput
+                            field={{ label: "Cantidad", type: "number" }}
+                            value={(newItem[req.id] || {}).quantity || ""}
+                            onChange={(val) =>
+                              setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), quantity: val } }))
+                            }
+                          />
+                          {canEditPrices && (
+                            <FieldInput
+                              field={{ label: "Precio", type: "number" }}
+                              value={(newItem[req.id] || {}).price || ""}
+                              onChange={(val) =>
+                                setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), price: val } }))
+                              }
+                            />
+                          )}
+                          {canEditPrices && (
+                            <FieldInput
+                              field={{ label: "Total", type: "number" }}
+                              value={(newItem[req.id] || {}).total || ""}
+                              onChange={(val) =>
+                                setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), total: val } }))
+                              }
+                            />
+                          )}
+                        </div>
+                        <div className="flex justify-end mt-2">
+                          <Button size="sm" icon={FiPlus} onClick={() => handleAddItem(req)}>
+                            Registrar inversión
+                          </Button>
+                        </div>
+                        <div className="mt-3 bg-white rounded-lg border border-gray-200 p-2 max-h-56 overflow-y-auto">
+                          {itemsLoading[req.id] ? (
+                            <p className="text-sm text-gray-500">Cargando inversiones...</p>
+                          ) : items.length ? (
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-gray-500">
+                                  <th className="py-1 px-2 text-left">Concepto</th>
+                                  <th className="py-1 px-2 text-left">Estado</th>
+                                  <th className="py-1 px-2 text-left">Cantidad</th>
+                                  {canEditPrices && <th className="py-1 px-2 text-left">Precio</th>}
+                                  {canEditPrices && <th className="py-1 px-2 text-left">Total</th>}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {items.map((item) => (
+                                  <tr key={item.id} className="border-t">
+                                    <td className="py-1 px-2 font-semibold text-gray-900">{item.name}</td>
+                                    <td className="py-1 px-2 text-gray-700">{item.status || "-"}</td>
+                                    <td className="py-1 px-2 text-gray-700">{item.quantity ?? "-"}</td>
+                                    {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.price ?? "-"}</td>}
+                                    {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.total ?? "-"}</td>}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          ) : (
+                            <p className="text-sm text-gray-500">Sin inversiones registradas.</p>
+                          )}
                         </div>
                       </div>
-                    ))}
-                    <div className="flex justify-end">
-                      <Button
-                        icon={FiSend}
-                        loading={saving}
-                        onClick={() => handleSave(req.id)}
-                        disabled={saving}
-                      >
-                        Guardar campos
-                      </Button>
-                    </div>
+                    )}
                   </div>
-
-                  <div className="border border-gray-100 rounded-lg p-3 bg-gray-50">
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900">Inversiones adicionales</p>
-                        <p className="text-xs text-gray-500">Productos y servicios extra del Business Case</p>
-                      </div>
-                      <Button
-                        variant="secondary"
-                        size="xs"
-                        onClick={() => loadItems(req.id)}
-                        loading={!!itemsLoading[req.id]}
-                      >
-                        Recargar
-                      </Button>
-                    </div>
-
-                    <div className="space-y-2">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                        <input
-                          className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                          placeholder="Concepto"
-                          value={(newItem[req.id] || {}).name || ""}
-                          onChange={(e) => setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), name: e.target.value } }))}
-                        />
-                        <input
-                          className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                          placeholder="Estado"
-                          value={(newItem[req.id] || {}).status || ""}
-                          onChange={(e) => setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), status: e.target.value } }))}
-                        />
-                        <input
-                          className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                          placeholder="Características"
-                          value={(newItem[req.id] || {}).characteristics || ""}
-                          onChange={(e) =>
-                            setNewItem((prev) => ({
-                              ...prev,
-                              [req.id]: { ...(prev[req.id] || {}), characteristics: e.target.value },
-                            }))
-                          }
-                        />
-                        <input
-                          className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                          placeholder="Cantidad"
-                          type="number"
-                          value={(newItem[req.id] || {}).quantity || ""}
-                          onChange={(e) =>
-                            setNewItem((prev) => ({
-                              ...prev,
-                              [req.id]: { ...(prev[req.id] || {}), quantity: e.target.value },
-                            }))
-                          }
-                        />
-                        {canEditPrices && (
-                          <>
-                            <input
-                              className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                              placeholder="Precio"
-                              type="number"
-                              value={(newItem[req.id] || {}).price || ""}
-                              onChange={(e) =>
-                                setNewItem((prev) => ({
-                                  ...prev,
-                                  [req.id]: { ...(prev[req.id] || {}), price: e.target.value },
-                                }))
-                              }
-                            />
-                            <input
-                              className="border border-gray-200 rounded-lg px-2 py-2 text-sm"
-                              placeholder="Total"
-                              type="number"
-                              value={(newItem[req.id] || {}).total || ""}
-                              onChange={(e) =>
-                                setNewItem((prev) => ({
-                                  ...prev,
-                                  [req.id]: { ...(prev[req.id] || {}), total: e.target.value },
-                                }))
-                              }
-                            />
-                          </>
-                        )}
-                      </div>
-                      <div className="flex justify-end">
-                        <Button size="sm" icon={FiPlus} onClick={() => handleAddItem(req.id)}>
-                          Registrar inversión
-                        </Button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 bg-white rounded-lg border border-gray-200 p-2 max-h-56 overflow-y-auto">
-                      {itemsLoading[req.id] ? (
-                        <p className="text-sm text-gray-500">Cargando inversiones...</p>
-                      ) : (itemsByRequest[req.id] || []).length ? (
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-gray-500">
-                              <th className="py-1 px-2 text-left">Concepto</th>
-                              <th className="py-1 px-2 text-left">Estado</th>
-                              <th className="py-1 px-2 text-left">Cantidad</th>
-                              {canEditPrices && <th className="py-1 px-2 text-left">Precio</th>}
-                              {canEditPrices && <th className="py-1 px-2 text-left">Total</th>}
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(itemsByRequest[req.id] || []).map((item) => (
-                              <tr key={item.id} className="border-t">
-                                <td className="py-1 px-2 font-semibold text-gray-900">{item.name}</td>
-                                <td className="py-1 px-2 text-gray-700">{item.status || "-"}</td>
-                                <td className="py-1 px-2 text-gray-700">{item.quantity ?? "-"}</td>
-                                {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.price ?? "-"}</td>}
-                                {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.total ?? "-"}</td>}
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      ) : (
-                        <p className="text-sm text-gray-500">Sin inversiones registradas.</p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
+
+      <Modal
+        open={!!activeForm}
+        onClose={() => setActiveForm(null)}
+        title={
+          activeForm?.type === "commercial"
+            ? "Datos iniciales (Comercial)"
+            : activeForm?.type === "acp"
+              ? "Datos ACP Comercial"
+              : activeForm?.type === "gerencia"
+                ? "Datos Gerencia"
+                : "Operaciones"
+        }
+        maxWidth="max-w-4xl"
+      >
+        {optionsLoading && <p className="text-sm text-gray-500">Cargando listas...</p>}
+        {activeForm && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto pr-1">
+              {formFields.map((field) => (
+                <div key={field.label} className="space-y-1">
+                  <p className="text-xxs uppercase text-gray-500">{field.label}</p>
+                  <FieldInput
+                    field={field}
+                    value={(drafts[activeForm.id] || {})[field.label] || ""}
+                    options={bcOptions}
+                    onChange={(val) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [activeForm.id]: { ...(prev[activeForm.id] || {}), [field.label]: val },
+                      }))
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setActiveForm(null)}>
+                Cancelar
+              </Button>
+              <Button onClick={() => handleSave(activeForm.id, formFields)} loading={saving} icon={FiSend}>
+                Guardar y sincronizar
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </Card>
   );
 };

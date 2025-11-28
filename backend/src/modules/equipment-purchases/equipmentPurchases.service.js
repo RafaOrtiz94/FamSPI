@@ -37,6 +37,68 @@ const STATUS = {
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
 const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
 const BUSINESS_CASE_SHEET_RANGE = "A1:F200";
+const ADDITIONAL_INVESTMENT_CATALOG = [
+  "Control externo de tercera opinión",
+  "Control interno interlaboratorial",
+  "Póliza de Fiel Cumplimiento del Contrato",
+  "Póliza de seguro de equipos",
+  "Ups equipo",
+  "Ups servidor",
+  "LIS",
+  "Interfaz",
+  "Lantronix",
+  "IP publica",
+  "Punto de consulta web",
+  "Internet",
+  "Router para Internet",
+  "Servidor",
+  "Computadores",
+  "Impresora",
+  "Tinta",
+  "Toner para impresora de equipos (en caso de dejar las impresoras)",
+  "Impresora Zebra Termica ZD230 ETHERNET Y USB",
+  "Lector inalambrico de codigo de barra",
+  "Sistema de destilación de agua pequeño",
+  "Sistema de osmosis",
+  "Mantenimiento sistema de osmosis",
+  "Sistema de prefiltracion",
+  "Mantenimiento sistema pre filtración",
+  "Tanque para resina mixta (muerta)",
+  "Estructura de proteccion para sistema de agua",
+  "MEMBRANE EQ.OSMOSIS, AG2521TF  2.5 diam",
+  "FILTER NOM. P/SEDIMENTS PX10-20XX  PURTR (CARBON - AZUL)",
+  "FILTER NOM.P/SEDIMENTS GX05-20XX  HYTREX (FIBRA - PAPEL - PAPEL)",
+  "RESINA IONICA REGENERADA 20 ",
+  "RESINA MUERTA 16kilos",
+  "Sal en grano x quintal",
+  "Modificaciones de espacio fisico - estructura",
+  "Modificaciones de espacio fisico - mobiliario",
+  "Climatizacion del area",
+  "Rollo de cable UTP CAT5e x 100m",
+  "Conector RJ45 Delta CAT5E x 50 unds",
+  "Rack Cerrado POWEST 5UR",
+  "Switch HP Aruba Ion 5 puertos",
+  "Switch HP Aruba Ion 1430 24 puertos",
+  "Extensiones y cortapicos",
+  "Extras (tairas, canaletas, espiral plastico)",
+  "Etiquetas",
+  "A4 printer paper",
+  "Refrigerador panorámico",
+  "Refrigerador médico",
+  "Termometro para refrigerador",
+  "Termohigrometros",
+  "Cronometros digitales",
+  "Centrifuga",
+  "Servicio Logisticos Proveedores",
+  "Servicio Logisticos Clientes",
+  "Ampolla de agua bidestilada",
+  "Agua destilada por galón",
+  "Hisopos x 100 uds",
+  "Gasas x 100 uds",
+  "Alcohol prepad 10 x 100 uds",
+  "Tubos eppendorf X 500 UDS",
+  "Otros",
+];
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -60,9 +122,12 @@ function safeJsonParse(value, fallback = {}) {
 
 function mapRequestRow(row = {}) {
   const extra = typeof row.extra === "string" ? safeJsonParse(row.extra) : row.extra;
+  const progress = typeof row.bc_progress === "string" ? safeJsonParse(row.bc_progress, {}) : row.bc_progress;
   return {
     ...row,
     extra,
+    bc_progress: progress || {},
+    bc_stage: row.bc_stage || "pending_comercial",
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
@@ -95,6 +160,12 @@ function stripHtml(text) {
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function computeBusinessCaseStage(progress = {}) {
+  if (!progress.comercial) return "pending_comercial";
+  if (!progress.acp_comercial || !progress.gerencia) return "pending_managerial";
+  return "investments";
 }
 
 async function buildReport({ subject, html, request, actionLabel, user }) {
@@ -201,6 +272,8 @@ async function ensureTables() {
       contract_reminder_event_id TEXT,
       contract_reminder_event_link TEXT,
       drive_folder_id TEXT,
+      bc_stage TEXT DEFAULT 'pending_comercial',
+      bc_progress JSONB DEFAULT '{}',
       extra JSONB,
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
@@ -224,6 +297,12 @@ async function ensureTables() {
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_created_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_stage TEXT DEFAULT 'pending_comercial'`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_progress JSONB DEFAULT '{}'`,
   );
   await db.query(`
     CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
@@ -585,14 +664,78 @@ async function getEquipmentCatalog() {
   }));
 }
 
+async function getBusinessCaseOptions() {
+  await ensureTables();
+  const rowsResult = await db.query(`SELECT client_name, extra FROM equipment_purchase_requests`);
+
+  const sets = {
+    client_types: new Set(),
+    contract_entities: new Set(),
+    clients: new Set(),
+    locations: new Set(),
+    equipment_names: new Set(),
+    lis_providers: new Set(),
+    lis_systems: new Set(),
+    bc_codes: new Set(),
+    bc_objects: new Set(),
+  };
+
+  rowsResult.rows.forEach((row) => {
+    const extra = typeof row.extra === "string" ? safeJsonParse(row.extra, {}) : row.extra || {};
+    if (row.client_name) sets.clients.add(row.client_name);
+    if (extra.tipo_cliente) sets.client_types.add(extra.tipo_cliente);
+    if (extra.entidad_contratante) sets.contract_entities.add(extra.entidad_contratante);
+    if (extra.ciudad || extra.provincia) sets.locations.add(`${extra.provincia || ""} ${extra.ciudad || ""}`.trim());
+    if (extra.codigo_proceso) sets.bc_codes.add(extra.codigo_proceso);
+    if (extra.objeto_contratacion) sets.bc_objects.add(extra.objeto_contratacion);
+    [extra.equipo_principal, extra.equipo_backup, extra.equipo_complementario_para]
+      .filter(Boolean)
+      .forEach((eq) => sets.equipment_names.add(eq));
+    [extra.proveedor_lis, extra.proveedor_sistema]
+      .filter(Boolean)
+      .forEach((provider) => sets.lis_providers.add(provider));
+    [extra.nombre_sistema, extra.lis_system]
+      .filter(Boolean)
+      .forEach((system) => sets.lis_systems.add(system));
+  });
+
+  const equipmentCatalog = await getEquipmentCatalog();
+  equipmentCatalog.forEach((item) => item.name && sets.equipment_names.add(item.name));
+
+  const clients = await getApprovedClients();
+  clients.forEach((client) => client.name && sets.clients.add(client.name));
+
+  const investments = new Set(ADDITIONAL_INVESTMENT_CATALOG);
+
+  const normalize = (set) => Array.from(set).filter(Boolean).map((v) => String(v)).sort((a, b) => a.localeCompare(b, "es"));
+
+  return {
+    client_types: normalize(sets.client_types),
+    contract_entities: normalize(sets.contract_entities),
+    clients: normalize(sets.clients),
+    locations: normalize(sets.locations),
+    equipment_names: normalize(sets.equipment_names),
+    lis_providers: normalize(sets.lis_providers),
+    lis_systems: normalize(sets.lis_systems),
+    bc_codes: normalize(sets.bc_codes),
+    bc_objects: normalize(sets.bc_objects),
+    investment_catalog: normalize(investments),
+  };
+}
+
 async function listByUser(user) {
   await ensureTables();
   const params = [];
   let query = `SELECT * FROM equipment_purchase_requests`;
+  const role = normalizeRole(user?.role);
 
   if (!canManageAll(user)) {
-    query += ` WHERE created_by = $1 OR assigned_to = $1`;
-    params.push(user.id);
+    if (role === "jefe_tecnico" || role === "jefe_operaciones") {
+      query += ` WHERE bc_stage = 'investments'`;
+    } else {
+      query += ` WHERE created_by = $1 OR assigned_to = $1`;
+      params.push(user.id);
+    }
   }
 
   query += ` ORDER BY created_at DESC`;
@@ -605,9 +748,11 @@ async function getById(id, user) {
   await ensureTables();
   const { rows } = await db.query(`SELECT * FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`, [id]);
   const row = rows[0];
+  const role = normalizeRole(user?.role);
   const isCreator = row?.created_by === user?.id;
   const isAssignee = row?.assigned_to === user?.id;
-  if (!row || (!isCreator && !isAssignee && !canManageAll(user))) return null;
+  const isBcSupport = (role === "jefe_tecnico" || role === "jefe_operaciones") && row?.bc_stage === "investments";
+  if (!row || (!isCreator && !isAssignee && !canManageAll(user) && !isBcSupport)) return null;
   return mapRequestRow(row);
 }
 
@@ -1030,6 +1175,8 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
             contract_reminder_event_id = $6,
             contract_reminder_event_link = $7,
             status = $8,
+            bc_stage = 'pending_comercial',
+            bc_progress = '{}'::jsonb,
             updated_at = now()
       WHERE id = $9
       RETURNING *`,
@@ -1173,13 +1320,40 @@ async function updateBusinessCaseFields({ id, user, fields }) {
   );
 
   await updateSheetByLabel({ spreadsheetId: ensured.bc_spreadsheet_id, updates: filtered });
-  return { ...ensured, bc_updates: filtered };
+
+  const progress = typeof request.bc_progress === "string" ? safeJsonParse(request.bc_progress, {}) : request.bc_progress || {};
+
+  if (role === "comercial") progress.comercial = true;
+  if (role === "acp_comercial" || role === "jefe_comercial") progress.acp_comercial = true;
+  if (role === "gerencia") progress.gerencia = true;
+  if (role === "jefe_tecnico") progress.jefe_tecnico = true;
+  if (role === "jefe_operaciones") progress.jefe_operaciones = true;
+
+  const nextStage = computeBusinessCaseStage(progress);
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET bc_progress = $1,
+            bc_stage = $2,
+            updated_at = now()
+      WHERE id = $3
+      RETURNING *`,
+    [JSON.stringify(progress), nextStage, id],
+  );
+
+  return mapRequestRow(rows[0]);
 }
 
 async function addBusinessCaseItem({ id, user, item }) {
   await ensureTables();
   const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+
+  const progress = typeof request.bc_progress === "string" ? safeJsonParse(request.bc_progress, {}) : request.bc_progress || {};
+  const stage = computeBusinessCaseStage(progress);
+  if (stage !== "investments") {
+    throw new Error("Las inversiones adicionales se habilitan cuando Comercial, ACP Comercial y Gerencia completan sus datos");
+  }
 
   const clientInfo = await getClientDetails(request.client_id);
   const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
@@ -1249,6 +1423,7 @@ module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
   getEquipmentCatalog,
+  getBusinessCaseOptions,
   listByUser,
   getById,
   createPurchaseRequest,

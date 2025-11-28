@@ -15,10 +15,12 @@ const businessCaseRoles = [
   "jefe_tecnico",
   "jefe_operaciones",
 ];
+const viewerRoles = Array.from(new Set([...creatorRoles, "jefe_tecnico", "jefe_operaciones"]));
 
 router.get("/meta", verifyToken, requireRole(creatorRoles), ctrl.getMeta);
-router.get("/", verifyToken, requireRole(creatorRoles), ctrl.listMine);
-router.get("/:id", verifyToken, requireRole(creatorRoles), ctrl.getOne);
+router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
+router.get("/business-case/options", verifyToken, requireRole(businessCaseRoles), ctrl.getBusinessCaseOptions);
+router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
 router.post("/:id/start-availability", verifyToken, requireRole(managerRoles), ctrl.startAvailability);

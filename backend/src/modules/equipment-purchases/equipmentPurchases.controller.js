@@ -28,6 +28,15 @@ exports.getMeta = async (req, res, next) => {
   }
 };
 
+exports.getBusinessCaseOptions = async (req, res, next) => {
+  try {
+    const options = await service.getBusinessCaseOptions();
+    res.json({ ok: true, data: options });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.listMine = async (req, res, next) => {
   try {
     const data = await service.listByUser(req.user);
