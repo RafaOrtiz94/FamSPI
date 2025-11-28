@@ -165,7 +165,7 @@ const FieldInput = ({
   );
 };
 
-const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
+const BusinessCaseWidget = ({ title = "Business Case", compact = false, showCommercialStartCards = false }) => {
   const { user } = useAuth();
   const { showToast } = useUI();
   const [loading, setLoading] = useState(false);
@@ -398,6 +398,11 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
     return <span className={`text-xxs px-2 py-1 rounded-full font-semibold ${data.className}`}>{data.label}</span>;
   };
 
+  const showCommercialStarts = showCommercialStartCards && normalizedRole === "comercial";
+  const pendingCommercial = showCommercialStarts
+    ? visibleRequests.filter((req) => (req.bc_stage || "pending_comercial") === "pending_comercial")
+    : [];
+
   return (
     <Card className="p-4 border border-gray-200">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-3">
@@ -419,6 +424,28 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
           </Button>
         </div>
       </div>
+
+      {showCommercialStarts && pendingCommercial.length > 0 && (
+        <div className="mb-4 space-y-2">
+          <p className="text-sm font-semibold text-gray-900">Tarjetas de inicio</p>
+          <p className="text-xs text-gray-500">
+            Solo el asesor comercial puede iniciar el Business Case desde estas tarjetas.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {pendingCommercial.map((req) => (
+              <div key={`start-${req.id}`} className="border border-gray-200 rounded-lg p-3 bg-amber-50">
+                <p className="text-sm font-semibold text-gray-900">{req.client_name}</p>
+                <p className="text-xs text-gray-600">Solicitado por: {req.assigned_to_name || req.assigned_to_email || "-"}</p>
+                <p className="text-xs text-gray-600">Código: {req.code || req.folio || "Sin folio"}</p>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-xxs uppercase text-amber-600 font-semibold">Pendiente Comercial</span>
+                  <Button size="xs" icon={FiEdit2} onClick={() => openForm(req.id, "commercial")}>Iniciar</Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-sm text-gray-500">Cargando Business Case...</p>

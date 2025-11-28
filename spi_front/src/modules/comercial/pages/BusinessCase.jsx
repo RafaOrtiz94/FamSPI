@@ -7,7 +7,7 @@ const BusinessCasePage = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Business Case</h1>
       </div>
-      <BusinessCaseWidget />
+      <BusinessCaseWidget showCommercialStartCards />
     </div>
   );
 };
