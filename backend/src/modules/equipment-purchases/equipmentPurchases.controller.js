@@ -69,6 +69,7 @@ exports.create = async (req, res, next) => {
       equipment,
       notes,
       extra,
+      request_type,
     } = req.body;
     const parsedEquipment = Array.isArray(equipment)
       ? equipment
@@ -95,6 +96,7 @@ exports.create = async (req, res, next) => {
       equipment: parsedEquipment,
       notes,
       extra: parsedExtra,
+      requestType: request_type,
     });
 
     await logAction({

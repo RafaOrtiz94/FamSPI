@@ -14,6 +14,7 @@ import {
 } from "react-icons/fi";
 import {
   addBusinessCaseItem,
+  createEquipmentPurchase,
   getBusinessCaseOptions,
   listBusinessCaseItems,
   listEquipmentPurchases,
@@ -24,6 +25,7 @@ import Card from "../../../core/ui/components/Card";
 import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/useUI";
+import NewBusinessCaseCard from "../../comercial/components/NewBusinessCaseCard";
 
 const BOOLEAN_OPTIONS = ["SI", "NO"];
 
@@ -183,6 +185,9 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
   const [activeForm, setActiveForm] = useState(null);
   const [bcOptions, setBcOptions] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
+  const [startModalOpen, setStartModalOpen] = useState(false);
+  const [startLoading, setStartLoading] = useState(false);
+  const [startForm, setStartForm] = useState({ clientName: "", notes: "" });
   const itemsPerPage = 6;
 
   const normalizedRole = useMemo(() => (user?.role || "").toLowerCase(), [user]);
@@ -432,6 +437,32 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
     )
     : [];
 
+  const handleStartBusinessCase = async () => {
+    if (!startForm.clientName?.trim()) {
+      showToast("El nombre del cliente es obligatorio", "warning");
+      return;
+    }
+
+    setStartLoading(true);
+    try {
+      await createEquipmentPurchase({
+        client_name: startForm.clientName.trim(),
+        notes: startForm.notes?.trim() || undefined,
+        equipment: [],
+        request_type: "business_case",
+      });
+      showToast("Business Case creado", "success");
+      setStartForm({ clientName: "", notes: "" });
+      setStartModalOpen(false);
+      loadRequests();
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo crear el Business Case", "error");
+    } finally {
+      setStartLoading(false);
+    }
+  };
+
 
 
   return (
@@ -455,6 +486,12 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
           </Button>
         </div>
       </div>
+
+      {showCommercialStarts && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+          <NewBusinessCaseCard onClick={() => setStartModalOpen(true)} />
+        </div>
+      )}
 
 
 
@@ -676,6 +713,47 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
           )}
         </div>
       )}
+
+      <Modal
+        open={startModalOpen}
+        onClose={() => {
+          if (!startLoading) {
+            setStartModalOpen(false);
+            setStartForm({ clientName: "", notes: "" });
+          }
+        }}
+        title="Iniciar Business Case"
+      >
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
+            <input
+              type="text"
+              value={startForm.clientName}
+              onChange={(e) => setStartForm((prev) => ({ ...prev, clientName: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              placeholder="Nombre del cliente"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notas</label>
+            <textarea
+              value={startForm.notes}
+              onChange={(e) => setStartForm((prev) => ({ ...prev, notes: e.target.value }))}
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
+              placeholder="Contexto o aclaraciones"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="secondary" onClick={() => setStartModalOpen(false)} disabled={startLoading}>
+              Cancelar
+            </Button>
+            <Button onClick={handleStartBusinessCase} loading={startLoading}>
+              Crear Business Case
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Modal
         open={!!activeForm}

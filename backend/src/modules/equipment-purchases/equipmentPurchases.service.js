@@ -128,6 +128,7 @@ function mapRequestRow(row = {}) {
   return {
     ...row,
     extra,
+    request_type: row.request_type || "purchase",
     bc_progress: progress || {},
     bc_stage: row.bc_stage || "pending_comercial",
     proforma_file_link: driveLink(row.proforma_file_id),
@@ -278,6 +279,7 @@ async function ensureTables() {
       bc_stage TEXT DEFAULT 'pending_comercial',
       bc_progress JSONB DEFAULT '{}',
       extra JSONB,
+      request_type TEXT DEFAULT 'purchase',
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now()
     );
@@ -315,6 +317,9 @@ async function ensureTables() {
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_progress JSONB DEFAULT '{}'`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS request_type TEXT DEFAULT 'purchase'`,
   );
   await db.query(`
     CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
@@ -847,17 +852,23 @@ async function createPurchaseRequest({
   equipment = [],
   notes,
   extra,
+  requestType = "purchase",
 }) {
   await ensureTables();
-  if (!clientName || !equipment.length) {
+  if (!clientName) {
+    throw new Error("El cliente es obligatorio");
+  }
+
+  if (requestType !== "business_case" && !equipment.length) {
     throw new Error("Cliente y al menos un equipo son obligatorios");
   }
 
   const canSendAvailability = canManageAll(user);
+  const isBusinessCaseOnly = requestType === "business_case";
   const provider = canSendAvailability ? providerEmail : null;
 
   const assigneeUser = assignedTo ? await getUserById(assignedTo) : null;
-  const resolvedAssignee = assigneeUser || (canSendAvailability ? user : null);
+  const resolvedAssignee = assigneeUser || (canSendAvailability || isBusinessCaseOnly ? user : null);
 
   if (!resolvedAssignee) {
     throw new Error("Debes asignar la solicitud a un ACP Comercial");
@@ -873,53 +884,55 @@ async function createPurchaseRequest({
     lis_system: extra?.requires_lis ? (extra?.lis_system || null) : null,
   };
 
-  const equipmentList = equipment
-    .map((item) => {
-      const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
-      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
-    })
-    .join("<br>");
-
-  const html = `
-    <h2>Solicitud de disponibilidad</h2>
-    <p>Cliente: <strong>${clientName}</strong></p>
-    <p>Equipos requeridos:</p>
-    <p>${equipmentList}</p>
-    ${notes ? `<p>Notas: ${notes}</p>` : ""}
-  `;
-
-  const requestSnapshot = {
-    id,
-    client_name: clientName,
-    provider_email: provider,
-    equipment,
-    created_at: createdAt,
-    notes,
-  };
-
   let emailFileId = null;
   let status = STATUS.PENDING_PROVIDER;
 
-  if (provider) {
-    emailFileId = await sendAndArchive({
-      user,
-      to: provider,
-      subject: `Disponibilidad de equipos - ${clientName}`,
-      html,
-      folderId,
-      prefix: "disponibilidad",
-      request: requestSnapshot,
-      actionLabel: "Informe de disponibilidad de equipos",
-    });
-    status = STATUS.WAITING_PROVIDER;
+  if (!isBusinessCaseOnly) {
+    const equipmentList = equipment
+      .map((item) => {
+        const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
+        return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+      })
+      .join("<br>");
+
+    const html = `
+      <h2>Solicitud de disponibilidad</h2>
+      <p>Cliente: <strong>${clientName}</strong></p>
+      <p>Equipos requeridos:</p>
+      <p>${equipmentList}</p>
+      ${notes ? `<p>Notas: ${notes}</p>` : ""}
+    `;
+
+    const requestSnapshot = {
+      id,
+      client_name: clientName,
+      provider_email: provider,
+      equipment,
+      created_at: createdAt,
+      notes,
+    };
+
+    if (provider) {
+      emailFileId = await sendAndArchive({
+        user,
+        to: provider,
+        subject: `Disponibilidad de equipos - ${clientName}`,
+        html,
+        folderId,
+        prefix: "disponibilidad",
+        request: requestSnapshot,
+        actionLabel: "Informe de disponibilidad de equipos",
+      });
+      status = STATUS.WAITING_PROVIDER;
+    }
   }
 
   const { rows } = await db.query(
     `INSERT INTO equipment_purchase_requests (
         id, created_by, created_by_email, assigned_to, assigned_to_email, assigned_to_name,
         client_id, client_name, client_email, notes, provider_email,
-        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        equipment, status, availability_email_sent_at, availability_email_file_id, drive_folder_id, extra, request_type
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
      RETURNING *`,
     [
       id,
@@ -939,6 +952,7 @@ async function createPurchaseRequest({
       emailFileId,
       folderId,
       JSON.stringify(extraPayload || {}),
+      requestType || "purchase",
     ],
   );
 
@@ -951,10 +965,12 @@ async function createPurchaseRequest({
     logger.warn("No se pudieron obtener los datos del cliente %s: %s", clientId, error.message);
   }
 
-  try {
-    created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
-  } catch (error) {
-    logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
+  if (!isBusinessCaseOnly) {
+    try {
+      created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
+    } catch (error) {
+      logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
+    }
   }
 
   try {
