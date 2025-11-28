@@ -100,7 +100,25 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
           </Route>
 
-          <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "acp_comercial",
+                  "jefe_comercial",
+                  "gerencia",
+                  "gerencia_general",
+                  "operaciones",
+                  "jefe_operaciones",
+                  "servicio_tecnico",
+                  "jefe_tecnico",
+                  "jefe_servicio_tecnico",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
             <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
           </Route>
 

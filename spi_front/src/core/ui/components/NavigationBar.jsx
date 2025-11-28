@@ -41,12 +41,13 @@ const acpLinks = [
     icon: FiShoppingCart,
     path: "/dashboard/comercial/equipment-purchases",
   },
-  {
-    name: "BussinesCase",
-    icon: FiFileText,
-    path: "/dashboard/comercial/business-case",
-  },
 ];
+
+const businessCaseLink = {
+  name: "Business Case",
+  icon: FiFileText,
+  path: "/dashboard/business-case",
+};
 
 const talentoLinks = [
   {
@@ -79,6 +80,23 @@ const buildLinks = (scope) => {
 
   if (["acp_comercial"].includes(scope)) {
     links.push(...acpLinks);
+  }
+
+  const businessCaseRoles = [
+    "comercial",
+    "acp_comercial",
+    "jefe_comercial",
+    "gerencia",
+    "gerencia_general",
+    "operaciones",
+    "jefe_operaciones",
+    "servicio_tecnico",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+  ];
+
+  if (businessCaseRoles.includes(scope)) {
+    links.push(businessCaseLink);
   }
 
   // Talento Humano links

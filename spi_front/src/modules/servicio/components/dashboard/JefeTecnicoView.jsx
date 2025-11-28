@@ -11,7 +11,6 @@ import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PendingApprovals from "../../components/PendingApprovals";
 import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
-import BusinessCaseWidget from "../../../shared/components/BusinessCaseWidget";
 
 const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
     return (
@@ -129,9 +128,6 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                 <PersonnelRequestWidget />
             </div>
 
-            <div className="mt-6">
-                <BusinessCaseWidget title="Business Case (Dirección Técnica)" />
-            </div>
         </>
     );
 };
