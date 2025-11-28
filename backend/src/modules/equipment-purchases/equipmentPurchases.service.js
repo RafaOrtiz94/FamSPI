@@ -944,11 +944,23 @@ async function createPurchaseRequest({
 
   let created = mapRequestRow(rows[0]);
 
+  let clientInfo = null;
   try {
-    const clientInfo = await getClientDetails(clientId);
+    clientInfo = await getClientDetails(clientId);
+  } catch (error) {
+    logger.warn("No se pudieron obtener los datos del cliente %s: %s", clientId, error.message);
+  }
+
+  try {
     created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
   } catch (error) {
     logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
+  }
+
+  try {
+    created = await ensureBusinessCaseDocument({ request: created, clientInfo, user });
+  } catch (error) {
+    logger.warn("No se pudo crear Business Case automático al iniciar: %s", error.message);
   }
 
   return created;
