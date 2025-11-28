@@ -1281,9 +1281,7 @@ async function updateBusinessCaseFields({ id, user, fields }) {
   const baseAllowed = new Set([
     "comercial",
     "acp_comercial",
-    "gerencia",
-    "jefe_comercial",
-    "jefe_tecnico",
+    "gerencia_general",
     "jefe_operaciones",
   ]);
 
@@ -1301,19 +1299,13 @@ async function updateBusinessCaseFields({ id, user, fields }) {
     "Observaciones",
   ]);
 
+  const operationsFields = new Set(["Observaciones de Jefe de Operaciones"]);
+
   let allowedLabels = new Set();
-  if (role === "gerencia") allowedLabels = new Set([...commercialFields, ...gerenciaFields]);
-  else if (role === "acp_comercial" || role === "jefe_comercial") allowedLabels = new Set([...commercialFields, ...acpFields]);
-  else if (role === "jefe_operaciones") {
-    allowedLabels = new Set([
-      ...commercialFields,
-      ...gerenciaFields,
-      ...acpFields,
-      "Observaciones de Jefe de Operaciones",
-    ]);
-  } else {
-    allowedLabels = commercialFields;
-  }
+  if (role === "gerencia_general") allowedLabels = gerenciaFields;
+  else if (role === "acp_comercial") allowedLabels = acpFields;
+  else if (role === "jefe_operaciones") allowedLabels = operationsFields;
+  else allowedLabels = commercialFields;
 
   const filtered = Object.fromEntries(
     Object.entries(fields || {}).filter(([label]) => allowedLabels.has(label)),
@@ -1324,9 +1316,8 @@ async function updateBusinessCaseFields({ id, user, fields }) {
   const progress = typeof request.bc_progress === "string" ? safeJsonParse(request.bc_progress, {}) : request.bc_progress || {};
 
   if (role === "comercial") progress.comercial = true;
-  if (role === "acp_comercial" || role === "jefe_comercial") progress.acp_comercial = true;
-  if (role === "gerencia") progress.gerencia = true;
-  if (role === "jefe_tecnico") progress.jefe_tecnico = true;
+  if (role === "acp_comercial") progress.acp_comercial = true;
+  if (role === "gerencia_general") progress.gerencia = true;
   if (role === "jefe_operaciones") progress.jefe_operaciones = true;
 
   const nextStage = computeBusinessCaseStage(progress);
@@ -1360,14 +1351,7 @@ async function addBusinessCaseItem({ id, user, item }) {
 
   const role = normalizeRole(user.role);
   const canEditPrice = role === "jefe_operaciones";
-  const allowedRoles = new Set([
-    "comercial",
-    "acp_comercial",
-    "jefe_tecnico",
-    "jefe_operaciones",
-    "jefe_comercial",
-    "gerencia",
-  ]);
+  const allowedRoles = new Set(["comercial", "acp_comercial", "jefe_tecnico", "jefe_operaciones"]);
 
   if (!allowedRoles.has(role)) {
     throw new Error("No tienes permisos para registrar inversiones adicionales");

@@ -83,15 +83,9 @@ const OPERATIONS_FIELDS = [{ label: "Observaciones de Jefe de Operaciones", type
 
 const ROLE_FIELD_MAP = {
   comercial: COMMERCIAL_FIELDS.map((f) => f.label),
-  acp_comercial: [...COMMERCIAL_FIELDS.map((f) => f.label), ...ACP_FIELDS.map((f) => f.label)],
-  gerencia: [...COMMERCIAL_FIELDS.map((f) => f.label), ...GERENCIA_FIELDS.map((f) => f.label)],
-  jefe_comercial: [...COMMERCIAL_FIELDS.map((f) => f.label), ...ACP_FIELDS.map((f) => f.label)],
-  jefe_operaciones: [
-    ...COMMERCIAL_FIELDS.map((f) => f.label),
-    ...GERENCIA_FIELDS.map((f) => f.label),
-    ...ACP_FIELDS.map((f) => f.label),
-    ...OPERATIONS_FIELDS.map((f) => f.label),
-  ],
+  acp_comercial: ACP_FIELDS.map((f) => f.label),
+  gerencia_general: GERENCIA_FIELDS.map((f) => f.label),
+  jefe_operaciones: OPERATIONS_FIELDS.map((f) => f.label),
   jefe_tecnico: COMMERCIAL_FIELDS.map((f) => f.label),
 };
 
@@ -364,6 +358,17 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
   };
 
   const openForm = (reqId, type) => {
+    const roleGuards = {
+      commercial: "comercial",
+      acp: "acp_comercial",
+      gerencia: "gerencia_general",
+      operations: "jefe_operaciones",
+    };
+    const requiredRole = roleGuards[type];
+    if (requiredRole && normalizedRole !== requiredRole) {
+      showToast("Este formulario solo puede ser completado por el rol asignado", "warning");
+      return;
+    }
     setActiveForm({ id: reqId, type });
     setExpanded(reqId);
   };
@@ -425,9 +430,9 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false }) => {
             const progress = req.bc_progress || {};
             const items = itemsByRequest[req.id] || [];
             const stage = req.bc_stage || "pending_comercial";
-            const canSeeCommercial = ["comercial", "acp_comercial"].includes(normalizedRole);
-            const canSeeAcp = ["acp_comercial", "jefe_comercial"].includes(normalizedRole);
-            const canSeeGerencia = normalizedRole === "gerencia" || normalizedRole === "jefe_operaciones";
+            const canSeeCommercial = normalizedRole === "comercial";
+            const canSeeAcp = normalizedRole === "acp_comercial";
+            const canSeeGerencia = normalizedRole === "gerencia_general";
             const canSeeOperations = normalizedRole === "jefe_operaciones";
 
             return (
