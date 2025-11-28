@@ -286,16 +286,33 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
     loadRequests();
   }, [refreshKey]);
 
+  const sortedRequests = useMemo(() => {
+    const parseDate = (value) => {
+      const date = value ? new Date(value) : null;
+      return date?.getTime?.() || 0;
+    };
+
+    return [...requests].sort((a, b) => {
+      const diff = parseDate(b.created_at || b.createdAt) - parseDate(a.created_at || a.createdAt);
+      if (diff !== 0) return diff;
+      return String(b.id || "").localeCompare(String(a.id || ""), undefined, { numeric: true, sensitivity: "base" });
+    });
+  }, [requests]);
+
   const filteredRequests = useMemo(() => {
     const q = (query || "").toLowerCase();
-    const bcReady = requests.filter((req) => req.status && req.status !== "pending_provider_assignment");
+    const bcReady = sortedRequests.filter((req) => req.status && req.status !== "pending_provider_assignment");
     if (!q) return bcReady;
     return bcReady.filter((req) =>
       [req.client_name, req.assigned_to_name, req.assigned_to_email, req.provider_email]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q)),
     );
-  }, [query, requests]);
+  }, [query, sortedRequests]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [query, sortedRequests]);
 
   const visibleRequests = compact ? filteredRequests.slice(0, 3) : filteredRequests;
 
