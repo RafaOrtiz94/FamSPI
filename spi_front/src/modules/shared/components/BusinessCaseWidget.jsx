@@ -182,7 +182,8 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
   const [newItem, setNewItem] = useState({});
   const [activeForm, setActiveForm] = useState(null);
   const [bcOptions, setBcOptions] = useState({});
-  const carouselRef = useRef(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 6;
 
   const normalizedRole = useMemo(() => (user?.role || "").toLowerCase(), [user]);
 
@@ -388,9 +389,8 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
   const progressChip = (label, done) => (
     <span
       key={label}
-      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${
-        done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"
-      }`}
+      className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-full ${done ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-600"
+        }`}
     >
       {done ? <FiCheckCircle /> : <FiClock />} {label}
     </span>
@@ -404,19 +404,15 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
   const showCommercialStarts = showCommercialStartCards && normalizedRole === "comercial";
   const pendingCommercial = showCommercialStarts
     ? visibleRequests.filter(
-        (req) =>
-          (req.bc_stage || "pending_comercial") === "pending_comercial" &&
-          !req.bc_spreadsheet_id &&
-          !req.business_case_link &&
-          !(req.bc_progress || {}).comercial,
-      )
+      (req) =>
+        (req.bc_stage || "pending_comercial") === "pending_comercial" &&
+        !req.bc_spreadsheet_id &&
+        !req.business_case_link &&
+        !(req.bc_progress || {}).comercial,
+    )
     : [];
 
-  const scrollCarousel = (direction) => {
-    if (!carouselRef.current) return;
-    const delta = direction === "left" ? -420 : 420;
-    carouselRef.current.scrollBy({ left: delta, behavior: "smooth" });
-  };
+
 
   return (
     <Card className="p-4 border border-gray-200">
@@ -440,224 +436,224 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
         </div>
       </div>
 
-      {showCommercialStarts && pendingCommercial.length > 0 && (
-        <div className="mb-4 space-y-2">
-          <p className="text-sm font-semibold text-gray-900">Tarjetas de inicio</p>
-          <p className="text-xs text-gray-500">
-            Solo el asesor comercial puede iniciar el Business Case desde estas tarjetas.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-            {pendingCommercial.map((req) => (
-              <div key={`start-${req.id}`} className="border border-gray-200 rounded-lg p-3 bg-amber-50">
-                <p className="text-sm font-semibold text-gray-900">{req.client_name}</p>
-                <p className="text-xs text-gray-600">Solicitado por: {req.assigned_to_name || req.assigned_to_email || "-"}</p>
-                <p className="text-xs text-gray-600">Código: {req.code || req.folio || "Sin folio"}</p>
-                <div className="mt-3 flex items-center justify-between">
-                  <span className="text-xxs uppercase text-amber-600 font-semibold">Pendiente Comercial</span>
-                  <Button size="xs" icon={FiEdit2} onClick={() => openForm(req.id, "commercial")}>Iniciar</Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+
 
       {loading ? (
         <p className="text-sm text-gray-500">Cargando Business Case...</p>
       ) : visibleRequests.length === 0 ? (
         <p className="text-sm text-gray-500">No hay solicitudes en etapa de Business Case.</p>
       ) : (
-        <div className="relative">
-          <div className="absolute -left-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
-            <Button variant="ghost" size="sm" icon={FiChevronLeft} onClick={() => scrollCarousel("left")} />
-          </div>
-          <div className="absolute -right-3 top-1/2 -translate-y-1/2 flex flex-col gap-2">
-            <Button variant="ghost" size="sm" icon={FiChevronRight} onClick={() => scrollCarousel("right")} />
-          </div>
-          <div ref={carouselRef} className="overflow-x-auto pb-2 scroll-smooth">
-            <div className="flex gap-3 min-w-full">
-              {visibleRequests.map((req) => {
-                const progress = req.bc_progress || {};
-                const items = itemsByRequest[req.id] || [];
-                const stage = req.bc_stage || "pending_comercial";
-                const canSeeCommercial = normalizedRole === "comercial";
-                const canSeeAcp = normalizedRole === "acp_comercial";
-                const canSeeGerencia = normalizedRole === "gerencia_general";
-                const canSeeOperations = normalizedRole === "jefe_operaciones";
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {visibleRequests.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage).map((req) => {
+              const progress = req.bc_progress || {};
+              const items = itemsByRequest[req.id] || [];
+              const stage = req.bc_stage || "pending_comercial";
+              const canSeeCommercial = normalizedRole === "comercial";
+              const canSeeAcp = normalizedRole === "acp_comercial";
+              const canSeeGerencia = normalizedRole === "gerencia_general";
+              const canSeeOperations = normalizedRole === "jefe_operaciones";
 
-                return (
-                  <div key={req.id} className="border border-gray-100 rounded-lg p-3 bg-white shadow-sm flex-shrink-0 w-full md:w-96">
-                    <div className="flex flex-col gap-2">
-                      <div>
-                        <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                          <FiClipboard className="text-blue-500" /> {req.client_name}
-                        </p>
-                        <p className="text-xs text-gray-500">Asignado a: {req.assigned_to_name || req.assigned_to_email || "Sin asignar"}</p>
-                        <p className="text-xs text-gray-500">Estado: {STATUS_LABELS[req.status] || req.status || "-"}</p>
-                        <div className="mt-1 flex flex-wrap gap-1">{renderStageBadge(stage)}</div>
-                        <div className="mt-1 flex flex-wrap gap-2">
-                          {progressChip("Comercial", progress.comercial)}
-                          {progressChip("ACP Comercial", progress.acp_comercial)}
-                          {progressChip("Gerencia", progress.gerencia)}
-                        </div>
+              return (
+                <div key={req.id} className="border border-gray-100 rounded-lg p-3 bg-white shadow-sm flex flex-col h-full">
+                  <div className="flex flex-col gap-2 flex-1">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+                        <FiClipboard className="text-blue-500" /> {req.client_name}
+                      </p>
+                      <p className="text-xs text-gray-500">Asignado a: {req.assigned_to_name || req.assigned_to_email || "Sin asignar"}</p>
+                      <p className="text-xs text-gray-500">Estado: {STATUS_LABELS[req.status] || req.status || "-"}</p>
+                      <div className="mt-1 flex flex-wrap gap-1">{renderStageBadge(stage)}</div>
+                      <div className="mt-1 flex flex-wrap gap-2">
+                        {progressChip("Comercial", progress.comercial)}
+                        {progressChip("ACP Comercial", progress.acp_comercial)}
+                        {progressChip("Gerencia", progress.gerencia)}
                       </div>
-                      <div className="flex flex-wrap gap-2">
-                        {req.business_case_link && (
-                          <a
-                            href={req.business_case_link}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-sm inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:text-blue-600"
-                          >
-                            <FiExternalLink /> Ver en Sheets
-                          </a>
-                        )}
-                        {stage === "pending_comercial" && canSeeCommercial && (
-                          <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "commercial")}>
-                            Completar Comercial
-                          </Button>
-                        )}
-                        {stage === "pending_managerial" && canSeeAcp && (
-                          <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "acp")}>
-                            ACP Comercial
-                          </Button>
-                        )}
-                        {stage === "pending_managerial" && canSeeGerencia && (
-                          <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "gerencia")}>
-                            Gerencia
-                          </Button>
-                        )}
-                        {stage === "investments" && canSeeOperations && (
-                          <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "operations")}>
-                            Operaciones
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          icon={expanded === req.id ? FiDatabase : FiClipboard}
-                          onClick={() => {
-                            setExpanded(expanded === req.id ? null : req.id);
-                            if (!itemsByRequest[req.id]) loadItems(req.id);
-                          }}
-                        >
-                          {expanded === req.id ? "Ocultar detalle" : "Ver detalle"}
-                        </Button>
-                      </div>
-
-                      {expanded === req.id && (
-                        <div className="mt-1 space-y-3">
-                          <div className="grid grid-cols-1 gap-2 bg-gray-50 p-3 rounded-lg">
-                            {["TIPO DE CLIENTE", "ENTIDAD CONTRATANTE", "CLIENTE", "Provincia /Ciudad"].map((label) => (
-                              <div key={label}>
-                                <p className="text-xxs uppercase text-gray-500">{label}</p>
-                                <p className="text-sm font-semibold text-gray-900">{drafts[req.id]?.[label] || "-"}</p>
-                              </div>
-                            ))}
-                          </div>
-
-                          {stage === "investments" && canHandleInvestments && (
-                            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
-                              <div className="flex items-center justify-between mb-2">
-                                <p className="text-sm font-semibold text-gray-800">Inversiones adicionales</p>
-                                <Button size="xs" variant="ghost" icon={FiRefreshCw} onClick={() => loadItems(req.id)} loading={!!itemsLoading[req.id]}>
-                                  Recargar
-                                </Button>
-                              </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                <FieldInput
-                                  field={{ label: "Concepto", optionsKey: "investment_catalog" }}
-                                  value={(newItem[req.id] || {}).name || ""}
-                                  options={bcOptions}
-                                  onChange={(val) =>
-                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), name: val } }))
-                                  }
-                                />
-                                <FieldInput
-                                  field={{ label: "Estado" }}
-                                  value={(newItem[req.id] || {}).status || ""}
-                                  onChange={(val) =>
-                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), status: val } }))
-                                  }
-                                />
-                                <FieldInput
-                                  field={{ label: "Características" }}
-                                  value={(newItem[req.id] || {}).characteristics || ""}
-                                  onChange={(val) =>
-                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), characteristics: val } }))
-                                  }
-                                />
-                                <FieldInput
-                                  field={{ label: "Cantidad", type: "number" }}
-                                  value={(newItem[req.id] || {}).quantity || ""}
-                                  onChange={(val) =>
-                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), quantity: val } }))
-                                  }
-                                />
-                                {canEditPrices && (
-                                  <FieldInput
-                                    field={{ label: "Precio", type: "number" }}
-                                    value={(newItem[req.id] || {}).price || ""}
-                                    onChange={(val) =>
-                                      setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), price: val } }))
-                                    }
-                                  />
-                                )}
-                                {canEditPrices && (
-                                  <FieldInput
-                                    field={{ label: "Total", type: "number" }}
-                                    value={(newItem[req.id] || {}).total || ""}
-                                    onChange={(val) =>
-                                      setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), total: val } }))
-                                    }
-                                  />
-                                )}
-                              </div>
-                              <div className="flex justify-end mt-2">
-                                <Button size="sm" icon={FiPlus} onClick={() => handleAddItem(req)}>
-                                  Registrar inversión
-                                </Button>
-                              </div>
-                              <div className="mt-3 bg-white rounded-lg border border-gray-200 p-2 max-h-56 overflow-y-auto">
-                                {itemsLoading[req.id] ? (
-                                  <p className="text-sm text-gray-500">Cargando inversiones...</p>
-                                ) : items.length ? (
-                                  <table className="w-full text-xs">
-                                    <thead>
-                                      <tr className="text-gray-500">
-                                        <th className="py-1 px-2 text-left">Concepto</th>
-                                        <th className="py-1 px-2 text-left">Estado</th>
-                                        <th className="py-1 px-2 text-left">Cantidad</th>
-                                        {canEditPrices && <th className="py-1 px-2 text-left">Precio</th>}
-                                        {canEditPrices && <th className="py-1 px-2 text-left">Total</th>}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {items.map((item) => (
-                                        <tr key={item.id} className="border-t">
-                                          <td className="py-1 px-2 font-semibold text-gray-900">{item.name}</td>
-                                          <td className="py-1 px-2 text-gray-700">{item.status || "-"}</td>
-                                          <td className="py-1 px-2 text-gray-700">{item.quantity ?? "-"}</td>
-                                          {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.price ?? "-"}</td>}
-                                          {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.total ?? "-"}</td>}
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
-                                ) : (
-                                  <p className="text-sm text-gray-500">Sin inversiones registradas.</p>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      )}
                     </div>
+                    <div className="flex flex-wrap gap-2 mt-auto pt-2">
+                      {req.business_case_link && (
+                        <a
+                          href={req.business_case_link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-sm inline-flex items-center gap-1 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:text-blue-600"
+                        >
+                          <FiExternalLink /> Ver en Sheets
+                        </a>
+                      )}
+                      {stage === "pending_comercial" && canSeeCommercial && (
+                        <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "commercial")}>
+                          Completar Comercial
+                        </Button>
+                      )}
+                      {stage === "pending_managerial" && canSeeAcp && (
+                        <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "acp")}>
+                          ACP Comercial
+                        </Button>
+                      )}
+                      {stage === "pending_managerial" && canSeeGerencia && (
+                        <Button size="sm" icon={FiSend} onClick={() => openForm(req.id, "gerencia")}>
+                          Gerencia
+                        </Button>
+                      )}
+                      {stage === "investments" && canSeeOperations && (
+                        <Button size="sm" icon={FiEdit2} onClick={() => openForm(req.id, "operations")}>
+                          Operaciones
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        icon={expanded === req.id ? FiDatabase : FiClipboard}
+                        onClick={() => {
+                          setExpanded(expanded === req.id ? null : req.id);
+                          if (!itemsByRequest[req.id]) loadItems(req.id);
+                        }}
+                      >
+                        {expanded === req.id ? "Ocultar detalle" : "Ver detalle"}
+                      </Button>
+                    </div>
+
+                    {expanded === req.id && (
+                      <div className="mt-1 space-y-3">
+                        <div className="grid grid-cols-1 gap-2 bg-gray-50 p-3 rounded-lg">
+                          {["TIPO DE CLIENTE", "ENTIDAD CONTRATANTE", "CLIENTE", "Provincia /Ciudad"].map((label) => (
+                            <div key={label}>
+                              <p className="text-xxs uppercase text-gray-500">{label}</p>
+                              <p className="text-sm font-semibold text-gray-900">{drafts[req.id]?.[label] || "-"}</p>
+                            </div>
+                          ))}
+                        </div>
+
+                        {stage === "investments" && canHandleInvestments && (
+                          <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                            <div className="flex items-center justify-between mb-2">
+                              <p className="text-sm font-semibold text-gray-800">Inversiones adicionales</p>
+                              <Button size="xs" variant="ghost" icon={FiRefreshCw} onClick={() => loadItems(req.id)} loading={!!itemsLoading[req.id]}>
+                                Recargar
+                              </Button>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                              <FieldInput
+                                field={{ label: "Concepto", optionsKey: "investment_catalog" }}
+                                value={(newItem[req.id] || {}).name || ""}
+                                options={bcOptions}
+                                onChange={(val) =>
+                                  setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), name: val } }))
+                                }
+                              />
+                              <FieldInput
+                                field={{ label: "Estado" }}
+                                value={(newItem[req.id] || {}).status || ""}
+                                onChange={(val) =>
+                                  setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), status: val } }))
+                                }
+                              />
+                              <FieldInput
+                                field={{ label: "Características" }}
+                                value={(newItem[req.id] || {}).characteristics || ""}
+                                onChange={(val) =>
+                                  setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), characteristics: val } }))
+                                }
+                              />
+                              <FieldInput
+                                field={{ label: "Cantidad", type: "number" }}
+                                value={(newItem[req.id] || {}).quantity || ""}
+                                onChange={(val) =>
+                                  setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), quantity: val } }))
+                                }
+                              />
+                              {canEditPrices && (
+                                <FieldInput
+                                  field={{ label: "Precio", type: "number" }}
+                                  value={(newItem[req.id] || {}).price || ""}
+                                  onChange={(val) =>
+                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), price: val } }))
+                                  }
+                                />
+                              )}
+                              {canEditPrices && (
+                                <FieldInput
+                                  field={{ label: "Total", type: "number" }}
+                                  value={(newItem[req.id] || {}).total || ""}
+                                  onChange={(val) =>
+                                    setNewItem((prev) => ({ ...prev, [req.id]: { ...(prev[req.id] || {}), total: val } }))
+                                  }
+                                />
+                              )}
+                            </div>
+                            <div className="flex justify-end mt-2">
+                              <Button size="sm" icon={FiPlus} onClick={() => handleAddItem(req)}>
+                                Registrar inversión
+                              </Button>
+                            </div>
+                            <div className="mt-3 bg-white rounded-lg border border-gray-200 p-2 max-h-56 overflow-y-auto">
+                              {itemsLoading[req.id] ? (
+                                <p className="text-sm text-gray-500">Cargando inversiones...</p>
+                              ) : items.length ? (
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-gray-500">
+                                      <th className="py-1 px-2 text-left">Concepto</th>
+                                      <th className="py-1 px-2 text-left">Estado</th>
+                                      <th className="py-1 px-2 text-left">Cantidad</th>
+                                      {canEditPrices && <th className="py-1 px-2 text-left">Precio</th>}
+                                      {canEditPrices && <th className="py-1 px-2 text-left">Total</th>}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {items.map((item) => (
+                                      <tr key={item.id} className="border-t">
+                                        <td className="py-1 px-2 font-semibold text-gray-900">{item.name}</td>
+                                        <td className="py-1 px-2 text-gray-700">{item.status || "-"}</td>
+                                        <td className="py-1 px-2 text-gray-700">{item.quantity ?? "-"}</td>
+                                        {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.price ?? "-"}</td>}
+                                        {canEditPrices && <td className="py-1 px-2 text-gray-700">{item.total ?? "-"}</td>}
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              ) : (
+                                <p className="text-sm text-gray-500">Sin inversiones registradas.</p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
-                );
-              })}
-            </div>
+                </div>
+              );
+            })}
           </div>
+
+          {/* Pagination Controls */}
+          {visibleRequests.length > itemsPerPage && (
+            <div className="flex items-center justify-between border-t border-gray-200 pt-4">
+              <p className="text-sm text-gray-500">
+                Mostrando {Math.min((currentPage - 1) * itemsPerPage + 1, visibleRequests.length)} a {Math.min(currentPage * itemsPerPage, visibleRequests.length)} de {visibleRequests.length} resultados
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  icon={FiChevronLeft}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(Math.ceil(visibleRequests.length / itemsPerPage), p + 1))}
+                  disabled={currentPage >= Math.ceil(visibleRequests.length / itemsPerPage)}
+                >
+                  Siguiente <FiChevronRight className="ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
