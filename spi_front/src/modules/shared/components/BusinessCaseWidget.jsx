@@ -167,7 +167,7 @@ const FieldInput = ({
   );
 };
 
-const BusinessCaseWidget = ({ title = "Business Case", compact = false, showCommercialStartCards = false }) => {
+const BusinessCaseWidget = ({ title = "Business Case", compact = false, showCommercialStartCards = false, refreshKey = 0 }) => {
   const { user } = useAuth();
   const { showToast } = useUI();
   const [loading, setLoading] = useState(false);
@@ -279,9 +279,12 @@ const BusinessCaseWidget = ({ title = "Business Case", compact = false, showComm
   };
 
   useEffect(() => {
-    loadRequests();
     loadOptions();
   }, []);
+
+  useEffect(() => {
+    loadRequests();
+  }, [refreshKey]);
 
   const filteredRequests = useMemo(() => {
     const q = (query || "").toLowerCase();
