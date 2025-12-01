@@ -11,6 +11,11 @@ export const listEquipmentPurchases = async () => {
   return data.data || [];
 };
 
+export const getBusinessCaseOptions = async () => {
+  const { data } = await api.get("/equipment-purchases/business-case/options");
+  return data.data || {};
+};
+
 export const createEquipmentPurchase = async (payload) => {
   const { data } = await api.post("/equipment-purchases", payload);
   return data.data;
@@ -74,6 +79,21 @@ export const renewReservation = async (id) => {
 
 export const cancelOrder = async (id, reason) => {
   const { data } = await api.post(`/equipment-purchases/${id}/cancel-order`, { reason });
+  return data.data;
+};
+
+export const updateBusinessCaseFields = async (id, fields) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/business-case/fields`, { fields });
+  return data.data;
+};
+
+export const listBusinessCaseItems = async (id) => {
+  const { data } = await api.get(`/equipment-purchases/${id}/business-case/items`);
+  return data.data || [];
+};
+
+export const addBusinessCaseItem = async (id, item) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/business-case/items`, item);
   return data.data;
 };
 

@@ -4,10 +4,10 @@ import {
   FiHome,
   FiUsers,
   FiBriefcase,
-  FiFileText,
   FiPackage,
   FiClipboard,
   FiShoppingCart,
+  FiFileText,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -43,6 +43,12 @@ const acpLinks = [
   },
 ];
 
+const businessCaseLink = {
+  name: "Business Case",
+  icon: FiFileText,
+  path: "/dashboard/business-case",
+};
+
 const talentoLinks = [
   {
     name: "Gestión de Usuarios",
@@ -74,6 +80,23 @@ const buildLinks = (scope) => {
 
   if (["acp_comercial"].includes(scope)) {
     links.push(...acpLinks);
+  }
+
+  const businessCaseRoles = [
+    "comercial",
+    "acp_comercial",
+    "jefe_comercial",
+    "gerencia",
+    "gerencia_general",
+    "operaciones",
+    "jefe_operaciones",
+    "servicio_tecnico",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+  ];
+
+  if (businessCaseRoles.includes(scope)) {
+    links.push(businessCaseLink);
   }
 
   // Talento Humano links

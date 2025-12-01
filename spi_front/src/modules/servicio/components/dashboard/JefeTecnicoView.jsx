@@ -127,6 +127,7 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
             <div className="mt-6">
                 <PersonnelRequestWidget />
             </div>
+
         </>
     );
 };
