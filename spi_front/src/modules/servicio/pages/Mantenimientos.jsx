@@ -142,39 +142,45 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
 
       const firma_responsable = sigRespRef.current?.getBase64() || "";
       const firma_receptor = sigRecRef.current?.getBase64() || "";
+      const idEquipoNumber = Number.parseInt(form.id_equipo, 10);
+      if (Number.isNaN(idEquipoNumber)) {
+        showToast("Selecciona un equipo válido para el mantenimiento", "warning");
+        setSaving(false);
+        return;
+      }
 
-    const fd = new FormData();
-    fd.append("id_equipo", Number(form.id_equipo));
-    fd.append("tipo", form.tipo);
-    fd.append("responsable", form.responsable);
-    fd.append("observaciones", form.observaciones || "");
-    fd.append("frecuencia", form.frecuencia || "6m");
-    if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
+      const fd = new FormData();
+      fd.append("id_equipo", idEquipoNumber);
+      fd.append("tipo", form.tipo);
+      fd.append("responsable", form.responsable);
+      fd.append("observaciones", form.observaciones || "");
+      fd.append("frecuencia", form.frecuencia || "6m");
+      if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
       if (firma_responsable) fd.append("firma_responsable", firma_responsable);
       if (firma_receptor) fd.append("firma_receptor", firma_receptor);
       (form.evidencias || []).forEach((f) => fd.append("evidencias", f));
 
-    const response = await createMantenimiento(fd);
-    const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance || {};
+      const response = await createMantenimiento(fd);
+      const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance || {};
 
-    showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
+      showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
 
-    if (!nextInfo?.date) {
-      const baseDate = form.fecha_programada ? new Date(form.fecha_programada) : new Date();
-      const monthsToAdd = form.frecuencia === "12m" ? 12 : 6;
-      baseDate.setMonth(baseDate.getMonth() + monthsToAdd);
-      nextInfo.date = baseDate.toISOString();
-    }
+      if (!nextInfo?.date) {
+        const baseDate = form.fecha_programada ? new Date(form.fecha_programada) : new Date();
+        const monthsToAdd = form.frecuencia === "12m" ? 12 : 6;
+        baseDate.setMonth(baseDate.getMonth() + monthsToAdd);
+        nextInfo.date = baseDate.toISOString();
+      }
 
-    if (nextInfo?.status === "conflicto") {
-      showToast(
-        nextInfo?.conflictMessage ||
-          `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
-        "warning"
-      );
-    } else if (nextInfo?.date) {
-      showToast(`Programaremos un siguiente mantenimiento para ${formatDate(nextInfo?.date)}.`, "info");
-    }
+      if (nextInfo?.status === "conflicto") {
+        showToast(
+          nextInfo?.conflictMessage ||
+            `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
+          "warning"
+        );
+      } else if (nextInfo?.date) {
+        showToast(`Programaremos un siguiente mantenimiento para ${formatDate(nextInfo?.date)}.`, "info");
+      }
 
       setOpen(false);
       setForm({

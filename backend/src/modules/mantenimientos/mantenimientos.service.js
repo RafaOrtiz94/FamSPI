@@ -133,12 +133,20 @@ async function createMantenimiento({
   try {
     await client.query("BEGIN");
 
+    const id_equipo = Number.parseInt(data.id_equipo, 10);
+    if (Number.isNaN(id_equipo)) {
+      const err = new Error("Debes seleccionar un equipo válido para el mantenimiento.");
+      err.status = 400;
+      throw err;
+    }
+
     const tipo = normalizeTipo(data.tipo);
-    const equipoLabel = data.equipo || data.equipo_nombre || `Equipo ${data.id_equipo}`;
+    const equipoLabel = data.equipo || data.equipo_nombre || `Equipo ${id_equipo}`;
+    const equipo = data.equipo || data.equipo_nombre || equipoLabel;
     const fechaDate = toUTCDate(data.fecha_programada);
     const fecha = dateToISO(fechaDate);
 
-    const existing = await findConflict(client, data.id_equipo, fecha);
+    const existing = await findConflict(client, id_equipo, fecha);
     if (existing) {
       await client.query("ROLLBACK");
       await notifyConflictEmail({
@@ -156,11 +164,13 @@ async function createMantenimiento({
       throw err;
     }
 
-    const nextDateIso = dateToISO(addMonthsUtc(fechaDate, 6));
+    const freq = `${data.frecuencia || ""}`.toLowerCase();
+    const monthsToAdd = ["12m", "1y", "12", "1ano"].includes(freq) ? 12 : 6;
+    const nextDateIso = dateToISO(addMonthsUtc(fechaDate, monthsToAdd));
     let nextStatus = REMINDER_STATUS.PENDING;
     let nextConflictMessage = null;
     if (nextDateIso) {
-      const futureConflict = await findConflict(client, data.id_equipo, nextDateIso);
+      const futureConflict = await findConflict(client, id_equipo, nextDateIso);
       if (futureConflict) {
         nextStatus = REMINDER_STATUS.CONFLICT;
         nextConflictMessage = `Existe un mantenimiento activo el ${formatHumanDate(
@@ -185,7 +195,7 @@ async function createMantenimiento({
        (id_equipo, tipo, responsable, fecha_programada, observaciones, estado, created_by, next_maintenance_date, next_maintenance_status, next_maintenance_conflict, firma_responsable, firma_receptor)
        VALUES ($1,$2,$3,$4,$5,'pendiente',$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
-        data.id_equipo,
+        id_equipo,
         tipo,
         data.responsable || responsable_nombre || "Sin asignar",
         fecha,
