@@ -1,36 +1,11 @@
-/**
- * Personnel Requests API
- * Cliente API para solicitudes de personal
- */
-
-import axios from 'axios';
-
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';
-
-const api = axios.create({
-    baseURL: `${API_URL}/api/v1/personnel-requests`,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
-
-// Interceptor para agregar token JWT
-api.interceptors.request.use(
-    (config) => {
-        const token = localStorage.getItem('token');
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    },
-    (error) => Promise.reject(error)
-);
+// API central con manejo de tokens y base /api/v1
+import api from './index';
 
 /**
  * Crear nueva solicitud de personal
  */
 export const createPersonnelRequest = async (data) => {
-    const response = await api.post('/', data);
+    const response = await api.post('/personnel-requests', data);
     return response.data;
 };
 
@@ -38,7 +13,7 @@ export const createPersonnelRequest = async (data) => {
  * Obtener lista de solicitudes con filtros
  */
 export const getPersonnelRequests = async (filters = {}) => {
-    const response = await api.get('/', { params: filters });
+    const response = await api.get('/personnel-requests', { params: filters });
     return response.data;
 };
 
@@ -46,7 +21,7 @@ export const getPersonnelRequests = async (filters = {}) => {
  * Obtener solicitud específica por ID
  */
 export const getPersonnelRequestById = async (id) => {
-    const response = await api.get(`/${id}`);
+    const response = await api.get(`/personnel-requests/${id}`);
     return response.data;
 };
 
@@ -54,7 +29,7 @@ export const getPersonnelRequestById = async (id) => {
  * Actualizar estado de solicitud
  */
 export const updatePersonnelRequestStatus = async (id, status, notes = null) => {
-    const response = await api.patch(`/${id}/status`, { status, notes });
+    const response = await api.patch(`/personnel-requests/${id}/status`, { status, notes });
     return response.data;
 };
 
@@ -62,7 +37,7 @@ export const updatePersonnelRequestStatus = async (id, status, notes = null) => 
  * Agregar comentario a solicitud
  */
 export const addPersonnelRequestComment = async (id, comment, isInternal = false) => {
-    const response = await api.post(`/${id}/comments`, {
+    const response = await api.post(`/personnel-requests/${id}/comments`, {
         comment,
         is_internal: isInternal,
     });
@@ -74,7 +49,7 @@ export const addPersonnelRequestComment = async (id, comment, isInternal = false
  */
 export const getPersonnelRequestStats = async (departmentId = null) => {
     const params = departmentId ? { department_id: departmentId } : {};
-    const response = await api.get('/stats', { params });
+    const response = await api.get('/personnel-requests/stats', { params });
     return response.data;
 };
 
