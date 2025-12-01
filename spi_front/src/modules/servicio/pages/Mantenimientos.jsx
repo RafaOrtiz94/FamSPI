@@ -61,6 +61,8 @@ const formatDate = (value, withTime = false) => {
   }
 };
 
+const normalizeEquipoId = (eq) => eq?.id ?? eq?.id_equipo ?? eq?.equipo_id ?? null;
+
 const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const { showToast, confirm } = useUI();
 
@@ -111,6 +113,10 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   }, [open, loadEquipos]);
 
   const rows = useMemo(() => data?.rows || data?.result?.rows || data || [], [data]);
+  const equipoIds = useMemo(
+    () => new Set(equipos.map((eq) => Number(normalizeEquipoId(eq))).filter((n) => !Number.isNaN(n))),
+    [equipos]
+  );
 
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -143,7 +149,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
       const firma_responsable = sigRespRef.current?.getBase64() || "";
       const firma_receptor = sigRecRef.current?.getBase64() || "";
       const idEquipoNumber = Number.parseInt(form.id_equipo, 10);
-      if (Number.isNaN(idEquipoNumber)) {
+      if (Number.isNaN(idEquipoNumber) || !equipoIds.has(idEquipoNumber)) {
         showToast("Selecciona un equipo válido para el mantenimiento", "warning");
         setSaving(false);
         return;
@@ -372,9 +378,15 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
                         required
                       >
                         <option value="">Selecciona un equipo…</option>
-                        {equipos.map(eq => (
-                          <option key={eq.id} value={eq.id}>{eq.nombre || `Equipo ${eq.id}`}</option>
-                        ))}
+                        {equipos.map((eq) => {
+                          const optionId = normalizeEquipoId(eq);
+                          if (!optionId) return null;
+                          return (
+                            <option key={optionId} value={optionId}>
+                              {eq.nombre || eq.equipo || `Equipo ${optionId}`}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                     <div>
