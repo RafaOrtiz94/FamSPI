@@ -376,15 +376,16 @@ const CreateRequestModal = ({
   return (
     <Dialog open={open} onClose={onClose} className="relative z-50">
       <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
-      <div className="fixed inset-0 flex items-center justify-center p-4">
-        <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-xl overflow-y-auto max-h-[90vh]">
-          {submitting && (
-            <ProcessingOverlay
-              title="Procesando solicitud comercial"
-              steps={submissionSteps}
-              activeStep={progressStep || "validating"}
-            />
-          )}
+      <div className="fixed inset-0 overflow-y-auto">
+        <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
+          <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-xl overflow-y-auto max-h-[90vh]">
+            {submitting && (
+              <ProcessingOverlay
+                title="Procesando solicitud comercial"
+                steps={submissionSteps}
+                activeStep={progressStep || "validating"}
+              />
+            )}
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -563,7 +564,8 @@ const CreateRequestModal = ({
               isEditing={isEditing}
             />
           )}
-        </Dialog.Panel>
+          </Dialog.Panel>
+        </div>
       </div>
     </Dialog>
   );

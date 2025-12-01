@@ -121,29 +121,31 @@ export const UIProvider = ({ children }) => {
       <Transition.Root show={!!confirm} as={Fragment}>
         <Dialog as="div" className="relative z-50" onClose={() => setConfirm(null)}>
           <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" />
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 border border-gray-200 dark:border-gray-700">
-              <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
-                Confirmar acción
-              </Dialog.Title>
-              <p className="text-gray-700 dark:text-gray-300 mb-6">
-                {confirm?.message || "¿Deseas continuar con esta acción?"}
-              </p>
-              <div className="flex justify-end gap-3">
-                <button
-                  onClick={() => handleConfirm(false)}
-                  className="px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => handleConfirm(true)}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
-                >
-                  Confirmar
-                </button>
-              </div>
-            </Dialog.Panel>
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
+              <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl w-full max-w-md p-6 border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
+                <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-4">
+                  Confirmar acción
+                </Dialog.Title>
+                <p className="text-gray-700 dark:text-gray-300 mb-6">
+                  {confirm?.message || "¿Deseas continuar con esta acción?"}
+                </p>
+                <div className="flex justify-end gap-3">
+                  <button
+                    onClick={() => handleConfirm(false)}
+                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 rounded-lg text-gray-800 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={() => handleConfirm(true)}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </Dialog.Panel>
+            </div>
           </div>
         </Dialog>
       </Transition.Root>
