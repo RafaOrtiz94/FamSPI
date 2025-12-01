@@ -5,6 +5,7 @@ import { Dialog } from "@headlessui/react";
 import { FiSend, FiX, FiPlus, FiTrash2, FiPhone } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
 import FileUploader from "../../../core/ui/components/FileUploader";
+import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 
 /* ============================================================
@@ -215,8 +216,20 @@ const CreateRequestModal = ({
   const [equipos, setEquipos] = useState([]);
   const [files, setFiles] = useState([]);
   const [errors, setErrors] = useState({});
+  const [submitting, setSubmitting] = useState(false);
+  const [progressStep, setProgressStep] = useState(null);
 
   const todayDateString = useMemo(() => TODAY, []);
+
+  const submissionSteps = useMemo(
+    () => [
+      { id: "validating", label: "Validando información" },
+      { id: "preparing", label: "Preparando archivos y anexos" },
+      { id: "submitting", label: "Enviando solicitud" },
+      { id: "refreshing", label: "Actualizando bandeja" },
+    ],
+    [],
+  );
 
   useEffect(() => {
     if (!open) {
@@ -326,26 +339,38 @@ const CreateRequestModal = ({
   };
 
   // ✅ Envío al backend (ya estructurado)
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
 
-    const payload = { ...formData };
-    if (equipos.length > 0) payload.equipos = equipos;
+    setSubmitting(true);
+    setProgressStep("validating");
+    try {
+      const payload = { ...formData };
+      if (equipos.length > 0) payload.equipos = equipos;
 
-    // Envía con el identificador correcto del tipo
-    onSubmit({
-      request_type_id: type,
-      payload,
-      files,
-    });
+      setProgressStep("preparing");
+      setProgressStep("submitting");
+      await Promise.resolve(
+        onSubmit?.({
+          request_type_id: type,
+          payload,
+          files,
+        }),
+      );
+      setProgressStep("refreshing");
 
-    // Limpiar estado
-    setFiles([]);
-    setFormData({});
-    setEquipos([]);
-    setErrors({});
-    setType(null);
+      setFiles([]);
+      setFormData({});
+      setEquipos([]);
+      setErrors({});
+      setType(null);
+    } catch (error) {
+      console.error("Error al enviar la solicitud", error);
+    } finally {
+      setSubmitting(false);
+      setProgressStep(null);
+    }
   };
 
   return (
@@ -353,6 +378,13 @@ const CreateRequestModal = ({
       <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
       <div className="fixed inset-0 flex items-center justify-center p-4">
         <Dialog.Panel className="bg-white dark:bg-gray-800 rounded-2xl p-6 max-w-2xl w-full shadow-xl overflow-y-auto max-h-[90vh]">
+          {submitting && (
+            <ProcessingOverlay
+              title="Procesando solicitud comercial"
+              steps={submissionSteps}
+              activeStep={progressStep || "validating"}
+            />
+          )}
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
             <div>

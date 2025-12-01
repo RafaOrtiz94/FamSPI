@@ -17,9 +17,35 @@ import clsx from "clsx";
 
 import { useAuth } from "../../auth/AuthContext";
 
-const baseLinks = [
-  { name: "Inicio", icon: FiHome, path: "/dashboard" },
-];
+const homePathsByScope = {
+  gerencia: "/dashboard/gerencia",
+  gerente_general: "/dashboard/gerencia",
+  director: "/dashboard/gerencia",
+  finanzas: "/dashboard/finanzas",
+  jefe_finanzas: "/dashboard/finanzas",
+  comercial: "/dashboard/comercial",
+  jefe_comercial: "/dashboard/comercial",
+  backoffice_comercial: "/dashboard/comercial",
+  acp_comercial: "/dashboard/comercial",
+  servicio_tecnico: "/dashboard/servicio-tecnico",
+  "servicio-tecnico": "/dashboard/servicio-tecnico",
+  jefe_tecnico: "/dashboard/servicio-tecnico",
+  jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
+  tecnico: "/dashboard/servicio-tecnico",
+  talento_humano: "/dashboard/talento-humano",
+  "talento-humano": "/dashboard/talento-humano",
+  jefe_talento_humano: "/dashboard/talento-humano",
+  ti: "/dashboard/ti",
+  jefe_ti: "/dashboard/ti",
+  operaciones: "/dashboard/operaciones",
+  jefe_operaciones: "/dashboard/operaciones",
+  calidad: "/dashboard/calidad",
+};
+
+const getHomeLink = (scope) => {
+  const path = homePathsByScope[scope] || "/dashboard";
+  return { name: "Inicio", icon: FiHome, path };
+};
 
 const comercialLinks = [
   {
@@ -71,11 +97,6 @@ const auditLinks = [
 
 const servicioLinks = [
   {
-    name: "Servicio Técnico",
-    icon: FiTool,
-    path: "/dashboard/servicio-tecnico",
-  },
-  {
     name: "Mantenimientos",
     icon: FiTool,
     path: "/dashboard/servicio-tecnico/mantenimientos",
@@ -108,7 +129,7 @@ const servicioLinks = [
 ];
 
 const buildLinks = (scope) => {
-  const links = [...baseLinks];
+  const links = [getHomeLink(scope)];
 
   // Comercial links
   if (["comercial", "gerencia", "ti"].includes(scope)) {
