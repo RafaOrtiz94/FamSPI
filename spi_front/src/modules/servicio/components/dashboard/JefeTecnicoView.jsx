@@ -11,6 +11,7 @@ import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import PendingApprovals from "../../components/PendingApprovals";
 import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
+import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 
 const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
     return (
@@ -28,7 +29,10 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                 }
             />
 
-
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                <AttendanceWidget />
+                <PersonnelRequestWidget />
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 <ExecutiveStatCard
@@ -121,11 +125,6 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                         </div>
                     </Card>
                 </div>
-            </div>
-
-            {/* Widget de Solicitudes de Personal */}
-            <div className="mt-6">
-                <PersonnelRequestWidget />
             </div>
 
         </>

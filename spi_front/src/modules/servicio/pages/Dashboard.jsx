@@ -157,7 +157,7 @@ const ServicioDashboard = () => {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout includeWidgets={false}>
       {renderView()}
     </DashboardLayout>
   );

@@ -8,6 +8,7 @@ import {
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 
 const TecnicoView = ({ stats, myMaintenances, onRefresh }) => {
     const navigate = useNavigate();
@@ -27,7 +28,9 @@ const TecnicoView = ({ stats, myMaintenances, onRefresh }) => {
                 }
             />
 
-
+            <div className="grid grid-cols-1 gap-4 mb-6">
+                <AttendanceWidget />
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card

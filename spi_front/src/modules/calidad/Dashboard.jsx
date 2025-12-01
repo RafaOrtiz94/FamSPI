@@ -1,50 +1,77 @@
 import React, { useCallback } from "react";
-import { motion } from "framer-motion";
-import { FiRefreshCw } from "react-icons/fi";
+import { FiRefreshCw, FiClipboard, FiBookOpen, FiCheckSquare, FiActivity } from "react-icons/fi";
 
 import { useUI } from "../../core/ui/useUI";
 
 import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import Button from "../../core/ui/components/Button";
+import Card from "../../core/ui/components/Card";
+import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
 
 const DashboardCalidad = () => {
   const { showToast } = useUI();
 
-  // ----------------  Refresh ----------------
   const refresh = useCallback(() => {
     showToast("Panel actualizado correctamente.", "success");
   }, [showToast]);
 
   return (
-    <motion.section
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.2 }}
-      className="p-6 space-y-6"
-    >
-      {/* HEADER */}
-      <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Calidad y Mejora Continua
-          </h1>
-          <p className="text-sm text-gray-500">
-            Seguimiento de procesos internos, certificaciones y control documental.
-          </p>
-        </div>
+    <DashboardLayout includeWidgets={false}>
+      <DashboardHeader
+        title="Calidad y Mejora Continua"
+        subtitle="Seguimiento de procesos internos, certificaciones y control documental"
+        actions={
+          <Button variant="secondary" icon={FiRefreshCw} onClick={refresh}>
+            Actualizar
+          </Button>
+        }
+      />
 
-        <Button variant="secondary" icon={FiRefreshCw} onClick={refresh}>
-          Actualizar
-        </Button>
-      </header>
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="p-4 flex items-center gap-3 border border-gray-200">
+          <div className="p-2 bg-blue-50 rounded-md text-blue-600">
+            <FiClipboard size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Procesos</p>
+            <p className="text-xs text-gray-500">Checklists y auditorías.</p>
+          </div>
+        </Card>
+        <Card className="p-4 flex items-center gap-3 border border-gray-200">
+          <div className="p-2 bg-emerald-50 rounded-md text-emerald-600">
+            <FiBookOpen size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Documentos</p>
+            <p className="text-xs text-gray-500">Normativas y manuales.</p>
+          </div>
+        </Card>
+        <Card className="p-4 flex items-center gap-3 border border-gray-200">
+          <div className="p-2 bg-indigo-50 rounded-md text-indigo-600">
+            <FiCheckSquare size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Certificaciones</p>
+            <p className="text-xs text-gray-500">Seguimiento de requisitos.</p>
+          </div>
+        </Card>
+        <Card className="p-4 flex items-center gap-3 border border-gray-200">
+          <div className="p-2 bg-amber-50 rounded-md text-amber-600">
+            <FiActivity size={18} />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">Indicadores</p>
+            <p className="text-xs text-gray-500">KPIs de cumplimiento.</p>
+          </div>
+        </Card>
+      </div>
 
-      {/* Widgets */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <AttendanceWidget />
         <ClientRequestWidget />
       </div>
-    </motion.section>
+    </DashboardLayout>
   );
 };
 

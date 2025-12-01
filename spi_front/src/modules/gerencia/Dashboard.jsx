@@ -152,7 +152,7 @@ const Dashboard = () => {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout includeWidgets={false}>
       <div ref={reportRef}>
         <DashboardHeader
           title="Dashboard Gerencial"
