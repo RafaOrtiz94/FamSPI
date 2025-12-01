@@ -19,7 +19,16 @@ router.use(verifyToken);
  */
 router.post(
     '/',
-    requireRole(['jefe_comercial', 'jefe_servicio', 'jefe_operaciones', 'jefe_finanzas', 'jefe_calidad', 'gerente', 'admin']),
+    requireRole([
+        'jefe_comercial',
+        'jefe_servicio_tecnico',
+        'jefe_tecnico',
+        'jefe_operaciones',
+        'jefe_finanzas',
+        'jefe_calidad',
+        'gerencia',
+        'admin',
+    ]),
     personnelRequestsController.createRequest
 );
 
