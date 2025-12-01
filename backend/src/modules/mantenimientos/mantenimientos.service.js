@@ -193,7 +193,7 @@ async function createMantenimiento({
     } = await client.query(
       `INSERT INTO servicio.cronograma_mantenimientos
        (id_equipo, tipo, responsable, fecha_programada, observaciones, estado, created_by, next_maintenance_date, next_maintenance_status, next_maintenance_conflict, firma_responsable, firma_receptor)
-       VALUES ($1,$2,$3,$4,$5,'pendiente',$6,$7,$8,$9,$10,$11) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,'Pendiente',$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
         id_equipo,
         tipo,
