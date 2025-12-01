@@ -13,7 +13,21 @@ import PendingApprovals from "../../components/PendingApprovals";
 import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 
-const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
+const availabilityColor = (status) => {
+    const value = (status || "").toString().toLowerCase();
+    if (["disponible", "available", "on"].includes(value)) return "bg-green-50 text-green-700 border-green-200";
+    if (["ocupado", "busy"].includes(value)) return "bg-yellow-50 text-yellow-700 border-yellow-200";
+    return "bg-red-50 text-red-700 border-red-200";
+};
+
+const availabilityLabel = (status) => {
+    const value = (status || "").toString().toLowerCase();
+    if (["disponible", "available", "on"].includes(value)) return "Disponible";
+    if (["ocupado", "busy"].includes(value)) return "Ocupado";
+    return "No disponible";
+};
+
+const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], onRefresh }) => {
     return (
         <>
             <DashboardHeader
@@ -113,15 +127,26 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, onRefresh }) => {
                     <Card className="p-5">
                         <SectionTitle title="Disponibilidad de Equipo" />
                         <div className="space-y-3">
-                            {/* Placeholder for team status */}
-                            <div className="flex items-center justify-between p-2 bg-green-50 rounded border border-green-100">
-                                <span className="text-sm font-medium text-green-800">Juan Perez</span>
-                                <span className="text-xs text-green-600">Disponible</span>
-                            </div>
-                            <div className="flex items-center justify-between p-2 bg-yellow-50 rounded border border-yellow-100">
-                                <span className="text-sm font-medium text-yellow-800">Maria Lopez</span>
-                                <span className="text-xs text-yellow-600">En Mantenimiento</span>
-                            </div>
+                            {availability && availability.length > 0 ? (
+                                availability.map((member) => (
+                                    <div
+                                        key={member.id || member.userId || member.name}
+                                        className={`flex items-center justify-between p-2 rounded border ${availabilityColor(member.status)}`}
+                                    >
+                                        <div>
+                                            <p className="text-sm font-medium">{member.name || member.fullname || "Técnico"}</p>
+                                            {member.updatedAt && (
+                                                <p className="text-xs text-gray-500">
+                                                    Actualizado {new Date(member.updatedAt).toLocaleString()}
+                                                </p>
+                                            )}
+                                        </div>
+                                        <span className="text-xs font-medium">{availabilityLabel(member.status)}</span>
+                                    </div>
+                                ))
+                            ) : (
+                                <p className="text-sm text-gray-500">Sin información de disponibilidad.</p>
+                            )}
                         </div>
                     </Card>
                 </div>

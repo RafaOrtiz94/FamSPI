@@ -4,6 +4,7 @@ import api from "../../../core/api";
 import { getMantenimientos } from "../../../core/api/mantenimientosApi";
 import { getRequests } from "../../../core/api/requestsApi";
 import { getPendingApprovals } from "../../../core/api/approvalsApi";
+import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
 import { DashboardLayout } from "../../shared/components/DashboardComponents";
 
 // Views
@@ -42,6 +43,7 @@ const ServicioDashboard = () => {
   const [solicitudes, setSolicitudes] = useState([]);
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [approvals, setApprovals] = useState([]);
+  const [availability, setAvailability] = useState([]);
 
   const unwrapRows = useCallback((payload) => {
     if (Array.isArray(payload)) return payload;
@@ -61,6 +63,7 @@ const ServicioDashboard = () => {
       { label: "capacitaciones", fn: fetchCapacitaciones, setter: setCapacitaciones },
       { label: "solicitudes", fn: fetchSolicitudesTecnicas, setter: setSolicitudes },
       { label: "aprobaciones", fn: getPendingApprovals, setter: setApprovals },
+      { label: "availability", fn: getTeamAvailability, setter: setAvailability },
     ];
 
     for (const task of tasks) {
@@ -87,6 +90,7 @@ const ServicioDashboard = () => {
   );
   const safeSolicitudes = useMemo(() => (Array.isArray(solicitudes) ? solicitudes : []), [solicitudes]);
   const safeApprovals = useMemo(() => (Array.isArray(approvals) ? approvals : []), [approvals]);
+  const safeAvailability = useMemo(() => (Array.isArray(availability) ? availability : []), [availability]);
 
   const stats = useMemo(() => {
     const normalize = (value) => String(value || "").toLowerCase();
@@ -113,17 +117,42 @@ const ServicioDashboard = () => {
       return isMyAssignment && isPending;
     }).length;
 
+    const tecnicosActivos = safeAvailability.filter(
+      (a) => ["disponible", "available", true].includes(normalize(a.status))
+    ).length;
+
     return {
       pendientes,
       completados,
       equiposOperativos,
       solicitudesAbiertas,
-      tecnicosActivos: 5, // Placeholder, ideally from active sessions or schedule
+      tecnicosActivos,
       alertas: 2, // Placeholder
       cumplimiento: 95, // Placeholder
       myPending
     };
-  }, [safeMantenimientos, safeEquipos, safeSolicitudes, user]);
+  }, [safeMantenimientos, safeEquipos, safeSolicitudes, safeAvailability, user]);
+
+  const myAvailability = useMemo(() => {
+    if (!user) return null;
+    return (
+      safeAvailability.find(
+        (a) => a.userId === user.id || a.user_id === user.id || a.name === user.fullname
+      ) || null
+    );
+  }, [safeAvailability, user]);
+
+  const handleAvailabilityChange = useCallback(
+    async (nextStatus) => {
+      try {
+        await updateAvailabilityStatus(nextStatus);
+        await refreshSnapshots();
+      } catch (err) {
+        console.warn("No se pudo actualizar disponibilidad", err);
+      }
+    },
+    [refreshSnapshots]
+  );
 
   const renderView = () => {
     const role = user?.role?.toLowerCase() || "";
@@ -134,6 +163,7 @@ const ServicioDashboard = () => {
           stats={stats}
           maintenances={safeMantenimientos}
           approvals={safeApprovals}
+          availability={safeAvailability}
           onRefresh={refreshSnapshots}
         />
       );
@@ -151,6 +181,9 @@ const ServicioDashboard = () => {
       <TecnicoView
         stats={stats}
         myMaintenances={myMaintenances}
+        availability={myAvailability}
+        teamAvailability={safeAvailability}
+        onAvailabilityChange={handleAvailabilityChange}
         onRefresh={refreshSnapshots}
       />
     );

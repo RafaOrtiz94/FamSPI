@@ -85,6 +85,12 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
     }
   }, [initialRows, setData]);
 
+  useEffect(() => {
+    if (open) {
+      loadEquipos();
+    }
+  }, [open, loadEquipos]);
+
   const rows = useMemo(() => data?.rows || data?.result?.rows || data || [], [data]);
 
   const [saving, setSaving] = useState(false);
@@ -93,6 +99,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
     tipo: "preventivo",
     responsable: "",
     fecha_programada: "",
+    frecuencia: "6m",
     observaciones: "",
     firma_responsable: null,
     firma_receptor: null,
@@ -105,6 +112,24 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const [equipos, setEquipos] = useState([]);
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+
+  const loadEquipos = useCallback(async () => {
+    try {
+      const { data } = await api.get("/servicio/equipos");
+      const rows = Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.result?.rows)
+        ? data.result.rows
+        : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data)
+        ? data
+        : [];
+      setEquipos(rows);
+    } catch (err) {
+      console.warn("No se pudo cargar equipos", err?.message || err);
+    }
+  }, []);
 
   const handleFiles = (e) => {
     const files = Array.from(e.target.files || []);
@@ -119,28 +144,38 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
       const firma_responsable = sigRespRef.current?.getBase64() || "";
       const firma_receptor = sigRecRef.current?.getBase64() || "";
 
-      const fd = new FormData();
-      fd.append("id_equipo", Number(form.id_equipo));
-      fd.append("tipo", form.tipo);
-      fd.append("responsable", form.responsable);
-      fd.append("observaciones", form.observaciones || "");
-      if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
+    const fd = new FormData();
+    fd.append("id_equipo", Number(form.id_equipo));
+    fd.append("tipo", form.tipo);
+    fd.append("responsable", form.responsable);
+    fd.append("observaciones", form.observaciones || "");
+    fd.append("frecuencia", form.frecuencia || "6m");
+    if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
       if (firma_responsable) fd.append("firma_responsable", firma_responsable);
       if (firma_receptor) fd.append("firma_receptor", firma_receptor);
       (form.evidencias || []).forEach((f) => fd.append("evidencias", f));
 
-      const response = await createMantenimiento(fd);
-      const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance;
+    const response = await createMantenimiento(fd);
+    const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance || {};
 
-      showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
+    showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
 
-      if (nextInfo?.status === "conflicto") {
-        showToast(
-          nextInfo?.conflictMessage ||
-            `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
-          "warning"
-        );
-      }
+    if (!nextInfo?.date) {
+      const baseDate = form.fecha_programada ? new Date(form.fecha_programada) : new Date();
+      const monthsToAdd = form.frecuencia === "12m" ? 12 : 6;
+      baseDate.setMonth(baseDate.getMonth() + monthsToAdd);
+      nextInfo.date = baseDate.toISOString();
+    }
+
+    if (nextInfo?.status === "conflicto") {
+      showToast(
+        nextInfo?.conflictMessage ||
+          `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
+        "warning"
+      );
+    } else if (nextInfo?.date) {
+      showToast(`Programaremos un siguiente mantenimiento para ${formatDate(nextInfo?.date)}.`, "info");
+    }
 
       setOpen(false);
       setForm({
@@ -148,6 +183,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
         tipo: "preventivo",
         responsable: "",
         fecha_programada: "",
+        frecuencia: "6m",
         observaciones: "",
         firma_responsable: null,
         firma_receptor: null,
@@ -190,65 +226,6 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
       showToast("No se pudo exportar el PDF", "error");
     }
   };
-
-  // ----------------------------------------------------------------
-  // 🔥 FIX: useEffect con await corregido
-  // ----------------------------------------------------------------
-  useEffect(() => {
-    if (!open) return;
-
-    const createOnOpen = async () => {
-      try {
-        setSaving(true);
-
-        if (!form.id_equipo || isNaN(Number(form.id_equipo))) {
-          showToast("Debes seleccionar un equipo válido", "error");
-          setSaving(false);
-          return;
-        }
-
-        const firma_responsable = sigRespRef.current?.getBase64() || "";
-        const firma_receptor = sigRecRef.current?.getBase64() || "";
-
-        const fd = new FormData();
-        fd.append("id_equipo", Number(form.id_equipo));
-        fd.append("tipo", form.tipo);
-        fd.append("responsable", form.responsable);
-        fd.append("observaciones", form.observaciones || "");
-        if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
-        if (firma_responsable) fd.append("firma_responsable", firma_responsable);
-        if (firma_receptor) fd.append("firma_receptor", firma_receptor);
-        (form.evidencias || []).forEach((f) => fd.append("evidencias", f));
-
-        const response = await createMantenimiento(fd);
-        const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance;
-
-        showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
-
-        if (nextInfo?.status === "conflicto") {
-          showToast(
-            nextInfo?.conflictMessage ||
-              `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
-            "warning"
-          );
-        }
-
-        setForm((f) => ({ ...f, evidencias: [] }));
-        setSaving(false);
-        setOpen(false);
-
-        await load();
-        await onRefresh?.();
-      } catch (err) {
-        setSaving(false);
-        showToast("Error al crear mantenimiento", "error");
-        console.error(err);
-      }
-    };
-
-    createOnOpen();
-  }, [open]);
-
 
   return (
     <div className="space-y-4">
@@ -423,6 +400,20 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
                         className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                         required
                       />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600 dark:text-gray-300">Programar próximo mantenimiento</label>
+                      <select
+                        value={form.frecuencia}
+                        onChange={(e) => setField("frecuencia", e.target.value)}
+                        className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                      >
+                        <option value="6m">Recordar en 6 meses</option>
+                        <option value="12m">Recordar en 1 año</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Usaremos esta frecuencia para sugerir el próximo recordatorio automáticamente.
+                      </p>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-sm text-gray-600 dark:text-gray-300">Observaciones</label>

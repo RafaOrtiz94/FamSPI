@@ -10,8 +10,26 @@ import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 
-const TecnicoView = ({ stats, myMaintenances, onRefresh }) => {
+const availabilityLabel = (status) => {
+    const value = (status || "").toString().toLowerCase();
+    if (["disponible", "available", "on"].includes(value)) return "Disponible";
+    if (["ocupado", "busy"].includes(value)) return "Ocupado";
+    return "No disponible";
+};
+
+const availabilityColor = (status) => {
+    const value = (status || "").toString().toLowerCase();
+    if (["disponible", "available", "on"].includes(value)) return "bg-green-50 text-green-700 border-green-200";
+    if (["ocupado", "busy"].includes(value)) return "bg-yellow-50 text-yellow-700 border-yellow-200";
+    return "bg-red-50 text-red-700 border-red-200";
+};
+
+const TecnicoView = ({ stats, myMaintenances, availability, teamAvailability = [], onAvailabilityChange, onRefresh }) => {
     const navigate = useNavigate();
+
+    const currentStatus = availability?.status || "no_disponible";
+    const formattedStatus = availabilityLabel(currentStatus);
+    const nextStatus = currentStatus === "disponible" ? "no_disponible" : "disponible";
 
     return (
         <>
@@ -28,9 +46,51 @@ const TecnicoView = ({ stats, myMaintenances, onRefresh }) => {
                 }
             />
 
-            <div className="grid grid-cols-1 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div className={`flex items-center justify-between p-4 rounded-xl border ${availabilityColor(currentStatus)}`}>
+                    <div>
+                        <p className="text-sm text-gray-500">Estado de disponibilidad</p>
+                        <p className="text-lg font-semibold">{formattedStatus}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                            Tus jefes verán este estado en tiempo real.
+                        </p>
+                    </div>
+                    <button
+                        onClick={() => onAvailabilityChange?.(nextStatus)}
+                        className="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm font-medium hover:bg-gray-50"
+                    >
+                        Marcar {nextStatus === "disponible" ? "disponible" : "no disponible"}
+                    </button>
+                </div>
+
                 <AttendanceWidget />
             </div>
+
+            <Card className="p-5 mb-6">
+                <SectionTitle title="Disponibilidad del equipo" />
+                <div className="space-y-2">
+                    {teamAvailability && teamAvailability.length > 0 ? (
+                        teamAvailability.map((member) => (
+                            <div
+                                key={member.id || member.userId || member.name}
+                                className={`flex items-center justify-between px-3 py-2 rounded-lg border ${availabilityColor(member.status)}`}
+                            >
+                                <div>
+                                    <p className="text-sm font-semibold">{member.name || member.fullname || "Técnico"}</p>
+                                    {member.updatedAt && (
+                                        <p className="text-xs text-gray-500">
+                                            Actualizado {new Date(member.updatedAt).toLocaleString()}
+                                        </p>
+                                    )}
+                                </div>
+                                <span className="text-xs font-medium">{availabilityLabel(member.status)}</span>
+                            </div>
+                        ))
+                    ) : (
+                        <p className="text-sm text-gray-500">Sin datos de disponibilidad del equipo.</p>
+                    )}
+                </div>
+            </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card
