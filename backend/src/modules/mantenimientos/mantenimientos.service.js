@@ -215,6 +215,13 @@ async function createMantenimiento({
 
     // 3️⃣ Copiar plantilla y reemplazar tags
     const templateId = process.env.DRIVE_TEMPLATE_MANTENIMIENTO_ID;
+    if (!templateId) {
+      const err = new Error(
+        "No se ha configurado la plantilla de mantenimiento (DRIVE_TEMPLATE_MANTENIMIENTO_ID)."
+      );
+      err.status = 500;
+      throw err;
+    }
     const doc = await copyTemplate(templateId, `Ficha-MANT-${row.id}`, folder.id);
 
     await replaceTags(doc.id, {
