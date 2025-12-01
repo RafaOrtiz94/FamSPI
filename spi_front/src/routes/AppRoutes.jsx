@@ -26,6 +26,12 @@ import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
+import ServicioMantenimientos from "../modules/servicio/pages/Mantenimientos";
+import ServicioSolicitudes from "../modules/servicio/pages/Solicitudes";
+import ServicioDisponibilidad from "../modules/servicio/pages/Disponibilidad";
+import ServicioCapacitaciones from "../modules/servicio/pages/Capacitaciones";
+import ServicioEquipos from "../modules/servicio/pages/Equipos";
+import ServicioAprobaciones from "../modules/servicio/pages/Aprobaciones";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
 import DashboardOperaciones from "../modules/operaciones/Dashboard";
@@ -121,6 +127,12 @@ const AppRoutes = () => {
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
+          <Route path="/dashboard/servicio-tecnico/mantenimientos" element={<ServicioMantenimientos />} />
+          <Route path="/dashboard/servicio-tecnico/solicitudes" element={<ServicioSolicitudes />} />
+          <Route path="/dashboard/servicio-tecnico/disponibilidad" element={<ServicioDisponibilidad />} />
+          <Route path="/dashboard/servicio-tecnico/capacitaciones" element={<ServicioCapacitaciones />} />
+          <Route path="/dashboard/servicio-tecnico/equipos" element={<ServicioEquipos />} />
+          <Route path="/dashboard/servicio-tecnico/aprobaciones" element={<ServicioAprobaciones />} />
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
           <Route path="/dashboard/ti" element={<DashboardTI />} />
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
