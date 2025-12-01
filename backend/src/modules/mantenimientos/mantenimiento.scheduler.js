@@ -3,8 +3,8 @@ const logger = require("../../config/logger");
 const { sendMail } = require("../../utils/mailer");
 
 const REMINDER_STATUS = {
-  PENDING: "pendiente",
-  SENT: "notificado",
+  PENDING: "Pendiente",
+  SENT: "Notificado",
 };
 
 const DEFAULT_INTERVAL_MINUTES = Number(

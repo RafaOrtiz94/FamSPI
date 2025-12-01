@@ -12,9 +12,9 @@ const documents = require("../documents/document.service");
 const files = require("../files/file.service");
 
 const REMINDER_STATUS = {
-  PENDING: "pendiente",
-  CONFLICT: "conflicto",
-  SENT: "notificado",
+  PENDING: "Pendiente",
+  CONFLICT: "Conflicto",
+  SENT: "Notificado",
 };
 
 const normalizeTipo = (tipo = "preventivo") => {
