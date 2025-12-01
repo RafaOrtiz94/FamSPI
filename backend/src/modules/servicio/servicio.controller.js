@@ -120,11 +120,8 @@ const mapDisponibilidadRow = (row) => ({
   userId: row.user_id,
   name:
     row.fullname ||
-    row.full_name ||
     row.name ||
-    row.email ||
-    row.display_name ||
-    row.friendly_name,
+    row.email,
   status: row.status,
   note: row.note,
   updatedAt: row.updated_at,
@@ -140,14 +137,11 @@ const getDisponibilidadTecnicos = async (req, res) => {
         d.note,
         d.updated_at,
         u.fullname,
-        u.full_name,
         u.name,
-        u.email,
-        u.display_name,
-        u.friendly_name
+        u.email
       FROM servicio.disponibilidad_tecnicos d
       LEFT JOIN public.users u ON u.id = d.user_id
-      ORDER BY COALESCE(u.fullname, u.full_name, u.name, u.email, d.name) ASC;
+      ORDER BY COALESCE(u.fullname, u.name, u.email, d.name) ASC;
     `);
 
     res.json({ ok: true, rows: rows.map(mapDisponibilidadRow) });
