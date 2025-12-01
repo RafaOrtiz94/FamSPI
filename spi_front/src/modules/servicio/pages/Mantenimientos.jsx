@@ -66,6 +66,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [equipos, setEquipos] = useState([]);
 
   const { data, loading, execute: fetchList, setData } = useApi(getMantenimientos, {
     errorMsg: "Error al cargar mantenimientos",
@@ -74,6 +75,24 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const load = useCallback(async () => {
     await fetchList({ page: 1, pageSize: 25, q: query || undefined });
   }, [fetchList, query]);
+
+  const loadEquipos = useCallback(async () => {
+    try {
+      const { data } = await api.get("/servicio/equipos");
+      const rows = Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.result?.rows)
+        ? data.result.rows
+        : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data)
+        ? data
+        : [];
+      setEquipos(rows);
+    } catch (err) {
+      console.warn("No se pudo cargar equipos", err?.message || err);
+    }
+  }, []);
 
   useEffect(() => {
     load();
@@ -109,27 +128,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const sigRespRef = useRef(null);
   const sigRecRef = useRef(null);
 
-  const [equipos, setEquipos] = useState([]);
-
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
-
-  const loadEquipos = useCallback(async () => {
-    try {
-      const { data } = await api.get("/servicio/equipos");
-      const rows = Array.isArray(data?.rows)
-        ? data.rows
-        : Array.isArray(data?.result?.rows)
-        ? data.result.rows
-        : Array.isArray(data?.data)
-        ? data.data
-        : Array.isArray(data)
-        ? data
-        : [];
-      setEquipos(rows);
-    } catch (err) {
-      console.warn("No se pudo cargar equipos", err?.message || err);
-    }
-  }, []);
 
   const handleFiles = (e) => {
     const files = Array.from(e.target.files || []);
