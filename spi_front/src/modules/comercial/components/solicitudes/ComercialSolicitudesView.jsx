@@ -48,8 +48,8 @@ const ComercialSolicitudesView = () => {
             subtitle: "Retiros",
             title: "Coordina retiros y devoluciones",
             description:
-                "Gestiona la logística inversa para equipos en campo, notifica a inventario y documenta las observaciones.",
-            chips: ["Rutas", "Inventario"],
+                "Gestiona la logística inversa para equipos en campo y documenta las observaciones.",
+            chips: ["Rutas"],
             tone: "amber",
             icon: FiClipboard,
         },

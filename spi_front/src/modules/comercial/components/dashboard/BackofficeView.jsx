@@ -1,6 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { FiBox, FiTruck, FiSearch, FiClipboard } from "react-icons/fi";
+import { FiTruck, FiSearch, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../shared/components/DashboardComponents";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
@@ -12,7 +12,7 @@ const BackofficeView = ({ onRefresh }) => {
         <>
             <DashboardHeader
                 title="Backoffice Comercial"
-                subtitle="Gestión administrativa, inventario y logística"
+                subtitle="Gestión administrativa y logística"
                 actions={
                     <button
                         onClick={onRefresh}
@@ -23,22 +23,7 @@ const BackofficeView = ({ onRefresh }) => {
                 }
             />
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card
-                    className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                    onClick={() => navigate("/dashboard/comercial/inventario")}
-                >
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-indigo-50 rounded-md text-indigo-600">
-                            <FiBox size={18} />
-                        </div>
-                        <div>
-                            <p className="text-sm font-semibold text-gray-900">Inventario</p>
-                            <p className="text-xs text-gray-500">Control y stock</p>
-                        </div>
-                    </div>
-                </Card>
-
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <Card
                     className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
                     onClick={() => navigate("/dashboard/comercial/logistica")}

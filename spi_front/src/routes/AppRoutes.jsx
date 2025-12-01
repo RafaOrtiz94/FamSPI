@@ -22,7 +22,6 @@ import DashboardFinanzas from "../modules/finanzas/Dashboard";
 import DashboardComercial from "../modules/comercial/pages/Dashboard";
 import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
 import ClientesPage from "../modules/comercial/pages/Clientes";
-import InventarioPage from "../modules/comercial/pages/Inventario";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
@@ -95,7 +94,6 @@ const AppRoutes = () => {
           <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti", "acp_comercial"]} />}>
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
-            <Route path="/dashboard/comercial/inventario" element={<InventarioPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
           </Route>

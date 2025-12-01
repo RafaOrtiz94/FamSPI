@@ -4,7 +4,6 @@ import {
   FiHome,
   FiUsers,
   FiBriefcase,
-  FiPackage,
   FiClipboard,
   FiShoppingCart,
   FiFileText,
@@ -27,11 +26,6 @@ const comercialLinks = [
     name: "Clientes",
     icon: FiUsers,
     path: "/dashboard/comercial/clientes",
-  },
-  {
-    name: "Inventario",
-    icon: FiPackage,
-    path: "/dashboard/comercial/inventario",
   },
 ];
 
