@@ -7,6 +7,11 @@ import {
   FiClipboard,
   FiShoppingCart,
   FiFileText,
+  FiTool,
+  FiList,
+  FiBookOpen,
+  FiCpu,
+  FiCheckCircle,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -64,6 +69,44 @@ const auditLinks = [
   },
 ];
 
+const servicioLinks = [
+  {
+    name: "Servicio Técnico",
+    icon: FiTool,
+    path: "/dashboard/servicio-tecnico",
+  },
+  {
+    name: "Mantenimientos",
+    icon: FiTool,
+    path: "/dashboard/servicio-tecnico/mantenimientos",
+  },
+  {
+    name: "Solicitudes",
+    icon: FiList,
+    path: "/dashboard/servicio-tecnico/solicitudes",
+  },
+  {
+    name: "Disponibilidad",
+    icon: FiUsers,
+    path: "/dashboard/servicio-tecnico/disponibilidad",
+  },
+  {
+    name: "Capacitaciones",
+    icon: FiBookOpen,
+    path: "/dashboard/servicio-tecnico/capacitaciones",
+  },
+  {
+    name: "Equipos",
+    icon: FiCpu,
+    path: "/dashboard/servicio-tecnico/equipos",
+  },
+  {
+    name: "Aprobaciones",
+    icon: FiCheckCircle,
+    path: "/dashboard/servicio-tecnico/aprobaciones",
+  },
+];
+
 const buildLinks = (scope) => {
   const links = [...baseLinks];
 
@@ -101,6 +144,10 @@ const buildLinks = (scope) => {
   // Audit links
   if (["ti", "gerencia"].includes(scope)) {
     links.push(...auditLinks);
+  }
+
+  if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico"].includes(scope)) {
+    links.push(...servicioLinks);
   }
 
   return links;

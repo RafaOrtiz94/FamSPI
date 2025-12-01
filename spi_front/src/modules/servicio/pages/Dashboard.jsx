@@ -1,13 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
-import { FiTool, FiList, FiUsers, FiBookOpen, FiCpu, FiCheckCircle } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import api from "../../../core/api";
 import { getMantenimientos } from "../../../core/api/mantenimientosApi";
 import { getRequests } from "../../../core/api/requestsApi";
 import { getPendingApprovals } from "../../../core/api/approvalsApi";
 import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
-import Card from "../../../core/ui/components/Card";
 import { DashboardLayout } from "../../shared/components/DashboardComponents";
 
 // Views
@@ -94,48 +91,6 @@ const ServicioDashboard = () => {
   const safeSolicitudes = useMemo(() => (Array.isArray(solicitudes) ? solicitudes : []), [solicitudes]);
   const safeApprovals = useMemo(() => (Array.isArray(approvals) ? approvals : []), [approvals]);
   const safeAvailability = useMemo(() => (Array.isArray(availability) ? availability : []), [availability]);
-
-  const quickLinks = useMemo(
-    () => [
-      {
-        title: "Mantenimientos",
-        description: "Agenda, aprueba y exporta bitácoras.",
-        to: "/dashboard/servicio-tecnico/mantenimientos",
-        icon: <FiTool />, 
-      },
-      {
-        title: "Solicitudes",
-        description: "Revisa requerimientos y su estado.",
-        to: "/dashboard/servicio-tecnico/solicitudes",
-        icon: <FiList />, 
-      },
-      {
-        title: "Disponibilidad",
-        description: "Actualiza y consulta quién está en campo.",
-        to: "/dashboard/servicio-tecnico/disponibilidad",
-        icon: <FiUsers />, 
-      },
-      {
-        title: "Capacitaciones",
-        description: "Calendario y responsables de formación.",
-        to: "/dashboard/servicio-tecnico/capacitaciones",
-        icon: <FiBookOpen />, 
-      },
-      {
-        title: "Equipos",
-        description: "Estado e inventario de equipos técnicos.",
-        to: "/dashboard/servicio-tecnico/equipos",
-        icon: <FiCpu />, 
-      },
-      {
-        title: "Aprobaciones",
-        description: "Ordena y atiende la cola pendiente.",
-        to: "/dashboard/servicio-tecnico/aprobaciones",
-        icon: <FiCheckCircle />, 
-      },
-    ],
-    []
-  );
 
   const stats = useMemo(() => {
     const normalize = (value) => String(value || "").toLowerCase();
@@ -236,19 +191,6 @@ const ServicioDashboard = () => {
 
   return (
     <DashboardLayout includeWidgets={false}>
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-        {quickLinks.map((link) => (
-          <Link key={link.to} to={link.to}>
-            <Card className="p-4 h-full hover:shadow-lg transition-shadow">
-              <div className="flex items-center gap-3 text-blue-600 font-semibold">
-                {link.icon}
-                <span>{link.title}</span>
-              </div>
-              <p className="mt-2 text-sm text-gray-600">{link.description}</p>
-            </Card>
-          </Link>
-        ))}
-      </div>
       {renderView()}
     </DashboardLayout>
   );
