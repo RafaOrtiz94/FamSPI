@@ -15,6 +15,22 @@ router.put("/capacitaciones/:id", verifyToken, requireRole(["tecnico"]), control
 router.delete("/capacitaciones/:id", verifyToken, requireRole(["tecnico", "gerencia"]), controller.deleteCapacitacion);
 
 // ======================================================
+// ✅ DISPONIBILIDAD DE TÉCNICOS
+// ======================================================
+router.get(
+  "/disponibilidad",
+  verifyToken,
+  requireRole(["servicio_tecnico", "tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.getDisponibilidadTecnicos
+);
+router.post(
+  "/disponibilidad",
+  verifyToken,
+  requireRole(["servicio_tecnico", "tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.updateDisponibilidadTecnico
+);
+
+// ======================================================
 // ⚙️ EQUIPOS
 // ======================================================
 router.get("/equipos", verifyToken, requireRole(["tecnico", "gerencia", "jefe_tecnico"]), controller.getEquipos);

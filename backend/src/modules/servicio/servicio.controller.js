@@ -99,6 +99,102 @@ const deleteCapacitacion = async (req, res) => {
 };
 
 // ===============================================================
+// ✅ DISPONIBILIDAD DE TÉCNICOS
+// ===============================================================
+
+const ensureDisponibilidadTable = async () => {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS servicio.disponibilidad_tecnicos (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER UNIQUE REFERENCES public.users(id) ON DELETE CASCADE,
+      name TEXT,
+      status TEXT DEFAULT 'no_disponible',
+      note TEXT,
+      updated_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+};
+
+const mapDisponibilidadRow = (row) => ({
+  user_id: row.user_id,
+  userId: row.user_id,
+  name:
+    row.fullname ||
+    row.full_name ||
+    row.name ||
+    row.email ||
+    row.display_name ||
+    row.friendly_name,
+  status: row.status,
+  note: row.note,
+  updatedAt: row.updated_at,
+});
+
+const getDisponibilidadTecnicos = async (req, res) => {
+  try {
+    await ensureDisponibilidadTable();
+    const { rows } = await db.query(`
+      SELECT
+        d.user_id,
+        d.status,
+        d.note,
+        d.updated_at,
+        u.fullname,
+        u.full_name,
+        u.name,
+        u.email,
+        u.display_name,
+        u.friendly_name
+      FROM servicio.disponibilidad_tecnicos d
+      LEFT JOIN public.users u ON u.id = d.user_id
+      ORDER BY COALESCE(u.fullname, u.full_name, u.name, u.email, d.name) ASC;
+    `);
+
+    res.json({ ok: true, rows: rows.map(mapDisponibilidadRow) });
+  } catch (err) {
+    console.error("❌ Error listando disponibilidad de técnicos:", err);
+    res.status(500).json({ ok: false, error: "Error al listar disponibilidad" });
+  }
+};
+
+const updateDisponibilidadTecnico = async (req, res) => {
+  try {
+    await ensureDisponibilidadTable();
+
+    const userId = req.user?.id;
+    const status = String(req.body?.status || "no_disponible").toLowerCase();
+    const note = req.body?.note || "";
+    const name =
+      req.user?.full_name ||
+      req.user?.fullname ||
+      req.user?.name ||
+      req.user?.email ||
+      req.user?.display_name;
+
+    if (!userId) {
+      return res.status(400).json({ ok: false, error: "Usuario no identificado" });
+    }
+
+    const { rows } = await db.query(
+      `INSERT INTO servicio.disponibilidad_tecnicos (user_id, name, status, note, updated_at)
+       VALUES ($1, $2, $3, $4, now())
+       ON CONFLICT (user_id) DO UPDATE
+         SET status = EXCLUDED.status,
+             note = EXCLUDED.note,
+             name = EXCLUDED.name,
+             updated_at = now()
+       RETURNING *;`,
+      [userId, name, status, note]
+    );
+
+    res.json({ ok: true, result: mapDisponibilidadRow(rows[0]) });
+  } catch (err) {
+    console.error("❌ Error actualizando disponibilidad:", err);
+    res.status(500).json({ ok: false, error: "Error al actualizar disponibilidad" });
+  }
+};
+
+// ===============================================================
 // ⚙️ EQUIPOS
 // ===============================================================
 const getEquipos = async (req, res) => {
@@ -207,6 +303,8 @@ module.exports = {
   createCapacitacion,
   updateCapacitacion,
   deleteCapacitacion,
+  getDisponibilidadTecnicos,
+  updateDisponibilidadTecnico,
   getEquipos,
   createEquipo,
   getMantenimientos,
