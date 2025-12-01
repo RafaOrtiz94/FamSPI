@@ -16,6 +16,9 @@ function App() {
           <AppRoutes />
           <Toaster
             position="top-right"
+            containerStyle={{
+              zIndex: 100000,
+            }}
             toastOptions={{
               style: {
                 background: "#fff",

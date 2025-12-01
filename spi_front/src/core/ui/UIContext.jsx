@@ -103,6 +103,7 @@ export const UIProvider = ({ children }) => {
                 ? "bg-amber-50 border-amber-400 text-amber-800 dark:bg-amber-900/40 dark:border-amber-700 dark:text-amber-200"
                 : "bg-blue-50 border-blue-400 text-blue-800 dark:bg-blue-900/40 dark:border-blue-700 dark:text-blue-200"
             }`}
+          style={{ zIndex: 120000 }}
         >
           {toastIcons[toast.type] || toastIcons.info}
           <span className="font-medium text-sm">{toast.message}</span>
