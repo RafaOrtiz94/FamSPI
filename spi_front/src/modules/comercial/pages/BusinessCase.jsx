@@ -1,5 +1,5 @@
 import React from "react";
-import BusinessCaseWidget from "../../shared/components/BusinessCaseWidget";
+import BusinessCaseWidget from "../../core/ui/widgets/BusinessCaseWidget";
 import { useAuth } from "../../../core/auth/AuthContext";
 
 const BusinessCasePage = () => {
