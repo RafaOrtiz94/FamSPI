@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { FiMail, FiCheck, FiAlertCircle, FiRefreshCw } from 'react-icons/fi';
-import api from '../../../core/api';
+import api from '../../api';
 import { toast } from 'react-hot-toast';
 
 /**

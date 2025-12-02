@@ -12,6 +12,8 @@ import NewClientActionCard from "../NewClientActionCard";
 import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
+import VacationRequestActionCard from "../VacationRequestActionCard";
+import VacationRequestModal from "../VacationRequestModal";
 
 const ComercialSolicitudesView = () => {
     const { showToast, confirm } = useUI();
@@ -20,6 +22,7 @@ const ComercialSolicitudesView = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+    const [showVacationModal, setShowVacationModal] = useState(false);
 
     // Grid data states
     const [solicitudes, setSolicitudes] = useState([]);
@@ -48,8 +51,8 @@ const ComercialSolicitudesView = () => {
             subtitle: "Retiros",
             title: "Coordina retiros y devoluciones",
             description:
-                "Gestiona la logística inversa para equipos en campo, notifica a inventario y documenta las observaciones.",
-            chips: ["Rutas", "Inventario"],
+                "Gestiona la logística inversa para equipos en campo y documenta las observaciones.",
+            chips: ["Rutas"],
             tone: "amber",
             icon: FiClipboard,
         },
@@ -144,6 +147,11 @@ const ComercialSolicitudesView = () => {
                             onClick={handlePurchaseHandoffOpen}
                         />
                     </div>
+                    <div className="flex">
+                        <VacationRequestActionCard
+                            onClick={() => setShowVacationModal(true)}
+                        />
+                    </div>
                 </div>
             </section>
 
@@ -223,6 +231,16 @@ const ComercialSolicitudesView = () => {
                 isOpen={showPurchaseHandoff}
                 onOpenChange={setShowPurchaseHandoff}
                 hideButton={true}
+            />
+
+            {/* VACATION MODAL */}
+            <VacationRequestModal
+                open={showVacationModal}
+                onClose={() => setShowVacationModal(false)}
+                onSuccess={() => {
+                    load();
+                    // Opcional: recargar otros widgets si es necesario
+                }}
             />
 
             {/* MODALES */}

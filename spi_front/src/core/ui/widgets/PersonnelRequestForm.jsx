@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { FiX, FiSave, FiUser, FiBriefcase, FiFileText, FiDollarSign } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import Button from '../../../core/ui/components/Button';
-import { createPersonnelRequest } from '../../../core/api/personnelRequestsApi';
+import Button from '../components/Button';
+import { createPersonnelRequest } from '../../api/personnelRequestsApi';
 
 const PersonnelRequestForm = ({ onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
@@ -106,8 +106,8 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                         {['Puesto', 'Perfil', 'Responsabilidades', 'Condiciones'].map((step, idx) => (
                             <div key={idx} className="flex items-center">
                                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${currentStep > idx + 1 ? 'bg-green-500 text-white' :
-                                        currentStep === idx + 1 ? 'bg-blue-600 text-white' :
-                                            'bg-gray-300 text-gray-600'
+                                    currentStep === idx + 1 ? 'bg-blue-600 text-white' :
+                                        'bg-gray-300 text-gray-600'
                                     }`}>
                                     {idx + 1}
                                 </div>

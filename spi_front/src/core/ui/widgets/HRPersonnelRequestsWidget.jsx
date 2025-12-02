@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { FiUsers, FiEye, FiCheck, FiX, FiMessageSquare, FiFilter } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import Card from '../../../core/ui/components/Card';
-import Button from '../../../core/ui/components/Button';
+import Card from '../components/Card';
+import Button from '../components/Button';
 import {
     getPersonnelRequests,
     getPersonnelRequestById,
     updatePersonnelRequestStatus,
     addPersonnelRequestComment
-} from '../../../core/api/personnelRequestsApi';
+} from '../../api/personnelRequestsApi';
 
 const HRPersonnelRequestsWidget = () => {
     const [requests, setRequests] = useState([]);

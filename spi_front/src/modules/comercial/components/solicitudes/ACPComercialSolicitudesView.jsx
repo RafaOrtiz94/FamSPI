@@ -5,12 +5,15 @@ import NewClientActionCard from "../NewClientActionCard";
 import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
+import VacationRequestActionCard from "../VacationRequestActionCard";
+import VacationRequestModal from "../VacationRequestModal";
 
 const ACPComercialSolicitudesView = () => {
     const { showToast } = useUI();
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+    const [showVacationModal, setShowVacationModal] = useState(false);
 
     const openRequestModal = (type) => {
         setPresetRequestType(type);
@@ -45,7 +48,7 @@ const ACPComercialSolicitudesView = () => {
                         Selecciona el tipo de solicitud que deseas crear
                     </p>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                     <div className="flex">
                         <NewClientActionCard
                             onClick={() => openRequestModal("cliente")}
@@ -54,6 +57,11 @@ const ACPComercialSolicitudesView = () => {
                     <div className="flex">
                         <PurchaseRequestActionCard
                             onClick={handlePurchaseHandoffOpen}
+                        />
+                    </div>
+                    <div className="flex">
+                        <VacationRequestActionCard
+                            onClick={() => setShowVacationModal(true)}
                         />
                     </div>
                 </div>
@@ -69,6 +77,12 @@ const ACPComercialSolicitudesView = () => {
                 isOpen={showPurchaseHandoff}
                 onOpenChange={setShowPurchaseHandoff}
                 hideButton={true}
+            />
+
+            {/* VACATION MODAL */}
+            <VacationRequestModal
+                open={showVacationModal}
+                onClose={() => setShowVacationModal(false)}
             />
 
             {/* MODALES */}

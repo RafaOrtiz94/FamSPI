@@ -176,12 +176,13 @@ const Requests = () => {
               enterTo="opacity-100"
               leave="ease-in duration-200"
               leaveFrom="opacity-100"
-              leaveTo="opacity-0"
-            >
-              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
-            </Transition.Child>
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          </Transition.Child>
 
-            <div className="fixed inset-0 flex items-center justify-center p-4">
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
               <Transition.Child
                 as={Fragment}
                 enter="ease-out duration-300"
@@ -191,7 +192,7 @@ const Requests = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700">
+                <Dialog.Panel className="w-full max-w-2xl bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
                   <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
                     Detalle de Solicitud
                   </Dialog.Title>
@@ -318,8 +319,9 @@ const Requests = () => {
                 </Dialog.Panel>
               </Transition.Child>
             </div>
-          </Dialog>
-        </Transition.Root>
+          </div>
+        </Dialog>
+      </Transition.Root>
       </motion.div>
     </DashboardLayout>
   );

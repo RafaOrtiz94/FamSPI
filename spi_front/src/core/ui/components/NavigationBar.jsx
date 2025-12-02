@@ -4,18 +4,48 @@ import {
   FiHome,
   FiUsers,
   FiBriefcase,
-  FiPackage,
   FiClipboard,
   FiShoppingCart,
   FiFileText,
+  FiTool,
+  FiList,
+  FiBookOpen,
+  FiCpu,
+  FiCheckCircle,
 } from "react-icons/fi";
 import clsx from "clsx";
 
 import { useAuth } from "../../auth/AuthContext";
 
-const baseLinks = [
-  { name: "Inicio", icon: FiHome, path: "/dashboard" },
-];
+const homePathsByScope = {
+  gerencia: "/dashboard/gerencia",
+  gerente_general: "/dashboard/gerencia",
+  director: "/dashboard/gerencia",
+  finanzas: "/dashboard/finanzas",
+  jefe_finanzas: "/dashboard/finanzas",
+  comercial: "/dashboard/comercial",
+  jefe_comercial: "/dashboard/comercial",
+  backoffice_comercial: "/dashboard/comercial",
+  acp_comercial: "/dashboard/comercial",
+  servicio_tecnico: "/dashboard/servicio-tecnico",
+  "servicio-tecnico": "/dashboard/servicio-tecnico",
+  jefe_tecnico: "/dashboard/servicio-tecnico",
+  jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
+  tecnico: "/dashboard/servicio-tecnico",
+  talento_humano: "/dashboard/talento-humano",
+  "talento-humano": "/dashboard/talento-humano",
+  jefe_talento_humano: "/dashboard/talento-humano",
+  ti: "/dashboard/ti",
+  jefe_ti: "/dashboard/ti",
+  operaciones: "/dashboard/operaciones",
+  jefe_operaciones: "/dashboard/operaciones",
+  calidad: "/dashboard/calidad",
+};
+
+const getHomeLink = (scope) => {
+  const path = homePathsByScope[scope] || "/dashboard";
+  return { name: "Inicio", icon: FiHome, path };
+};
 
 const comercialLinks = [
   {
@@ -27,11 +57,6 @@ const comercialLinks = [
     name: "Clientes",
     icon: FiUsers,
     path: "/dashboard/comercial/clientes",
-  },
-  {
-    name: "Inventario",
-    icon: FiPackage,
-    path: "/dashboard/comercial/inventario",
   },
 ];
 
@@ -70,8 +95,41 @@ const auditLinks = [
   },
 ];
 
+const servicioLinks = [
+  {
+    name: "Mantenimientos",
+    icon: FiTool,
+    path: "/dashboard/servicio-tecnico/mantenimientos",
+  },
+  {
+    name: "Solicitudes",
+    icon: FiList,
+    path: "/dashboard/servicio-tecnico/solicitudes",
+  },
+  {
+    name: "Disponibilidad",
+    icon: FiUsers,
+    path: "/dashboard/servicio-tecnico/disponibilidad",
+  },
+  {
+    name: "Capacitaciones",
+    icon: FiBookOpen,
+    path: "/dashboard/servicio-tecnico/capacitaciones",
+  },
+  {
+    name: "Equipos",
+    icon: FiCpu,
+    path: "/dashboard/servicio-tecnico/equipos",
+  },
+  {
+    name: "Aprobaciones",
+    icon: FiCheckCircle,
+    path: "/dashboard/servicio-tecnico/aprobaciones",
+  },
+];
+
 const buildLinks = (scope) => {
-  const links = [...baseLinks];
+  const links = [getHomeLink(scope)];
 
   // Comercial links
   if (["comercial", "gerencia", "ti"].includes(scope)) {
@@ -107,6 +165,10 @@ const buildLinks = (scope) => {
   // Audit links
   if (["ti", "gerencia"].includes(scope)) {
     links.push(...auditLinks);
+  }
+
+  if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico"].includes(scope)) {
+    links.push(...servicioLinks);
   }
 
   return links;

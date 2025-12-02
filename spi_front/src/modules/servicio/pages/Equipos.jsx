@@ -1,259 +1,194 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiPlus, FiRefreshCw, FiSettings } from "react-icons/fi";
-import api from "../../../core/api/index";
-import { useUI } from "../../../core/ui/useUI";
+import { FiRefreshCw, FiCpu, FiFileText, FiSearch } from "react-icons/fi";
+import Card from "../../../core/ui/components/Card";
+import Button from "../../../core/ui/components/Button";
+import api from "../../../core/api";
 
-const statusBadge = (s) => {
-  switch (s) {
-    case "operativo":
-    case "ok":
-      return "bg-green-100 text-green-700";
-    case "en_mantenimiento":
-      return "bg-amber-100 text-amber-700";
-    case "baja":
-      return "bg-red-100 text-red-700";
-    default:
-      return "bg-gray-100 text-gray-700";
-  }
+const estadoChip = (estado) => {
+  const value = (estado || "").toString().toLowerCase();
+  if (["operativo", "ok"].includes(value)) return "bg-green-100 text-green-700";
+  if (["en_mantenimiento", "maintenance"].includes(value)) return "bg-amber-100 text-amber-700";
+  return "bg-gray-100 text-gray-700";
 };
 
-const Equipos = ({ initialRows = null, onRefresh }) => {
-  const { showToast, confirm } = useUI();
-  const [list, setList] = useState(initialRows || []);
-  const [q, setQ] = useState("");
-  const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({
-    nombre: "",
-    modelo: "",
-    serie: "",
-    estado: "operativo",
-  });
+const EquiposPage = () => {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const { data } = await api.get("/servicio/equipos", { params: { q: q || undefined } });
-      const rows = data.result?.rows || data.rows || data || [];
-      setList(rows);
-    } catch (e) {
-      console.error(e);
-      showToast("No se pudieron listar los equipos", "error");
+      const { data } = await api.get("/servicio/equipos");
+      if (Array.isArray(data?.rows)) return setRows(data.rows);
+      if (Array.isArray(data?.result?.rows)) return setRows(data.result.rows);
+      if (Array.isArray(data?.data)) return setRows(data.data);
+      if (Array.isArray(data)) return setRows(data);
+      setRows([]);
+    } catch (err) {
+      console.warn("No se pudieron cargar equipos", err);
+      setRows([]);
+    } finally {
+      setLoading(false);
     }
-  }, [q, showToast]);
+  }, []);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  useEffect(() => {
-    if (Array.isArray(initialRows)) {
-      setList(initialRows);
-    }
-  }, [initialRows]);
+  const operational = useMemo(
+    () => rows.filter((r) => (r.estado || "").toLowerCase() === "operativo"),
+    [rows]
+  );
 
-  const filtered = useMemo(() => {
-    const text = q.trim().toLowerCase();
-    if (!text) return list;
-    return list.filter((e) =>
-      [e.nombre, e.modelo, e.serie].filter(Boolean).some((v) => String(v).toLowerCase().includes(text))
-    );
-  }, [list, q]);
+  const normalizeDocs = useCallback((row) => {
+    const docs = [];
 
-  const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
+    const pushDoc = (label, value) => {
+      if (!value) return;
+      if (Array.isArray(value)) {
+        value.filter(Boolean).forEach((entry, idx) => pushDoc(`${label} ${idx + 1}`, entry));
+        return;
+      }
 
-  const save = async (e) => {
-    e.preventDefault();
-    try {
-      setSaving(true);
-      await api.post("/servicio/equipos", form);
-      showToast("Equipo registrado ✅", "success");
-      setOpen(false);
-      setForm({ nombre: "", modelo: "", serie: "", estado: "operativo" });
-      await load();
-      await onRefresh?.();
-    } catch (e) {
-      console.error(e);
-      showToast("No se pudo registrar el equipo", "error");
-    } finally {
-      setSaving(false);
-    }
-  };
+      if (typeof value === "string") {
+        docs.push({ label, url: value, name: value });
+        return;
+      }
 
-  const changeState = async (row, estado) => {
-    const ok = await confirm(`¿Cambiar estado del equipo "${row.nombre}" a "${estado}"?`);
-    if (!ok) return;
-    try {
-      await api.patch(`/servicio/equipos/${row.id}`, { estado });
-      showToast("Estado actualizado ✅", "success");
-      await load();
-      await onRefresh?.();
-    } catch (e) {
-      console.error(e);
-      showToast("No se pudo actualizar el estado", "error");
-    }
-  };
+      if (typeof value === "object") {
+        const name = value.name || value.label || label;
+        const url = value.url || value.link || value.path;
+        if (url) docs.push({ label: name, url, name });
+      }
+    };
+
+    pushDoc("Ficha técnica", row.ficha_tecnica || row.fichaTecnica || row.ficha || row.fichas_tecnicas);
+    pushDoc("Manual", row.manual || row.manual_usuario || row.manuales);
+    pushDoc("Documento", row.documento || row.documentos);
+
+    return docs;
+  }, []);
+
+  const filteredRows = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return rows;
+
+    return rows.filter((row) => {
+      const textFields = [
+        row.nombre,
+        row.serial,
+        row.modelo,
+        row.fabricante,
+        row.categoria,
+        row.descripcion,
+        row.ubicacion,
+        row.ubicacion_actual,
+        row.responsable,
+        row.estado,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+
+      const docs = normalizeDocs(row);
+      const docText = docs.map((d) => `${d.label} ${d.name || ""}`).join(" ").toLowerCase();
+
+      return textFields.includes(term) || docText.includes(term);
+    });
+  }, [normalizeDocs, query, rows]);
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3">
+    <div className="space-y-6 p-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
-            <FiSettings /> Equipos Técnicos
-          </h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Catálogo de equipos, modelos, series y estados.
-          </p>
+          <p className="text-sm text-gray-500">Inventario técnico</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Equipos de servicio</h1>
         </div>
-        <div className="flex items-center gap-2">
-          <input
-            placeholder="Buscar por nombre / modelo / serie"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-          />
-          <button
-            onClick={() => setOpen(true)}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <FiPlus /> Nuevo
-          </button>
-          <button
-            onClick={load}
-            className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-700"
-          >
-            <FiRefreshCw />
-          </button>
-        </div>
-      </div>
-
-      {/* Tabla */}
-      <div className="overflow-x-auto bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="text-left bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-              <th className="px-4 py-2">#</th>
-              <th className="px-4 py-2">Nombre</th>
-              <th className="px-4 py-2">Modelo</th>
-              <th className="px-4 py-2">Serie</th>
-              <th className="px-4 py-2">Estado</th>
-              <th className="px-4 py-2 text-right">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((e) => (
-              <tr key={e.id} className="border-t border-gray-100 dark:border-gray-700">
-                <td className="px-4 py-2">{e.id}</td>
-                <td className="px-4 py-2">{e.nombre}</td>
-                <td className="px-4 py-2">{e.modelo}</td>
-                <td className="px-4 py-2">{e.serie}</td>
-                <td className="px-4 py-2">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${statusBadge(e.estado)}`}>
-                    {e.estado}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-right space-x-2">
-                  <button
-                    onClick={() => changeState(e, "operativo")}
-                    className="px-3 py-1.5 rounded-lg bg-green-50 text-green-700 hover:bg-green-100"
-                  >
-                    Operativo
-                  </button>
-                  <button
-                    onClick={() => changeState(e, "en_mantenimiento")}
-                    className="px-3 py-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100"
-                  >
-                    Mantenimiento
-                  </button>
-                  <button
-                    onClick={() => changeState(e, "baja")}
-                    className="px-3 py-1.5 rounded-lg bg-red-50 text-red-700 hover:bg-red-100"
-                  >
-                    Baja
-                  </button>
-                </td>
-              </tr>
-            ))}
-
-            {filtered.length === 0 && (
-              <tr>
-                <td className="px-4 py-6 text-center text-gray-500" colSpan={6}>
-                  Sin resultados.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Modal simple */}
-      {open && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-2xl p-6 border border-gray-200 dark:border-gray-700">
-            <h3 className="text-lg font-bold mb-3">Nuevo equipo</h3>
-            <form onSubmit={save} className="space-y-3">
-              <div>
-                <label className="text-sm text-gray-600 dark:text-gray-300">Nombre</label>
-                <input
-                  value={form.nombre}
-                  onChange={(e) => setField("nombre", e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                  required
-                />
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm text-gray-600 dark:text-gray-300">Modelo</label>
-                  <input
-                    value={form.modelo}
-                    onChange={(e) => setField("modelo", e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-gray-600 dark:text-gray-300">Serie</label>
-                  <input
-                    value={form.serie}
-                    onChange={(e) => setField("serie", e.target.value)}
-                    className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="text-sm text-gray-600 dark:text-gray-300">Estado</label>
-                <select
-                  value={form.estado}
-                  onChange={(e) => setField("estado", e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
-                >
-                  <option value="operativo">Operativo</option>
-                  <option value="en_mantenimiento">En mantenimiento</option>
-                  <option value="baja">Baja</option>
-                </select>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                <button
-                  type="button"
-                  onClick={() => setOpen(false)}
-                  className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
-                >
-                  {saving ? "Guardando..." : "Guardar"}
-                </button>
-              </div>
-            </form>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative">
+            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar equipo, ficha técnica o manual"
+              className="pl-9 pr-3 py-2 border rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            />
           </div>
+          <Button variant="secondary" icon={FiRefreshCw} onClick={load} disabled={loading}>
+            Actualizar
+          </Button>
         </div>
-      )}
+      </div>
+
+      <Card className="p-5">
+        {loading ? (
+          <p className="text-sm text-gray-500">Cargando equipos...</p>
+        ) : rows.length ? (
+          <div className="space-y-2 mb-4">
+            <p className="text-sm text-gray-600">
+              {operational.length} operativos de {rows.length} en total.
+            </p>
+            {query ? (
+              <p className="text-xs text-gray-500">{filteredRows.length} coincidencia(s) para "{query}".</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {rows.length ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredRows.map((eq) => {
+              const docs = normalizeDocs(eq);
+
+              return (
+                <div key={eq.id || eq._id} className="border rounded-lg p-4 space-y-2 bg-white">
+                  <div className="flex items-center gap-2 text-blue-600 font-semibold">
+                    <FiCpu />
+                    <span>{eq.nombre || eq.serial || "Equipo"}</span>
+                  </div>
+                  <p className="text-sm text-gray-600">Tipo: {eq.tipo || eq.category || "—"}</p>
+                  <p className="text-sm text-gray-600">Ubicación: {eq.ubicacion || eq.location || "—"}</p>
+                  <p className="text-sm text-gray-600">Responsable: {eq.responsable || "—"}</p>
+                  <span className={`inline-flex px-2 py-1 rounded-full text-xs font-semibold ${estadoChip(eq.estado)}`}>
+                    {eq.estado || "Sin estado"}
+                  </span>
+                  <div className="pt-2 border-t text-sm text-gray-700 space-y-1">
+                    <p className="font-semibold text-gray-800">Fichas técnicas y manuales</p>
+                    {docs.length ? (
+                      <ul className="space-y-1">
+                        {docs.map((doc, idx) => (
+                          <li key={`${doc.url}-${idx}`} className="flex items-center gap-2 text-blue-600 truncate">
+                            <FiFileText className="shrink-0" />
+                            <a
+                              href={doc.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="truncate hover:underline"
+                              title={doc.name || doc.label}
+                            >
+                              {doc.name || doc.label}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-gray-500">Sin documentos asociados.</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">No hay equipos registrados.</p>
+        )}
+        {rows.length && !filteredRows.length ? (
+          <p className="text-sm text-gray-500 mt-4">No se encontraron equipos ni documentos que coincidan.</p>
+        ) : null}
+      </Card>
     </div>
   );
 };
 
-export default Equipos;
+export default EquiposPage;

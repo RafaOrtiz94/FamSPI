@@ -15,6 +15,7 @@ import jsPDF from "jspdf";
 import Button from "../../core/ui/components/Button";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
+import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
 import { useUI } from "../../core/ui/useUI";
 import { useApi } from "../../core/hooks/useApi";
 import { useDashboard } from "../../core/hooks/useDashboard";
@@ -25,7 +26,7 @@ import { logout } from "../../core/api";
 import KpiCard from "./components/KpiCard";
 import ChartCard from "./components/ChartCard";
 import RequestCard from "./components/RequestCard";
-import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
+import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 import {
   Chart as ChartJS,
@@ -152,7 +153,7 @@ const Dashboard = () => {
   };
 
   return (
-    <DashboardLayout>
+    <DashboardLayout includeWidgets={false}>
       <div ref={reportRef}>
         <DashboardHeader
           title="Dashboard Gerencial"
@@ -172,9 +173,10 @@ const Dashboard = () => {
           }
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           <AttendanceWidget />
           <ClientRequestWidget />
+          <VacationRequestsWidget />
         </div>
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

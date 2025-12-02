@@ -12,9 +12,9 @@ const documents = require("../documents/document.service");
 const files = require("../files/file.service");
 
 const REMINDER_STATUS = {
-  PENDING: "pendiente",
-  CONFLICT: "conflicto",
-  SENT: "notificado",
+  PENDING: "Pendiente",
+  CONFLICT: "Conflicto",
+  SENT: "Notificado",
 };
 
 const normalizeTipo = (tipo = "preventivo") => {
@@ -133,12 +133,20 @@ async function createMantenimiento({
   try {
     await client.query("BEGIN");
 
+    const id_equipo = Number.parseInt(data.id_equipo, 10);
+    if (Number.isNaN(id_equipo)) {
+      const err = new Error("Debes seleccionar un equipo válido para el mantenimiento.");
+      err.status = 400;
+      throw err;
+    }
+
     const tipo = normalizeTipo(data.tipo);
-    const equipoLabel = data.equipo || data.equipo_nombre || `Equipo ${data.id_equipo}`;
+    const equipoLabel = data.equipo || data.equipo_nombre || `Equipo ${id_equipo}`;
+    const equipo = data.equipo || data.equipo_nombre || equipoLabel;
     const fechaDate = toUTCDate(data.fecha_programada);
     const fecha = dateToISO(fechaDate);
 
-    const existing = await findConflict(client, data.id_equipo, fecha);
+    const existing = await findConflict(client, id_equipo, fecha);
     if (existing) {
       await client.query("ROLLBACK");
       await notifyConflictEmail({
@@ -156,11 +164,13 @@ async function createMantenimiento({
       throw err;
     }
 
-    const nextDateIso = dateToISO(addMonthsUtc(fechaDate, 6));
+    const freq = `${data.frecuencia || ""}`.toLowerCase();
+    const monthsToAdd = ["12m", "1y", "12", "1ano"].includes(freq) ? 12 : 6;
+    const nextDateIso = dateToISO(addMonthsUtc(fechaDate, monthsToAdd));
     let nextStatus = REMINDER_STATUS.PENDING;
     let nextConflictMessage = null;
     if (nextDateIso) {
-      const futureConflict = await findConflict(client, data.id_equipo, nextDateIso);
+      const futureConflict = await findConflict(client, id_equipo, nextDateIso);
       if (futureConflict) {
         nextStatus = REMINDER_STATUS.CONFLICT;
         nextConflictMessage = `Existe un mantenimiento activo el ${formatHumanDate(
@@ -183,9 +193,9 @@ async function createMantenimiento({
     } = await client.query(
       `INSERT INTO servicio.cronograma_mantenimientos
        (id_equipo, tipo, responsable, fecha_programada, observaciones, estado, created_by, next_maintenance_date, next_maintenance_status, next_maintenance_conflict, firma_responsable, firma_receptor)
-       VALUES ($1,$2,$3,$4,$5,'pendiente',$6,$7,$8,$9,$10,$11) RETURNING *`,
+       VALUES ($1,$2,$3,$4,$5,'Pendiente',$6,$7,$8,$9,$10,$11) RETURNING *`,
       [
-        data.id_equipo,
+        id_equipo,
         tipo,
         data.responsable || responsable_nombre || "Sin asignar",
         fecha,
@@ -204,7 +214,14 @@ async function createMantenimiento({
     const folder = await createFolder(`MANT-${row.id}`, baseFolder);
 
     // 3️⃣ Copiar plantilla y reemplazar tags
-    const templateId = process.env.DRIVE_TEMPLATE_MANTENIMIENTO_ID;
+    const templateId = `${process.env.DRIVE_TEMPLATE_MANTENIMIENTO_ID || ""}`.trim();
+    if (!templateId || ["null", "undefined"].includes(templateId.toLowerCase())) {
+      const err = new Error(
+        "No se ha configurado la plantilla de mantenimiento (DRIVE_TEMPLATE_MANTENIMIENTO_ID)."
+      );
+      err.status = 500;
+      throw err;
+    }
     const doc = await copyTemplate(templateId, `Ficha-MANT-${row.id}`, folder.id);
 
     await replaceTags(doc.id, {

@@ -5,3 +5,6 @@ export * from "./documentsApi";
 export * from "./mantenimientosApi";
 export * from "./filesApi";
 export * from "./auditoriaApi";
+export * from "./availabilityApi";
+export * from "./vacationsApi";
+export * from "./clientsApi";

@@ -75,6 +75,11 @@ async function ensureFolder(name, parentId) {
 
 /** 📄 Copiar plantilla y crear documento editable */
 async function copyTemplate(templateId, name, parentId) {
+  if (!templateId) {
+    const err = new Error("No se recibió un fileId de plantilla para copiar en Drive.");
+    err.status = 500;
+    throw err;
+  }
   try {
     const { data } = await drive.files.copy({
       fileId: templateId,

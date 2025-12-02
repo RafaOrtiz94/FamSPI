@@ -7,6 +7,7 @@ import {
   sendConsentEmailToken,
   verifyConsentEmailToken,
 } from "../../../core/api/requestsApi";
+import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 
 const COMMON_REQUIRED_FIELDS = [
   "commercial_name",
@@ -164,6 +165,7 @@ const NewClientRequestForm = ({
   const [files, setFiles] = useState(initialFilesState);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [progressStep, setProgressStep] = useState(null);
   const [consentTokenState, setConsentTokenState] = useState({
     status: "idle",
     tokenId: null,
@@ -181,6 +183,20 @@ const NewClientRequestForm = ({
         formData.consent_capture_method,
       ),
     [formData.client_type, formData.operating_permit_status, formData.consent_capture_method],
+  );
+
+  const submissionSteps = useMemo(
+    () => [
+      { id: "validating", label: "Validando datos críticos" },
+      { id: "uploading", label: "Adjuntando evidencias y anexos" },
+      { id: "submitting", label: "Registrando solicitud" },
+      {
+        id: "notifying",
+        label: "Confirmando envío",
+        description: "Activando recordatorios y flujos de consentimiento",
+      },
+    ],
+    [],
   );
 
   useEffect(() => {
@@ -449,12 +465,15 @@ const NewClientRequestForm = ({
 
     const selectedMethod = formData.consent_capture_method;
     setLoading(true);
+    setProgressStep("validating");
     try {
+      setProgressStep("uploading");
       const payload = { ...formData };
       if (payload.consent_capture_method !== "email_link") {
         delete payload.consent_email_token_id;
       }
 
+      setProgressStep("submitting");
       if (isEditing) {
         await updateClientRequest(initialData.id, payload, files);
         showToast("Solicitud corregida y reenviada correctamente.", "success");
@@ -466,6 +485,7 @@ const NewClientRequestForm = ({
             : "Solicitud registrada y el consentimiento quedó auditado con tu evidencia.";
         showToast(successCopy, "success");
       }
+      setProgressStep("notifying");
       resetForm();
       onSuccess?.();
     } catch (error) {
@@ -474,6 +494,7 @@ const NewClientRequestForm = ({
       showToast(message, "error");
     } finally {
       setLoading(false);
+      setProgressStep(null);
     }
   };
 
@@ -492,6 +513,13 @@ const NewClientRequestForm = ({
 
   return (
     <form onSubmit={handleSubmit} className={`space-y-6 ${className}`}>
+      {loading && (
+        <ProcessingOverlay
+          title="Enviando solicitud de nuevo cliente"
+          steps={submissionSteps}
+          activeStep={progressStep || "validating"}
+        />
+      )}
       {showIntro && (
         <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
           <FiAlertCircle className="mt-0.5 flex-shrink-0 text-xl" />

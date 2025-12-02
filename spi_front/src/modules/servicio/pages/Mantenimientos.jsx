@@ -61,11 +61,14 @@ const formatDate = (value, withTime = false) => {
   }
 };
 
+const normalizeEquipoId = (eq) => eq?.id ?? eq?.id_equipo ?? eq?.equipo_id ?? null;
+
 const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const { showToast, confirm } = useUI();
 
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [equipos, setEquipos] = useState([]);
 
   const { data, loading, execute: fetchList, setData } = useApi(getMantenimientos, {
     errorMsg: "Error al cargar mantenimientos",
@@ -74,6 +77,24 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
   const load = useCallback(async () => {
     await fetchList({ page: 1, pageSize: 25, q: query || undefined });
   }, [fetchList, query]);
+
+  const loadEquipos = useCallback(async () => {
+    try {
+      const { data } = await api.get("/servicio/equipos");
+      const rows = Array.isArray(data?.rows)
+        ? data.rows
+        : Array.isArray(data?.result?.rows)
+        ? data.result.rows
+        : Array.isArray(data?.data)
+        ? data.data
+        : Array.isArray(data)
+        ? data
+        : [];
+      setEquipos(rows);
+    } catch (err) {
+      console.warn("No se pudo cargar equipos", err?.message || err);
+    }
+  }, []);
 
   useEffect(() => {
     load();
@@ -85,7 +106,17 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
     }
   }, [initialRows, setData]);
 
+  useEffect(() => {
+    if (open) {
+      loadEquipos();
+    }
+  }, [open, loadEquipos]);
+
   const rows = useMemo(() => data?.rows || data?.result?.rows || data || [], [data]);
+  const equipoIds = useMemo(
+    () => new Set(equipos.map((eq) => Number(normalizeEquipoId(eq))).filter((n) => !Number.isNaN(n))),
+    [equipos]
+  );
 
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
@@ -93,6 +124,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
     tipo: "preventivo",
     responsable: "",
     fecha_programada: "",
+    frecuencia: "6m",
     observaciones: "",
     firma_responsable: null,
     firma_receptor: null,
@@ -101,8 +133,6 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
 
   const sigRespRef = useRef(null);
   const sigRecRef = useRef(null);
-
-  const [equipos, setEquipos] = useState([]);
 
   const setField = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -118,21 +148,35 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
 
       const firma_responsable = sigRespRef.current?.getBase64() || "";
       const firma_receptor = sigRecRef.current?.getBase64() || "";
+      const idEquipoNumber = Number.parseInt(form.id_equipo, 10);
+      if (Number.isNaN(idEquipoNumber) || !equipoIds.has(idEquipoNumber)) {
+        showToast("Selecciona un equipo válido para el mantenimiento", "warning");
+        setSaving(false);
+        return;
+      }
 
       const fd = new FormData();
-      fd.append("id_equipo", Number(form.id_equipo));
+      fd.append("id_equipo", idEquipoNumber);
       fd.append("tipo", form.tipo);
       fd.append("responsable", form.responsable);
       fd.append("observaciones", form.observaciones || "");
+      fd.append("frecuencia", form.frecuencia || "6m");
       if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
       if (firma_responsable) fd.append("firma_responsable", firma_responsable);
       if (firma_receptor) fd.append("firma_receptor", firma_receptor);
       (form.evidencias || []).forEach((f) => fd.append("evidencias", f));
 
       const response = await createMantenimiento(fd);
-      const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance;
+      const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance || {};
 
       showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
+
+      if (!nextInfo?.date) {
+        const baseDate = form.fecha_programada ? new Date(form.fecha_programada) : new Date();
+        const monthsToAdd = form.frecuencia === "12m" ? 12 : 6;
+        baseDate.setMonth(baseDate.getMonth() + monthsToAdd);
+        nextInfo.date = baseDate.toISOString();
+      }
 
       if (nextInfo?.status === "conflicto") {
         showToast(
@@ -140,6 +184,8 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
             `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
           "warning"
         );
+      } else if (nextInfo?.date) {
+        showToast(`Programaremos un siguiente mantenimiento para ${formatDate(nextInfo?.date)}.`, "info");
       }
 
       setOpen(false);
@@ -148,6 +194,7 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
         tipo: "preventivo",
         responsable: "",
         fecha_programada: "",
+        frecuencia: "6m",
         observaciones: "",
         firma_responsable: null,
         firma_receptor: null,
@@ -190,65 +237,6 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
       showToast("No se pudo exportar el PDF", "error");
     }
   };
-
-  // ----------------------------------------------------------------
-  // 🔥 FIX: useEffect con await corregido
-  // ----------------------------------------------------------------
-  useEffect(() => {
-    if (!open) return;
-
-    const createOnOpen = async () => {
-      try {
-        setSaving(true);
-
-        if (!form.id_equipo || isNaN(Number(form.id_equipo))) {
-          showToast("Debes seleccionar un equipo válido", "error");
-          setSaving(false);
-          return;
-        }
-
-        const firma_responsable = sigRespRef.current?.getBase64() || "";
-        const firma_receptor = sigRecRef.current?.getBase64() || "";
-
-        const fd = new FormData();
-        fd.append("id_equipo", Number(form.id_equipo));
-        fd.append("tipo", form.tipo);
-        fd.append("responsable", form.responsable);
-        fd.append("observaciones", form.observaciones || "");
-        if (form.fecha_programada) fd.append("fecha_programada", form.fecha_programada);
-        if (firma_responsable) fd.append("firma_responsable", firma_responsable);
-        if (firma_receptor) fd.append("firma_receptor", firma_receptor);
-        (form.evidencias || []).forEach((f) => fd.append("evidencias", f));
-
-        const response = await createMantenimiento(fd);
-        const nextInfo = response?.nextMaintenance || response?.mantenimiento?.nextMaintenance;
-
-        showToast(response?.message || "Mantenimiento creado y enviado a Drive ✅", "success");
-
-        if (nextInfo?.status === "conflicto") {
-          showToast(
-            nextInfo?.conflictMessage ||
-              `El recordatorio programado para ${formatDate(nextInfo?.date)} tiene conflicto.`,
-            "warning"
-          );
-        }
-
-        setForm((f) => ({ ...f, evidencias: [] }));
-        setSaving(false);
-        setOpen(false);
-
-        await load();
-        await onRefresh?.();
-      } catch (err) {
-        setSaving(false);
-        showToast("Error al crear mantenimiento", "error");
-        console.error(err);
-      }
-    };
-
-    createOnOpen();
-  }, [open]);
-
 
   return (
     <div className="space-y-4">
@@ -358,20 +346,21 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
             <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
           </Transition.Child>
 
-          <div className="fixed inset-0 flex items-center justify-center p-4">
-            <Transition.Child
-              as={Fragment}
-              enter="ease-out duration-200"
-              enterFrom="opacity-0 scale-95"
-              enterTo="opacity-100 scale-100"
-              leave="ease-in duration-150"
-              leaveFrom="opacity-100 scale-100"
-              leaveTo="opacity-0 scale-95"
-            >
-              <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-800 p-6 shadow-xl border border-gray-200 dark:border-gray-700">
-                <div className="flex items-center justify-between mb-3">
-                  <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
-                    Nuevo mantenimiento
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-200"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-150"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl rounded-2xl bg-white dark:bg-gray-800 p-6 shadow-xl border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
+                  <div className="flex items-center justify-between mb-3">
+                    <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white">
+                      Nuevo mantenimiento
                   </Dialog.Title>
                   <button onClick={() => setOpen(false)} className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700">
                     <FiX />
@@ -389,9 +378,15 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
                         required
                       >
                         <option value="">Selecciona un equipo…</option>
-                        {equipos.map(eq => (
-                          <option key={eq.id} value={eq.id}>{eq.nombre || `Equipo ${eq.id}`}</option>
-                        ))}
+                        {equipos.map((eq) => {
+                          const optionId = normalizeEquipoId(eq);
+                          if (!optionId) return null;
+                          return (
+                            <option key={optionId} value={optionId}>
+                              {eq.nombre || eq.equipo || `Equipo ${optionId}`}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                     <div>
@@ -423,6 +418,20 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
                         className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
                         required
                       />
+                    </div>
+                    <div>
+                      <label className="text-sm text-gray-600 dark:text-gray-300">Programar próximo mantenimiento</label>
+                      <select
+                        value={form.frecuencia}
+                        onChange={(e) => setField("frecuencia", e.target.value)}
+                        className="mt-1 w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900"
+                      >
+                        <option value="6m">Recordar en 6 meses</option>
+                        <option value="12m">Recordar en 1 año</option>
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Usaremos esta frecuencia para sugerir el próximo recordatorio automáticamente.
+                      </p>
                     </div>
                     <div className="md:col-span-2">
                       <label className="text-sm text-gray-600 dark:text-gray-300">Observaciones</label>
@@ -480,8 +489,9 @@ const Mantenimientos = ({ initialRows = null, onRefresh }) => {
                     </button>
                   </div>
                 </form>
-              </Dialog.Panel>
-            </Transition.Child>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
           </div>
         </Dialog>
       </Transition.Root>
