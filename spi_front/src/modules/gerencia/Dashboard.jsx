@@ -15,6 +15,7 @@ import jsPDF from "jspdf";
 import Button from "../../core/ui/components/Button";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
+import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
 import { useUI } from "../../core/ui/useUI";
 import { useApi } from "../../core/hooks/useApi";
 import { useDashboard } from "../../core/hooks/useDashboard";
@@ -172,9 +173,10 @@ const Dashboard = () => {
           }
         />
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
           <AttendanceWidget />
           <ClientRequestWidget />
+          <VacationRequestsWidget />
         </div>
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">

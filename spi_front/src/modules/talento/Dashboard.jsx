@@ -9,6 +9,7 @@ import Select from "../../core/ui/components/Select";
 import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import HRPersonnelRequestsWidget from "../shared/components/HRPersonnelRequestsWidget";
+import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
 import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
@@ -122,9 +123,10 @@ const TalentoDashboard = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <AttendanceWidget />
         <ClientRequestWidget />
+        <VacationRequestsWidget mode="hr" />
       </div>
 
       <HRPersonnelRequestsWidget />

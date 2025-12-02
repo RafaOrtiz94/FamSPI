@@ -12,6 +12,7 @@ import { DashboardHeader, SectionTitle } from "../../../shared/components/Dashbo
 import PendingApprovals from "../../components/PendingApprovals";
 import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
+import VacationRequestsWidget from "../../../shared/components/VacationRequestsWidget";
 
 const availabilityColor = (status) => {
     const value = (status || "").toString().toLowerCase();
@@ -43,9 +44,10 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
                 }
             />
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 <AttendanceWidget />
                 <PersonnelRequestWidget />
+                <VacationRequestsWidget />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">

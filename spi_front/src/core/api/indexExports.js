@@ -6,3 +6,4 @@ export * from "./mantenimientosApi";
 export * from "./filesApi";
 export * from "./auditoriaApi";
 export * from "./availabilityApi";
+export * from "./vacationsApi";
