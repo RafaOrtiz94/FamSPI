@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCalendar, FiCheck, FiX, FiClock } from "react-icons/fi";
-import { listVacationRequests, updateVacationStatus, getVacationSummary } from "../../../core/api/vacationsApi";
-import Card from "../../../core/ui/components/Card";
-import Button from "../../../core/ui/components/Button";
-import { useUI } from "../../../core/ui/UIContext";
-import { useAuth } from "../../../core/auth/AuthContext";
+import { listVacationRequests, updateVacationStatus, getVacationSummary } from "../../api/vacationsApi";
+import Card from "../components/Card";
+import Button from "../components/Button";
+import { useUI } from "../UIContext";
+import { useAuth } from "../../auth/AuthContext";
 
 const managerRoles = [
   "jefe_comercial",

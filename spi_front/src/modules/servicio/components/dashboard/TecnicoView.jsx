@@ -7,7 +7,7 @@ import {
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";
 
 const availabilityLabel = (status) => {

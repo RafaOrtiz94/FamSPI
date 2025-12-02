@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { FiUsers, FiPlus, FiClock, FiCheckCircle, FiXCircle, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
-import Card from '../../../core/ui/components/Card';
-import Button from '../../../core/ui/components/Button';
+import Card from '../components/Card';
+import Button from '../components/Button';
 import PersonnelRequestForm from './PersonnelRequestForm';
-import { getPersonnelRequests } from '../../../core/api/personnelRequestsApi';
+import { getPersonnelRequests } from '../../api/personnelRequestsApi';
 
 const PersonnelRequestWidget = () => {
     const [showForm, setShowForm] = useState(false);

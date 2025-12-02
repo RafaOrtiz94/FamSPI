@@ -3,10 +3,10 @@ import { FiTrendingUp, FiUsers, FiClipboard, FiPackage } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
-import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
-import VacationRequestsWidget from "../../../shared/components/VacationRequestsWidget";
+import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
+import VacationRequestsWidget from "../../../../core/ui/widgets/VacationRequestsWidget";
 
 const JefeComercialView = ({ onRefresh }) => {
     return (

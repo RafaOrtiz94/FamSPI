@@ -19,13 +19,13 @@ import {
   listBusinessCaseItems,
   listEquipmentPurchases,
   updateBusinessCaseFields,
-} from "../../../core/api/equipmentPurchasesApi";
-import Button from "../../../core/ui/components/Button";
-import Card from "../../../core/ui/components/Card";
-import Modal from "../../../core/ui/components/Modal";
-import { useAuth } from "../../../core/auth/AuthContext";
-import { useUI } from "../../../core/ui/useUI";
-import NewBusinessCaseCard from "../../comercial/components/NewBusinessCaseCard";
+} from "../../api/equipmentPurchasesApi";
+import Button from "../components/Button";
+import Card from "../components/Card";
+import Modal from "../components/Modal";
+import { useAuth } from "../../auth/AuthContext";
+import { useUI } from "../useUI";
+import NewBusinessCaseCard from "../../../modules/comercial/components/NewBusinessCaseCard";
 
 const BOOLEAN_OPTIONS = ["SI", "NO"];
 

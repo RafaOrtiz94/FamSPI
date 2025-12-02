@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { FiTruck, FiSearch, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
-import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const BackofficeView = ({ onRefresh }) => {

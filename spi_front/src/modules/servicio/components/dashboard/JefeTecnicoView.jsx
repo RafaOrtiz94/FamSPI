@@ -8,7 +8,7 @@ import {
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader, SectionTitle } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
 import PendingApprovals from "../../components/PendingApprovals";
 import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
 import AttendanceWidget from "../../../shared/components/AttendanceWidget";

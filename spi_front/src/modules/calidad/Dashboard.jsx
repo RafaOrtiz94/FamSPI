@@ -4,11 +4,11 @@ import { FiRefreshCw, FiClipboard, FiBookOpen, FiCheckSquare, FiActivity } from 
 import { useUI } from "../../core/ui/useUI";
 
 import AttendanceWidget from "../shared/components/AttendanceWidget";
-import ClientRequestWidget from "../shared/components/ClientRequestWidget";
-import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
+import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
+import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
 import Button from "../../core/ui/components/Button";
 import Card from "../../core/ui/components/Card";
-import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
+import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 const DashboardCalidad = () => {
   const { showToast } = useUI();

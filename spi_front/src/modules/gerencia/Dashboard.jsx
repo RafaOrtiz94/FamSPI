@@ -26,7 +26,7 @@ import { logout } from "../../core/api";
 import KpiCard from "./components/KpiCard";
 import ChartCard from "./components/ChartCard";
 import RequestCard from "./components/RequestCard";
-import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
+import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 import {
   Chart as ChartJS,

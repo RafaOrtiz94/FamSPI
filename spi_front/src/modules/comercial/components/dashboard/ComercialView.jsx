@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { FiClipboard, FiUsers, FiCheckSquare, FiFileText } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 
 const ComercialView = () => {

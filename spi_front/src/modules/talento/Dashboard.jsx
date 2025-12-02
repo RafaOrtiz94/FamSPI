@@ -10,7 +10,7 @@ import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import HRPersonnelRequestsWidget from "../shared/components/HRPersonnelRequestsWidget";
 import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
-import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
+import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import { downloadAttendancePDF } from "../../core/api/attendanceApi";
@@ -189,40 +189,40 @@ const TalentoDashboard = () => {
         </p>
       </Card>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Card className="p-6 flex flex-col justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800 mb-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <button
+          onClick={() => navigate("/dashboard/usuarios")}
+          className="group relative flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-white p-4 shadow-sm transition-all duration-200 hover:border-blue-400 hover:shadow-md"
+        >
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm transition-transform duration-200 group-hover:scale-110">
+            <FiUsers size={32} />
+          </div>
+          <div className="text-center">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-blue-700 opacity-70">
+              Administración
+            </p>
+            <h3 className="text-sm font-bold leading-tight text-gray-900">
               Gestión de Usuarios
-            </h2>
-            <p className="text-gray-600 text-sm mb-4">
-              Administra los usuarios, roles y asignaciones por departamento.
-            </p>
+            </h3>
           </div>
-          <Button
-            onClick={() => navigate("/dashboard/usuarios")}
-            className="bg-blue-600 text-white hover:bg-blue-700"
-          >
-            Ir a Usuarios
-          </Button>
-        </Card>
+        </button>
 
-        <Card className="p-6 flex flex-col justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-800 mb-2">
-              Departamentos
-            </h2>
-            <p className="text-gray-600 text-sm mb-4">
-              Agrega, edita o elimina departamentos disponibles en el sistema.
-            </p>
+        <button
+          onClick={() => navigate("/dashboard/departamentos")}
+          className="group relative flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl border border-green-200 bg-gradient-to-br from-green-50 via-white to-white p-4 shadow-sm transition-all duration-200 hover:border-green-400 hover:shadow-md"
+        >
+          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-green-600 text-white shadow-sm transition-transform duration-200 group-hover:scale-110">
+            <FiSettings size={32} />
           </div>
-          <Button
-            onClick={() => navigate("/dashboard/departamentos")}
-            className="bg-green-600 text-white hover:bg-green-700"
-          >
-            Ir a Departamentos
-          </Button>
-        </Card>
+          <div className="text-center">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-green-700 opacity-70">
+              Configuración
+            </p>
+            <h3 className="text-sm font-bold leading-tight text-gray-900">
+              Departamentos
+            </h3>
+          </div>
+        </button>
       </div>
     </DashboardLayout>
   );

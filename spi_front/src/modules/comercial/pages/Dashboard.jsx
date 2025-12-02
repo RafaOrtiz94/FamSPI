@@ -1,6 +1,6 @@
 import React from "react";
 import { useAuth } from "../../../core/auth/AuthContext";
-import { DashboardLayout } from "../../shared/components/DashboardComponents";
+import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 
 // Views
 import JefeComercialView from "../components/dashboard/JefeComercialView";
@@ -10,7 +10,7 @@ import ACPComercialView from "../components/dashboard/ACPComercialView";
 
 const ComercialDashboard = () => {
   const { user } = useAuth();
-  const handleRefresh = () => {};
+  const handleRefresh = () => { };
 
   const renderView = () => {
     const role = user?.role?.toLowerCase() || "";

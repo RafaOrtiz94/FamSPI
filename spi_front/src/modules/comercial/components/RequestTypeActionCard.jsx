@@ -4,85 +4,60 @@ const toneStyles = {
   blue: {
     border: "border-blue-200 dark:border-blue-900/40",
     bg: "bg-gradient-to-br from-blue-50 via-white to-white dark:from-blue-950/40 dark:via-gray-900 dark:to-gray-900",
-    icon: "bg-blue-600",
-    subtitle: "text-blue-700 dark:text-blue-200",
-    chip: "bg-blue-100/80 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200",
-    button: "bg-blue-600 hover:bg-blue-700",
+    icon: "bg-blue-600 text-white",
+    text: "text-blue-900 dark:text-blue-100",
+    hover: "hover:border-blue-400 hover:shadow-md",
   },
   amber: {
     border: "border-amber-200 dark:border-amber-900/40",
     bg: "bg-gradient-to-br from-amber-50 via-white to-white dark:from-amber-950/30 dark:via-gray-900 dark:to-gray-900",
-    icon: "bg-amber-500",
-    subtitle: "text-amber-700 dark:text-amber-200",
-    chip: "bg-amber-100/80 text-amber-700 dark:bg-amber-900/40 dark:text-amber-100",
-    button: "bg-amber-500 hover:bg-amber-600",
+    icon: "bg-amber-500 text-white",
+    text: "text-amber-900 dark:text-amber-100",
+    hover: "hover:border-amber-400 hover:shadow-md",
   },
   violet: {
     border: "border-violet-200 dark:border-violet-900/40",
     bg: "bg-gradient-to-br from-violet-50 via-white to-white dark:from-violet-950/30 dark:via-gray-900 dark:to-gray-900",
-    icon: "bg-violet-600",
-    subtitle: "text-violet-700 dark:text-violet-200",
-    chip: "bg-violet-100/80 text-violet-700 dark:bg-violet-900/40 dark:text-violet-200",
-    button: "bg-violet-600 hover:bg-violet-700",
+    icon: "bg-violet-600 text-white",
+    text: "text-violet-900 dark:text-violet-100",
+    hover: "hover:border-violet-400 hover:shadow-md",
   },
 };
 
 const RequestTypeActionCard = ({
   title,
   subtitle,
-  description,
-  chips = [],
   icon: Icon,
   tone = "blue",
-  ctaLabel = "Crear solicitud",
   onClick,
 }) => {
   const palette = toneStyles[tone] || toneStyles.blue;
 
   return (
-    <div
-      className={`flex h-full flex-col justify-between rounded-2xl border p-6 shadow-sm transition hover:shadow-md dark:border-opacity-50 ${palette.border
-        } ${palette.bg}`}
+    <button
+      type="button"
+      onClick={onClick}
+      className={`group relative flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl border p-4 transition-all duration-200 ${palette.border} ${palette.bg} ${palette.hover}`}
     >
-      <div className="flex flex-col items-center text-center space-y-3">
-        {Icon ? (
-          <div className={`rounded-2xl p-4 text-white shadow-sm ${palette.icon}`}>
-            <Icon size={28} />
-          </div>
-        ) : null}
-        <div className="space-y-2">
-          {subtitle ? (
-            <p className={`text-xs font-semibold uppercase tracking-wide ${palette.subtitle}`}>
-              {subtitle}
-            </p>
-          ) : null}
-          <h3 className="text-base font-semibold text-gray-900 dark:text-white leading-tight">{title}</h3>
-          <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">{description}</p>
+      {Icon && (
+        <div
+          className={`flex h-16 w-16 items-center justify-center rounded-2xl shadow-sm transition-transform duration-200 group-hover:scale-110 ${palette.icon}`}
+        >
+          <Icon size={32} />
         </div>
-      </div>
+      )}
 
-      <div className="mt-5 flex flex-col items-center gap-3">
-        <div className="flex flex-wrap gap-2 justify-center">
-          {chips.map((chip) => (
-            <span
-              key={chip}
-              className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${palette.chip}`}
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-        {onClick ? (
-          <button
-            type="button"
-            onClick={onClick}
-            className={`w-full inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-white transition ${palette.button}`}
-          >
-            {ctaLabel}
-          </button>
-        ) : null}
+      <div className="text-center">
+        {subtitle && (
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wider opacity-70">
+            {subtitle}
+          </p>
+        )}
+        <h3 className={`text-sm font-bold leading-tight ${palette.text}`}>
+          {title}
+        </h3>
       </div>
-    </div>
+    </button>
   );
 };
 

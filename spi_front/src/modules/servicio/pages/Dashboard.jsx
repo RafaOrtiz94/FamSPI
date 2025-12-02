@@ -5,7 +5,7 @@ import { getMantenimientos } from "../../../core/api/mantenimientosApi";
 import { getRequests } from "../../../core/api/requestsApi";
 import { getPendingApprovals } from "../../../core/api/approvalsApi";
 import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
-import { DashboardLayout } from "../../shared/components/DashboardComponents";
+import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 
 // Views
 import JefeTecnicoView from "../components/dashboard/JefeTecnicoView";

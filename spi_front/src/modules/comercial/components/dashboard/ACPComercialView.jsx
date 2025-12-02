@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { FiPhone, FiUserCheck, FiFileText, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
-import { DashboardHeader } from "../../../shared/components/DashboardComponents";
+import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 
 const ACPComercialView = ({ onRefresh }) => {
     const navigate = useNavigate();

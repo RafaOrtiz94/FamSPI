@@ -17,7 +17,7 @@ import AttendanceWidget from "../shared/components/AttendanceWidget";
 import ClientRequestWidget from "../shared/components/ClientRequestWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
-import { DashboardLayout, DashboardHeader } from "../shared/components/DashboardComponents";
+import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 const unwrapRows = (payload) =>
   payload?.rows || payload?.result?.rows || payload?.result || payload || [];

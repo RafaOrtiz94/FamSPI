@@ -2,10 +2,10 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import jsPDF from "jspdf";
 import { FiShield, FiAlertTriangle, FiCheckCircle, FiRefreshCcw } from "react-icons/fi";
-import FirmaDigital from "../../servicio/components/FirmaDigital";
-import { submitInternalLopdpConsent } from "../../../core/api/authApi";
-import { useAuth } from "../../../core/auth/AuthContext";
-import { useUI } from "../../../core/ui/UIContext";
+import FirmaDigital from "../../../modules/servicio/components/FirmaDigital";
+import { submitInternalLopdpConsent } from "../../api/authApi";
+import { useAuth } from "../../auth/AuthContext";
+import { useUI } from "../UIContext";
 
 const paragraphs = [
   "FamSPI protege los datos personales conforme a la Ley Orgánica de Protección de Datos Personales del Ecuador (LOPDP).",
