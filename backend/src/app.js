@@ -204,6 +204,8 @@ app.use("/api/v1/auth", authRoutes);
 // ======================================================
 app.use((req, res, next) => {
   if (
+    req.path === "/ws" || // permitir conexiones de websocket/sondeos sin JWT para evitar ruido en logs
+    req.path.startsWith("/ws/") ||
     req.path.startsWith("/api/v1/auth/google") ||
     req.path.startsWith("/api/v1/gmail/auth/callback") ||
     req.path.startsWith("/health")

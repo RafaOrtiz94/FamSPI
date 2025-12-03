@@ -1,220 +1,112 @@
-import React, { useEffect, useState } from 'react';
-import { FiUser, FiClock, FiCheckCircle, FiXCircle, FiPackage } from 'react-icons/fi';
-import { useAuth } from '../../../core/auth/AuthContext';
-import { getMyClientRequests } from '../../../core/api/requestsApi';
-import { listEquipmentPurchases } from '../../../core/api/equipmentPurchasesApi';
-import Card from '../../../core/ui/components/Card';
-import { toast } from 'react-hot-toast';
+import React from "react";
+import {
+  FiMapPin,
+  FiCheckCircle,
+  FiClock,
+  FiNavigation,
+  FiUsers,
+} from "react-icons/fi";
+import Card from "../../../core/ui/components/Card";
 
-const MyClientRequestsWidget = () => {
-    const { user } = useAuth();
-    const [requests, setRequests] = useState([]);
-    const [loading, setLoading] = useState(true);
-    const [stats, setStats] = useState({
-        total: 0,
-        pending: 0,
-        approved: 0,
-        rejected: 0
-    });
-    const [equipmentStats, setEquipmentStats] = useState({
-        total: 0,
-        active: 0
-    });
+const ProgressBar = ({ value }) => (
+  <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+    <div
+      className="h-full bg-gradient-to-r from-blue-500 via-indigo-500 to-emerald-500 transition-all"
+      style={{ width: `${Math.min(100, Math.max(0, value))}%` }}
+    />
+  </div>
+);
 
-    useEffect(() => {
-        const loadMyRequests = async () => {
-            if (!user?.email) return;
+const StatPill = ({ label, value, accent }) => (
+  <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
+    <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+      {label}
+    </span>
+    <span className={`mt-1 text-2xl font-bold ${accent}`}>{value}</span>
+  </div>
+);
 
-            try {
-                setLoading(true);
-                const [clientData, equipmentData] = await Promise.all([
-                    getMyClientRequests({
-                        page: 1,
-                        pageSize: 100,
-                        // No necesitamos createdBy porque el endpoint /my ya filtra por el usuario autenticado
-                    }),
-                    listEquipmentPurchases(),
-                ]);
+/**
+ * Widget de cabecera para el módulo de clientes comerciales.
+ * Muestra el estado diario de visitas y resalta la acción principal
+ * de check‑in / check‑out, sin secciones de documentación ni solicitudes.
+ */
+const MyClientRequestsWidget = ({ total, visited, pending, onFilterChange }) => {
+  const progress = total ? Math.round((visited / total) * 100) : 0;
 
-                const userRequests = (clientData.rows || []).filter(
-                    req => req.created_by === user.email
-                );
+  return (
+    <Card className="relative overflow-hidden border-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white">
+      {/* halo decorativo */}
+      <div className="pointer-events-none absolute inset-0 opacity-30">
+        <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/20 blur-3xl" />
+        <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-emerald-400/30 blur-3xl" />
+      </div>
 
-                setRequests(userRequests);
-
-                // Calcular estadísticas
-                setStats({
-                    total: userRequests.length,
-                    pending: userRequests.filter(r => r.status === 'pending_approval').length,
-                    approved: userRequests.filter(r => r.status === 'approved').length,
-                    rejected: userRequests.filter(r => r.status === 'rejected').length
-                });
-
-                const equipmentRequests = Array.isArray(equipmentData) ? equipmentData : [];
-                setEquipmentStats({
-                    total: equipmentRequests.length,
-                    active: equipmentRequests.filter(r => r.status !== 'completed').length
-                });
-            } catch (error) {
-                console.error('Error cargando solicitudes:', error);
-                toast.error('Error al cargar tus solicitudes de clientes');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        loadMyRequests();
-    }, [user]);
-
-    const getStatusBadge = (status) => {
-        const badges = {
-            pending_approval: {
-                label: 'Pendiente',
-                color: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-                icon: FiClock
-            },
-            pending_consent: {
-                label: 'Pend. Consentimiento',
-                color: 'bg-blue-100 text-blue-800 border-blue-200',
-                icon: FiClock
-            },
-            approved: {
-                label: 'Aprobada',
-                color: 'bg-green-100 text-green-800 border-green-200',
-                icon: FiCheckCircle
-            },
-            rejected: {
-                label: 'Rechazada',
-                color: 'bg-red-100 text-red-800 border-red-200',
-                icon: FiXCircle
-            }
-        };
-        const badge = badges[status] || badges.pending_approval;
-        const Icon = badge.icon;
-
-        return (
-            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold border ${badge.color}`}>
-                <Icon className="w-3 h-3 mr-1" />
-                {badge.label}
-            </span>
-        );
-    };
-
-    if (loading) {
-        return (
-            <Card className="p-6">
-                <div className="text-center py-8">
-                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
-                    <p className="text-gray-500 text-sm">Cargando tus solicitudes...</p>
-                </div>
-            </Card>
-        );
-    }
-
-    return (
-        <div className="space-y-4">
-            {/* Header con estadísticas */}
-            <Card className="p-5">
-                <div className="flex items-center justify-between mb-4">
-                    <div>
-                        <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2">
-                            <FiUser className="w-5 h-5 text-blue-600" />
-                            Mis Solicitudes de Clientes
-                        </h3>
-                        <p className="text-sm text-gray-600 mt-1">
-                            Solicitudes de registro de clientes que has creado.
-                        </p>
-                    </div>
-                </div>
-
-                {/* Estadísticas */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="bg-gray-50 rounded-lg p-3 text-center">
-                        <p className="text-xs text-gray-500 font-medium mb-1">Total</p>
-                        <p className="text-2xl font-bold text-gray-900">{stats.total}</p>
-                    </div>
-                    <div className="bg-yellow-50 rounded-lg p-3 text-center">
-                        <p className="text-xs text-yellow-700 font-medium mb-1">Pendientes</p>
-                        <p className="text-2xl font-bold text-yellow-700">{stats.pending}</p>
-                    </div>
-                    <div className="bg-green-50 rounded-lg p-3 text-center">
-                        <p className="text-xs text-green-700 font-medium mb-1">Aprobadas</p>
-                        <p className="text-2xl font-bold text-green-700">{stats.approved}</p>
-                    </div>
-                    <div className="bg-red-50 rounded-lg p-3 text-center">
-                        <p className="text-xs text-red-700 font-medium mb-1">Rechazadas</p>
-                        <p className="text-2xl font-bold text-red-700">{stats.rejected}</p>
-                    </div>
-                </div>
-            </Card>
-
-            {/* Resumen de solicitudes de compra */}
-            <Card className="p-5">
-                <div className="flex items-start justify-between mb-4">
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                            <FiPackage className="w-4 h-4 text-indigo-600" />
-                            Compras de equipos en Solicitudes en curso
-                        </h4>
-                        <p className="text-xs text-gray-600 mt-1">
-                            Totales de las solicitudes que ves en el listado de compras de equipos.
-                        </p>
-                    </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="bg-indigo-50 rounded-lg p-3">
-                        <p className="text-xs text-indigo-700 font-medium mb-1">Solicitudes de compra</p>
-                        <p className="text-2xl font-bold text-indigo-700">{equipmentStats.total}</p>
-                    </div>
-                    <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-700 font-medium mb-1">Activas</p>
-                        <p className="text-2xl font-bold text-blue-700">{equipmentStats.active}</p>
-                        <p className="text-[11px] text-blue-600 mt-1">En curso o por completar</p>
-                    </div>
-                </div>
-            </Card>
-
-            {/* Lista de solicitudes */}
-            <Card className="p-5">
-                <h4 className="text-sm font-semibold text-gray-700 mb-4">
-                    Últimas Solicitudes ({requests.length})
-                </h4>
-
-                {requests.length === 0 ? (
-                    <div className="text-center py-8">
-                        <FiUser className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                        <p className="text-gray-500 text-sm">No has creado solicitudes de clientes aún</p>
-                    </div>
-                ) : (
-                    <div className="space-y-3 max-h-96 overflow-y-auto">
-                        {requests.slice(0, 10).map((request) => (
-                            <div
-                                key={request.id}
-                                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                            >
-                                <div className="flex-1 min-w-0">
-                                    <p className="font-semibold text-gray-900 text-sm truncate">
-                                        {request.commercial_name}
-                                    </p>
-                                    <div className="flex items-center gap-3 mt-1">
-                                        <p className="text-xs text-gray-500">
-                                            RUC: {request.ruc_cedula || 'N/A'}
-                                        </p>
-                                        <p className="text-xs text-gray-400">
-                                            {new Date(request.created_at).toLocaleDateString('es-ES')}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="ml-3">
-                                    {getStatusBadge(request.status)}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </Card>
+      <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="space-y-2">
+          <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold">
+            <FiNavigation className="h-4 w-4" />
+            Ruta comercial · Check‑in diario
+          </div>
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            <FiUsers className="h-5 w-5" />
+            Tu tablero de visitas de clientes
+          </h2>
+          <p className="text-sm text-blue-50 max-w-md">
+            Registra tus visitas en campo con un solo clic, valida ubicación
+            y haz seguimiento claro de lo que ya visitaste y lo que falta.
+          </p>
         </div>
-    );
+
+        <div className="flex flex-1 flex-col gap-3 md:max-w-md">
+          <div className="grid grid-cols-3 gap-3 text-gray-900">
+            <StatPill label="Clientes del día" value={total} accent="text-white" />
+            <StatPill label="Visitados" value={visited} accent="text-emerald-300" />
+            <StatPill label="Pendientes" value={pending} accent="text-amber-200" />
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-blue-50">
+              <span className="inline-flex items-center gap-1">
+                <FiClock className="h-3 w-3" />
+                Progreso de la ruta de hoy
+              </span>
+              <span>{progress}% completado</span>
+            </div>
+            <ProgressBar value={progress} />
+          </div>
+
+          {typeof onFilterChange === "function" && (
+            <div className="flex flex-wrap gap-2 text-[11px]">
+              <button
+                type="button"
+                onClick={() => onFilterChange("all")}
+                className="rounded-full bg-white/10 px-3 py-1 font-medium text-blue-50 hover:bg-white/20 transition"
+              >
+                Ver todos
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange("pending")}
+                className="inline-flex items-center gap-1 rounded-full bg-amber-400/20 px-3 py-1 font-medium text-amber-100 hover:bg-amber-400/30 transition"
+              >
+                <FiMapPin className="h-3 w-3" />
+                Solo pendientes
+              </button>
+              <button
+                type="button"
+                onClick={() => onFilterChange("visited")}
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-400/20 px-3 py-1 font-medium text-emerald-100 hover:bg-emerald-400/30 transition"
+              >
+                <FiCheckCircle className="h-3 w-3" />
+                Solo visitados
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </Card>
+  );
 };
 
 export default MyClientRequestsWidget;

@@ -5,7 +5,7 @@ import CreateRequestModal from "../CreateRequestModal";
 import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import VacationRequestModal from "../VacationRequestModal";
+import VacationRequestModal from "../../../shared/solicitudes/modals/VacationRequestModal";
 
 const ACPComercialSolicitudesView = () => {
     const { showToast } = useUI();

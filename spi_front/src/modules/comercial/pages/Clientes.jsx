@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   FiAlertTriangle,
   FiCheckCircle,
-  FiExternalLink,
   FiInfo,
   FiMapPin,
   FiNavigation,
@@ -22,7 +21,6 @@ import {
   startClientVisit,
 } from "../../../core/api/clientsApi";
 import { getUsers } from "../../../core/api/usersApi";
-import { getFilesByRequest } from "../../../core/api/filesApi";
 import MyClientRequestsWidget from "../components/MyClientRequestsWidget";
 
 const todayStr = new Date().toISOString().slice(0, 10);
@@ -34,18 +32,16 @@ const advisorRoles = new Set(["comercial", "acp_comercial", "backoffice"]);
 
 const ClientesPage = () => {
   const { showToast } = useUI();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const isManager = roleIsManager(role);
+  const currentEmail = user?.email?.toLowerCase?.() || "";
 
   const [clientes, setClientes] = useState([]);
-  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [assignments, setAssignments] = useState({});
   const [advisors, setAdvisors] = useState([]);
-  const [filesCache, setFilesCache] = useState({});
-  const [filesLoading, setFilesLoading] = useState(false);
   const [activeClient, setActiveClient] = useState(null);
-  const [modalType, setModalType] = useState(null); // start | end | report | docs
+  const [modalType, setModalType] = useState(null); // start | end | report
   const [visitModal, setVisitModal] = useState({
     timestamp: null,
     coords: null,
@@ -54,6 +50,9 @@ const ClientesPage = () => {
     error: null,
   });
   const [submittingVisit, setSubmittingVisit] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | visited
+  const [assignedViewFilter, setAssignedViewFilter] = useState("assigned");
+  const [assignedSearch, setAssignedSearch] = useState("");
 
   const normalizeStatus = (status) => {
     const value = (status || "").toLowerCase();
@@ -101,6 +100,21 @@ const ClientesPage = () => {
     return Math.max(0, Math.round(diffMs / 60000));
   };
 
+  // Helper para normalizar asignados a un array siempre
+  const normalizeAsignados = (asignados) => {
+    if (Array.isArray(asignados)) return asignados;
+    if (typeof asignados === "string") {
+      try {
+        const parsed = JSON.parse(asignados);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    // Si es número, null, undefined, objeto, etc., devolver array vacío
+    return [];
+  };
+
   const captureLocation = () =>
     new Promise((resolve, reject) => {
       if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -121,21 +135,24 @@ const ClientesPage = () => {
   const loadAdvisors = async () => {
     try {
       const users = await getUsers();
-      const filtered = (users || []).filter((u) => advisorRoles.has(u.role?.toLowerCase?.()));
-      setAdvisors(filtered);
+      const usersArray = Array.isArray(users) ? users : [];
+      const filtered = usersArray.filter((u) => advisorRoles.has(u.role?.toLowerCase?.()));
+      setAdvisors(Array.isArray(filtered) ? filtered : []);
     } catch (error) {
       console.error(error);
+      setAdvisors([]);
     }
   };
 
   const loadClientes = async () => {
     setLoading(true);
     try {
-      const data = await fetchClients({ q: query || undefined, date: todayStr });
-      setClientes(data || []);
+      const data = await fetchClients({ date: todayStr });
+      setClientes(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
       showToast("No pudimos cargar tus clientes", "error");
+      setClientes([]);
     } finally {
       setLoading(false);
     }
@@ -143,31 +160,61 @@ const ClientesPage = () => {
 
   useEffect(() => {
     loadClientes();
-  }, [query]);
+  }, []);
 
   useEffect(() => {
     if (isManager) loadAdvisors();
   }, [isManager]);
 
-  const visitedCount = useMemo(
-    () => clientes.filter((c) => normalizeStatus(c.visit_status) === "visitado").length,
-    [clientes],
-  );
+  const visitedCount = useMemo(() => {
+    if (!Array.isArray(clientes)) return 0;
+    return clientes.filter((c) => normalizeStatus(c.visit_status) === "visitado").length;
+  }, [clientes]);
 
-  const pendingCount = useMemo(
-    () => clientes.filter((c) => normalizeStatus(c.visit_status) !== "visitado").length,
-    [clientes],
-  );
+  const pendingCount = useMemo(() => {
+    if (!Array.isArray(clientes)) return 0;
+    return clientes.filter((c) => normalizeStatus(c.visit_status) !== "visitado").length;
+  }, [clientes]);
 
-  const progress = clientes.length ? Math.round((visitedCount / clientes.length) * 100) : 0;
+  const progress = Array.isArray(clientes) && clientes.length > 0 ? Math.round((visitedCount / clientes.length) * 100) : 0;
 
   const filteredClientes = useMemo(() => {
-    if (!query) return clientes;
+    if (!Array.isArray(clientes)) return [];
+    let base = clientes;
+
+    if (statusFilter === "pending") {
+      base = base.filter((c) => normalizeStatus(c.visit_status) !== "visitado");
+    } else if (statusFilter === "visited") {
+      base = base.filter((c) => normalizeStatus(c.visit_status) === "visitado");
+    }
+
+    return base;
+  }, [clientes, statusFilter]);
+
+  const assignedToMe = useMemo(() => {
+    if (!Array.isArray(clientes)) return [];
     return clientes.filter((c) => {
-      const haystack = `${c.nombre || ""} ${c.identificador || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
-      return haystack.includes(query.toLowerCase());
+      const asignados = normalizeAsignados(c.asignados);
+      return asignados.some((mail) => (mail || "").toLowerCase?.() === currentEmail);
     });
-  }, [clientes, query]);
+  }, [clientes, currentEmail]);
+
+  const createdByMe = useMemo(() => {
+    if (!Array.isArray(clientes)) return [];
+    return clientes.filter(
+      (c) => (c.created_by || "").toLowerCase?.() === currentEmail,
+    );
+  }, [clientes, currentEmail]);
+
+  const filteredAssignedList = useMemo(() => {
+    const base = assignedViewFilter === "assigned" ? assignedToMe : createdByMe;
+    if (!assignedSearch) return base;
+    const q = assignedSearch.toLowerCase();
+    return base.filter((c) => {
+      const haystack = `${c.nombre || ""} ${c.identificador || ""} ${c.shipping_contact_name || ""} ${c.shipping_address || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [assignedViewFilter, assignedToMe, createdByMe, assignedSearch]);
 
   const handleAssign = async (clientId) => {
     const email = assignments[clientId];
@@ -208,23 +255,6 @@ const ClientesPage = () => {
   const openReportModal = (client) => {
     setActiveClient(client);
     setModalType("report");
-  };
-
-  const openDocsModal = async (client) => {
-    setActiveClient(client);
-    setModalType("docs");
-    if (!filesCache[client.id]) {
-      try {
-        setFilesLoading(true);
-        const files = await getFilesByRequest(client.id);
-        setFilesCache((prev) => ({ ...prev, [client.id]: files }));
-      } catch (error) {
-        console.error(error);
-        showToast("No pudimos cargar los archivos del cliente", "error");
-      } finally {
-        setFilesLoading(false);
-      }
-    }
   };
 
   const closeModal = () => {
@@ -274,7 +304,10 @@ const ClientesPage = () => {
         if (typeof computed === "number") updated.duracion_minutos = computed;
       }
 
-      setClientes((prev) => prev.map((c) => (c.id === activeClient.id ? updated : c)));
+      setClientes((prev) => {
+        if (!Array.isArray(prev)) return [];
+        return prev.map((c) => (c.id === activeClient.id ? updated : c));
+      });
       setActiveClient(updated);
       showToast(modalType === "start" ? "Visita iniciada" : "Visita finalizada", "success");
       closeModal();
@@ -286,62 +319,22 @@ const ClientesPage = () => {
     }
   };
 
-  const renderDocs = (clientId) => {
-    const docs = filesCache[clientId] || [];
-    if (!docs.length) {
-      return <p className="text-sm text-gray-500">Sin documentos adjuntos</p>;
-    }
-    const ficha = docs.filter((d) => d.original_name?.toLowerCase().includes("ficha"));
-    const manual = docs.filter((d) => d.original_name?.toLowerCase().includes("manual"));
-    const otros = docs.filter(
-      (d) => !ficha.includes(d) && !manual.includes(d),
-    );
-
-    const renderGroup = (title, items) => (
-      <div className="space-y-1">
-        <p className="text-xs font-semibold text-gray-600">{title}</p>
-        {items.length ? (
-          items.map((doc) => (
-            <a
-              key={doc.id}
-              href={doc.download_url || doc.webViewLink || doc.webContentLink}
-              target="_blank"
-              rel="noreferrer"
-              className="text-blue-600 text-sm flex items-center gap-2 hover:underline"
-            >
-              <FiExternalLink /> {doc.original_name || doc.name || "Archivo"}
-            </a>
-          ))
-        ) : (
-          <p className="text-xs text-gray-500">No disponible</p>
-        )}
-      </div>
-    );
-
-    return (
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {renderGroup("Fichas técnicas", ficha)}
-        {renderGroup("Manuales", manual)}
-        {renderGroup("Otros", otros)}
-      </div>
-    );
-  };
-
   const renderCard = (cliente) => {
     const status = normalizeStatus(cliente.visit_status);
     const meta = getStatusMeta(status);
     const duration = cliente.duracion_minutos ?? calculateDuration(cliente);
-    const assigned = cliente.asignados?.length ? cliente.asignados.join(", ") : "Sin asignar";
+    const asignadosArray = normalizeAsignados(cliente.asignados);
+    const assigned = asignadosArray.length > 0 ? asignadosArray.join(", ") : "Sin asignar";
     const hasEntryCoords = cliente.lat_entrada && cliente.lng_entrada;
     const hasExitCoords = cliente.lat_salida && cliente.lng_salida;
 
     return (
       <div
         key={cliente.id}
-        className="relative rounded-xl border border-gray-100 bg-white p-4 shadow-sm hover:shadow-md transition hover:-translate-y-0.5 cursor-pointer"
+        className="relative flex flex-col rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-sm backdrop-blur hover:shadow-md transition hover:-translate-y-0.5 cursor-pointer"
         onClick={() => openReportModal(cliente)}
       >
-        <span className={`absolute top-3 right-3 h-3 w-3 rounded-full ${meta.led}`} />
+        <span className={`absolute top-3 right-3 h-2.5 w-2.5 rounded-full ${meta.led}`} />
 
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
@@ -412,17 +405,19 @@ const ClientesPage = () => {
               Ver reporte
             </Button>
           )}
-          <Button
-            variant="ghost"
-            icon={FiInfo}
-            className="px-3 py-2"
-            onClick={(e) => {
-              e.stopPropagation();
-              openReportModal(cliente);
-            }}
-          >
-            Detalles
-          </Button>
+          {status !== "visitado" && (
+            <Button
+              variant="ghost"
+              icon={FiInfo}
+              className="px-3 py-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                openReportModal(cliente);
+              }}
+            >
+              Detalles
+            </Button>
+          )}
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -448,28 +443,6 @@ const ClientesPage = () => {
               Ver ubicación salida
             </a>
           )}
-          <Button
-            variant="ghost"
-            icon={FiExternalLink}
-            className="px-3 py-1 text-xs"
-            onClick={(e) => {
-              e.stopPropagation();
-              openDocsModal(cliente);
-            }}
-          >
-            Documentos
-          </Button>
-          {cliente.drive_folder_id && (
-            <a
-              href={`https://drive.google.com/drive/folders/${cliente.drive_folder_id}`}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              className="rounded-full border border-gray-200 px-3 py-1 text-gray-700 hover:bg-gray-50"
-            >
-              Carpeta en Drive
-            </a>
-          )}
         </div>
 
         {isManager && (
@@ -482,7 +455,7 @@ const ClientesPage = () => {
                 onChange={(e) => setAssignments((prev) => ({ ...prev, [cliente.id]: e.target.value }))}
               >
                 <option value="">Selecciona asesor</option>
-                {advisors.map((u) => (
+                {Array.isArray(advisors) && advisors.map((u) => (
                   <option key={u.id} value={u.email}>
                     {u.fullname || u.name || u.email}
                   </option>
@@ -498,70 +471,38 @@ const ClientesPage = () => {
 
   return (
     <div className="p-6 space-y-6">
-      <header className="flex flex-col md:flex-row justify-between items-center gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <FiUsers className="text-blue-600" /> Gestión de Clientes
-          </h1>
-          <p className="text-sm text-gray-500">
-            Clientes aprobados que puedes gestionar, con acceso rápido a fichas técnicas y visitas diarias.
-          </p>
+      <header className="space-y-3">
+        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <FiUsers className="text-blue-600" /> Gestión de Clientes
+            </h1>
+            <p className="text-sm text-gray-500">
+              Clientes aprobados que puedes gestionar, con enfoque en tu ruta diaria de visitas.
+            </p>
+          </div>
         </div>
+
+        {/* Widget de check‑in / check‑out en cabecera */}
+        <MyClientRequestsWidget
+          total={Array.isArray(clientes) ? clientes.length : 0}
+          visited={visitedCount}
+          pending={pendingCount}
+          onFilterChange={setStatusFilter}
+        />
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="p-4 flex flex-col gap-2">
-          <p className="text-sm text-gray-500">Total accesibles</p>
-          <p className="text-3xl font-bold text-gray-900">{clientes.length}</p>
-          <p className="text-xs text-gray-500">Clientes aprobados filtrados a tu rol</p>
-        </Card>
-        <Card className="p-4 flex flex-col gap-2">
-          <p className="text-sm text-gray-500">Visitados hoy</p>
-          <p className="text-3xl font-bold text-green-600">{visitedCount}</p>
-          <div className="h-2 bg-gray-200 rounded-full">
-            <div
-              className="h-2 bg-green-500 rounded-full"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <p className="text-xs text-gray-500">Progreso diario {progress}%</p>
-        </Card>
-        <Card className="p-4 flex flex-col gap-2">
-          <p className="text-sm text-gray-500">Pendientes de visita</p>
-          <p className="text-3xl font-bold text-amber-600">{pendingCount}</p>
-          <p className="text-xs text-gray-500">Clientes por visitar en el día</p>
-        </Card>
-      </div>
-
-      <Card className="p-5">
-        <div className="relative">
-          <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="Buscar por nombre, RUC o contacto..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-      </Card>
-
-      <MyClientRequestsWidget />
       <Card className="p-5 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Solicitudes en curso</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check‑in/check‑out</h2>
             <p className="text-sm text-gray-500">
-              Tarjetas compactas para check-in/check-out. Haz clic en cualquier tarjeta para ver el detalle completo.
+              Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
             </p>
-          </div>
-          <div className="flex items-center gap-2 rounded-full bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700">
-            <FiNavigation />
-            Este registro requiere tu ubicación para validar la visita.
           </div>
         </div>
 
-        {filteredClientes.length ? (
+        {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
             {filteredClientes.map((cliente) => renderCard(cliente))}
           </div>
@@ -569,6 +510,111 @@ const ClientesPage = () => {
           <div className="py-10 text-center text-gray-500">
             {loading ? "Cargando clientes..." : "No se encontraron clientes"}
           </div>
+        )}
+      </Card>
+
+      {/* Widget: Clientes asignados / registrados por mí */}
+      <Card className="p-5 space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Mis clientes de gestión diaria
+            </h2>
+            <p className="text-sm text-gray-500">
+              Revisa rápidamente los clientes que tienes asignados o que tú mismo registraste y fueron aprobados.
+            </p>
+          </div>
+          <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
+            Vista solo para tu usuario
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="inline-flex rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700">
+            <button
+              type="button"
+              onClick={() => setAssignedViewFilter("assigned")}
+              className={`px-3 py-1 rounded-full transition ${
+                assignedViewFilter === "assigned"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-500"
+              }`}
+            >
+              Asignados a mí ({Array.isArray(assignedToMe) ? assignedToMe.length : 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssignedViewFilter("created")}
+              className={`px-3 py-1 rounded-full transition ${
+                assignedViewFilter === "created"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-500"
+              }`}
+            >
+              Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
+            </button>
+          </div>
+
+          <div className="relative w-full md:max-w-xs">
+            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, RUC o ciudad..."
+              value={assignedSearch}
+              onChange={(e) => setAssignedSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+        </div>
+
+        {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredAssignedList.map((cliente) => {
+              const ciudad =
+                (cliente.shipping_address || "")
+                  .split(",")
+                  .map((s) => s.trim())
+                  .slice(-2, -1)[0] || "Ciudad no especificada";
+              const status = normalizeStatus(cliente.visit_status);
+              const meta = getStatusMeta(status);
+              return (
+                <div
+                  key={`mini-${cliente.id}`}
+                  className="flex flex-col rounded-xl border border-gray-100 bg-white/80 p-3 shadow-sm hover:shadow-md transition cursor-pointer"
+                  onClick={() => openReportModal(cliente)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="space-y-0.5">
+                      <p className="text-sm font-semibold text-gray-900 line-clamp-1">
+                        {cliente.nombre}
+                      </p>
+                      <p className="text-[11px] text-gray-500">
+                        {cliente.identificador ? `RUC/Cédula: ${cliente.identificador}` : "Sin identificador"}
+                      </p>
+                      <p className="text-[11px] text-gray-500 flex items-center gap-1">
+                        <FiMapPin className="h-3 w-3 text-gray-400" />
+                        {ciudad}
+                      </p>
+                    </div>
+                    <span
+                      className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}
+                    >
+                      {meta.label}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-[11px] text-gray-500 line-clamp-2">
+                    {cliente.shipping_address || "Sin dirección detallada"}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500">
+            {assignedViewFilter === "assigned"
+              ? "No tienes clientes asignados que coincidan con el filtro."
+              : "No tienes clientes registrados por ti que coincidan con el filtro."}
+          </p>
         )}
       </Card>
 
@@ -708,7 +754,12 @@ const ClientesPage = () => {
 
             <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
               <p className="text-xs font-semibold text-gray-700">Asignado a</p>
-              <p className="text-sm text-gray-800">{activeClient.asignados?.join(", ") || "Sin asignar"}</p>
+              <p className="text-sm text-gray-800">
+                {(() => {
+                  const asignadosArray = normalizeAsignados(activeClient.asignados);
+                  return asignadosArray.length > 0 ? asignadosArray.join(", ") : "Sin asignar";
+                })()}
+              </p>
               <p className="mt-2 text-xs font-semibold text-gray-700">Contacto</p>
               <p className="text-sm text-gray-800">{activeClient.shipping_contact_name || "Sin contacto"}</p>
               <p className="text-xs text-gray-600">{activeClient.shipping_phone || "Sin teléfono"}</p>
@@ -722,9 +773,6 @@ const ClientesPage = () => {
             )}
 
             <div className="flex flex-wrap gap-2">
-              <Button variant="secondary" icon={FiExternalLink} onClick={() => openDocsModal(activeClient)}>
-                Ver documentos
-              </Button>
               {normalizeStatus(activeClient.visit_status) === "en_visita" && (
                 <Button icon={FiCheckCircle} onClick={() => openVisitFlow(activeClient, "end")}>
                   Finalizar visita
@@ -733,15 +781,6 @@ const ClientesPage = () => {
             </div>
           </div>
         )}
-      </Modal>
-
-      <Modal
-        open={modalType === "docs"}
-        onClose={closeModal}
-        title={`Documentos de ${activeClient?.nombre || "cliente"}`}
-        maxWidth="max-w-3xl"
-      >
-        {filesLoading ? <p className="text-sm text-gray-500">Cargando archivos...</p> : renderDocs(activeClient?.id)}
       </Modal>
     </div>
   );

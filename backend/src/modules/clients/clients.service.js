@@ -10,13 +10,11 @@ const MANAGER_ROLES = new Set([
   "ti",
 ]);
 
-const ADVISOR_ROLES = new Set([
-  "comercial",
-  "acp_comercial",
-  "backoffice",
-]);
+const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
 
-const VALID_VISIT_STATUS = new Set(["visited", "pending", "skipped"]);
+// Estados válidos para registros de visita.
+// "in_visit" representa una visita en curso que aún no ha sido cerrada.
+const VALID_VISIT_STATUS = new Set(["visited", "pending", "skipped", "in_visit"]);
 
 function isManager(user) {
   return MANAGER_ROLES.has(user?.role?.toLowerCase?.() || "");
@@ -44,11 +42,32 @@ async function ensureTables() {
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
       user_email TEXT NOT NULL,
       visit_date DATE NOT NULL,
-      status TEXT NOT NULL CHECK (status IN ('visited','pending','skipped')),
+      status TEXT NOT NULL CHECK (status IN ('visited','pending','skipped','in_visit')),
+      hora_entrada TIMESTAMPTZ,
+      hora_salida TIMESTAMPTZ,
+      lat_entrada DOUBLE PRECISION,
+      lng_entrada DOUBLE PRECISION,
+      lat_salida DOUBLE PRECISION,
+      lng_salida DOUBLE PRECISION,
+      observaciones TEXT,
+      duracion_minutos INTEGER,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(client_request_id, user_email, visit_date)
     );
+  `);
+
+  // Asegurar columnas nuevas en instalaciones existentes
+  await db.query(`
+    ALTER TABLE client_visit_logs
+      ADD COLUMN IF NOT EXISTS hora_entrada TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS hora_salida TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS lat_entrada DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS lng_entrada DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS lat_salida DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS lng_salida DOUBLE PRECISION,
+      ADD COLUMN IF NOT EXISTS observaciones TEXT,
+      ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER;
   `);
 }
 
@@ -105,24 +124,57 @@ async function listAccessibleClients({ user, q, visitDate }) {
       cr.shipping_address,
       cr.drive_folder_id,
       COALESCE(json_agg(DISTINCT ca.assigned_to_email) FILTER (WHERE ca.assigned_to_email IS NOT NULL), '[]') AS asignados,
-      vl.status AS visit_status
+      vl.status AS visit_status,
+      vl.hora_entrada,
+      vl.hora_salida,
+      vl.lat_entrada,
+      vl.lng_entrada,
+      vl.lat_salida,
+      vl.lng_salida,
+      vl.observaciones,
+      vl.duracion_minutos
     FROM client_requests cr
     LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id
     LEFT JOIN client_visit_logs vl
       ON vl.client_request_id = cr.id AND vl.user_email = $1 AND vl.visit_date = $2
     ${whereClause}
-    GROUP BY cr.id, vl.status
+    GROUP BY
+      cr.id,
+      vl.status,
+      vl.hora_entrada,
+      vl.hora_salida,
+      vl.lat_entrada,
+      vl.lng_entrada,
+      vl.lat_salida,
+      vl.lng_salida,
+      vl.observaciones,
+      vl.duracion_minutos
     ORDER BY cr.created_at DESC
     LIMIT 400
   `;
 
   const { rows } = await db.query(query, params);
 
-  return rows.map((row) => ({
-    ...row,
-    asignados: Array.isArray(row.asignados) ? row.asignados : [],
-    visit_status: row.visit_status || "pending",
-  }));
+  return rows.map((row) => {
+    let asignados = row.asignados;
+    // PostgreSQL puede devolver json_agg como string JSON, parsearlo si es necesario
+    if (typeof asignados === "string") {
+      try {
+        asignados = JSON.parse(asignados);
+      } catch (e) {
+        asignados = [];
+      }
+    }
+    // Asegurar que siempre sea un array
+    if (!Array.isArray(asignados)) {
+      asignados = [];
+    }
+    return {
+      ...row,
+      asignados,
+      visit_status: row.visit_status || "pending",
+    };
+  });
 }
 
 async function assignClient({ clientId, assigneeEmail, user }) {
@@ -152,7 +204,19 @@ async function assignClient({ clientId, assigneeEmail, user }) {
   return { ok: true, client: clientId, assignee: normalizedEmail };
 }
 
-async function upsertVisitStatus({ clientId, user, status, visitDate }) {
+async function upsertVisitStatus({
+  clientId,
+  user,
+  status,
+  visitDate,
+  hora_entrada,
+  hora_salida,
+  lat_entrada,
+  lng_entrada,
+  lat_salida,
+  lng_salida,
+  observaciones,
+}) {
   if (!isAdvisor(user)) {
     const error = new Error("No tienes permisos para registrar visitas");
     error.status = 403;
@@ -160,7 +224,17 @@ async function upsertVisitStatus({ clientId, user, status, visitDate }) {
   }
   await ensureTables();
   const client = await getClientOrThrow(clientId);
-  const dateValue = visitDate || new Date().toISOString().slice(0, 10);
+
+  const now = new Date();
+  const baseDate =
+    visitDate ||
+    hora_entrada ||
+    hora_salida ||
+    now.toISOString().slice(0, 10);
+  const dateValue =
+    typeof baseDate === "string" && baseDate.length > 10
+      ? baseDate.slice(0, 10)
+      : baseDate;
 
   // Validar acceso a cliente
   if (!isManager(user)) {
@@ -178,18 +252,91 @@ async function upsertVisitStatus({ clientId, user, status, visitDate }) {
     }
   }
 
-  const finalStatus = VALID_VISIT_STATUS.has(status) ? status : "visited";
+  // Determinar estado final y duración
+  let finalStatus;
+  if (status && VALID_VISIT_STATUS.has(status)) {
+    finalStatus = status;
+  } else if (hora_salida) {
+    finalStatus = "visited";
+  } else if (hora_entrada) {
+    finalStatus = "in_visit";
+  } else {
+    finalStatus = "visited";
+  }
+
+  let duracionMinutos = null;
+  try {
+    if (hora_entrada && hora_salida) {
+      const start = new Date(hora_entrada);
+      const end = new Date(hora_salida);
+      const diffMs = end - start;
+      if (Number.isFinite(diffMs) && diffMs >= 0) {
+        duracionMinutos = Math.round(diffMs / 60000);
+      }
+    }
+  } catch (e) {
+    logger.warn({ e }, "No se pudo calcular la duración de la visita");
+  }
 
   const { rows } = await db.query(
-    `INSERT INTO client_visit_logs (client_request_id, user_email, visit_date, status)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO client_visit_logs (
+       client_request_id,
+       user_email,
+       visit_date,
+       status,
+       hora_entrada,
+       hora_salida,
+       lat_entrada,
+       lng_entrada,
+       lat_salida,
+       lng_salida,
+       observaciones,
+       duracion_minutos
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
      ON CONFLICT (client_request_id, user_email, visit_date)
-     DO UPDATE SET status = EXCLUDED.status, updated_at = NOW()
-     RETURNING id, status`,
-    [clientId, user.email, dateValue, finalStatus],
+     DO UPDATE SET
+       status = EXCLUDED.status,
+       updated_at = NOW(),
+       hora_entrada = COALESCE(client_visit_logs.hora_entrada, EXCLUDED.hora_entrada),
+       hora_salida = COALESCE(EXCLUDED.hora_salida, client_visit_logs.hora_salida),
+       lat_entrada = COALESCE(client_visit_logs.lat_entrada, EXCLUDED.lat_entrada),
+       lng_entrada = COALESCE(client_visit_logs.lng_entrada, EXCLUDED.lng_entrada),
+       lat_salida = COALESCE(EXCLUDED.lat_salida, client_visit_logs.lat_salida),
+       lng_salida = COALESCE(EXCLUDED.lng_salida, client_visit_logs.lng_salida),
+       observaciones = COALESCE(EXCLUDED.observaciones, client_visit_logs.observaciones),
+       duracion_minutos = COALESCE(EXCLUDED.duracion_minutos, client_visit_logs.duracion_minutos)
+     RETURNING
+       id,
+       status,
+       hora_entrada,
+       hora_salida,
+       lat_entrada,
+       lng_entrada,
+       lat_salida,
+       lng_salida,
+       observaciones,
+       duracion_minutos`,
+    [
+      clientId,
+      user.email,
+      dateValue,
+      finalStatus,
+      hora_entrada || null,
+      hora_salida || null,
+      lat_entrada ?? null,
+      lng_entrada ?? null,
+      lat_salida ?? null,
+      lng_salida ?? null,
+      observaciones || null,
+      duracionMinutos,
+    ],
   );
 
-  logger.info({ clientId, user: user.email, status: rows[0].status }, "Visita de cliente registrada");
+  logger.info(
+    { clientId, user: user.email, status: rows[0].status },
+    "Visita de cliente registrada",
+  );
   return rows[0];
 }
 
