@@ -230,7 +230,7 @@ const CreateRequestModal = ({
   const [selectedClientId, setSelectedClientId] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
-  const isInspection = type === "inspection";
+  const clientSelectionRequired = type === "inspection" || type === "retiro";
   const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
 
   const submissionSteps = useMemo(
@@ -468,7 +468,7 @@ const CreateRequestModal = ({
           {/* Campos dinámicos */}
           {type && type !== "cliente" && (
             <form onSubmit={handleSubmit} className="space-y-3">
-              {isInspection && (
+              {clientSelectionRequired && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
                   <p className="font-semibold">Selecciona primero un cliente registrado.</p>
                   <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
@@ -494,7 +494,7 @@ const CreateRequestModal = ({
                   </label>
 
                   {/* 📞 Input de Teléfono Personalizado */}
-                  {isInspection && f === "nombre_cliente" ? (
+                  {clientSelectionRequired && f === "nombre_cliente" ? (
                     <div className="space-y-2">
                       <select
                         name={f}
@@ -527,7 +527,7 @@ const CreateRequestModal = ({
                       value={formData[f] || COUNTRIES[0].dialCode}
                       onChange={handleChange}
                       error={errors[f]}
-                      disabled={isInspection && !hasSelectedClient}
+                      disabled={clientSelectionRequired && !hasSelectedClient}
                     />
                   ) : f === "requiere_lis" ? (
                     <label className="flex items-center gap-2 text-sm">
@@ -536,7 +536,7 @@ const CreateRequestModal = ({
                         name={f}
                         checked={formData[f] || false}
                         onChange={handleChange}
-                        disabled={isInspection && !hasSelectedClient}
+                        disabled={clientSelectionRequired && !hasSelectedClient}
                       />
                       Requiere LIS
                     </label>
@@ -556,8 +556,8 @@ const CreateRequestModal = ({
                         className={`w-full p-2 rounded-lg border ${errors[f]
                           ? "border-red-500"
                           : "border-gray-300 dark:border-gray-600"
-                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${isInspection && f !== "nombre_cliente" && !hasSelectedClient ? "opacity-60 cursor-not-allowed" : ""}`}
-                        disabled={isInspection && f !== "nombre_cliente" && !hasSelectedClient}
+                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${clientSelectionRequired && f !== "nombre_cliente" && !hasSelectedClient ? "opacity-60 cursor-not-allowed" : ""}`}
+                        disabled={clientSelectionRequired && f !== "nombre_cliente" && !hasSelectedClient}
                       />
                   )}
                   {errors[f] && (
@@ -589,11 +589,11 @@ const CreateRequestModal = ({
                     type="button"
                     onClick={addEquipo}
                     className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2 disabled:opacity-60"
-                    disabled={isInspection && !hasSelectedClient}
+                    disabled={clientSelectionRequired && !hasSelectedClient}
                   >
                     <FiPlus /> Agregar equipo
                   </Button>
-                  {isInspection && !hasSelectedClient && (
+                  {clientSelectionRequired && !hasSelectedClient && (
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
                 </div>
