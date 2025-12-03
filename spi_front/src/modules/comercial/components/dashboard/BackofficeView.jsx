@@ -4,6 +4,7 @@ import { FiTruck, FiSearch, FiClipboard, FiUserCheck } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
+import ClientApprovalsWidget from "../../../backoffice/components/ClientApprovalsWidget";
 
 const BackofficeView = ({ onRefresh }) => {
     const navigate = useNavigate();
@@ -39,19 +40,17 @@ const BackofficeView = ({ onRefresh }) => {
                     </div>
                 </Card>
 
-                <Card
-                    className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                    onClick={() => navigate("/dashboard/backoffice/client-requests")}
-                >
-                    <div className="flex items-center gap-3">
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3 mb-3">
                         <div className="p-2 bg-green-50 rounded-md text-green-600">
                             <FiUserCheck size={18} />
                         </div>
                         <div>
                             <p className="text-sm font-semibold text-gray-900">Solicitudes de clientes</p>
-                            <p className="text-xs text-gray-500">Aprobar o rechazar registros</p>
+                            <p className="text-xs text-gray-500">Revisar, aprobar o rechazar</p>
                         </div>
                     </div>
+                    <ClientApprovalsWidget />
                 </Card>
 
                 <Card
