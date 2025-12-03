@@ -233,15 +233,35 @@ const ClientesPage = () => {
     );
   }, [clientes, currentEmail]);
 
+  const allMine = useMemo(() => {
+    if (!Array.isArray(clientes)) return [];
+    const seen = new Set();
+    const merged = [];
+    [...assignedToMe, ...createdByMe].forEach((client) => {
+      if (!seen.has(client.id)) {
+        seen.add(client.id);
+        merged.push(client);
+      }
+    });
+    return merged;
+  }, [clientes, assignedToMe, createdByMe]);
+
   const filteredAssignedList = useMemo(() => {
-    const base = assignedViewFilter === "assigned" ? assignedToMe : createdByMe;
+    let base = assignedToMe;
+
+    if (assignedViewFilter === "created") {
+      base = createdByMe;
+    } else if (assignedViewFilter === "all") {
+      base = allMine;
+    }
+
     if (!assignedSearch) return base;
     const q = assignedSearch.toLowerCase();
     return base.filter((c) => {
       const haystack = `${c.nombre || ""} ${c.identificador || ""} ${c.shipping_contact_name || ""} ${c.shipping_address || ""}`.toLowerCase();
       return haystack.includes(q);
     });
-  }, [assignedViewFilter, assignedToMe, createdByMe, assignedSearch]);
+  }, [assignedViewFilter, assignedToMe, createdByMe, allMine, assignedSearch]);
 
   const handleAssign = async (clientId) => {
     const email = assignments[clientId];
@@ -548,7 +568,7 @@ const ClientesPage = () => {
               Mis clientes de gestión diaria
             </h2>
             <p className="text-sm text-gray-500">
-              Revisa rápidamente los clientes que tienes asignados o que tú mismo registraste y fueron aprobados.
+              Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
             </p>
           </div>
           <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
@@ -579,6 +599,17 @@ const ClientesPage = () => {
               }`}
             >
               Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setAssignedViewFilter("all")}
+              className={`px-3 py-1 rounded-full transition ${
+                assignedViewFilter === "all"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-500"
+              }`}
+            >
+              Todos mis clientes ({Array.isArray(allMine) ? allMine.length : 0})
             </button>
           </div>
 
@@ -646,7 +677,9 @@ const ClientesPage = () => {
           <p className="text-sm text-gray-500">
             {assignedViewFilter === "assigned"
               ? "No tienes clientes asignados que coincidan con el filtro."
-              : "No tienes clientes registrados por ti que coincidan con el filtro."}
+              : assignedViewFilter === "created"
+              ? "No tienes clientes registrados por ti que coincidan con el filtro."
+              : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
           </p>
         )}
       </Card>
