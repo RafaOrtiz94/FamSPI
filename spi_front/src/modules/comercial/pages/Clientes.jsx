@@ -54,7 +54,6 @@ const ClientesPage = () => {
     error: null,
   });
   const [submittingVisit, setSubmittingVisit] = useState(false);
-  const activeStatusMeta = getStatusMeta(activeClient?.visit_status);
 
   const normalizeStatus = (status) => {
     const value = (status || "").toLowerCase();
@@ -82,6 +81,8 @@ const ClientesPage = () => {
   };
 
   const getStatusMeta = (status) => statusStyles[normalizeStatus(status)] || statusStyles.pendiente;
+
+  const activeStatusMeta = useMemo(() => getStatusMeta(activeClient?.visit_status), [activeClient]);
 
   const formatTime = (value) =>
     value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
