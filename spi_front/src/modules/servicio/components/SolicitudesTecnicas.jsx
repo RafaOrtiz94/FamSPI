@@ -1,193 +1,271 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiFileText, FiRefreshCw, FiEye, FiX, FiFile, FiCalendar } from "react-icons/fi";
-import { motion } from "framer-motion";
+import React, { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Dialog, Transition } from "@headlessui/react";
+import {
+  FiRefreshCw,
+  FiFileText,
+  FiX,
+  FiMapPin,
+  FiUsers,
+  FiActivity,
+  FiClock,
+} from "react-icons/fi";
 import { getRequests } from "../../../core/api/requestsApi";
-import { useUI } from "../../../core/ui/useUI";
+import Card from "../../../core/ui/components/Card";
+import Button from "../../../core/ui/components/Button";
+import SolicitudesGrid from "../comercial/components/SolicitudesGrid";
 
-const TYPE_LABELS = {
-  "F.ST-20": "Solicitud de inspección de ambiente",
-  "F.ST-21": "Solicitud de retiro de equipo",
-  "F.ST-22": "Registro de nuevo cliente",
-  "F.ST-19": "Requerimiento de proceso de compra",
-};
-const getTypeLabel = (code, fallback) => TYPE_LABELS[code] || fallback || "Solicitud";
-
-const normalizeRows = (payload) => {
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload?.rows)) return payload.rows;
-  if (Array.isArray(payload?.data?.rows)) return payload.data.rows;
-  if (Array.isArray(payload?.data)) return payload.data;
-  if (Array.isArray(payload?.result?.rows)) return payload.result.rows;
-  if (Array.isArray(payload?.result)) return payload.result;
-  return [];
+const normalizeStatus = (status) => {
+  const value = String(status || "").toLowerCase();
+  if (["aprobado", "approved"].includes(value)) return "approved";
+  if (["rechazado", "rejected"].includes(value)) return "rejected";
+  if (["acta_generada", "acta_generated"].includes(value)) return "acta_generated";
+  if (["modificada", "modified"].includes(value)) return "modified";
+  if (["en_revision", "in_review"].includes(value)) return "in_review";
+  return "pending";
 };
 
-const SolicitudesTecnicas = ({ initialRequests = null }) => {
-  const { showToast } = useUI();
-  const [loading, setLoading] = useState(false);
-  const [list, setList] = useState(() => normalizeRows(initialRequests));
-  const [detail, setDetail] = useState({ open: false, data: null });
+const statusStyles = (status) => {
+  switch (normalizeStatus(status)) {
+    case "approved":
+      return {
+        label: "Aprobada",
+        badge: "bg-green-100 text-green-700 border-green-200",
+        dot: "bg-green-500",
+      };
+    case "rejected":
+      return {
+        label: "Rechazada",
+        badge: "bg-red-100 text-red-700 border-red-200",
+        dot: "bg-red-500",
+      };
+    case "in_review":
+      return {
+        label: "En revisión",
+        badge: "bg-blue-100 text-blue-700 border-blue-200",
+        dot: "bg-blue-500",
+      };
+    case "acta_generated":
+      return {
+        label: "Acta generada",
+        badge: "bg-purple-100 text-purple-700 border-purple-200",
+        dot: "bg-purple-500",
+      };
+    default:
+      return {
+        label: "Pendiente",
+        badge: "bg-amber-100 text-amber-700 border-amber-200",
+        dot: "bg-amber-500",
+      };
+  }
+};
 
-  const safeJSON = (txt) => {
+const parsePayload = (payload) => {
+  if (!payload) return {};
+  if (typeof payload === "string") {
     try {
-      return JSON.parse(txt);
-    } catch {
+      return JSON.parse(payload);
+    } catch (err) {
       return {};
     }
-  };
+  }
+  return payload;
+};
 
-  const fetchSolicitudes = useCallback(async () => {
+const SolicitudesTecnicas = () => {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState({ open: false, data: null });
+
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      const response = await getRequests({ pageSize: 30 });
-      setList(normalizeRows(response));
+      const data = await getRequests({ pageSize: 50 });
+      if (Array.isArray(data?.rows)) return setRequests(data.rows);
+      if (Array.isArray(data?.result?.rows)) return setRequests(data.result.rows);
+      if (Array.isArray(data?.data?.rows)) return setRequests(data.data.rows);
+      if (Array.isArray(data)) return setRequests(data);
+      setRequests([]);
     } catch (err) {
-      console.error(err);
-      showToast("No se pudieron cargar las solicitudes técnicas", "error");
+      console.warn("No se pudieron cargar solicitudes", err);
+      setRequests([]);
     } finally {
       setLoading(false);
     }
-  }, [showToast]);
+  }, []);
 
   useEffect(() => {
-    fetchSolicitudes();
-  }, [fetchSolicitudes]);
+    load();
+  }, [load]);
 
-  useEffect(() => {
-    setList(normalizeRows(initialRequests));
-  }, [initialRequests]);
-
-  const solicitudes = useMemo(
+  const mapped = useMemo(
     () =>
-      list.map((s) => ({
-        ...s,
-        payload: typeof s.payload === "string" ? safeJSON(s.payload) : s.payload,
-        type_title: getTypeLabel(s.type_code || s.code, s.type_title),
+      (requests || []).map((r) => ({
+        ...r,
+        status: normalizeStatus(r.status),
+        payload: parsePayload(r.payload),
       })),
-    [list]
+    [requests]
   );
 
-  const openDetail = (item) => {
-    setDetail({ open: true, data: item });
-  };
+  const openDetail = (item) => setDetail({ open: true, data: item });
+  const closeDetail = () => setDetail({ open: false, data: null });
+
+  const detailStyles = statusStyles(detail.data?.status);
+  const detailPayload = detail.data?.payload || {};
 
   return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.3 }}
-      className="p-6"
-    >
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-semibold text-gray-800 dark:text-white flex items-center gap-2">
-          <FiFileText className="text-blue-600" />
-          Solicitudes Técnicas
-        </h2>
-        <button
-          onClick={fetchSolicitudes}
-          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-        >
-          <FiRefreshCw className={loading ? "animate-spin" : ""} /> Actualizar
-        </button>
+    <div className="space-y-6 p-6">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <p className="text-sm text-gray-500">Gestión de solicitudes</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Solicitudes técnicas</h1>
+        </div>
+        <Button variant="secondary" icon={FiRefreshCw} onClick={load} disabled={loading}>
+          Actualizar
+        </Button>
       </div>
 
-      {loading ? (
-        <p className="text-gray-500 dark:text-gray-400">Cargando solicitudes...</p>
-      ) : solicitudes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center text-gray-400 dark:text-gray-500 py-12">
-          <FiFileText className="text-4xl mb-2" />
-          <p>No hay solicitudes técnicas registradas.</p>
+      <Card className="p-5">
+        <div className="mb-4 flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Solicitudes en curso</h2>
+            <p className="text-sm text-gray-500">Revisa cada tarjeta y abre el detalle para gestionar.</p>
+          </div>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {solicitudes.map((s) => (
-            <motion.div
-              key={s.id}
-              whileHover={{ scale: 1.02 }}
-              className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl p-4 shadow-sm"
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="font-semibold text-blue-600 mb-1">
-                    Solicitud #{s.id}
-                  </h3>
-                  <p className="text-sm text-gray-700 dark:text-gray-200">
-                    {s.type_title}
-                  </p>
-                </div>
-                <button
-                  onClick={() => openDetail(s)}
-                  className="rounded-lg border border-gray-200 p-2 text-sm text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
-                >
-                  <FiEye />
-                </button>
-              </div>
-              <p className="text-xs text-gray-400 mt-1">
-                Estado: <b className="capitalize">{s.status || "pendiente"}</b>
-              </p>
-              <p className="text-xs text-gray-500">
-                Cliente: {s.payload?.nombre_cliente || "—"}
-              </p>
-            </motion.div>
-          ))}
-        </div>
-      )}
 
-      <DetailModal detail={detail} onClose={() => setDetail({ open: false, data: null })} />
-    </motion.div>
+        {loading ? (
+          <div className="py-10 text-center text-gray-500">Cargando...</div>
+        ) : (
+          <SolicitudesGrid items={mapped} onView={openDetail} />
+        )}
+      </Card>
+
+      <Card className="p-5 flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Crear o revisar solicitudes</h3>
+          <p className="text-sm text-gray-600">
+            Ingresa al flujo completo para generar nuevas solicitudes o aprobar las existentes.
+          </p>
+        </div>
+        <a
+          href="/requests"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+        >
+          <FiFileText /> Ir a solicitudes
+        </a>
+      </Card>
+
+      <Transition.Root show={detail.open} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={closeDetail}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                        Solicitud #{detail.data?.id || "—"}
+                      </p>
+                      <Dialog.Title className="text-xl font-bold text-gray-900">
+                        {detailPayload?.nombre_cliente || detailPayload?.cliente || detail.data?.type_title || "Detalle de solicitud"}
+                      </Dialog.Title>
+                      <p className="text-sm text-gray-500">{detail.data?.type_title || detail.data?.type_name || "Tipo de solicitud"}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-50">
+                        <span className={`absolute h-3 w-3 rounded-full ${detailStyles.dot}`} aria-hidden />
+                      </span>
+                      <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${detailStyles.badge}`}>
+                        {detailStyles.label}
+                      </span>
+                      <button
+                        onClick={closeDetail}
+                        className="rounded-full border border-gray-200 p-2 text-gray-600 hover:bg-gray-100"
+                        aria-label="Cerrar"
+                      >
+                        <FiX />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 space-y-2">
+                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                        <FiUsers /> Datos del solicitante
+                      </div>
+                      <p className="text-gray-600">Solicitante: {detail.data?.requester_email || "—"}</p>
+                      <p className="text-gray-600">Contacto: {detailPayload?.persona_contacto || "—"}</p>
+                      <p className="text-gray-600">Teléfono: {detailPayload?.celular_contacto || detailPayload?.celular || "—"}</p>
+                      <p className="text-gray-600">Dirección: {detailPayload?.direccion_cliente || "—"}</p>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 space-y-2">
+                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                        <FiActivity /> Estado y asignación
+                      </div>
+                      <p className="text-gray-600">Estado: {detailStyles.label}</p>
+                      <p className="text-gray-600">Asignado a: {detail.data?.assigned_to_name || detailPayload?.asignado_a || "No asignado"}</p>
+                      <p className="text-gray-600">
+                        Creado: {detail.data?.created_at ? new Date(detail.data.created_at).toLocaleString("es-EC") : "—"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 space-y-2 md:col-span-2">
+                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                        <FiMapPin /> Detalle de la solicitud
+                      </div>
+                      <p>Equipo principal: {detailPayload?.equipo_principal || detailPayload?.equipo || detailPayload?.producto || "—"}</p>
+                      <p>Observaciones: {detailPayload?.observaciones || detailPayload?.observacion || "—"}</p>
+                      <p>Ubicación cliente: {detailPayload?.direccion_cliente || "No especificada"}</p>
+                      {detailPayload?.lat && detailPayload?.lng && (
+                        <a
+                          href={`https://www.google.com/maps?q=${detailPayload.lat},${detailPayload.lng}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-blue-600 text-sm font-semibold"
+                        >
+                          <FiMapPin /> Ver en mapa
+                        </a>
+                      )}
+                    </div>
+
+                    <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 space-y-2 md:col-span-2">
+                      <div className="flex items-center gap-2 text-gray-900 font-semibold">
+                        <FiClock /> Historial
+                      </div>
+                      <p>
+                        Última actualización: {detail.data?.updated_at ? new Date(detail.data.updated_at).toLocaleString("es-EC") : "No disponible"}
+                      </p>
+                    </div>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition.Root>
+    </div>
   );
 };
 
 export default SolicitudesTecnicas;
-
-const DetailModal = ({ detail, onClose }) => {
-  if (!detail.open || !detail.data) return null;
-  const s = detail.data;
-  const payload = s.payload || {};
-  return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-900">
-        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-3 dark:border-gray-800">
-          <div>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Solicitud #{s.id}</p>
-            <h3 className="text-xl font-semibold text-gray-900 dark:text-white">
-              {s.type_title}
-            </h3>
-          </div>
-          <button
-            onClick={onClose}
-            className="rounded-full border border-gray-200 p-2 text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
-            aria-label="Cerrar"
-          >
-            <FiX />
-          </button>
-        </div>
-
-        <div className="max-h-[70vh] overflow-y-auto px-5 py-4 space-y-4">
-          <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 dark:border-gray-800 dark:text-gray-200">
-            <p className="font-semibold mb-2 flex items-center gap-2">
-              <FiCalendar /> Información
-            </p>
-            <p>Estado: {s.status || "pendiente"}</p>
-            <p>
-              Creado:{" "}
-              {s.created_at ? new Date(s.created_at).toLocaleString("es-EC") : "—"}
-            </p>
-            <p>Solicitante: {s.requester_email || "—"}</p>
-          </div>
-
-          <div className="rounded-xl border border-gray-200 p-4 text-sm text-gray-700 dark:border-gray-800 dark:text-gray-200">
-            <p className="font-semibold mb-2 flex items-center gap-2">
-              <FiFile /> Detalle del cliente
-            </p>
-            <p>Nombre: {payload.nombre_cliente || "—"}</p>
-            <p>Contacto: {payload.persona_contacto || "—"}</p>
-            <p>Teléfono: {payload.celular_contacto || payload.celular || "—"}</p>
-            <p>Dirección: {payload.direccion_cliente || "—"}</p>
-            <p>Observación: {payload.observaciones || payload.observacion || "—"}</p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
