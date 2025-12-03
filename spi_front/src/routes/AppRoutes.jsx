@@ -32,6 +32,7 @@ import ServicioDisponibilidad from "../modules/servicio/pages/Disponibilidad";
 import ServicioCapacitaciones from "../modules/servicio/pages/Capacitaciones";
 import ServicioEquipos from "../modules/servicio/pages/Equipos";
 import ServicioAprobaciones from "../modules/servicio/pages/Aprobaciones";
+import ServicioAplicaciones from "../modules/servicio/pages/aplicaciones/Aplicaciones";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
 import DashboardOperaciones from "../modules/operaciones/Dashboard";
@@ -44,7 +45,6 @@ import Usuarios from "../modules/talento/pages/Usuarios";
 import Departamentos from "../modules/talento/pages/Departamentos";
 
 // 🧾 Páginas compartidas
-import RequestsPage from "../modules/RequestsPage";
 import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
@@ -129,6 +129,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
           <Route path="/dashboard/servicio-tecnico/mantenimientos" element={<ServicioMantenimientos />} />
           <Route path="/dashboard/servicio-tecnico/solicitudes" element={<ServicioSolicitudes />} />
+          <Route path="/dashboard/servicio-tecnico/aplicaciones" element={<ServicioAplicaciones />} />
           <Route path="/dashboard/servicio-tecnico/disponibilidad" element={<ServicioDisponibilidad />} />
           <Route path="/dashboard/servicio-tecnico/capacitaciones" element={<ServicioCapacitaciones />} />
           <Route path="/dashboard/servicio-tecnico/equipos" element={<ServicioEquipos />} />
@@ -155,7 +156,6 @@ const AppRoutes = () => {
           </Route>
 
           {/* Rutas compartidas */}
-          <Route path="/requests" element={<RequestsPage />} />
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />

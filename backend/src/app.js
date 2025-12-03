@@ -177,21 +177,6 @@ const departmentsRoutes = require("./modules/departments/departments.routes");
 const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
 const attendanceRoutes = require("./modules/attendance/attendance.routes");
-const gmailRoutes = require("./modules/gmail/gmail.routes");
-const equipmentPurchaseRoutes = require("./modules/equipment-purchases/equipmentPurchases.routes");
-const personnelRequestsRoutes = require("./modules/personnel-requests/personnel-requests.routes");
-const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
-const clientsRoutes = require("./modules/clients/clients.routes");
-
-// ======================================================
-// ❤️ 6️⃣ Rutas públicas de salud
-// ======================================================
-app.get("/", (_req, res) => res.status(200).json({
-  ok: true,
-  message: "SPI FAM API",
-  version: require("../package.json").version
-}));
-app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
 // ======================================================
 // 🔓 7️⃣ Rutas públicas (sin JWT)
@@ -241,6 +226,13 @@ app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
 app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
 app.use("/api/v1/vacaciones", vacacionesRoutes);
 app.use("/api/v1/clients", clientsRoutes);
+// Business Case Vivo routes
+app.use("/api/v1/catalogs", catalogsRoutes);
+app.use("/api/v1/contracts", contractsRoutes);
+app.use("/api/v1/alerts", alertsRoutes);
+// Technical Applications routes
+const taRoutes = require("./modules/technical-applications/ta.routes");
+app.use("/api/v1/technical-applications", taRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

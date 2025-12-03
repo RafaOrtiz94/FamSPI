@@ -107,6 +107,11 @@ const servicioLinks = [
     path: "/dashboard/servicio-tecnico/solicitudes",
   },
   {
+    name: "Aplicaciones",
+    icon: FiFileText,
+    path: "/dashboard/servicio-tecnico/aplicaciones",
+  },
+  {
     name: "Disponibilidad",
     icon: FiUsers,
     path: "/dashboard/servicio-tecnico/disponibilidad",
