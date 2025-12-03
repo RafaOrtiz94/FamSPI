@@ -7,12 +7,9 @@ import Button from "../../../../core/ui/components/Button";
 import SolicitudesGrid from "../SolicitudesGrid";
 import CreateRequestModal from "../CreateRequestModal";
 import RequestDetailModal from "../RequestDetailModal";
-import RequestTypeActionCard from "../RequestTypeActionCard";
-import NewClientActionCard from "../NewClientActionCard";
-import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
+import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import VacationRequestActionCard from "../VacationRequestActionCard";
 import VacationRequestModal from "../VacationRequestModal";
 
 const ComercialSolicitudesView = () => {
@@ -43,7 +40,7 @@ const ComercialSolicitudesView = () => {
             description:
                 "Agenda la visita del equipo técnico y genera automáticamente la F.ST-INS para ambientes, LIS y periféricos.",
             chips: ["F.ST-INS", "Checklist"],
-            tone: "blue",
+            color: "blue",
             icon: FiClipboard,
         },
         {
@@ -53,7 +50,7 @@ const ComercialSolicitudesView = () => {
             description:
                 "Gestiona la logística inversa para equipos en campo y documenta las observaciones.",
             chips: ["Rutas"],
-            tone: "amber",
+            color: "amber",
             icon: FiClipboard,
         },
     ];
@@ -130,25 +127,39 @@ const ComercialSolicitudesView = () => {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
                     {requestActionCards.map((card) => (
                         <div key={card.id} className="flex">
-                            <RequestTypeActionCard
-                                {...card}
+                            <ActionCard
+                                icon={card.icon}
+                                subtitle={card.subtitle}
+                                title={card.title}
+                                color={card.color}
                                 onClick={() => openRequestModal(card.id)}
-                                ctaLabel="Crear Solicitud"
                             />
                         </div>
                     ))}
                     <div className="flex">
-                        <NewClientActionCard
+                        <ActionCard
+                            icon={FiClipboard}
+                            subtitle="Nuevo Cliente"
+                            title="Registrar Cliente"
+                            color="emerald"
                             onClick={() => openRequestModal("cliente")}
                         />
                     </div>
                     <div className="flex">
-                        <PurchaseRequestActionCard
+                        <ActionCard
+                            icon={FiClipboard}
+                            subtitle="Compras"
+                            title="Requerimientos"
+                            color="indigo"
                             onClick={handlePurchaseHandoffOpen}
                         />
                     </div>
                     <div className="flex">
-                        <VacationRequestActionCard
+                        <ActionCard
+                            icon={FiClipboard}
+                            subtitle="Talento Humano"
+                            title="Vacaciones"
+                            color="orange"
                             onClick={() => setShowVacationModal(true)}
                         />
                     </div>

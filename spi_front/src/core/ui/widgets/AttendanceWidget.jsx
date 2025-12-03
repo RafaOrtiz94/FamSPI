@@ -2,15 +2,15 @@ import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiClock, FiCoffee, FiLogOut, FiCheckCircle, FiSun, FiMoon } from "react-icons/fi";
 import confetti from "canvas-confetti";
-import Button from "../../../core/ui/components/Button";
-import Card from "../../../core/ui/components/Card";
-import { useUI } from "../../../core/ui/useUI";
+import Button from "../components/Button";
+import Card from "../components/Card";
+import { useUI } from "../useUI";
 import {
     clockOutLunch,
     clockInLunch,
     clockOut,
     getTodayAttendance,
-} from "../../../core/api/attendanceApi";
+} from "../../api/attendanceApi";
 
 /**
  * AttendanceWidget Component - Enhanced Interactive Version

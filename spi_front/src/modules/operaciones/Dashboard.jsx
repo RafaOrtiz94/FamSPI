@@ -12,9 +12,9 @@ import { useDashboard } from "../../core/hooks/useDashboard";
 import { useUI } from "../../core/ui/useUI";
 import { getRequests } from "../../core/api/requestsApi";
 import { getMantenimientos } from "../../core/api/mantenimientosApi";
-import ExecutiveStatCard from "../../core/ui/components/ExecutiveStatCard";
-import AttendanceWidget from "../shared/components/AttendanceWidget";
-import ClientRequestWidget from "../shared/components/ClientRequestWidget";
+import StatCard from "../../core/ui/patterns/StatCard";
+import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
+import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
@@ -117,33 +117,29 @@ const DashboardOperaciones = () => {
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ExecutiveStatCard
-          icon={<FiClipboard size={22} />}
+        <StatCard
+          icon={FiClipboard}
           label="Órdenes activas"
           value={activeOrders}
-          from="from-blue-600"
-          to="to-sky-500"
+          color="blue"
         />
-        <ExecutiveStatCard
-          icon={<FiCheckCircle size={22} />}
+        <StatCard
+          icon={FiCheckCircle}
           label="Órdenes completadas"
           value={completedOrders}
-          from="from-emerald-600"
-          to="to-green-500"
+          color="emerald"
         />
-        <ExecutiveStatCard
-          icon={<FiActivity size={22} />}
+        <StatCard
+          icon={FiActivity}
           label="Pendientes de revisión"
           value={statusBuckets.in_review || 0}
-          from="from-amber-500"
-          to="to-orange-500"
+          color="amber"
         />
-        <ExecutiveStatCard
-          icon={<FiTool size={22} />}
+        <StatCard
+          icon={FiTool}
           label="Mantenimientos activos"
           value={pendingMaints.length}
-          from="from-indigo-600"
-          to="to-blue-500"
+          color="indigo"
         />
       </div>
 

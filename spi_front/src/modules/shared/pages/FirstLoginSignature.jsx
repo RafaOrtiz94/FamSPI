@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiCheckCircle, FiAlertCircle } from "react-icons/fi";
-import SignatureCapture from "../components/SignatureCapture";
+import SignatureCapture from "../../../core/ui/widgets/SignatureCapture";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
 import { useAuth } from "../../../core/auth/AuthContext";

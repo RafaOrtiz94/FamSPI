@@ -2,14 +2,7 @@
 import React, { useEffect, useMemo, useState, useCallback, Fragment } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { motion } from "framer-motion";
-import {
-  FiEye,
-  FiTrash2,
-  FiFileText,
-  FiLink,
-  FiSearch,
-  FiPlus,
-} from "react-icons/fi";
+import { FiFileText, FiLink, FiSearch, FiPlus } from "react-icons/fi";
 
 import { useUI } from "../core/ui/UIContext";
 import { useApi } from "../core/hooks/useApi";
@@ -47,6 +40,19 @@ const STATUS_LABELS = {
   cancelado: "Cancelado",
 };
 
+const STATUS_DOTS = {
+  aprobado: "bg-green-500",
+  rechazado: "bg-red-500",
+  pendiente: "bg-amber-500",
+  en_revision: "bg-blue-500",
+  cancelado: "bg-gray-400",
+  acta_generada: "bg-purple-500",
+  in_review: "bg-blue-500",
+  approved: "bg-green-500",
+  rejected: "bg-red-500",
+  pending: "bg-amber-500",
+};
+
 const REQUEST_TYPE_LABELS = {
   inspection: "Inspección de ambiente",
   purchase: "Proceso de compra",
@@ -62,6 +68,13 @@ const StatusBadge = ({ status }) => (
   >
     {STATUS_LABELS[status] || status || "—"}
   </span>
+);
+
+const DetailSection = ({ title, children }) => (
+  <section className="rounded-xl border border-gray-100 bg-gray-50/60 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">{title}</p>
+    <div className="mt-2 space-y-2 text-sm text-gray-700 dark:text-gray-200">{children}</div>
+  </section>
 );
 
 // ======= Página principal (equivalente al Dashboard Comercial) =======
@@ -329,6 +342,31 @@ const RequestsPage = () => {
       }
     });
   };
+
+  const detailRequest = detail.data?.request || {};
+  const detailPayload = detailRequest.payload || {};
+  const detailEquipmentList = Array.isArray(detailPayload?.equipos)
+    ? detailPayload.equipos
+    : Array.isArray(detailPayload?.items)
+    ? detailPayload.items
+    : Array.isArray(detailPayload?.equipment_list)
+    ? detailPayload.equipment_list
+    : [];
+  const detailStatusKey = (detailRequest.status || "").toLowerCase();
+  const detailDot = STATUS_DOTS[detailStatusKey] || STATUS_DOTS.pending;
+  const detailCreatedAt = detailRequest.created_at
+    ? new Date(detailRequest.created_at).toLocaleString()
+    : "—";
+  const detailAssignedTo =
+    detailRequest.assigned_to_name ||
+    detailRequest.assigned_to ||
+    detailPayload.asignado_a ||
+    detailPayload.assigned_to ||
+    "No asignado";
+  const canCancelDetail =
+    detailStatusKey === "acta_generated" ||
+    detailStatusKey === "acta_generada" ||
+    ["pendiente", "pending", "en_revision", "in_review"].includes(detailStatusKey);
 
   // ======= UI =======
   return (
@@ -692,90 +730,154 @@ const RequestsPage = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl rounded-2xl bg-white dark:bg-gray-800 p-6 shadow-xl border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
-                  <Dialog.Title className="text-lg font-bold text-gray-900 dark:text-white mb-4">
-                    Detalle de Solicitud
-                  </Dialog.Title>
-
-                {detail.loading ? (
-                  <div className="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400">
-                    <svg className="animate-spin h-6 w-6 mr-2 text-blue-600" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    Cargando detalle...
-                  </div>
-                ) : detail.error ? (
-                  <p className="text-red-500">{detail.error}</p>
-                ) : detail.data ? (
-                  <>
-                    <div className="space-y-3 text-sm text-gray-700 dark:text-gray-300">
-                      <p>
-                        <span className="font-semibold">ID:</span> {detail.data.request?.id}
+                <Dialog.Panel className="w-full max-w-3xl rounded-2xl border border-gray-200 bg-white p-6 shadow-xl dark:border-gray-700 dark:bg-gray-800 max-h-[90vh] overflow-y-auto">
+                  <div className="mb-4 flex items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                        Solicitud #{detailRequest?.id || "—"}
                       </p>
-                      <p className="flex items-center gap-2">
-                        <span className="font-semibold">Estado:</span>
-                        <StatusBadge status={detail.data.request?.status} />
-                      </p>
-                      <p>
-                        <span className="font-semibold">Tipo de Solicitud:</span>{" "}
-                        {detail.data.request?.type_name || "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Cliente:</span>{" "}
-                        {detail.data.request?.payload?.nombre_cliente || "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Persona de contacto:</span>{" "}
-                        {detail.data.request?.payload?.persona_contacto || "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Fecha de creación:</span>{" "}
-                        {detail.data.request?.created_at
-                          ? new Date(detail.data.request.created_at).toLocaleString()
-                          : "—"}
+                      <Dialog.Title className="text-xl font-bold text-gray-900 dark:text-white">
+                        {detailPayload?.nombre_cliente || detailRequest?.type_name || "Detalle de Solicitud"}
+                      </Dialog.Title>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">
+                        {detailRequest?.type_name || detailRequest?.type_title || "Tipo de solicitud"}
                       </p>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <span className="relative inline-flex h-10 w-10 items-center justify-center rounded-full bg-gray-50 dark:bg-gray-900/50">
+                        <span className={`absolute h-3 w-3 rounded-full ${detailDot}`} aria-hidden />
+                      </span>
+                      <StatusBadge status={detailRequest?.status} />
+                      <button
+                        type="button"
+                        onClick={closeDetail}
+                        className="rounded-full border border-gray-200 p-2 text-gray-500 transition hover:bg-gray-100 hover:text-gray-700 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                        aria-label="Cerrar"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </div>
 
-                    {detail.data.attachments?.length > 0 && (
-                      <div className="mt-6">
-                        <h3 className="text-md font-semibold mb-3">Archivos Adjuntos</h3>
-                        <ul className="space-y-2">
-                          {detail.data.attachments.map((file, idx) => (
-                            <li
-                              key={idx}
-                              className="flex items-center justify-between bg-gray-50 dark:bg-gray-900 px-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700"
-                            >
-                              <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
-                                <FiFileText className="text-blue-500" />
-                                <span>{file.title || file.filename}</span>
-                              </div>
-                              <a
-                                href={file.drive_link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 text-sm"
-                              >
-                                <FiLink /> Ver archivo
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
+                  {detail.loading ? (
+                    <div className="flex items-center justify-center py-12 text-gray-500 dark:text-gray-400">
+                      <svg className="mr-2 h-6 w-6 animate-spin text-blue-600" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+                      </svg>
+                      Cargando detalle...
+                    </div>
+                  ) : detail.error ? (
+                    <p className="text-red-500">{detail.error}</p>
+                  ) : detail.data ? (
+                    <>
+                      <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <DetailSection title="Estado y fecha">
+                          <div className="flex items-center gap-2">
+                            <StatusBadge status={detailRequest?.status} />
+                            <span className="text-xs text-gray-500 dark:text-gray-400">{detailCreatedAt}</span>
+                          </div>
+                        </DetailSection>
+                        <DetailSection title="Asignación">
+                          <p className="font-semibold text-gray-900 dark:text-white">{detailAssignedTo}</p>
+                          {detailPayload?.persona_contacto && (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">Contacto: {detailPayload.persona_contacto}</p>
+                          )}
+                        </DetailSection>
                       </div>
-                    )}
-                  </>
-                ) : (
-                  <p>No hay datos disponibles.</p>
-                )}
 
-                <div className="flex justify-end mt-6">
-                  <button
-                    onClick={closeDetail}
-                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 transition"
-                  >
-                    Cerrar
-                  </button>
-                </div>
+                      <div className="space-y-3">
+                        <DetailSection title="Datos del solicitante">
+                          <p>
+                            <span className="font-semibold">Cliente:</span> {detailPayload?.nombre_cliente || "—"}
+                          </p>
+                          {detailPayload?.correo && (
+                            <p>
+                              <span className="font-semibold">Correo:</span> {detailPayload.correo}
+                            </p>
+                          )}
+                          {detailPayload?.telefono && (
+                            <p>
+                              <span className="font-semibold">Teléfono:</span> {detailPayload.telefono}
+                            </p>
+                          )}
+                          {detailPayload?.observacion && (
+                            <p className="whitespace-pre-line text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+                              {detailPayload.observacion}
+                            </p>
+                          )}
+                        </DetailSection>
+
+                        <DetailSection title="Equipos solicitados">
+                          {detailEquipmentList.length ? (
+                            <ul className="divide-y divide-gray-100 text-sm dark:divide-gray-700">
+                              {detailEquipmentList.map((eq, idx) => (
+                                <li key={idx} className="py-2">
+                                  <p className="font-semibold text-gray-900 dark:text-white">{eq?.nombre || eq?.equipo || eq?.descripcion || `Equipo ${idx + 1}`}</p>
+                                  {eq?.cantidad && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Cantidad: {eq.cantidad}</p>
+                                  )}
+                                  {eq?.detalle && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">{eq.detalle}</p>
+                                  )}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : (
+                            <p className="text-gray-500 dark:text-gray-400">No hay equipos adicionales registrados.</p>
+                          )}
+                        </DetailSection>
+
+                        {(detailPayload?.proveedor || detailPayload?.provider || detailPayload?.supplier) && (
+                          <DetailSection title="Información del proveedor">
+                            <p>{detailPayload.proveedor || detailPayload.provider || detailPayload.supplier}</p>
+                            {detailPayload?.proveedor_contacto && (
+                              <p className="text-xs text-gray-500 dark:text-gray-400">Contacto: {detailPayload.proveedor_contacto}</p>
+                            )}
+                          </DetailSection>
+                        )}
+
+                        {detail.data.attachments?.length > 0 && (
+                          <DetailSection title="Documentos adjuntos">
+                            <ul className="space-y-2">
+                              {detail.data.attachments.map((file, idx) => (
+                                <li
+                                  key={idx}
+                                  className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm shadow-sm dark:border-gray-700 dark:bg-gray-900"
+                                >
+                                  <div className="flex items-center gap-2 text-gray-700 dark:text-gray-300">
+                                    <FiFileText className="text-blue-500" />
+                                    <span>{file.title || file.filename}</span>
+                                  </div>
+                                  <a
+                                    href={file.drive_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-blue-600 transition hover:underline dark:text-blue-400"
+                                  >
+                                    <FiLink /> Ver archivo
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          </DetailSection>
+                        )}
+                      </div>
+
+                      <div className="mt-6 flex items-center justify-end gap-3 border-t border-gray-100 pt-4 dark:border-gray-700">
+                        {canCancelDetail && (
+                          <Button variant="secondary" type="button" onClick={() => cancelRequest(detailRequest)}>
+                            Cancelar solicitud
+                          </Button>
+                        )}
+                        <Button type="button" onClick={closeDetail} variant="primary">
+                          Cerrar
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <p>No hay datos disponibles.</p>
+                  )}
                 </Dialog.Panel>
               </Transition.Child>
             </div>

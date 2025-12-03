@@ -1,11 +1,10 @@
 import React, { useState } from "react";
+import { FiClipboard, FiCreditCard, FiUserPlus } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
 import CreateRequestModal from "../CreateRequestModal";
-import NewClientActionCard from "../NewClientActionCard";
-import PurchaseRequestActionCard from "../PurchaseRequestActionCard";
+import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import VacationRequestActionCard from "../VacationRequestActionCard";
 import VacationRequestModal from "../VacationRequestModal";
 
 const ACPComercialSolicitudesView = () => {
@@ -50,17 +49,29 @@ const ACPComercialSolicitudesView = () => {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                     <div className="flex">
-                        <NewClientActionCard
+                        <ActionCard
+                            icon={FiUserPlus}
+                            subtitle="Clientes"
+                            title="Registrar Cliente"
+                            color="emerald"
                             onClick={() => openRequestModal("cliente")}
                         />
                     </div>
                     <div className="flex">
-                        <PurchaseRequestActionCard
+                        <ActionCard
+                            icon={FiCreditCard}
+                            subtitle="Compras"
+                            title="Requerimientos"
+                            color="indigo"
                             onClick={handlePurchaseHandoffOpen}
                         />
                     </div>
                     <div className="flex">
-                        <VacationRequestActionCard
+                        <ActionCard
+                            icon={FiClipboard}
+                            subtitle="Talento Humano"
+                            title="Vacaciones"
+                            color="orange"
                             onClick={() => setShowVacationModal(true)}
                         />
                     </div>

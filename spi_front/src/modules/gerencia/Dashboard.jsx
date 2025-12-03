@@ -13,9 +13,9 @@ import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
 import Button from "../../core/ui/components/Button";
-import AttendanceWidget from "../shared/components/AttendanceWidget";
-import ClientRequestWidget from "../shared/components/ClientRequestWidget";
-import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
+import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
+import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
+import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
 import { useUI } from "../../core/ui/useUI";
 import { useApi } from "../../core/hooks/useApi";
 import { useDashboard } from "../../core/hooks/useDashboard";
@@ -23,7 +23,7 @@ import { getAuditoria } from "../../core/api/auditoriaApi";
 import { getRequests } from "../../core/api/requestsApi";
 import { logout } from "../../core/api";
 
-import KpiCard from "./components/KpiCard";
+import StatCard from "../../core/ui/patterns/StatCard";
 import ChartCard from "./components/ChartCard";
 import RequestCard from "./components/RequestCard";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
@@ -180,29 +180,29 @@ const Dashboard = () => {
         </div>
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <KpiCard
-            title="Total Solicitudes"
+          <StatCard
+            label="Total Solicitudes"
             value={stats.total || 0}
             icon={FiTrendingUp}
             color="blue"
           />
-          <KpiCard
-            title="Aprobadas"
+          <StatCard
+            label="Aprobadas"
             value={stats.approved || 0}
             icon={FiCheckCircle}
-            color="green"
+            color="emerald"
           />
-          <KpiCard
-            title="Rechazadas"
+          <StatCard
+            label="Rechazadas"
             value={stats.rejected || 0}
             icon={FiXCircle}
             color="red"
           />
-          <KpiCard
-            title="Pendientes"
+          <StatCard
+            label="Pendientes"
             value={stats.pending || 0}
             icon={FiRefreshCw}
-            color="yellow"
+            color="amber"
           />
         </section>
 
