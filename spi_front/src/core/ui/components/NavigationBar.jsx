@@ -126,6 +126,11 @@ const servicioLinks = [
     icon: FiCheckCircle,
     path: "/dashboard/servicio-tecnico/aprobaciones",
   },
+  {
+    name: "Aplicaciones",
+    icon: FiFileText,
+    path: "/dashboard/servicio-tecnico/aplicaciones",
+  },
 ];
 
 const buildLinks = (scope) => {
