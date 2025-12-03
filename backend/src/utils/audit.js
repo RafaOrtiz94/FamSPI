@@ -122,6 +122,7 @@ async function logAction({
     await db.query(query, values);
 
     logger.audit(
+      `🧾 Auditoría registrada → ${modulo}.${accion}`,
       {
         usuario_email,
         rol,
@@ -131,8 +132,7 @@ async function logAction({
         mantenimiento_id,
         inventario_id,
         auto,
-      },
-      `🧾 Auditoría registrada → ${modulo}.${accion}`
+      }
     );
   } catch (err) {
     // Nunca romper flujo principal
