@@ -104,8 +104,8 @@ const ClientesPage = () => {
 
   const formatClientType = (type) => {
     const value = (type || "").toLowerCase();
-    if (value === "persona_juridica") return "Persona Jurídica";
-    if (value === "persona_natural") return "Persona Natural";
+    if (value === "persona_juridica" || value.includes("jurid")) return "Persona Jurídica";
+    if (value === "persona_natural" || value.includes("natur")) return "Persona Natural";
     return "Tipo no especificado";
   };
 
