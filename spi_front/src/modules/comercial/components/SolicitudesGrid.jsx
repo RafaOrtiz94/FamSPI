@@ -1,11 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import {
-  FiEye,
-  FiTrash2,
-  FiPaperclip,
-  FiClock,
-  FiActivity,
-} from "react-icons/fi";
+import { FiClock, FiActivity, FiUser, FiInfo, FiCpu } from "react-icons/fi";
 
 const PAGE_SIZE = 6;
 
@@ -23,17 +17,41 @@ const getStatusStyle = (status) => {
   const s = normalizeStatus(status);
   switch (s) {
     case "approved":
-      return { label: "Aprobada", color: "bg-green-100 text-green-700 border-green-200" };
+      return {
+        label: "Aprobada",
+        color: "bg-green-100 text-green-700 border-green-200",
+        dot: "bg-green-500",
+      };
     case "rejected":
-      return { label: "Rechazada", color: "bg-red-100 text-red-700 border-red-200" };
+      return {
+        label: "Rechazada",
+        color: "bg-red-100 text-red-700 border-red-200",
+        dot: "bg-red-500",
+      };
     case "in_review":
-      return { label: "En Revisión", color: "bg-blue-100 text-blue-700 border-blue-200" };
+      return {
+        label: "En Revisión",
+        color: "bg-blue-100 text-blue-700 border-blue-200",
+        dot: "bg-blue-500",
+      };
     case "acta_generated":
-      return { label: "Acta Generada", color: "bg-purple-100 text-purple-700 border-purple-200" };
+      return {
+        label: "Acta Generada",
+        color: "bg-purple-100 text-purple-700 border-purple-200",
+        dot: "bg-purple-500",
+      };
     case "cancelled":
-      return { label: "Cancelada", color: "bg-gray-200 text-gray-600 border-gray-300" };
+      return {
+        label: "Cancelada",
+        color: "bg-gray-200 text-gray-600 border-gray-300",
+        dot: "bg-gray-400",
+      };
     default:
-      return { label: "Pendiente", color: "bg-amber-100 text-amber-700 border-amber-200" };
+      return {
+        label: "Pendiente",
+        color: "bg-amber-100 text-amber-700 border-amber-200",
+        dot: "bg-amber-500",
+      };
   }
 };
 
@@ -91,74 +109,118 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
         )}
       </div>
 
-      <div className="grid min-h-[28rem] grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid min-h-[28rem] grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {visibleItems.map((s) => {
-          const { label, color } = getStatusStyle(s.status);
+          const { label, color, dot } = getStatusStyle(s.status);
           const payload =
             typeof s.payload === "string" ? safeJSON(s.payload) : s.payload || {};
+
+          const requester =
+            payload?.nombre_cliente ||
+            payload?.solicitante ||
+            payload?.cliente ||
+            payload?.persona_contacto ||
+            s.type_title ||
+            "Solicitud";
+
+          const mainEquipment =
+            payload?.equipo_principal ||
+            payload?.equipo ||
+            payload?.equipment ||
+            payload?.producto ||
+            payload?.items?.[0]?.nombre ||
+            payload?.equipos?.[0]?.nombre ||
+            payload?.equipos?.[0]?.equipo ||
+            payload?.items?.[0]?.equipo ||
+            "—";
+
+          const assignedTo =
+            s.assigned_to_name ||
+            s.assigned_to ||
+            s.assigned_to_user ||
+            payload?.asignado_a ||
+            payload?.assigned_to ||
+            "No asignado";
+
+          const createdAt = s.created_at
+            ? new Date(s.created_at).toLocaleDateString("es-EC", {
+                day: "2-digit",
+                month: "short",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "Fecha no disponible";
 
           return (
             <div
               key={s.id}
-              className="flex flex-col justify-between rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition-all duration-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+              onClick={() => onView?.(s)}
+              className="group relative flex min-h-[180px] cursor-pointer flex-col justify-between rounded-xl border border-gray-100 bg-white p-4 text-sm shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
             >
-              <div className="flex items-center justify-between">
-                <span className="font-semibold text-blue-600 dark:text-blue-400">
-                  #{s.id} — {s.type_title || "Solicitud"}
-                </span>
+              <span
+                className={`absolute right-3 top-3 h-2.5 w-2.5 rounded-full shadow-sm ${dot}`}
+                aria-hidden
+              />
+
+              <div className="flex items-start justify-between gap-3">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    #{s.id} · {s.type_title || "Solicitud"}
+                  </p>
+                  <p className="text-base font-semibold text-gray-900 dark:text-white line-clamp-1">
+                    {requester}
+                  </p>
+                  <p className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
+                    <FiClock className="text-gray-400" />
+                    {createdAt}
+                  </p>
+                </div>
                 <span
-                  className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${color}`}
+                  className={`rounded-full border px-2 py-[2px] text-xs font-semibold ${color}`}
                 >
                   {label}
                 </span>
               </div>
 
-              <div className="mt-3 space-y-1 text-sm">
-                <p className="flex items-center gap-1 text-gray-700 dark:text-gray-200">
-                  <FiActivity className="text-accent" />{" "}
-                  <span className="font-medium">{payload?.nombre_cliente || "—"}</span>
-                </p>
-                <p className="text-gray-600 dark:text-gray-300">
-                  Contacto: <span className="font-medium">{payload?.persona_contacto || "—"}</span>
-                </p>
-                {payload?.direccion_cliente && (
-                  <p className="truncate text-gray-600 dark:text-gray-300">
-                    {payload.direccion_cliente}
-                  </p>
-                )}
-                <p className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
-                  <FiClock />
-                  {new Date(s.created_at).toLocaleDateString("es-EC", {
-                    day: "2-digit",
-                    month: "short",
-                    year: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </p>
+              <div className="mt-4 space-y-3">
+                <div className="flex items-center gap-3 text-gray-700 dark:text-gray-200">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
+                    <FiCpu />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Equipo principal</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">{mainEquipment}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 text-gray-700 dark:text-gray-200">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-200">
+                    <FiUser />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Asignado a</p>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white line-clamp-1">{assignedTo}</p>
+                  </div>
+                </div>
               </div>
 
-              {Array.isArray(s.attachments) && s.attachments.length > 0 && (
-                <div className="mt-3 flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
-                  <FiPaperclip /> {s.attachments.length} adjunto(s)
+              <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                <div className="flex items-center gap-2">
+                  <FiActivity className="text-blue-500" />
+                  <span className="text-xs font-semibold text-blue-600 dark:text-blue-300">{label}</span>
                 </div>
-              )}
-
-              <div className="mt-3 flex justify-end gap-2 border-t border-gray-100 pt-3 dark:border-gray-700">
                 <button
-                  onClick={() => onView(s)}
-                  className="flex items-center gap-2 rounded-lg bg-gray-100 px-3 py-1.5 text-sm text-gray-800 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onView?.(s);
+                  }}
+                  className="flex items-center gap-1 rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+                  aria-label="Ver detalle"
                 >
-                  <FiEye /> Ver
+                  <FiInfo /> Más info
                 </button>
-                {["pending", "in_review", "acta_generated"].includes(s.status) && (
-                  <button
-                    onClick={() => onCancel(s)}
-                    className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-1.5 text-sm text-red-600 hover:bg-red-100"
-                  >
-                    <FiTrash2 /> Cancelar
-                  </button>
-                )}
               </div>
             </div>
           );
