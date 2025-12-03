@@ -7,6 +7,7 @@ import Button from "../../../core/ui/components/Button";
 import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
+import { fetchClients } from "../../../core/api/clientsApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -224,6 +225,9 @@ const CreateRequestModal = ({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState(null);
+  const [availableClients, setAvailableClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
   const isInspection = type === "inspection";
@@ -246,26 +250,28 @@ const CreateRequestModal = ({
       setEquipos([]);
       setFiles([]);
       setErrors({});
+      setSelectedClientId("");
       return;
     }
 
     if (isEditing && initialData) {
       setType(presetType || (initialData.client_type ? "cliente" : null));
       if (presetType !== "cliente") {
-        setFormData(initialData);
-      }
-    } else if (presetType) {
-      setType(presetType);
-    } else {
-      setType(null);
+      setFormData(initialData);
     }
+  } else if (presetType) {
+    setType(presetType);
+  } else {
+    setType(null);
+  }
 
-    if (!isEditing) {
-      setFormData({});
-      setEquipos([]);
-      setErrors({});
-    }
-  }, [open, presetType, initialData, isEditing]);
+  if (!isEditing) {
+    setFormData({});
+    setEquipos([]);
+    setErrors({});
+    setSelectedClientId("");
+  }
+}, [open, presetType, initialData, isEditing]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -312,6 +318,24 @@ const CreateRequestModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
+  useEffect(() => {
+    const loadClients = async () => {
+      if (!open || !type || type === "cliente") return;
+      setLoadingClients(true);
+      try {
+        const clients = await fetchClients();
+        setAvailableClients(Array.isArray(clients) ? clients : []);
+      } catch (error) {
+        console.error("Error cargando clientes", error);
+        setAvailableClients([]);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+
+    loadClients();
+  }, [open, type]);
+
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
     const { name, value, type: inputType, checked } = e.target;
@@ -330,6 +354,27 @@ const CreateRequestModal = ({
     if (!type || !requestTypes[type].equipos) return;
     const base = requestTypesForEquipments[type];
     setEquipos([...equipos, { ...base }]);
+  };
+
+  const handleClientSelect = (clientId) => {
+    if (!clientId) {
+      setFormData((prev) => ({ ...prev, nombre_cliente: "" }));
+      setSelectedClientId("");
+      return;
+    }
+
+    const selected = availableClients.find((c) => `${c.id}` === `${clientId}`);
+    if (!selected) return;
+
+    setSelectedClientId(`${clientId}`);
+
+    setFormData((prev) => ({
+      ...prev,
+      nombre_cliente: selected.commercial_name || selected.nombre || "",
+      direccion_cliente: selected.shipping_address || "",
+      persona_contacto: selected.shipping_contact_name || "",
+      celular_contacto: selected.shipping_phone || prev.celular_contacto || COUNTRIES[0].dialCode,
+    }));
   };
 
   const updateEquipo = (index, key, value) => {
@@ -449,7 +494,34 @@ const CreateRequestModal = ({
                   </label>
 
                   {/* 📞 Input de Teléfono Personalizado */}
-                  {f === "celular_contacto" ? (
+                  {isInspection && f === "nombre_cliente" ? (
+                    <div className="space-y-2">
+                      <select
+                        name={f}
+                        value={selectedClientId}
+                        onChange={(e) => handleClientSelect(e.target.value)}
+                        disabled={loadingClients}
+                        className={`w-full p-2 rounded-lg border ${errors[f]
+                          ? "border-red-500"
+                          : "border-gray-300 dark:border-gray-600"
+                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+                      >
+                        <option value="" disabled>
+                          {loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}
+                        </option>
+                        {availableClients.map((client) => (
+                          <option key={client.id} value={client.id}>
+                            {client.commercial_name || client.nombre || `Cliente ${client.id}`}
+                          </option>
+                        ))}
+                      </select>
+                      {!loadingClients && availableClients.length === 0 && (
+                        <p className="text-xs text-gray-500">
+                          No encontramos clientes disponibles. Registra uno nuevo.
+                        </p>
+                      )}
+                    </div>
+                  ) : f === "celular_contacto" ? (
                     <PhoneNumberInput
                       name={f}
                       value={formData[f] || COUNTRIES[0].dialCode}
