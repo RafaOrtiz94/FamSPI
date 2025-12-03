@@ -21,7 +21,7 @@ const COUNTRIES = [
 /* ============================================================
     📞 Componente para Input de Teléfono con País
 ============================================================ */
-const PhoneNumberInput = ({ name, value, onChange, error }) => {
+const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
   // Inicializa el código de país basado en el valor o usa el primero por defecto
   const initialCountry = COUNTRIES.find(c => value.startsWith(c.dialCode))?.dialCode || COUNTRIES[0].dialCode;
   const [country, setCountry] = useState(initialCountry);
@@ -49,6 +49,7 @@ const PhoneNumberInput = ({ name, value, onChange, error }) => {
         value={country}
         onChange={handleCountryChange}
         className="bg-gray-100 dark:bg-gray-600 p-2 text-gray-900 dark:text-white border-r border-gray-300 dark:border-gray-600 focus:outline-none"
+        disabled={disabled}
       >
         {COUNTRIES.map((c) => (
           <option key={c.code} value={c.dialCode}>
@@ -63,6 +64,7 @@ const PhoneNumberInput = ({ name, value, onChange, error }) => {
         value={number}
         onChange={handleNumberChange}
         className="flex-1 p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none"
+        disabled={disabled}
       />
       <span className="p-2 bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center">
         <FiPhone />
@@ -97,7 +99,11 @@ const EquipoInput = ({ index, equipo, updateEquipo, type, removeEquipo }) => {
               className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white capitalize"
             >
               <option value="nuevo">Nuevo</option>
-              <option value="usado">Usado</option>
+              {type === "inspection" ? (
+                <option value="cu">CU</option>
+              ) : (
+                <option value="usado">Usado</option>
+              )}
             </select>
           ) : (
             <input
@@ -220,6 +226,8 @@ const CreateRequestModal = ({
   const [progressStep, setProgressStep] = useState(null);
 
   const todayDateString = useMemo(() => TODAY, []);
+  const isInspection = type === "inspection";
+  const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
 
   const submissionSteps = useMemo(
     () => [
@@ -415,6 +423,22 @@ const CreateRequestModal = ({
           {/* Campos dinámicos */}
           {type && type !== "cliente" && (
             <form onSubmit={handleSubmit} className="space-y-3">
+              {isInspection && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                  <p className="font-semibold">Selecciona primero un cliente registrado.</p>
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
+                    Solo se habilitarán los campos y equipos después de elegir al cliente. ¿Aún no está registrado?
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={() => setType("cliente")}
+                  >
+                    Ir a solicitud de registro de cliente
+                  </Button>
+                </div>
+              )}
               {requestTypes[type].fields.map((f) => (
                 <div key={f}>
                   <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 capitalize">
@@ -431,6 +455,7 @@ const CreateRequestModal = ({
                       value={formData[f] || COUNTRIES[0].dialCode}
                       onChange={handleChange}
                       error={errors[f]}
+                      disabled={isInspection && !hasSelectedClient}
                     />
                   ) : f === "requiere_lis" ? (
                     <label className="flex items-center gap-2 text-sm">
@@ -439,6 +464,7 @@ const CreateRequestModal = ({
                         name={f}
                         checked={formData[f] || false}
                         onChange={handleChange}
+                        disabled={isInspection && !hasSelectedClient}
                       />
                       Requiere LIS
                     </label>
@@ -451,15 +477,16 @@ const CreateRequestModal = ({
                             ? "email"
                             : "text"
                       }
-                      name={f}
-                      value={formData[f] || ""}
-                      onChange={handleChange}
-                      min={f.includes("fecha") ? todayDateString : null} // Validación HTML5: min=fecha_actual
-                      className={`w-full p-2 rounded-lg border ${errors[f]
-                        ? "border-red-500"
-                        : "border-gray-300 dark:border-gray-600"
-                        } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-                    />
+                        name={f}
+                        value={formData[f] || ""}
+                        onChange={handleChange}
+                        min={f.includes("fecha") ? todayDateString : null} // Validación HTML5: min=fecha_actual
+                        className={`w-full p-2 rounded-lg border ${errors[f]
+                          ? "border-red-500"
+                          : "border-gray-300 dark:border-gray-600"
+                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${isInspection && f !== "nombre_cliente" && !hasSelectedClient ? "opacity-60 cursor-not-allowed" : ""}`}
+                        disabled={isInspection && f !== "nombre_cliente" && !hasSelectedClient}
+                      />
                   )}
                   {errors[f] && (
                     <p className="text-red-500 text-xs mt-1">{errors[f]}</p>
@@ -489,10 +516,14 @@ const CreateRequestModal = ({
                   <Button
                     type="button"
                     onClick={addEquipo}
-                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2"
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2 disabled:opacity-60"
+                    disabled={isInspection && !hasSelectedClient}
                   >
                     <FiPlus /> Agregar equipo
                   </Button>
+                  {isInspection && !hasSelectedClient && (
+                    <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
+                  )}
                 </div>
               )}
 
