@@ -1,6 +1,6 @@
 import React from 'react';
 import { FiSettings, FiMail } from 'react-icons/fi';
-import GmailAuthWidget from '../modules/shared/components/GmailAuthWidget';
+import GmailAuthWidget from '../core/ui/widgets/GmailAuthWidget';
 
 /**
  * Página de Configuración del Usuario

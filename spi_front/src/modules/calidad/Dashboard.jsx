@@ -3,7 +3,7 @@ import { FiRefreshCw, FiClipboard, FiBookOpen, FiCheckSquare, FiActivity } from 
 
 import { useUI } from "../../core/ui/useUI";
 
-import AttendanceWidget from "../shared/components/AttendanceWidget";
+import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
 import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
 import Button from "../../core/ui/components/Button";

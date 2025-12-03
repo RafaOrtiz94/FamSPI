@@ -172,6 +172,7 @@ const managementRoutes = require("./modules/management/management.routes");
 const documentsRoutes = require("./modules/documents/documents.routes");
 const filesRoutes = require("./modules/files/files.routes");
 const servicioRoutes = require("./modules/servicio/servicio.routes");
+const technicalApplicationsRoutes = require("./modules/technical-applications/technicalApplications.routes");
 const mantenimientosRoutes = require("./modules/mantenimientos/mantenimientos.routes");
 const departmentsRoutes = require("./modules/departments/departments.routes");
 const usersRoutes = require("./modules/users/users.routes");
@@ -203,6 +204,8 @@ app.use("/api/v1/auth", authRoutes);
 // ======================================================
 app.use((req, res, next) => {
   if (
+    req.path === "/ws" || // permitir conexiones de websocket/sondeos sin JWT para evitar ruido en logs
+    req.path.startsWith("/ws/") ||
     req.path.startsWith("/api/v1/auth/google") ||
     req.path.startsWith("/api/v1/gmail/auth/callback") ||
     req.path.startsWith("/health")
@@ -232,6 +235,7 @@ app.use("/api/v1/management", managementRoutes);
 app.use("/api/v1/documents", documentsRoutes);
 app.use("/api/v1/files", filesRoutes);
 app.use("/api/v1/servicio", servicioRoutes);
+app.use("/api/v1/technical-applications", technicalApplicationsRoutes);
 app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);

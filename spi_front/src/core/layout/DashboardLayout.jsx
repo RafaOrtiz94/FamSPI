@@ -4,7 +4,7 @@ import { Outlet } from "react-router-dom";
 import Footer from "../ui/components/Footer";
 import Header from "../ui/components/Header";
 import NavigationBar from "../ui/components/NavigationBar";
-import InternalLopdpConsentModal from "../../modules/shared/components/InternalLopdpConsentModal";
+import InternalLopdpConsentModal from "../ui/widgets/InternalLopdpConsentModal";
 import { useAuth } from "../auth/AuthContext";
 
 export default function DashboardLayout() {

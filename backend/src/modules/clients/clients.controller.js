@@ -48,11 +48,28 @@ const assignClient = async (req, res) => {
 const setVisitStatus = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status, date } = req.body || {};
+    const {
+      status,
+      date,
+      hora_entrada,
+      hora_salida,
+      lat_entrada,
+      lng_entrada,
+      lat_salida,
+      lng_salida,
+      observaciones,
+    } = req.body || {};
     const result = await clientsService.upsertVisitStatus({
       clientId: Number(id),
       status,
       visitDate: date || null,
+      hora_entrada,
+      hora_salida,
+      lat_entrada,
+      lng_entrada,
+      lat_salida,
+      lng_salida,
+      observaciones,
       user: req.user,
     });
     return res.json({ ok: true, data: result });

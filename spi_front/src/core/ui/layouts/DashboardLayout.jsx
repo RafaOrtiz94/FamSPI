@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import AttendanceWidget from "../../../modules/shared/components/AttendanceWidget";
+import AttendanceWidget from "../widgets/AttendanceWidget";
 
 export const DashboardLayout = ({ children, className = "", includeWidgets = true }) => {
     return (

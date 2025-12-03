@@ -6,10 +6,11 @@ import toast from "react-hot-toast";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import Select from "../../core/ui/components/Select";
-import AttendanceWidget from "../shared/components/AttendanceWidget";
-import ClientRequestWidget from "../shared/components/ClientRequestWidget";
-import HRPersonnelRequestsWidget from "../shared/components/HRPersonnelRequestsWidget";
-import VacationRequestsWidget from "../shared/components/VacationRequestsWidget";
+import ActionCard from "../../core/ui/patterns/ActionCard";
+import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
+import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
+import HRPersonnelRequestsWidget from "../../core/ui/widgets/HRPersonnelRequestsWidget";
+import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
@@ -190,39 +191,20 @@ const TalentoDashboard = () => {
       </Card>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <button
+        <ActionCard
+          icon={FiUsers}
+          subtitle="Administración"
+          title="Gestión de Usuarios"
+          color="blue"
           onClick={() => navigate("/dashboard/usuarios")}
-          className="group relative flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-50 via-white to-white p-4 shadow-sm transition-all duration-200 hover:border-blue-400 hover:shadow-md"
-        >
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-sm transition-transform duration-200 group-hover:scale-110">
-            <FiUsers size={32} />
-          </div>
-          <div className="text-center">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-blue-700 opacity-70">
-              Administración
-            </p>
-            <h3 className="text-sm font-bold leading-tight text-gray-900">
-              Gestión de Usuarios
-            </h3>
-          </div>
-        </button>
-
-        <button
+        />
+        <ActionCard
+          icon={FiSettings}
+          subtitle="Configuración"
+          title="Departamentos"
+          color="green"
           onClick={() => navigate("/dashboard/departamentos")}
-          className="group relative flex aspect-square w-full flex-col items-center justify-center gap-4 rounded-2xl border border-green-200 bg-gradient-to-br from-green-50 via-white to-white p-4 shadow-sm transition-all duration-200 hover:border-green-400 hover:shadow-md"
-        >
-          <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-green-600 text-white shadow-sm transition-transform duration-200 group-hover:scale-110">
-            <FiSettings size={32} />
-          </div>
-          <div className="text-center">
-            <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-green-700 opacity-70">
-              Configuración
-            </p>
-            <h3 className="text-sm font-bold leading-tight text-gray-900">
-              Departamentos
-            </h3>
-          </div>
-        </button>
+        />
       </div>
     </DashboardLayout>
   );

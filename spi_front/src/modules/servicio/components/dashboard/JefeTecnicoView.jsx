@@ -10,9 +10,9 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
 import PendingApprovals from "../../components/PendingApprovals";
-import PersonnelRequestWidget from "../../../shared/components/PersonnelRequestWidget";
-import AttendanceWidget from "../../../shared/components/AttendanceWidget";
-import VacationRequestsWidget from "../../../shared/components/VacationRequestsWidget";
+import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
+import AttendanceWidget from "../../../../core/ui/widgets/AttendanceWidget";
+import VacationRequestsWidget from "../../../../core/ui/widgets/VacationRequestsWidget";
 
 const availabilityColor = (status) => {
     const value = (status || "").toString().toLowerCase();
