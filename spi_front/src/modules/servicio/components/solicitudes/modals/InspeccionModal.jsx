@@ -2,12 +2,14 @@ import React, { useState } from "react";
 import { FiX, FiClipboard } from "react-icons/fi";
 import { useUI } from "../../../../../core/ui/UIContext";
 import Button from "../../../../../core/ui/components/Button";
+import EquipmentSelect from "../../../../../core/ui/components/EquipmentSelect";
 
 const InspeccionModal = ({ open, onClose, onSuccess }) => {
     const { showToast } = useUI();
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         cliente: "",
+        equipo_id: "",
         ubicacion: "",
         tipo: "preventiva",
         fecha_programada: "",
@@ -29,6 +31,7 @@ const InspeccionModal = ({ open, onClose, onSuccess }) => {
             onClose();
             setFormData({
                 cliente: "",
+                equipo_id: "",
                 ubicacion: "",
                 tipo: "preventiva",
                 fecha_programada: "",
@@ -72,17 +75,29 @@ const InspeccionModal = ({ open, onClose, onSuccess }) => {
                         />
                     </div>
 
-                    <div>
-                        <label className="block text-sm font-medium mb-2">Ubicación</label>
-                        <input
-                            type="text"
-                            name="ubicacion"
-                            value={formData.ubicacion}
-                            onChange={handleChange}
-                            required
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500"
-                            placeholder="Dirección o ubicación"
-                        />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Equipo</label>
+                            <EquipmentSelect
+                                name="equipo_id"
+                                value={formData.equipo_id}
+                                onChange={handleChange}
+                                placeholder="Selecciona el equipo a inspeccionar"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium mb-2">Ubicación</label>
+                            <input
+                                type="text"
+                                name="ubicacion"
+                                value={formData.ubicacion}
+                                onChange={handleChange}
+                                required
+                                className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-amber-500"
+                                placeholder="Dirección o ubicación"
+                            />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-4">

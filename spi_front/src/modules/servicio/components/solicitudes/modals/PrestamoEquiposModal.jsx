@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { FiX, FiSettings } from "react-icons/fi";
 import { useUI } from "../../../../../core/ui/UIContext";
 import Button from "../../../../../core/ui/components/Button";
+import EquipmentSelect from "../../../../../core/ui/components/EquipmentSelect";
 
 const PrestamoEquiposModal = ({ open, onClose, onSuccess }) => {
     const { showToast } = useUI();
     const [loading, setLoading] = useState(false);
     const [formData, setFormData] = useState({
         cliente: "",
-        equipo: "",
+        equipo_id: "",
         fecha_inicio: "",
         fecha_fin: "",
         motivo: ""
@@ -29,7 +30,7 @@ const PrestamoEquiposModal = ({ open, onClose, onSuccess }) => {
             onClose();
             setFormData({
                 cliente: "",
-                equipo: "",
+                equipo_id: "",
                 fecha_inicio: "",
                 fecha_fin: "",
                 motivo: ""
@@ -74,14 +75,13 @@ const PrestamoEquiposModal = ({ open, onClose, onSuccess }) => {
 
                     <div>
                         <label className="block text-sm font-medium mb-2">Equipo</label>
-                        <input
-                            type="text"
-                            name="equipo"
-                            value={formData.equipo}
+                        <EquipmentSelect
+                            name="equipo_id"
+                            value={formData.equipo_id}
                             onChange={handleChange}
                             required
-                            className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
-                            placeholder="Equipo a prestar"
+                            placeholder="Selecciona el equipo a prestar"
+                            filter={{ estado: "disponible" }}
                         />
                     </div>
 
