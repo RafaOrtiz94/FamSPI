@@ -32,6 +32,7 @@ const STATUS = {
   WAITING_SIGNED_PROFORMA: "waiting_signed_proforma",
   PENDING_CONTRACT: "pending_contract",
   COMPLETED: "completed",
+  BUSINESS_CASE: "business_case",
 };
 
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
@@ -885,7 +886,7 @@ async function createPurchaseRequest({
   };
 
   let emailFileId = null;
-  let status = STATUS.PENDING_PROVIDER;
+  let status = isBusinessCaseOnly ? STATUS.BUSINESS_CASE : STATUS.PENDING_PROVIDER;
 
   if (!isBusinessCaseOnly) {
     const equipmentList = equipment

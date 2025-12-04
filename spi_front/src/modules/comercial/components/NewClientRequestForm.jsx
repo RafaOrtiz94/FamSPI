@@ -8,11 +8,17 @@ import {
   verifyConsentEmailToken,
 } from "../../../core/api/requestsApi";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
+import {
+  getCityOptions,
+  getCountryOptions,
+  getProvinceOptions,
+} from "../constants/locationOptions";
 
 const COMMON_REQUIRED_FIELDS = [
   "commercial_name",
   "ruc_cedula",
   "client_email",
+  "establishment_country",
   "establishment_name",
   "establishment_province",
   "establishment_city",
@@ -21,6 +27,7 @@ const COMMON_REQUIRED_FIELDS = [
   "establishment_phone",
   "establishment_cellphone",
   "shipping_contact_name",
+  "shipping_country",
   "shipping_address",
   "shipping_city",
   "shipping_province",
@@ -99,6 +106,7 @@ const initialFormState = {
   natural_person_lastname: "",
   legal_person_business_name: "",
   commercial_name: "",
+  establishment_country: "Ecuador",
   establishment_name: "",
   ruc_cedula: "",
   nationality: "",
@@ -115,6 +123,7 @@ const initialFormState = {
   legal_rep_cellphone: "",
   legal_rep_email: "",
   shipping_contact_name: "",
+  shipping_country: "Ecuador",
   shipping_address: "",
   shipping_city: "",
   shipping_province: "",
@@ -174,6 +183,24 @@ const NewClientRequestForm = ({
     lastEmail: "",
   });
   const [consentTokenCode, setConsentTokenCode] = useState("");
+
+  const countryOptions = useMemo(() => getCountryOptions(), []);
+  const establishmentProvinceOptions = useMemo(
+    () => getProvinceOptions(formData.establishment_country),
+    [formData.establishment_country],
+  );
+  const establishmentCityOptions = useMemo(
+    () => getCityOptions(formData.establishment_country, formData.establishment_province),
+    [formData.establishment_country, formData.establishment_province],
+  );
+  const shippingProvinceOptions = useMemo(
+    () => getProvinceOptions(formData.shipping_country),
+    [formData.shipping_country],
+  );
+  const shippingCityOptions = useMemo(
+    () => getCityOptions(formData.shipping_country, formData.shipping_province),
+    [formData.shipping_country, formData.shipping_province],
+  );
 
   const requiredFiles = useMemo(
     () =>
@@ -236,6 +263,24 @@ const NewClientRequestForm = ({
         if (!prev.consent_recipient_email || prev.consent_recipient_email === prev.client_email) {
           nextState.consent_recipient_email = nextValue;
         }
+      }
+
+      if (name === "establishment_country") {
+        nextState.establishment_province = "";
+        nextState.establishment_city = "";
+      }
+
+      if (name === "shipping_country") {
+        nextState.shipping_province = "";
+        nextState.shipping_city = "";
+      }
+
+      if (name === "establishment_province") {
+        nextState.establishment_city = "";
+      }
+
+      if (name === "shipping_province") {
+        nextState.shipping_city = "";
       }
 
       // Si el sector es público, siempre debe ser persona jurídica
@@ -820,21 +865,34 @@ const NewClientRequestForm = ({
             required
             error={errors.establishment_name}
           />
-          <InputField
+          <SelectField
+            name="establishment_country"
+            label="País"
+            value={formData.establishment_country}
+            onChange={handleChange}
+            options={countryOptions}
+            required
+            error={errors.establishment_country}
+          />
+          <SelectField
             name="establishment_province"
             label="Provincia"
             value={formData.establishment_province}
             onChange={handleChange}
+            options={establishmentProvinceOptions}
             required
             error={errors.establishment_province}
           />
-          <InputField
+          <SelectField
             name="establishment_city"
             label="Ciudad"
             value={formData.establishment_city}
             onChange={handleChange}
+            options={establishmentCityOptions}
             required
             error={errors.establishment_city}
+            disabled={!formData.establishment_province}
+            placeholder="Selecciona primero una provincia"
           />
           <InputField
             name="establishment_address"
@@ -930,21 +988,34 @@ const NewClientRequestForm = ({
             required
             error={errors.shipping_address}
           />
-          <InputField
-            name="shipping_city"
-            label="Ciudad"
-            value={formData.shipping_city}
+          <SelectField
+            name="shipping_country"
+            label="País"
+            value={formData.shipping_country}
             onChange={handleChange}
+            options={countryOptions}
             required
-            error={errors.shipping_city}
+            error={errors.shipping_country}
           />
-          <InputField
+          <SelectField
             name="shipping_province"
             label="Provincia"
             value={formData.shipping_province}
             onChange={handleChange}
+            options={shippingProvinceOptions}
             required
             error={errors.shipping_province}
+          />
+          <SelectField
+            name="shipping_city"
+            label="Ciudad"
+            value={formData.shipping_city}
+            onChange={handleChange}
+            options={shippingCityOptions}
+            required
+            error={errors.shipping_city}
+            disabled={!formData.shipping_province}
+            placeholder="Selecciona primero una provincia"
           />
           <InputField
             name="shipping_reference"
@@ -1043,6 +1114,28 @@ const Section = ({ title, children }) => (
     <h2 className="mb-4 text-base font-semibold text-gray-800 dark:text-gray-100">{title}</h2>
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">{children}</div>
   </section>
+);
+
+const SelectField = ({ label, name, value, onChange, options, required = false, error, disabled = false, placeholder }) => (
+  <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
+    {label} {required && <span className="text-red-500">*</span>}
+    <select
+      name={name}
+      value={value}
+      onChange={onChange}
+      required={required}
+      disabled={disabled}
+      className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"} ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
+    >
+      <option value="">{placeholder || "Selecciona una opción"}</option>
+      {options.map((option) => (
+        <option key={option} value={option}>
+          {option.replace(/_/g, " ")}
+        </option>
+      ))}
+    </select>
+    {error && <p className="mt-1 text-xs text-red-600 dark:text-red-400">{error}</p>}
+  </label>
 );
 
 const InputField = ({ label, name, value, onChange, type = "text", required = false, error, disabled = false }) => (

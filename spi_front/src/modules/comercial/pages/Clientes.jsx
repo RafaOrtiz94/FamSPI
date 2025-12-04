@@ -3,9 +3,11 @@ import {
   FiAlertTriangle,
   FiCheckCircle,
   FiInfo,
+  FiMail,
   FiMapPin,
   FiNavigation,
   FiSearch,
+  FiUser,
   FiUsers,
 } from "react-icons/fi";
 
@@ -98,6 +100,31 @@ const ClientesPage = () => {
     if (!client?.hora_entrada || !client?.hora_salida) return null;
     const diffMs = new Date(client.hora_salida) - new Date(client.hora_entrada);
     return Math.max(0, Math.round(diffMs / 60000));
+  };
+
+  const formatClientType = (type) => {
+    const value = (type || "").toLowerCase();
+    if (value === "persona_juridica" || value.includes("jurid")) return "Persona Jurídica";
+    if (value === "persona_natural" || value.includes("natur")) return "Persona Natural";
+    return "Tipo no especificado";
+  };
+
+  const parseAddressParts = (address) =>
+    (address || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+  const getCityFromAddress = (address) => {
+    const parts = parseAddressParts(address);
+    if (parts.length >= 2) return parts[parts.length - 2];
+    return parts[0] || "Ciudad no especificada";
+  };
+
+  const getProvinceFromAddress = (address) => {
+    const parts = parseAddressParts(address);
+    if (parts.length >= 1) return parts[parts.length - 1];
+    return "Provincia no especificada";
   };
 
   // Helper para normalizar asignados a un array siempre
@@ -206,15 +233,35 @@ const ClientesPage = () => {
     );
   }, [clientes, currentEmail]);
 
+  const allMine = useMemo(() => {
+    if (!Array.isArray(clientes)) return [];
+    const seen = new Set();
+    const merged = [];
+    [...assignedToMe, ...createdByMe].forEach((client) => {
+      if (!seen.has(client.id)) {
+        seen.add(client.id);
+        merged.push(client);
+      }
+    });
+    return merged;
+  }, [clientes, assignedToMe, createdByMe]);
+
   const filteredAssignedList = useMemo(() => {
-    const base = assignedViewFilter === "assigned" ? assignedToMe : createdByMe;
+    let base = assignedToMe;
+
+    if (assignedViewFilter === "created") {
+      base = createdByMe;
+    } else if (assignedViewFilter === "all") {
+      base = allMine;
+    }
+
     if (!assignedSearch) return base;
     const q = assignedSearch.toLowerCase();
     return base.filter((c) => {
       const haystack = `${c.nombre || ""} ${c.identificador || ""} ${c.shipping_contact_name || ""} ${c.shipping_address || ""}`.toLowerCase();
       return haystack.includes(q);
     });
-  }, [assignedViewFilter, assignedToMe, createdByMe, assignedSearch]);
+  }, [assignedViewFilter, assignedToMe, createdByMe, allMine, assignedSearch]);
 
   const handleAssign = async (clientId) => {
     const email = assignments[clientId];
@@ -521,7 +568,7 @@ const ClientesPage = () => {
               Mis clientes de gestión diaria
             </h2>
             <p className="text-sm text-gray-500">
-              Revisa rápidamente los clientes que tienes asignados o que tú mismo registraste y fueron aprobados.
+              Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
             </p>
           </div>
           <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
@@ -553,6 +600,17 @@ const ClientesPage = () => {
             >
               Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
             </button>
+            <button
+              type="button"
+              onClick={() => setAssignedViewFilter("all")}
+              className={`px-3 py-1 rounded-full transition ${
+                assignedViewFilter === "all"
+                  ? "bg-white shadow-sm text-gray-900"
+                  : "text-gray-500"
+              }`}
+            >
+              Todos mis clientes ({Array.isArray(allMine) ? allMine.length : 0})
+            </button>
           </div>
 
           <div className="relative w-full md:max-w-xs">
@@ -570,11 +628,10 @@ const ClientesPage = () => {
         {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {filteredAssignedList.map((cliente) => {
-              const ciudad =
-                (cliente.shipping_address || "")
-                  .split(",")
-                  .map((s) => s.trim())
-                  .slice(-2, -1)[0] || "Ciudad no especificada";
+              const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
+              const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
+              const clienteEmail = cliente.client_email || "Correo no disponible";
+              const clientTypeLabel = formatClientType(cliente.client_type);
               const status = normalizeStatus(cliente.visit_status);
               const meta = getStatusMeta(status);
               return (
@@ -588,23 +645,30 @@ const ClientesPage = () => {
                       <p className="text-sm font-semibold text-gray-900 line-clamp-1">
                         {cliente.nombre}
                       </p>
-                      <p className="text-[11px] text-gray-500">
-                        {cliente.identificador ? `RUC/Cédula: ${cliente.identificador}` : "Sin identificador"}
-                      </p>
-                      <p className="text-[11px] text-gray-500 flex items-center gap-1">
-                        <FiMapPin className="h-3 w-3 text-gray-400" />
-                        {ciudad}
-                      </p>
                     </div>
-                    <span
-                      className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}
-                    >
+                    <span className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}>
                       {meta.label}
                     </span>
                   </div>
-                  <p className="mt-2 text-[11px] text-gray-500 line-clamp-2">
-                    {cliente.shipping_address || "Sin dirección detallada"}
-                  </p>
+
+                  <div className="mt-2 space-y-1 text-[11px] text-gray-600">
+                    <p className="flex items-center gap-1">
+                      <FiMail className="h-3 w-3 text-gray-400" />
+                      <span className="truncate">{clienteEmail}</span>
+                    </p>
+                    <p className="flex items-center gap-1">
+                      <FiUser className="h-3 w-3 text-gray-400" />
+                      {clientTypeLabel}
+                    </p>
+                    <p className="flex items-center gap-1">
+                      <FiMapPin className="h-3 w-3 text-gray-400" />
+                      {provincia || "Provincia no especificada"}
+                    </p>
+                    <p className="flex items-center gap-1">
+                      <FiMapPin className="h-3 w-3 text-gray-400" />
+                      {ciudad || "Ciudad no especificada"}
+                    </p>
+                  </div>
                 </div>
               );
             })}
@@ -613,7 +677,9 @@ const ClientesPage = () => {
           <p className="text-sm text-gray-500">
             {assignedViewFilter === "assigned"
               ? "No tienes clientes asignados que coincidan con el filtro."
-              : "No tienes clientes registrados por ti que coincidan con el filtro."}
+              : assignedViewFilter === "created"
+              ? "No tienes clientes registrados por ti que coincidan con el filtro."
+              : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
           </p>
         )}
       </Card>

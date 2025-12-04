@@ -117,9 +117,19 @@ async function listAccessibleClients({ user, q, visitDate }) {
       cr.commercial_name AS nombre,
       cr.ruc_cedula AS identificador,
       cr.created_by,
+      COALESCE(NULLIF(cr.client_email, ''), NULLIF(cr.consent_recipient_email, '')) AS client_email,
+      COALESCE(
+        NULLIF(cr.client_type, ''),
+        CASE
+          WHEN NULLIF(cr.legal_person_business_name, '') IS NOT NULL THEN 'persona_juridica'
+          WHEN NULLIF(cr.natural_person_firstname, '') IS NOT NULL THEN 'persona_natural'
+        END
+      ) AS client_type,
       cr.status,
       cr.created_at,
       cr.shipping_contact_name,
+      cr.shipping_city,
+      cr.shipping_province,
       cr.shipping_phone,
       cr.shipping_address,
       cr.drive_folder_id,

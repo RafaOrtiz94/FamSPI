@@ -1,9 +1,10 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { FiTruck, FiSearch, FiClipboard } from "react-icons/fi";
+import { FiTruck, FiSearch, FiClipboard, FiUserCheck } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
+import ClientApprovalsWidget from "../../../backoffice/components/ClientApprovalsWidget";
 
 const BackofficeView = ({ onRefresh }) => {
     const navigate = useNavigate();
@@ -37,6 +38,19 @@ const BackofficeView = ({ onRefresh }) => {
                             <p className="text-xs text-gray-500">Despachos y envíos</p>
                         </div>
                     </div>
+                </Card>
+
+                <Card className="p-4 border border-gray-200">
+                    <div className="flex items-center gap-3 mb-3">
+                        <div className="p-2 bg-green-50 rounded-md text-green-600">
+                            <FiUserCheck size={18} />
+                        </div>
+                        <div>
+                            <p className="text-sm font-semibold text-gray-900">Solicitudes de clientes</p>
+                            <p className="text-xs text-gray-500">Revisar, aprobar o rechazar</p>
+                        </div>
+                    </div>
+                    <ClientApprovalsWidget />
                 </Card>
 
                 <Card

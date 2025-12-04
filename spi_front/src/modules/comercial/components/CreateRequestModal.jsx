@@ -7,6 +7,7 @@ import Button from "../../../core/ui/components/Button";
 import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
+import { fetchClients } from "../../../core/api/clientsApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -21,7 +22,7 @@ const COUNTRIES = [
 /* ============================================================
     📞 Componente para Input de Teléfono con País
 ============================================================ */
-const PhoneNumberInput = ({ name, value, onChange, error }) => {
+const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
   // Inicializa el código de país basado en el valor o usa el primero por defecto
   const initialCountry = COUNTRIES.find(c => value.startsWith(c.dialCode))?.dialCode || COUNTRIES[0].dialCode;
   const [country, setCountry] = useState(initialCountry);
@@ -49,6 +50,7 @@ const PhoneNumberInput = ({ name, value, onChange, error }) => {
         value={country}
         onChange={handleCountryChange}
         className="bg-gray-100 dark:bg-gray-600 p-2 text-gray-900 dark:text-white border-r border-gray-300 dark:border-gray-600 focus:outline-none"
+        disabled={disabled}
       >
         {COUNTRIES.map((c) => (
           <option key={c.code} value={c.dialCode}>
@@ -63,6 +65,7 @@ const PhoneNumberInput = ({ name, value, onChange, error }) => {
         value={number}
         onChange={handleNumberChange}
         className="flex-1 p-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none"
+        disabled={disabled}
       />
       <span className="p-2 bg-white dark:bg-gray-700 text-gray-500 dark:text-gray-400 flex items-center">
         <FiPhone />
@@ -97,7 +100,11 @@ const EquipoInput = ({ index, equipo, updateEquipo, type, removeEquipo }) => {
               className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white capitalize"
             >
               <option value="nuevo">Nuevo</option>
-              <option value="usado">Usado</option>
+              {type === "inspection" ? (
+                <option value="cu">CU</option>
+              ) : (
+                <option value="usado">Usado</option>
+              )}
             </select>
           ) : (
             <input
@@ -218,8 +225,13 @@ const CreateRequestModal = ({
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState(null);
+  const [availableClients, setAvailableClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
+  const clientSelectionRequired = type === "inspection" || type === "retiro";
+  const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
 
   const submissionSteps = useMemo(
     () => [
@@ -238,26 +250,28 @@ const CreateRequestModal = ({
       setEquipos([]);
       setFiles([]);
       setErrors({});
+      setSelectedClientId("");
       return;
     }
 
     if (isEditing && initialData) {
       setType(presetType || (initialData.client_type ? "cliente" : null));
       if (presetType !== "cliente") {
-        setFormData(initialData);
-      }
-    } else if (presetType) {
-      setType(presetType);
-    } else {
-      setType(null);
+      setFormData(initialData);
     }
+  } else if (presetType) {
+    setType(presetType);
+  } else {
+    setType(null);
+  }
 
-    if (!isEditing) {
-      setFormData({});
-      setEquipos([]);
-      setErrors({});
-    }
-  }, [open, presetType, initialData, isEditing]);
+  if (!isEditing) {
+    setFormData({});
+    setEquipos([]);
+    setErrors({});
+    setSelectedClientId("");
+  }
+}, [open, presetType, initialData, isEditing]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -304,6 +318,24 @@ const CreateRequestModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
+  useEffect(() => {
+    const loadClients = async () => {
+      if (!open || !type || type === "cliente") return;
+      setLoadingClients(true);
+      try {
+        const clients = await fetchClients();
+        setAvailableClients(Array.isArray(clients) ? clients : []);
+      } catch (error) {
+        console.error("Error cargando clientes", error);
+        setAvailableClients([]);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+
+    loadClients();
+  }, [open, type]);
+
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
     const { name, value, type: inputType, checked } = e.target;
@@ -322,6 +354,27 @@ const CreateRequestModal = ({
     if (!type || !requestTypes[type].equipos) return;
     const base = requestTypesForEquipments[type];
     setEquipos([...equipos, { ...base }]);
+  };
+
+  const handleClientSelect = (clientId) => {
+    if (!clientId) {
+      setFormData((prev) => ({ ...prev, nombre_cliente: "" }));
+      setSelectedClientId("");
+      return;
+    }
+
+    const selected = availableClients.find((c) => `${c.id}` === `${clientId}`);
+    if (!selected) return;
+
+    setSelectedClientId(`${clientId}`);
+
+    setFormData((prev) => ({
+      ...prev,
+      nombre_cliente: selected.commercial_name || selected.nombre || "",
+      direccion_cliente: selected.shipping_address || "",
+      persona_contacto: selected.shipping_contact_name || "",
+      celular_contacto: selected.shipping_phone || prev.celular_contacto || COUNTRIES[0].dialCode,
+    }));
   };
 
   const updateEquipo = (index, key, value) => {
@@ -415,6 +468,22 @@ const CreateRequestModal = ({
           {/* Campos dinámicos */}
           {type && type !== "cliente" && (
             <form onSubmit={handleSubmit} className="space-y-3">
+              {clientSelectionRequired && (
+                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
+                  <p className="font-semibold">Selecciona primero un cliente registrado.</p>
+                  <p className="mt-1 text-xs text-amber-800 dark:text-amber-200/80">
+                    Solo se habilitarán los campos y equipos después de elegir al cliente. ¿Aún no está registrado?
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="mt-2 bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={() => setType("cliente")}
+                  >
+                    Ir a solicitud de registro de cliente
+                  </Button>
+                </div>
+              )}
               {requestTypes[type].fields.map((f) => (
                 <div key={f}>
                   <label className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1 capitalize">
@@ -425,12 +494,40 @@ const CreateRequestModal = ({
                   </label>
 
                   {/* 📞 Input de Teléfono Personalizado */}
-                  {f === "celular_contacto" ? (
+                  {clientSelectionRequired && f === "nombre_cliente" ? (
+                    <div className="space-y-2">
+                      <select
+                        name={f}
+                        value={selectedClientId}
+                        onChange={(e) => handleClientSelect(e.target.value)}
+                        disabled={loadingClients}
+                        className={`w-full p-2 rounded-lg border ${errors[f]
+                          ? "border-red-500"
+                          : "border-gray-300 dark:border-gray-600"
+                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+                      >
+                        <option value="" disabled>
+                          {loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}
+                        </option>
+                        {availableClients.map((client) => (
+                          <option key={client.id} value={client.id}>
+                            {client.commercial_name || client.nombre || `Cliente ${client.id}`}
+                          </option>
+                        ))}
+                      </select>
+                      {!loadingClients && availableClients.length === 0 && (
+                        <p className="text-xs text-gray-500">
+                          No encontramos clientes disponibles. Registra uno nuevo.
+                        </p>
+                      )}
+                    </div>
+                  ) : f === "celular_contacto" ? (
                     <PhoneNumberInput
                       name={f}
                       value={formData[f] || COUNTRIES[0].dialCode}
                       onChange={handleChange}
                       error={errors[f]}
+                      disabled={clientSelectionRequired && !hasSelectedClient}
                     />
                   ) : f === "requiere_lis" ? (
                     <label className="flex items-center gap-2 text-sm">
@@ -439,6 +536,7 @@ const CreateRequestModal = ({
                         name={f}
                         checked={formData[f] || false}
                         onChange={handleChange}
+                        disabled={clientSelectionRequired && !hasSelectedClient}
                       />
                       Requiere LIS
                     </label>
@@ -451,15 +549,16 @@ const CreateRequestModal = ({
                             ? "email"
                             : "text"
                       }
-                      name={f}
-                      value={formData[f] || ""}
-                      onChange={handleChange}
-                      min={f.includes("fecha") ? todayDateString : null} // Validación HTML5: min=fecha_actual
-                      className={`w-full p-2 rounded-lg border ${errors[f]
-                        ? "border-red-500"
-                        : "border-gray-300 dark:border-gray-600"
-                        } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
-                    />
+                        name={f}
+                        value={formData[f] || ""}
+                        onChange={handleChange}
+                        min={f.includes("fecha") ? todayDateString : null} // Validación HTML5: min=fecha_actual
+                        className={`w-full p-2 rounded-lg border ${errors[f]
+                          ? "border-red-500"
+                          : "border-gray-300 dark:border-gray-600"
+                          } bg-white dark:bg-gray-700 text-gray-900 dark:text-white ${clientSelectionRequired && f !== "nombre_cliente" && !hasSelectedClient ? "opacity-60 cursor-not-allowed" : ""}`}
+                        disabled={clientSelectionRequired && f !== "nombre_cliente" && !hasSelectedClient}
+                      />
                   )}
                   {errors[f] && (
                     <p className="text-red-500 text-xs mt-1">{errors[f]}</p>
@@ -489,10 +588,14 @@ const CreateRequestModal = ({
                   <Button
                     type="button"
                     onClick={addEquipo}
-                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2"
+                    className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2 disabled:opacity-60"
+                    disabled={clientSelectionRequired && !hasSelectedClient}
                   >
                     <FiPlus /> Agregar equipo
                   </Button>
+                  {clientSelectionRequired && !hasSelectedClient && (
+                    <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
+                  )}
                 </div>
               )}
 

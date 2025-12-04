@@ -208,8 +208,9 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
   const filteredRequests = useMemo(() => {
     const q = (listQuery || "").trim().toLowerCase();
-    if (!q) return requests;
-    return requests.filter((req) =>
+    const purchaseRequests = requests.filter((req) => req.request_type !== "business_case");
+    if (!q) return purchaseRequests;
+    return purchaseRequests.filter((req) =>
       [req.client_name, req.provider_email, req.assigned_to_name, req.assigned_to_email]
         .filter(Boolean)
         .some((val) => String(val).toLowerCase().includes(q))

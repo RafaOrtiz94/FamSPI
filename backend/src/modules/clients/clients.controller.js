@@ -74,6 +74,7 @@ const setVisitStatus = async (req, res) => {
     });
     return res.json({ ok: true, data: result });
   } catch (error) {
+    console.error("Error in setVisitStatus:", error);
     const status = error.status || 500;
     return res.status(status).json({ ok: false, message: error.message || "Error registrando visita" });
   }
