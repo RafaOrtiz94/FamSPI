@@ -14,11 +14,13 @@ const PlanificacionMensual = () => {
   const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, remove, loading, error } =
     useSchedules({ skipLoad: isManager });
   const [editingLocked, setEditingLocked] = useState(false);
+  const [allowApprovedEditing, setAllowApprovedEditing] = useState(false);
   const [showEditWarning, setShowEditWarning] = useState(false);
   const [scheduleToUnlock, setScheduleToUnlock] = useState(null);
 
   useEffect(() => {
     if (!activeSchedule && schedules.length) {
+      setAllowApprovedEditing(false);
       setEditingLocked(["approved"].includes(schedules[0].status));
       loadScheduleDetail(schedules[0].id);
     }
@@ -26,11 +28,12 @@ const PlanificacionMensual = () => {
 
   useEffect(() => {
     if (!activeSchedule) return;
-    setEditingLocked(activeSchedule.status === "approved");
-  }, [activeSchedule]);
+    setEditingLocked(activeSchedule.status === "approved" && !allowApprovedEditing);
+  }, [activeSchedule, allowApprovedEditing]);
 
   const handleSelectSchedule = useCallback(
     (schedule) => {
+      setAllowApprovedEditing(false);
       setEditingLocked(schedule.status === "approved");
       loadScheduleDetail(schedule.id);
     },
@@ -40,6 +43,7 @@ const PlanificacionMensual = () => {
   const startEditing = useCallback(
     (schedule) => {
       setEditingLocked(false);
+      setAllowApprovedEditing(schedule.status === "approved");
       loadScheduleDetail(schedule.id);
     },
     [loadScheduleDetail],
@@ -62,6 +66,7 @@ const PlanificacionMensual = () => {
     if (scheduleToUnlock) {
       startEditing(scheduleToUnlock);
     }
+    setAllowApprovedEditing(true);
     setShowEditWarning(false);
     setScheduleToUnlock(null);
   }, [scheduleToUnlock, startEditing]);
