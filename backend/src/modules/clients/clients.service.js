@@ -138,7 +138,17 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
   }
 
   if (filterBySchedule && !approvedSchedule) {
-    return [];
+    return {
+      clients: [],
+      scheduleMeta: {
+        total: 0,
+        visited: 0,
+        pending: 0,
+        planned_today: 0,
+        has_approved_schedule: false,
+        cities_today: [],
+      },
+    };
   }
 
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
