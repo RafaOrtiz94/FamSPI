@@ -84,14 +84,16 @@ const JefeComercialView = ({ onRefresh }) => {
                             <FiCalendar size={18} />
                         </div>
                         <div className="flex-1">
-                            <p className="text-sm font-semibold text-gray-900">Planificaciones</p>
-                            <p className="text-xs text-gray-500">{pendingPlans} pendientes de aprobación</p>
+                            <p className="text-sm font-semibold text-gray-900">Aprobaciones de planificaciones</p>
+                            <p className="text-xs text-gray-500">
+                                {pendingPlans} cronogramas pendientes por revisar (solo revisión y aprobación)
+                            </p>
                         </div>
                         <button
                             className="px-3 py-1 text-sm font-semibold text-purple-700 border border-purple-200 rounded-md hover:bg-purple-50"
                             onClick={() => navigate("/dashboard/comercial/aprobaciones-planificacion")}
                         >
-                            Revisar
+                            Ver aprobaciones
                         </button>
                     </div>
                 </Card>
