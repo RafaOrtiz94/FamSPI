@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const controller = require("./permisos.controller");
-const { auth } = require("../../middlewares/auth");
+const { verifyToken } = require("../../middlewares/auth");
 
-router.use(auth);
+// Protegemos todas las rutas de permisos con el middleware de autenticación
+router.use(verifyToken);
 
 router.post("/", controller.crearSolicitud);
 router.get("/pending", controller.listarPendientes);
