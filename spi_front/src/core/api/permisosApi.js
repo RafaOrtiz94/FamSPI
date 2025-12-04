@@ -1,4 +1,4 @@
-import api from './apiClient';
+import api from "./index";
 
 export const crearPermiso = async (payload) => {
   const { data } = await api.post('/permisos', payload);
