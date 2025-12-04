@@ -7,7 +7,6 @@ import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
 import VacationRequestsWidget from "../../../../core/ui/widgets/VacationRequestsWidget";
-import ScheduleApprovalWidget from "../schedules/ScheduleApprovalWidget";
 
 const JefeComercialView = ({ onRefresh }) => {
     return (
@@ -67,8 +66,6 @@ const JefeComercialView = ({ onRefresh }) => {
                         <PurchaseHandoffWidget />
                     </div>
                 </Card>
-
-                <ScheduleApprovalWidget />
             </div>
 
             {/* Widget de Solicitudes de Personal */}
