@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { getEquipos } from "../../api/inventarioApi";
-import Spinner from "./Spinner";
+import { FiLoader } from "react-icons/fi";
 
 const EquipmentSelect = ({
   value,
@@ -69,8 +69,8 @@ const EquipmentSelect = ({
       </select>
 
       {loading && (
-        <div className="absolute right-3 top-1/2 -translate-y-1/2">
-          <Spinner size="sm" />
+        <div className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500">
+          <FiLoader className="animate-spin" size={16} />
         </div>
       )}
 
