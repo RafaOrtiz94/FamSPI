@@ -189,6 +189,12 @@ const ClientesPage = () => {
       } else {
         setClientes(Array.isArray(result?.clients) ? result.clients : []);
         setSummary(result?.summary || {});
+        if (filterBySchedule && !result?.summary?.has_approved_schedule) {
+          showToast(
+            "No tienes un cronograma aprobado para este mes. Mostrando todos los clientes.",
+            "info",
+          );
+        }
       }
     } catch (error) {
       console.error(error);

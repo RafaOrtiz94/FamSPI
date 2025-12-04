@@ -56,6 +56,50 @@ async function findScheduleOrThrow(id) {
   return rows[0];
 }
 
+function validateVisitDateWithinSchedule(plannedDate, schedule) {
+  if (!plannedDate) {
+    const error = new Error("La fecha planificada es obligatoria");
+    error.status = 400;
+    throw error;
+  }
+
+  const [yearStr, monthStr] = String(plannedDate).split("-");
+  const visitMonth = Number(monthStr);
+  const visitYear = Number(yearStr);
+
+  if (!visitMonth || !visitYear) {
+    const error = new Error("La fecha planificada no es válida");
+    error.status = 400;
+    throw error;
+  }
+
+  if (visitMonth !== Number(schedule.month) || visitYear !== Number(schedule.year)) {
+    const error = new Error("La fecha de visita debe estar dentro del mes del cronograma");
+    error.status = 400;
+    throw error;
+  }
+}
+
+async function triggerReapprovalIfNeeded(schedule) {
+  if (!schedule || !["approved", "rejected"].includes(schedule.status)) return schedule;
+
+  const { rows } = await db.query(
+    `UPDATE visit_schedules
+     SET status = 'pending_approval',
+         reviewed_by_email = NULL,
+         reviewed_at = NULL,
+         rejection_reason = NULL,
+         submitted_at = COALESCE(submitted_at, NOW()),
+         updated_at = NOW()
+     WHERE id = $1
+       AND status IN ('approved', 'rejected')
+     RETURNING *`,
+    [schedule.id],
+  );
+
+  return rows[0] || schedule;
+}
+
 function ensureOwner(schedule, user) {
   if (schedule.user_email !== user.email && !isManager(user)) {
     const error = new Error("No puedes modificar cronogramas de otros asesores");
@@ -210,17 +254,24 @@ async function updateSchedule({ id, notes, user }) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(id);
   ensureOwner(schedule, user);
-  if (schedule.status !== "draft" && schedule.status !== "rejected") {
-    const error = new Error("Solo se pueden editar cronogramas en borrador o rechazados");
-    error.status = 400;
-    throw error;
-  }
+
+  const needsReapproval = ["approved", "rejected"].includes(schedule.status);
 
   const { rows } = await db.query(
-    `UPDATE visit_schedules SET notes = $1, updated_at = NOW(), rejection_reason = NULL WHERE id = $2 RETURNING *`,
-    [notes || null, id],
+    `UPDATE visit_schedules
+     SET notes = $1,
+         status = CASE WHEN $3 THEN 'pending_approval' ELSE status END,
+         reviewed_by_email = CASE WHEN $3 THEN NULL ELSE reviewed_by_email END,
+         reviewed_at = CASE WHEN $3 THEN NULL ELSE reviewed_at END,
+         rejection_reason = CASE WHEN $3 THEN NULL ELSE rejection_reason END,
+         submitted_at = CASE WHEN $3 THEN NOW() ELSE submitted_at END,
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING *`,
+    [notes || null, id, needsReapproval],
   );
-  return rows[0];
+
+  return { ...rows[0], needs_reapproval: needsReapproval };
 }
 
 async function deleteSchedule({ id, user }) {
@@ -273,38 +324,32 @@ async function addVisit({ scheduleId, clientRequestId, plannedDate, city, priori
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
-  if (schedule.status !== "draft" && schedule.status !== "rejected") {
-    const error = new Error("Solo se pueden editar visitas en cronogramas en borrador");
-    error.status = 400;
-    throw error;
-  }
   if (!plannedDate || !clientRequestId) {
     const error = new Error("Fecha y cliente son obligatorios");
     error.status = 400;
     throw error;
   }
+  validateVisitDateWithinSchedule(plannedDate, schedule);
   const client = await getClientOrThrow(clientRequestId);
   const targetCity = resolveCity({ city, client }) || "Ciudad no especificada";
   const { rows } = await db.query(
     `INSERT INTO scheduled_visits (schedule_id, client_request_id, planned_date, city, priority, notes)
      VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (schedule_id, client_request_id, planned_date) DO UPDATE
-     SET city = EXCLUDED.city, priority = EXCLUDED.priority, notes = EXCLUDED.notes, updated_at = NOW()
-     RETURNING *`,
+    SET city = EXCLUDED.city, priority = EXCLUDED.priority, notes = EXCLUDED.notes, updated_at = NOW()
+    RETURNING *`,
     [scheduleId, clientRequestId, plannedDate, targetCity, priority || 1, notes || null],
   );
-  return rows[0];
+
+  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+
+  return { ...rows[0], schedule_status: updatedSchedule.status };
 }
 
 async function updateVisit({ scheduleId, visitId, city, plannedDate, priority, notes, user }) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
-  if (schedule.status !== "draft" && schedule.status !== "rejected") {
-    const error = new Error("Solo se pueden editar visitas en cronogramas en borrador");
-    error.status = 400;
-    throw error;
-  }
   const { rows } = await db.query("SELECT * FROM scheduled_visits WHERE id = $1 AND schedule_id = $2", [visitId, scheduleId]);
   if (!rows.length) {
     const error = new Error("Visita no encontrada");
@@ -312,28 +357,28 @@ async function updateVisit({ scheduleId, visitId, city, plannedDate, priority, n
     throw error;
   }
   const visit = rows[0];
+  validateVisitDateWithinSchedule(plannedDate || visit.planned_date, schedule);
   const client = await getClientOrThrow(visit.client_request_id);
   const targetCity = resolveCity({ city: city || visit.city, client }) || "Ciudad no especificada";
   const { rows: updated } = await db.query(
     `UPDATE scheduled_visits
      SET city = $1, planned_date = $2, priority = $3, notes = $4, updated_at = NOW()
-     WHERE id = $5
-     RETURNING *`,
+    WHERE id = $5
+    RETURNING *`,
     [targetCity, plannedDate || visit.planned_date, priority || visit.priority, notes || visit.notes, visitId],
   );
-  return updated[0];
+
+  const updatedSchedule = await triggerReapprovalIfNeeded(schedule);
+
+  return { ...updated[0], schedule_status: updatedSchedule.status };
 }
 
 async function deleteVisit({ scheduleId, visitId, user }) {
   assertAdvisor(user);
   const schedule = await findScheduleOrThrow(scheduleId);
   ensureOwner(schedule, user);
-  if (schedule.status !== "draft" && schedule.status !== "rejected") {
-    const error = new Error("Solo se pueden editar visitas en cronogramas en borrador");
-    error.status = 400;
-    throw error;
-  }
   await db.query("DELETE FROM scheduled_visits WHERE id = $1 AND schedule_id = $2", [visitId, scheduleId]);
+  await triggerReapprovalIfNeeded(schedule);
   return { deleted: true };
 }
 

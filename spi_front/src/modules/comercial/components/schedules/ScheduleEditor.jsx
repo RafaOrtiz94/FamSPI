@@ -3,7 +3,7 @@ import { fetchClients } from "../../../../core/api/clientsApi";
 import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 
-const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) => {
+const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete, editingLocked, onRequestEdit }) => {
   const [form, setForm] = useState({ month: "", year: new Date().getFullYear(), notes: "" });
   const [visitForm, setVisitForm] = useState({ client_request_id: "", planned_date: "", city: "", priority: 1, notes: "" });
   const [clients, setClients] = useState([]);
@@ -48,6 +48,10 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
   const handleAddVisit = (e) => {
     e.preventDefault();
     if (!schedule) return;
+    if (editingLocked && schedule.status === "approved") {
+      onRequestEdit?.();
+      return;
+    }
     if (!visitForm.client_request_id || !visitForm.planned_date || !visitForm.city) return;
     onAddVisit?.(schedule.id, {
       client_request_id: Number(visitForm.client_request_id),
@@ -61,6 +65,10 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
 
   const handleDelete = () => {
     if (!schedule) return;
+    if (editingLocked && schedule.status === "approved") {
+      onRequestEdit?.();
+      return;
+    }
     const confirmed = window.confirm(
       "¿Seguro que deseas eliminar este cronograma? Esta acción no se puede deshacer.",
     );
@@ -123,7 +131,23 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
               <ScheduleStatusBadge status={schedule.status} />
             </div>
 
-            {(["draft", "rejected"].includes(schedule.status)) && (
+            {schedule.status === "approved" && editingLocked && (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                <p className="font-semibold">Cronograma aprobado</p>
+                <p className="mt-1 text-amber-700">
+                  Para modificarlo se enviará nuevamente a aprobación. Activa la edición para continuar.
+                </p>
+                <button
+                  type="button"
+                  className="mt-2 w-full rounded bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700"
+                  onClick={() => onRequestEdit?.(schedule)}
+                >
+                  Habilitar edición
+                </button>
+              </div>
+            )}
+
+            {["draft", "rejected"].includes(schedule.status) && (
               <button
                 type="button"
                 className="w-full mb-3 bg-red-600 text-white py-2 rounded hover:bg-red-700"
@@ -187,7 +211,7 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
               <button
                 type="submit"
                 className="w-full bg-green-600 text-white py-2 rounded hover:bg-green-700"
-                disabled={schedule.status === "approved"}
+                disabled={editingLocked && schedule.status === "approved"}
               >
                 Agregar visita
               </button>
@@ -196,7 +220,7 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
             <button
               className="w-full mt-3 bg-blue-600 text-white py-2 rounded disabled:opacity-50"
               onClick={() => onSubmit?.(schedule.id)}
-              disabled={schedule.status !== "draft" && schedule.status !== "rejected"}
+              disabled={(editingLocked && schedule.status === "approved") || (schedule.status !== "draft" && schedule.status !== "rejected")}
             >
               Enviar para aprobación
             </button>
