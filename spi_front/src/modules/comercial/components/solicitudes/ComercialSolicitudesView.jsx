@@ -10,7 +10,7 @@ import RequestDetailModal from "../RequestDetailModal";
 import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import VacationRequestModal from "../../../shared/solicitudes/modals/VacationRequestModal";
+import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 
 const ComercialSolicitudesView = () => {
     const { showToast, confirm } = useUI();
@@ -19,7 +19,7 @@ const ComercialSolicitudesView = () => {
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
-    const [showVacationModal, setShowVacationModal] = useState(false);
+    const [showPermisoModal, setShowPermisoModal] = useState(false);
 
     // Grid data states
     const [solicitudes, setSolicitudes] = useState([]);
@@ -231,9 +231,9 @@ const ComercialSolicitudesView = () => {
                         <ActionCard
                             icon={FiClipboard}
                             subtitle="Talento Humano"
-                            title="Vacaciones"
+                            title="Permisos y Vacaciones"
                             color="orange"
-                            onClick={() => setShowVacationModal(true)}
+                            onClick={() => setShowPermisoModal(true)}
                         />
                     </div>
                 </div>
@@ -314,10 +314,10 @@ const ComercialSolicitudesView = () => {
                 hideButton={true}
             />
 
-            {/* VACATION MODAL */}
-            <VacationRequestModal
-                open={showVacationModal}
-                onClose={() => setShowVacationModal(false)}
+            {/* PERMISOS/VACACIONES MODAL */}
+            <PermisoVacacionModal
+                open={showPermisoModal}
+                onClose={() => setShowPermisoModal(false)}
                 onSuccess={() => {
                     load();
                     // Opcional: recargar otros widgets si es necesario

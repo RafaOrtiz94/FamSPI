@@ -10,8 +10,8 @@ import { useDebounce } from "../core/hooks/useDebounce";
 import { useAuth } from "../core/auth/AuthContext";
 
 import { getRequests, getRequestById, createRequest } from "../core/api/requestsApi";
-import { createVacationRequest, getVacationSummary, listVacationRequests } from "../core/api/vacationsApi";
 import api from "../core/api"; // para endpoints no mapeados aún (cancel)
+import PermisoVacacionModal from "./shared/solicitudes/modals/PermisoVacacionModal";
 
 import Button from "../core/ui/components/Button";
 import Input from "../core/ui/components/Input";
@@ -20,6 +20,7 @@ import Card from "../core/ui/components/Card";
 import Modal from "../core/ui/components/Modal";
 import FileUploader from "../core/ui/components/FileUploader";
 import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
+import { AprobacionPermisosView } from "./shared/solicitudes";
 import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "./comercial/components/EquipmentPurchaseWidget";
 import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
@@ -107,11 +108,8 @@ const RequestsPage = () => {
   // Detalle
   const [detail, setDetail] = useState({ open: false, loading: false, data: null, error: null });
 
-  // Vacaciones
+  // Permisos y vacaciones
   const [vacationModal, setVacationModal] = useState(false);
-  const [vacationForm, setVacationForm] = useState({ start_date: "", end_date: "", period: "", days: 0 });
-  const [vacSummary, setVacSummary] = useState(null);
-  const [vacRequests, setVacRequests] = useState([]);
 
   // Crear
   const [createModal, setCreateModal] = useState({ open: false, type: "inspection" });
@@ -140,24 +138,6 @@ const RequestsPage = () => {
     load();
   }, [load]);
 
-  const refreshVacations = useCallback(async () => {
-    try {
-      const [summary, mine] = await Promise.all([
-        getVacationSummary(false),
-        listVacationRequests({ scope: "mine" }),
-      ]);
-      setVacSummary(summary);
-      const rows = mine?.data || mine?.rows || mine || [];
-      setVacRequests(Array.isArray(rows) ? rows : []);
-    } catch (err) {
-      console.warn("No se pudo cargar el resumen de vacaciones", err);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (vacationModal) refreshVacations();
-  }, [refreshVacations, vacationModal]);
-
   // ======= Filtro =======
   const debounced = useDebounce(query, 350);
   const solicitudes = listData?.rows || listData?.result?.rows || listData || [];
@@ -185,50 +165,6 @@ const RequestsPage = () => {
       return {};
     }
   }
-
-  const computeVacationDays = useCallback((start, end) => {
-    if (!start || !end) return 0;
-    const s = new Date(start);
-    const e = new Date(end);
-    const diff = Math.round((e - s) / (1000 * 60 * 60 * 24));
-    return diff >= 0 ? diff + 1 : 0;
-  }, []);
-
-  const handleVacationChange = (key, value) => {
-    const next = { ...vacationForm, [key]: value };
-    if ((key === "start_date" || key === "end_date") && next.start_date && next.end_date) {
-      next.days = computeVacationDays(next.start_date, next.end_date);
-    }
-    if (key === "end_date" && value) {
-      const d = new Date(value);
-      const nextDay = new Date(d.getTime() + 24 * 60 * 60 * 1000).toISOString().split("T")[0];
-      next.return_date = nextDay;
-    }
-    setVacationForm(next);
-  };
-
-  const submitVacation = async (e) => {
-    e?.preventDefault?.();
-    if (!vacationForm.start_date || !vacationForm.end_date) {
-      showToast("Selecciona fechas de inicio y fin", "warning");
-      return;
-    }
-    try {
-      showLoader();
-      await createVacationRequest({
-        ...vacationForm,
-        days: vacationForm.days || computeVacationDays(vacationForm.start_date, vacationForm.end_date),
-      });
-      showToast("Solicitud de vacaciones enviada", "success");
-      await refreshVacations();
-      setVacationForm({ start_date: "", end_date: "", period: "", days: 0, return_date: "" });
-    } catch (err) {
-      console.error(err);
-      showToast("No se pudo enviar la solicitud", "error");
-    } finally {
-      hideLoader();
-    }
-  };
 
   // ======= Crear solicitud =======
   const handleOpenCreate = (type) => {
@@ -401,8 +337,10 @@ const RequestsPage = () => {
 
         <Card className="flex items-center justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase text-gray-500">Vacaciones</p>
-            <p className="text-sm text-gray-800 dark:text-gray-200">Solicita y consulta tus vacaciones</p>
+            <p className="text-xs font-semibold uppercase text-gray-500">Permisos y Vacaciones</p>
+            <p className="text-sm text-gray-800 dark:text-gray-200">
+              Solicita permisos por hora o tus vacaciones con aprobación en dos etapas
+            </p>
           </div>
           <Button size="sm" variant="secondary" onClick={() => setVacationModal(true)}>
             Abrir
@@ -436,6 +374,12 @@ const RequestsPage = () => {
       <div className="mb-6">
         <EquipmentPurchaseWidget showCreation={false} />
       </div>
+
+      {canViewAllRequests && (
+        <Card className="mb-6 p-4">
+          <AprobacionPermisosView />
+        </Card>
+      )}
 
       {/* Filtros */}
       <Card className="mb-4">
@@ -488,95 +432,11 @@ const RequestsPage = () => {
         </div>
       </Card>
 
-      <Modal open={vacationModal} onClose={() => setVacationModal(false)} title="Solicitud de vacaciones">
-        <form className="space-y-4" onSubmit={submitVacation}>
-          {vacSummary && !Array.isArray(vacSummary) ? (
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="p-2 bg-gray-50 rounded">Disponibles: {vacSummary.remaining}</div>
-              <div className="p-2 bg-blue-50 rounded">Tomados: {vacSummary.taken}</div>
-              <div className="p-2 bg-amber-50 rounded">Pendientes: {vacSummary.pending}</div>
-              <div className="p-2 bg-green-50 rounded">Total anual: {vacSummary.allowance}</div>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="flex flex-col text-sm gap-1">
-              Fecha de inicio
-              <input
-                type="date"
-                value={vacationForm.start_date}
-                onChange={(e) => handleVacationChange("start_date", e.target.value)}
-                className="input-field"
-                required
-              />
-            </label>
-            <label className="flex flex-col text-sm gap-1">
-              Fecha de fin
-              <input
-                type="date"
-                value={vacationForm.end_date}
-                onChange={(e) => handleVacationChange("end_date", e.target.value)}
-                className="input-field"
-                required
-              />
-            </label>
-            <label className="flex flex-col text-sm gap-1">
-              Período
-              <input
-                type="text"
-                placeholder="2024"
-                value={vacationForm.period}
-                onChange={(e) => handleVacationChange("period", e.target.value)}
-                className="input-field"
-              />
-            </label>
-            <label className="flex flex-col text-sm gap-1">
-              Días solicitados
-              <input
-                type="number"
-                value={vacationForm.days || 0}
-                readOnly
-                className="input-field bg-gray-50"
-              />
-            </label>
-            <label className="flex flex-col text-sm gap-1 md:col-span-2">
-              Fecha de regreso
-              <input
-                type="date"
-                value={vacationForm.return_date || ""}
-                readOnly
-                className="input-field bg-gray-50"
-              />
-            </label>
-          </div>
-
-          <div className="flex justify-end gap-2 pt-2">
-            <Button type="button" variant="secondary" onClick={() => setVacationModal(false)}>
-              Cerrar
-            </Button>
-            <Button type="submit" variant="primary">
-              Enviar solicitud
-            </Button>
-          </div>
-
-          <div className="border-t pt-3 space-y-2 max-h-48 overflow-y-auto">
-            <p className="text-sm font-semibold">Solicitudes recientes</p>
-            {vacRequests && vacRequests.length ? (
-              vacRequests.map((req) => (
-                <div key={req.id} className="flex items-center justify-between text-sm border p-2 rounded">
-                  <div>
-                    <p className="font-medium">{req.start_date} → {req.end_date}</p>
-                    <p className="text-xs text-gray-500">{req.days} día(s)</p>
-                  </div>
-                  <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700 capitalize">{req.status}</span>
-                </div>
-              ))
-            ) : (
-              <p className="text-xs text-gray-500">Aún no registras solicitudes.</p>
-            )}
-          </div>
-        </form>
-      </Modal>
+      <PermisoVacacionModal
+        open={vacationModal}
+        onClose={() => setVacationModal(false)}
+        onSuccess={load}
+      />
 
       <Card className="mb-6">
         <div className="mb-4 flex items-center justify-between">
