@@ -23,7 +23,16 @@ const PermisosStatusWidget = () => {
     const [loading, setLoading] = useState(true);
 
     const isApprover = useMemo(
-        () => ["jefe_comercial", "jefe_tecnico", "gerencia", "gerente", "administrador", "admin"].includes(role),
+        () =>
+            [
+                "jefe_comercial",
+                "jefe_tecnico",
+                "jefe_aplicaciones",
+                "gerencia",
+                "gerente",
+                "administrador",
+                "admin",
+            ].includes(role),
         [role]
     );
 

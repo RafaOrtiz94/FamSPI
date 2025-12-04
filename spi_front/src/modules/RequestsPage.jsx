@@ -85,7 +85,15 @@ const RequestsPage = () => {
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const canCreateRequests = role === "jefe_comercial";
-  const canViewAllRequests = ["jefe_comercial", "administrador", "admin", "gerencia", "gerente"].includes(role);
+  const canViewAllRequests = [
+    "jefe_comercial",
+    "jefe_tecnico",
+    "jefe_aplicaciones",
+    "administrador",
+    "admin",
+    "gerencia",
+    "gerente",
+  ].includes(role);
   const defaultRequestParams = useMemo(
     () => (canViewAllRequests ? { pageSize: 30 } : { mine: true, pageSize: 30 }),
     [canViewAllRequests]
