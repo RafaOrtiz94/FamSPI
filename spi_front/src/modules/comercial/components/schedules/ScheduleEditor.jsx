@@ -3,7 +3,7 @@ import { fetchClients } from "../../../../core/api/clientsApi";
 import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 
-const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit }) => {
+const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) => {
   const [form, setForm] = useState({ month: "", year: new Date().getFullYear(), notes: "" });
   const [visitForm, setVisitForm] = useState({ client_request_id: "", planned_date: "", city: "", priority: 1, notes: "" });
   const [clients, setClients] = useState([]);
@@ -51,6 +51,16 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit }) => {
       notes: visitForm.notes,
     });
     setVisitForm({ client_request_id: "", planned_date: "", city: "", priority: 1, notes: "" });
+  };
+
+  const handleDelete = () => {
+    if (!schedule) return;
+    const confirmed = window.confirm(
+      "¿Seguro que deseas eliminar este cronograma? Esta acción no se puede deshacer.",
+    );
+    if (confirmed) {
+      onDelete?.(schedule.id);
+    }
   };
 
   return (
@@ -106,6 +116,16 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit }) => {
               </div>
               <ScheduleStatusBadge status={schedule.status} />
             </div>
+
+            {(["draft", "rejected"].includes(schedule.status)) && (
+              <button
+                type="button"
+                className="w-full mb-3 bg-red-600 text-white py-2 rounded hover:bg-red-700"
+                onClick={handleDelete}
+              >
+                Eliminar cronograma
+              </button>
+            )}
 
             <form className="space-y-2" onSubmit={handleAddVisit}>
               <div className="space-y-2">

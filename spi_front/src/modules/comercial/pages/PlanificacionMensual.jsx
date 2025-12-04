@@ -6,7 +6,8 @@ import ScheduleEditor from "../components/schedules/ScheduleEditor";
 import ScheduleStatusBadge from "../components/schedules/ScheduleStatusBadge";
 
 const PlanificacionMensual = () => {
-  const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, loading, error } = useSchedules();
+  const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, remove, loading, error } =
+    useSchedules();
 
   useEffect(() => {
     if (!activeSchedule && schedules.length) {
@@ -57,6 +58,7 @@ const PlanificacionMensual = () => {
             onCreate={create}
             onAddVisit={addVisit}
             onSubmit={submit}
+            onDelete={remove}
           />
         </div>
       </div>

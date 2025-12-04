@@ -59,7 +59,7 @@ export const useSchedules = () => {
         setLoading(false);
       }
     },
-    [loadSchedules],
+    [],
   );
 
   const update = useCallback(
@@ -86,7 +86,12 @@ export const useSchedules = () => {
       setError(null);
       try {
         await deleteSchedule(id);
-        await loadSchedules();
+        const refreshed = await fetchSchedules();
+        setSchedules(refreshed);
+        setActiveSchedule((current) => {
+          if (current?.id !== id) return current;
+          return refreshed[0] || null;
+        });
       } catch (err) {
         setError(err.message || "No se pudo eliminar el cronograma");
         throw err;
@@ -94,7 +99,7 @@ export const useSchedules = () => {
         setLoading(false);
       }
     },
-    [loadSchedules],
+    [],
   );
 
   const submit = useCallback(
