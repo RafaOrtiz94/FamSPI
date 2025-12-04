@@ -1,0 +1,9 @@
+client_visit_logs_id_not_null: NOT NULL id
+client_visit_logs_client_request_id_not_null: NOT NULL client_request_id
+client_visit_logs_user_email_not_null: NOT NULL user_email
+client_visit_logs_visit_date_not_null: NOT NULL visit_date
+client_visit_logs_status_not_null: NOT NULL status
+client_visit_logs_pkey: PRIMARY KEY (id)
+client_visit_logs_client_request_id_user_email_visit_date_key: UNIQUE (client_request_id, user_email, visit_date)
+client_visit_logs_client_request_id_fkey: FOREIGN KEY (client_request_id) REFERENCES client_requests(id) ON DELETE CASCADE
+client_visit_logs_status_check: CHECK ((status = ANY (ARRAY['visited'::text, 'pending'::text, 'skipped'::text, 'in_visit'::text])))
