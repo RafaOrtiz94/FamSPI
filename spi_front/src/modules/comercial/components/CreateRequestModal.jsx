@@ -660,6 +660,10 @@ const CreateRequestModal = ({
                       updateEquipo={updateEquipo}
                       type={type}
                       removeEquipo={removeEquipo}
+                      equipmentOptions={equipmentOptions}
+                      equipmentLoading={loadingEquipment}
+                      equipmentError={equipmentError}
+                      disabled={clientSelectionRequired && !hasSelectedClient}
                     />
                   ))}
                   {errors.equipos && (
