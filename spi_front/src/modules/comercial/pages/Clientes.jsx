@@ -9,6 +9,7 @@ import {
   FiSearch,
   FiUser,
   FiUsers,
+  FiCalendar,
 } from "react-icons/fi";
 
 import Card from "../../../core/ui/components/Card";
@@ -55,6 +56,9 @@ const ClientesPage = () => {
   const [statusFilter, setStatusFilter] = useState("all"); // all | pending | visited
   const [assignedViewFilter, setAssignedViewFilter] = useState("assigned");
   const [assignedSearch, setAssignedSearch] = useState("");
+  const [filterBySchedule, setFilterBySchedule] = useState(true);
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [summary, setSummary] = useState({});
 
   const normalizeStatus = (status) => {
     const value = (status || "").toLowerCase();
@@ -174,12 +178,23 @@ const ClientesPage = () => {
   const loadClientes = async () => {
     setLoading(true);
     try {
-      const data = await fetchClients({ date: todayStr });
-      setClientes(Array.isArray(data) ? data : []);
+      const result = await fetchClients({
+        date: selectedDate,
+        include_schedule_info: true,
+        filter_by_schedule: filterBySchedule,
+      });
+      if (Array.isArray(result)) {
+        setClientes(result);
+        setSummary({});
+      } else {
+        setClientes(Array.isArray(result?.clients) ? result.clients : []);
+        setSummary(result?.summary || {});
+      }
     } catch (error) {
       console.error(error);
       showToast("No pudimos cargar tus clientes", "error");
       setClientes([]);
+      setSummary({});
     } finally {
       setLoading(false);
     }
@@ -187,23 +202,26 @@ const ClientesPage = () => {
 
   useEffect(() => {
     loadClientes();
-  }, []);
+  }, [selectedDate, filterBySchedule]);
 
   useEffect(() => {
     if (isManager) loadAdvisors();
   }, [isManager]);
 
   const visitedCount = useMemo(() => {
+    if (typeof summary?.visited === "number") return summary.visited;
     if (!Array.isArray(clientes)) return 0;
     return clientes.filter((c) => normalizeStatus(c.visit_status) === "visitado").length;
-  }, [clientes]);
+  }, [clientes, summary]);
 
   const pendingCount = useMemo(() => {
+    if (typeof summary?.pending === "number") return summary.pending;
     if (!Array.isArray(clientes)) return 0;
     return clientes.filter((c) => normalizeStatus(c.visit_status) !== "visitado").length;
-  }, [clientes]);
+  }, [clientes, summary]);
 
-  const progress = Array.isArray(clientes) && clientes.length > 0 ? Math.round((visitedCount / clientes.length) * 100) : 0;
+  const plannedToday = summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0);
+  const progress = plannedToday > 0 ? Math.round((visitedCount / plannedToday) * 100) : 0;
 
   const filteredClientes = useMemo(() => {
     if (!Array.isArray(clientes)) return [];
@@ -374,6 +392,7 @@ const ClientesPage = () => {
     const assigned = asignadosArray.length > 0 ? asignadosArray.join(", ") : "Sin asignar";
     const hasEntryCoords = cliente.lat_entrada && cliente.lng_entrada;
     const hasExitCoords = cliente.lat_salida && cliente.lng_salida;
+    const isPlanned = cliente.scheduled_info?.is_planned;
 
     return (
       <div
@@ -381,6 +400,12 @@ const ClientesPage = () => {
         className="relative flex flex-col rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-sm backdrop-blur hover:shadow-md transition hover:-translate-y-0.5 cursor-pointer"
         onClick={() => openReportModal(cliente)}
       >
+        {isPlanned && (
+          <span className="absolute top-3 left-3 px-2 py-1 bg-green-500 text-white text-xs rounded-full flex items-center gap-1">
+            <FiCalendar size={12} />
+            Planificado
+          </span>
+        )}
         <span className={`absolute top-3 right-3 h-2.5 w-2.5 rounded-full ${meta.led}`} />
 
         <div className="flex items-start justify-between gap-3">
@@ -530,9 +555,64 @@ const ClientesPage = () => {
           </div>
         </div>
 
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <label className="text-gray-700">Fecha</label>
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+              <input
+                type="checkbox"
+                checked={filterBySchedule}
+                onChange={(e) => setFilterBySchedule(e.target.checked)}
+                className="rounded"
+              />
+              <span>Mostrar solo clientes planificados</span>
+            </label>
+          </div>
+        </div>
+
+        {summary?.has_approved_schedule && (
+          <Card className="p-4 bg-blue-50 border-blue-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-semibold text-blue-900 flex items-center gap-2">
+                  <FiCalendar /> Planificación de Hoy
+                </h4>
+                <p className="text-sm text-blue-700 mt-1">{(summary.cities_today || []).join(", ") || "Ciudades"}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-blue-900">{summary.planned_today || 0}</p>
+                <p className="text-xs text-blue-600">clientes planificados</p>
+              </div>
+            </div>
+
+            <div className="mt-3">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-blue-700">Progreso</span>
+                <span className="font-semibold text-blue-900">
+                  {visitedCount} / {summary.planned_today || 0}
+                </span>
+              </div>
+              <div className="w-full bg-blue-200 rounded-full h-2 mt-1">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all"
+                  style={{ width: `${summary.planned_today ? Math.min(100, (visitedCount / summary.planned_today) * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+          </Card>
+        )}
+
         {/* Widget de check‑in / check‑out en cabecera */}
         <MyClientRequestsWidget
-          total={Array.isArray(clientes) ? clientes.length : 0}
+          total={summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
           visited={visitedCount}
           pending={pendingCount}
           onFilterChange={setStatusFilter}

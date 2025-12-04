@@ -2,7 +2,10 @@ import api from "./index";
 
 export const fetchClients = async (params = {}) => {
   const { data } = await api.get("/clients", { params });
-  return data.data || data.clients || [];
+  return {
+    clients: data.data || data.clients || [],
+    summary: data.summary || {},
+  };
 };
 
 export const assignClient = async (clientId, assigneeEmail) => {

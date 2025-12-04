@@ -8,14 +8,18 @@ const MANAGER_ROLES = new Set([
   "administrador",
 ]);
 
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice_comercial"]);
+const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
 
 function isManager(user) {
   return MANAGER_ROLES.has((user?.role || "").toLowerCase());
 }
 
 function isAdvisor(user) {
-  return isManager(user) || ADVISOR_ROLES.has((user?.role || "").toLowerCase());
+  return ADVISOR_ROLES.has((user?.role || "").toLowerCase());
+}
+
+function isCommercialUser(user) {
+  return isAdvisor(user) || isManager(user);
 }
 
 function assertAdvisor(user) {
@@ -29,6 +33,14 @@ function assertAdvisor(user) {
 function assertManager(user) {
   if (!isManager(user)) {
     const error = new Error("Solo los jefes pueden realizar esta acción");
+    error.status = 403;
+    throw error;
+  }
+}
+
+function assertCommercial(user) {
+  if (!isCommercialUser(user)) {
+    const error = new Error("No tienes permisos para consultar cronogramas");
     error.status = 403;
     throw error;
   }
@@ -90,9 +102,47 @@ async function listMySchedules(user) {
 async function listPendingApproval(user) {
   assertManager(user);
   const { rows } = await db.query(
-    `SELECT * FROM visit_schedules WHERE status = 'pending_approval' ORDER BY submitted_at DESC NULLS LAST`,
+    `SELECT
+       vs.id,
+       vs.user_email,
+       COALESCE(u.fullname, u.name, vs.user_email) AS user_name,
+       vs.month,
+       vs.year,
+       vs.status,
+       vs.submitted_at,
+       vs.notes,
+       vs.reviewed_by_email,
+       vs.reviewed_at,
+       vs.rejection_reason,
+       COUNT(sv.id) AS visits_count,
+       COALESCE(array_remove(array_agg(DISTINCT sv.city), NULL), '{}') AS cities,
+       COALESCE(
+         json_agg(
+           DISTINCT jsonb_build_object(
+             'id', sv.id,
+             'client_request_id', sv.client_request_id,
+             'client_name', cr.commercial_name,
+             'planned_date', sv.planned_date,
+             'city', sv.city,
+             'priority', sv.priority
+           )
+         ) FILTER (WHERE sv.id IS NOT NULL),
+         '[]'
+       ) AS visits
+     FROM visit_schedules vs
+     LEFT JOIN scheduled_visits sv ON sv.schedule_id = vs.id
+     LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
+     LEFT JOIN users u ON u.email = vs.user_email
+     WHERE vs.status = 'pending_approval'
+     GROUP BY vs.id, u.fullname, u.name
+     ORDER BY vs.submitted_at DESC NULLS LAST`,
   );
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    visits_count: Number(row.visits_count || 0),
+    cities: Array.isArray(row.cities) ? row.cities : [],
+    visits: Array.isArray(row.visits) ? row.visits : [],
+  }));
 }
 
 async function listTeamSchedules(user) {
@@ -328,6 +378,39 @@ async function rejectSchedule({ id, reason, user }) {
   return rows[0];
 }
 
+async function findApprovedScheduleForMonth({ userEmail, month, year }) {
+  const { rows } = await db.query(
+    `SELECT *
+       FROM visit_schedules
+      WHERE user_email = $1
+        AND status = 'approved'
+        AND month = $2
+        AND year = $3
+      ORDER BY reviewed_at DESC NULLS LAST
+      LIMIT 1`,
+    [userEmail, month, year],
+  );
+  return rows[0] || null;
+}
+
+async function getApprovedScheduleCurrent({ userEmail, month, year, user }) {
+  assertCommercial(user);
+  const targetEmail = (userEmail || user.email || "").toLowerCase();
+  const now = new Date();
+  const targetMonth = Number(month || now.getMonth() + 1);
+  const targetYear = Number(year || now.getFullYear());
+  const schedule = await findApprovedScheduleForMonth({ userEmail: targetEmail, month: targetMonth, year: targetYear });
+  if (!schedule) return null;
+  const { rows: visits } = await db.query(
+    `SELECT client_request_id, planned_date, city, priority, notes
+       FROM scheduled_visits
+      WHERE schedule_id = $1
+      ORDER BY planned_date ASC, priority ASC`,
+    [schedule.id],
+  );
+  return { ...schedule, schedule_id: schedule.id, visits };
+}
+
 async function getAnalytics(user) {
   assertManager(user);
   const { rows } = await db.query(
@@ -355,4 +438,6 @@ module.exports = {
   approveSchedule,
   rejectSchedule,
   getAnalytics,
+  getApprovedScheduleCurrent,
+  findApprovedScheduleForMonth,
 };

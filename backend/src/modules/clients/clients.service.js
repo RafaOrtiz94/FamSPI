@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const schedulesService = require("../schedules/schedules.service");
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
@@ -89,9 +90,31 @@ async function getClientOrThrow(clientId) {
   return rows[0];
 }
 
-async function listAccessibleClients({ user, q, visitDate }) {
+async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
   await ensureTables();
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
+
+  const normalizedEmail = (user?.email || "").toLowerCase();
+  let approvedSchedule = null;
+  let plannedVisits = [];
+
+  if (includeScheduleInfo || filterBySchedule) {
+    approvedSchedule = await schedulesService.findApprovedScheduleForMonth({
+      userEmail: normalizedEmail,
+      month: Number(dateParam.slice(5, 7)),
+      year: Number(dateParam.slice(0, 4)),
+    });
+
+    if (approvedSchedule) {
+      const { rows } = await db.query(
+        `SELECT client_request_id, planned_date, city, priority, notes, schedule_id
+           FROM scheduled_visits
+          WHERE schedule_id = $1 AND planned_date = $2`,
+        [approvedSchedule.id, dateParam],
+      );
+      plannedVisits = rows || [];
+    }
+  }
 
   const params = [user.email, dateParam];
   const clauses = ["cr.status = 'approved'"]; // base status filter
@@ -107,6 +130,15 @@ async function listAccessibleClients({ user, q, visitDate }) {
     clauses.push(
       `(LOWER(cr.commercial_name) LIKE $${idx} OR LOWER(cr.ruc_cedula) LIKE $${idx} OR CAST(cr.id AS TEXT) LIKE $${idx})`,
     );
+  }
+
+  if (filterBySchedule && approvedSchedule) {
+    params.push(plannedVisits.map((v) => v.client_request_id));
+    clauses.push(`cr.id = ANY($${params.length})`);
+  }
+
+  if (filterBySchedule && !approvedSchedule) {
+    return [];
   }
 
   const whereClause = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -165,7 +197,19 @@ async function listAccessibleClients({ user, q, visitDate }) {
 
   const { rows } = await db.query(query, params);
 
-  return rows.map((row) => {
+  const plannedByClient = plannedVisits.reduce((acc, visit) => {
+    acc[visit.client_request_id] = {
+      is_planned: true,
+      planned_date: visit.planned_date,
+      planned_city: visit.city,
+      priority: visit.priority,
+      notes: visit.notes,
+      schedule_id: visit.schedule_id,
+    };
+    return acc;
+  }, {});
+
+  const clients = rows.map((row) => {
     let asignados = row.asignados;
     // PostgreSQL puede devolver json_agg como string JSON, parsearlo si es necesario
     if (typeof asignados === "string") {
@@ -179,12 +223,34 @@ async function listAccessibleClients({ user, q, visitDate }) {
     if (!Array.isArray(asignados)) {
       asignados = [];
     }
+    const scheduled_info = includeScheduleInfo
+      ? {
+          ...(plannedByClient[row.id] || { is_planned: false, schedule_id: approvedSchedule?.id || null }),
+        }
+      : undefined;
+
     return {
       ...row,
       asignados,
       visit_status: row.visit_status || "pending",
+      scheduled_info,
     };
   });
+
+  const visitedCount = clients.filter((c) => (c.visit_status || "").toLowerCase() === "visited").length;
+  const citiesToday = [...new Set(plannedVisits.map((v) => v.city).filter(Boolean))];
+
+  return {
+    clients,
+    scheduleMeta: {
+      total: clients.length,
+      visited: visitedCount,
+      pending: Math.max(0, clients.length - visitedCount),
+      planned_today: plannedVisits.length,
+      has_approved_schedule: Boolean(approvedSchedule),
+      cities_today: citiesToday,
+    },
+  };
 }
 
 async function assignClient({ clientId, assigneeEmail, user }) {

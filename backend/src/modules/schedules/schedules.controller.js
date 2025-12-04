@@ -83,7 +83,22 @@ const approveSchedule = (req, res) =>
 const rejectSchedule = (req, res) =>
   respond(
     res,
-    service.rejectSchedule({ id: Number(req.params.id), reason: req.body.reason, user: req.user }),
+    service.rejectSchedule({
+      id: Number(req.params.id),
+      reason: req.body.rejection_reason || req.body.reason,
+      user: req.user,
+    }),
+  );
+
+const getApprovedSchedule = (req, res) =>
+  respond(
+    res,
+    service.getApprovedScheduleCurrent({
+      userEmail: req.query.user_email,
+      month: req.query.month,
+      year: req.query.year,
+      user: req.user,
+    }),
   );
 
 const analytics = (req, res) => respond(res, service.getAnalytics(req.user));
@@ -103,4 +118,5 @@ module.exports = {
   approveSchedule,
   rejectSchedule,
   analytics,
+  getApprovedSchedule,
 };

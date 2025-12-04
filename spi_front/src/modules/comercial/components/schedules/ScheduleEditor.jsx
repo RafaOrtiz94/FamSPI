@@ -11,7 +11,13 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete }) 
 
   useEffect(() => {
     fetchClients({ limit: 200 })
-      .then(setClients)
+      .then((data) => {
+        if (Array.isArray(data)) {
+          setClients(data);
+          return;
+        }
+        setClients(Array.isArray(data?.clients) ? data.clients : []);
+      })
       .catch(() => setClients([]));
   }, []);
 

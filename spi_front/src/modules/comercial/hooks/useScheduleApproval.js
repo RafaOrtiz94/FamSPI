@@ -5,7 +5,6 @@ import {
   rejectSchedule,
   fetchTeamSchedules,
   fetchScheduleAnalytics,
-  fetchScheduleDetail,
 } from "../../../core/api/schedulesApi";
 
 export const useScheduleApproval = () => {
@@ -20,17 +19,7 @@ export const useScheduleApproval = () => {
     setError(null);
     try {
       const data = await fetchPendingSchedules();
-      const detailed = await Promise.all(
-        data.map(async (schedule) => {
-          try {
-            const detail = await fetchScheduleDetail(schedule.id);
-            return detail || schedule;
-          } catch (err) {
-            return schedule;
-          }
-        }),
-      );
-      setPending(detailed);
+      setPending(data);
     } catch (err) {
       setError(err.message || "No se pudieron cargar los cronogramas pendientes");
     } finally {

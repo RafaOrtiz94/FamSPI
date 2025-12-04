@@ -150,7 +150,7 @@ const buildLinks = (scope) => {
   const links = [getHomeLink(scope)];
 
   // Comercial links
-  if (["comercial", "gerencia", "ti", "acp_comercial"].includes(scope)) {
+  if (["comercial", "acp_comercial", "backoffice", "backoffice_comercial"].includes(scope)) {
     links.push(...comercialLinks, planificacionLink);
   }
 

@@ -324,7 +324,11 @@ const CreateRequestModal = ({
       setLoadingClients(true);
       try {
         const clients = await fetchClients();
-        setAvailableClients(Array.isArray(clients) ? clients : []);
+        if (Array.isArray(clients)) {
+          setAvailableClients(clients);
+        } else {
+          setAvailableClients(Array.isArray(clients?.clients) ? clients.clients : []);
+        }
       } catch (error) {
         console.error("Error cargando clientes", error);
         setAvailableClients([]);
