@@ -1,10 +1,8 @@
 const express = require("express");
-const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const controller = require("./schedules.controller");
 
-const router = express.Router();
-router.use(verifyToken);
+const router = express.Router({ mergeParams: true });
 
 const advisorRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "gerencia", "gerencia_general"];
 const managerRoles = ["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"];
