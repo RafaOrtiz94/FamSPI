@@ -14,13 +14,13 @@ const PlanificacionMensual = () => {
   const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, remove, loading, error } =
     useSchedules({ skipLoad: isManager });
   const [editingLocked, setEditingLocked] = useState(false);
-  const [allowApprovedEditing, setAllowApprovedEditing] = useState(false);
+  const [unlockedScheduleId, setUnlockedScheduleId] = useState(null);
   const [showEditWarning, setShowEditWarning] = useState(false);
   const [scheduleToUnlock, setScheduleToUnlock] = useState(null);
 
   useEffect(() => {
     if (!activeSchedule && schedules.length) {
-      setAllowApprovedEditing(false);
+      setUnlockedScheduleId(null);
       setEditingLocked(["approved"].includes(schedules[0].status));
       loadScheduleDetail(schedules[0].id);
     }
@@ -28,12 +28,13 @@ const PlanificacionMensual = () => {
 
   useEffect(() => {
     if (!activeSchedule) return;
-    setEditingLocked(activeSchedule.status === "approved" && !allowApprovedEditing);
-  }, [activeSchedule, allowApprovedEditing]);
+    const shouldLock = activeSchedule.status === "approved" && unlockedScheduleId !== activeSchedule.id;
+    setEditingLocked(shouldLock);
+  }, [activeSchedule, unlockedScheduleId]);
 
   const handleSelectSchedule = useCallback(
     (schedule) => {
-      setAllowApprovedEditing(false);
+      setUnlockedScheduleId(null);
       setEditingLocked(schedule.status === "approved");
       loadScheduleDetail(schedule.id);
     },
@@ -43,7 +44,7 @@ const PlanificacionMensual = () => {
   const startEditing = useCallback(
     (schedule) => {
       setEditingLocked(false);
-      setAllowApprovedEditing(schedule.status === "approved");
+      setUnlockedScheduleId(schedule.status === "approved" ? schedule.id : null);
       loadScheduleDetail(schedule.id);
     },
     [loadScheduleDetail],
@@ -64,9 +65,9 @@ const PlanificacionMensual = () => {
 
   const confirmEdit = useCallback(() => {
     if (scheduleToUnlock) {
+      setUnlockedScheduleId(scheduleToUnlock.id);
       startEditing(scheduleToUnlock);
     }
-    setAllowApprovedEditing(true);
     setShowEditWarning(false);
     setScheduleToUnlock(null);
   }, [scheduleToUnlock, startEditing]);
