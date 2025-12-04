@@ -21,6 +21,7 @@ import Modal from "../core/ui/components/Modal";
 import FileUploader from "../core/ui/components/FileUploader";
 import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
 import { AprobacionPermisosView } from "./shared/solicitudes";
+import PermisosStatusWidget from "./shared/solicitudes/components/PermisosStatusWidget";
 import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "./comercial/components/EquipmentPurchaseWidget";
 import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
@@ -372,11 +373,15 @@ const RequestsPage = () => {
       </div>
 
       <div className="mb-6">
+        <PermisosStatusWidget />
+      </div>
+
+      <div className="mb-6">
         <EquipmentPurchaseWidget showCreation={false} />
       </div>
 
       {canViewAllRequests && (
-        <Card className="mb-6 p-4">
+        <Card className="mb-6 p-4" id="permisos-aprobacion">
           <AprobacionPermisosView />
         </Card>
       )}

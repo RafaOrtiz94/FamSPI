@@ -30,6 +30,11 @@ export const listarPendientes = async (stage = 'pending') => {
   return data;
 };
 
+export const listarMisPermisos = async () => {
+  const { data } = await api.get('/permisos/mis');
+  return data;
+};
+
 export default {
   crearPermiso,
   aprobarPermisoParcial,
@@ -37,4 +42,5 @@ export default {
   aprobarPermisoFinal,
   rechazarPermiso,
   listarPendientes,
+  listarMisPermisos,
 };

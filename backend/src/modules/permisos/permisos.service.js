@@ -218,6 +218,29 @@ async function listarPendientes({ stage, approver }) {
   return rows;
 }
 
+async function listarPorUsuario({ user }) {
+  await ensureTable();
+  const email = user?.email;
+  if (!email) return { data: [], summary: {} };
+
+  const { rows } = await db.query(
+    `SELECT * FROM permisos_vacaciones WHERE user_email = $1 ORDER BY created_at DESC LIMIT 100`,
+    [email]
+  );
+
+  const summary = rows.reduce(
+    (acc, row) => {
+      const status = row.status || "pending";
+      acc.status[status] = (acc.status[status] || 0) + 1;
+      acc.total += 1;
+      return acc;
+    },
+    { total: 0, status: {} }
+  );
+
+  return { data: rows, summary };
+}
+
 module.exports = {
   ensureTable,
   createSolicitud,
@@ -226,4 +249,5 @@ module.exports = {
   aprobarFinal,
   rechazar,
   listarPendientes,
+  listarPorUsuario,
 };

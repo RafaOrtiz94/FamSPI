@@ -65,6 +65,16 @@ const listarPendientes = async (req, res) => {
   }
 };
 
+const listarMias = async (req, res) => {
+  try {
+    const data = await permisosService.listarPorUsuario({ user: req.user });
+    return res.json({ ok: true, data: data.data, summary: data.summary });
+  } catch (error) {
+    const status = error.status || 400;
+    return res.status(status).json({ ok: false, message: error.message || "No se pudo obtener tus solicitudes" });
+  }
+};
+
 module.exports = {
   crearSolicitud,
   aprobarParcial,
@@ -72,4 +82,5 @@ module.exports = {
   aprobarFinal,
   rechazar,
   listarPendientes,
+  listarMias,
 };

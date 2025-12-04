@@ -8,6 +8,7 @@ router.use(verifyToken);
 
 router.post("/", controller.crearSolicitud);
 router.get("/pending", controller.listarPendientes);
+router.get("/mis", controller.listarMias);
 router.post("/:id/aprobar-parcial", controller.aprobarParcial);
 router.post("/:id/justificantes", controller.subirJustificantes);
 router.post("/:id/aprobar-final", controller.aprobarFinal);
