@@ -10,7 +10,7 @@ import ActionCard from "../../core/ui/patterns/ActionCard";
 import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
 import HRPersonnelRequestsWidget from "../../core/ui/widgets/HRPersonnelRequestsWidget";
-import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
+import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
@@ -124,10 +124,13 @@ const TalentoDashboard = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <AttendanceWidget />
         <ClientRequestWidget />
-        <VacationRequestsWidget mode="hr" />
+      </div>
+
+      <div className="mt-6">
+        <PermisosStatusWidget />
       </div>
 
       <HRPersonnelRequestsWidget />
