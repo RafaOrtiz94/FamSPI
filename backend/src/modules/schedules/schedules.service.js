@@ -63,15 +63,15 @@ function validateVisitDateWithinSchedule(plannedDate, schedule) {
     throw error;
   }
 
-  const [yearStr, monthStr] = String(plannedDate).split("-");
-  const visitMonth = Number(monthStr);
-  const visitYear = Number(yearStr);
-
-  if (!visitMonth || !visitYear) {
+  const parsed = new Date(plannedDate);
+  if (Number.isNaN(parsed.getTime())) {
     const error = new Error("La fecha planificada no es válida");
     error.status = 400;
     throw error;
   }
+
+  const visitMonth = parsed.getUTCMonth() + 1;
+  const visitYear = parsed.getUTCFullYear();
 
   if (visitMonth !== Number(schedule.month) || visitYear !== Number(schedule.year)) {
     const error = new Error("La fecha de visita debe estar dentro del mes del cronograma");
