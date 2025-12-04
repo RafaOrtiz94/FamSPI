@@ -11,7 +11,7 @@ import {
   deleteScheduledVisit,
 } from "../../../core/api/schedulesApi";
 
-export const useSchedules = () => {
+export const useSchedules = ({ skipLoad = false } = {}) => {
   const [loading, setLoading] = useState(false);
   const [schedules, setSchedules] = useState([]);
   const [activeSchedule, setActiveSchedule] = useState(null);
@@ -174,8 +174,9 @@ export const useSchedules = () => {
   );
 
   useEffect(() => {
+    if (skipLoad) return;
     loadSchedules();
-  }, [loadSchedules]);
+  }, [loadSchedules, skipLoad]);
 
   return {
     schedules,
