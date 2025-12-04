@@ -100,7 +100,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
           {/* Subrutas Comercial */}
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti", "acp_comercial"]} />}>
+          <Route element={<ProtectedRoute allowedRoles={["comercial", "gerencia", "ti", "acp_comercial"]} />}> 
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
