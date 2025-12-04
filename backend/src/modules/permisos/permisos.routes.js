@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router({ mergeParams: true });
 const controller = require("./permisos.controller");
-const { auth } = require("../../middleware/auth" );
+const { auth } = require("../../middlewares/auth");
 
 router.use(auth);
 
