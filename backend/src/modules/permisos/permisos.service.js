@@ -3,12 +3,31 @@ const { logAction } = require("../../utils/audit");
 const { validatePermisoRequest } = require("./permisos.validation");
 const { generateFRH10 } = require("./permisos.pdf");
 
+const ROLE_APPROVER = {
+  comercial: "jefe_comercial",
+  acp_comercial: "jefe_comercial",
+  backoffice_comercial: "jefe_comercial",
+  backoffice: "jefe_comercial",
+  jefe_comercial: "gerencia",
+  tecnico: "jefe_tecnico",
+  tecnico_servicio: "jefe_tecnico",
+  aplicaciones: "jefe_tecnico",
+  applicaciones: "jefe_tecnico",
+  jefe_tecnico: "gerencia",
+};
+
+function resolveApproverRole(requesterRole = "") {
+  const normalized = requesterRole.toLowerCase();
+  return ROLE_APPROVER[normalized] || "gerencia";
+}
+
 async function ensureTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS permisos_vacaciones (
       id SERIAL PRIMARY KEY,
       user_email TEXT NOT NULL,
       user_fullname TEXT,
+      approver_role TEXT,
       tipo_solicitud TEXT NOT NULL DEFAULT 'vacaciones',
       tipo_permiso TEXT,
       subtipo_calamidad TEXT,
@@ -35,6 +54,7 @@ async function ensureTable() {
       CHECK (status IN ('pending','partially_approved','pending_final','approved','rejected'))
     );
   `);
+  await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_role TEXT");
 }
 
 async function createSolicitud({ body, user }) {
@@ -43,6 +63,7 @@ async function createSolicitud({ body, user }) {
   payload.tipo_solicitud = payload.tipo_solicitud || "permiso";
   payload.user_email = user?.email;
   payload.user_fullname = user?.fullname || user?.name || user?.email;
+  payload.approver_role = resolveApproverRole(user?.role || user?.rol || "");
 
   if (payload.tipo_solicitud === "permiso") {
     const validation = await validatePermisoRequest(payload);
@@ -52,12 +73,13 @@ async function createSolicitud({ body, user }) {
 
   const { rows } = await db.query(
     `INSERT INTO permisos_vacaciones (
-      user_email, user_fullname, tipo_solicitud, tipo_permiso, subtipo_calamidad, duracion_horas, duracion_dias, fecha_inicio, fecha_fin,
+      user_email, user_fullname, approver_role, tipo_solicitud, tipo_permiso, subtipo_calamidad, duracion_horas, duracion_dias, fecha_inicio, fecha_fin,
       es_recuperable, periodo_vacaciones, justificacion_requerida, status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'pending') RETURNING *`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending') RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
+      payload.approver_role,
       payload.tipo_solicitud,
       payload.tipo_permiso || null,
       payload.subtipo_calamidad || null,
@@ -75,8 +97,24 @@ async function createSolicitud({ body, user }) {
   return rows[0];
 }
 
+function canApprove({ approverRole, approver }) {
+  if (!approverRole) return true;
+  const role = approver?.role?.toLowerCase();
+  if (!role) return false;
+  if (role === "gerencia") return true;
+  return role === approverRole.toLowerCase();
+}
+
 async function aprobarParcial({ id, approver }) {
   await ensureTable();
+  const existing = await db.query(`SELECT approver_role, status FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const solicitud = existing.rows[0];
+  if (!solicitud) throw new Error("Solicitud no encontrada");
+  if (!canApprove({ approverRole: solicitud.approver_role, approver })) {
+    const err = new Error("No autorizado para aprobar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET status = 'partially_approved',
@@ -112,6 +150,11 @@ async function aprobarFinal({ id, approver }) {
   const { rows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = rows[0];
   if (!solicitud) throw new Error("Solicitud no encontrada");
+  if (!canApprove({ approverRole: solicitud.approver_role, approver })) {
+    const err = new Error("No autorizado para aprobar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
   const pdfUrl = await generateFRH10(solicitud);
   const update = await db.query(
     `UPDATE permisos_vacaciones
@@ -130,6 +173,14 @@ async function aprobarFinal({ id, approver }) {
 
 async function rechazar({ id, approver, observaciones }) {
   await ensureTable();
+  const current = await db.query(`SELECT approver_role FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const solicitud = current.rows[0];
+  if (!solicitud) throw new Error("Solicitud no encontrada");
+  if (!canApprove({ approverRole: solicitud.approver_role, approver })) {
+    const err = new Error("No autorizado para rechazar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
   const obsArray = Array.isArray(observaciones)
     ? observaciones
     : observaciones
@@ -150,14 +201,19 @@ async function rechazar({ id, approver, observaciones }) {
   return rows[0];
 }
 
-async function listarPendientes({ stage }) {
+async function listarPendientes({ stage, approver }) {
   await ensureTable();
   let statusFilter = "pending";
-  if (stage === "final") statusFilter = "pending_final";
+  if (stage === "final" || stage === "pending_final") statusFilter = "pending_final";
   if (stage === "parcial") statusFilter = "pending";
+  const role = approver?.role?.toLowerCase();
+  const allowedRoles = [role].filter(Boolean);
+  if (role !== "gerencia") {
+    allowedRoles.push("gerencia");
+  }
   const { rows } = await db.query(
-    `SELECT * FROM permisos_vacaciones WHERE status = $1 ORDER BY created_at DESC`,
-    [statusFilter]
+    `SELECT * FROM permisos_vacaciones WHERE status = $1 AND (approver_role = ANY($2) OR $3 = TRUE OR approver_role IS NULL) ORDER BY created_at DESC`,
+    [statusFilter, allowedRoles, role === "gerencia"]
   );
   return rows;
 }

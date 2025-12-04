@@ -57,7 +57,7 @@ const rechazar = async (req, res) => {
 
 const listarPendientes = async (req, res) => {
   try {
-    const data = await permisosService.listarPendientes({ stage: req.query?.stage });
+    const data = await permisosService.listarPendientes({ stage: req.query?.stage, approver: req.user });
     return res.json({ ok: true, data });
   } catch (error) {
     const status = error.status || 400;
