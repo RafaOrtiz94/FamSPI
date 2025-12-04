@@ -8,6 +8,7 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
+import { getEquiposDisponibles } from "../../../core/api/inventarioApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -78,33 +79,66 @@ const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
     ⚙️ Componente para Input de Equipo con Select de Estado
 ============================================================ */
 const requestTypesForEquipments = {
-  inspection: { nombre_equipo: "", estado: "nuevo" },
-  retiro: { nombre_equipo: "", cantidad: 1 },
-  compra: { nombre_equipo: "", estado: "nuevo" },
+  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
+  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1 },
+  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
 };
 
-const EquipoInput = ({ index, equipo, updateEquipo, type, removeEquipo }) => {
+const EquipoInput = ({
+  index,
+  equipo,
+  updateEquipo,
+  type,
+  removeEquipo,
+  equipmentOptions = [],
+  equipmentLoading,
+  equipmentError,
+  disabled,
+}) => {
   const keys = Object.keys(requestTypesForEquipments[type] || {});
 
   const isStateField = (k) => k === "estado" && (type === "inspection" || type === "compra");
   const isQuantityField = (k) => k === "cantidad";
+  const isEquipmentField = (k) => k === "equipo_id";
+
+  const handleEquipmentSelect = (e) => {
+    const value = e.target.value;
+    const selected = equipmentOptions.find((opt) => `${opt.id}` === `${value}`);
+    updateEquipo(index, "equipo_id", value);
+    updateEquipo(index, "nombre_equipo", selected?.nombre || "");
+  };
 
   return (
-    <div className="flex items-center gap-2 mb-2 flex-wrap sm:flex-nowrap w-full">
+    <div className="flex items-start gap-2 mb-3 flex-wrap sm:flex-nowrap w-full">
       {keys.map((k) => (
-        <div key={k} className="flex-1 min-w-[100px]">
-          {isStateField(k) ? (
+        <div key={k} className="flex-1 min-w-[160px]">
+          {isEquipmentField(k) ? (
+            <select
+              value={equipo[k]}
+              onChange={handleEquipmentSelect}
+              disabled={disabled || equipmentLoading}
+              className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+            >
+              <option value="">
+                {equipmentLoading ? "Cargando equipos..." : "Selecciona un equipo"}
+              </option>
+              {equipmentOptions.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.nombre}
+                  {opt.marca ? ` - ${opt.marca}` : ""}
+                  {opt.modelo ? ` ${opt.modelo}` : ""}
+                </option>
+              ))}
+            </select>
+          ) : isStateField(k) ? (
             <select
               value={equipo[k]}
               onChange={(e) => updateEquipo(index, k, e.target.value)}
+              disabled={disabled}
               className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white capitalize"
             >
               <option value="nuevo">Nuevo</option>
-              {type === "inspection" ? (
-                <option value="cu">CU</option>
-              ) : (
-                <option value="usado">Usado</option>
-              )}
+              {type === "inspection" ? <option value="cu">CU</option> : <option value="usado">Usado</option>}
             </select>
           ) : (
             <input
@@ -112,9 +146,18 @@ const EquipoInput = ({ index, equipo, updateEquipo, type, removeEquipo }) => {
               placeholder={k.replaceAll("_", " ")}
               value={equipo[k]}
               min={isQuantityField(k) ? 1 : null}
-              onChange={(e) => updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)}
+              onChange={(e) =>
+                updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
+              }
+              disabled={disabled}
               className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
             />
+          )}
+          {isEquipmentField(k) && !equipmentLoading && equipmentOptions.length === 0 && (
+            <p className="text-xs text-gray-500 mt-1">No hay equipos disponibles.</p>
+          )}
+          {isEquipmentField(k) && equipmentError && (
+            <p className="text-xs text-red-500 mt-1">{equipmentError}</p>
           )}
         </div>
       ))}
@@ -122,6 +165,7 @@ const EquipoInput = ({ index, equipo, updateEquipo, type, removeEquipo }) => {
         type="button"
         onClick={() => removeEquipo(index)}
         className="text-red-500 hover:text-red-700 p-2"
+        disabled={disabled}
       >
         <FiTrash2 />
       </button>
@@ -228,6 +272,9 @@ const CreateRequestModal = ({
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [equipmentOptions, setEquipmentOptions] = useState([]);
+  const [loadingEquipment, setLoadingEquipment] = useState(false);
+  const [equipmentError, setEquipmentError] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
   const clientSelectionRequired = type === "inspection" || type === "retiro";
@@ -251,6 +298,8 @@ const CreateRequestModal = ({
       setFiles([]);
       setErrors({});
       setSelectedClientId("");
+      setEquipmentOptions([]);
+      setEquipmentError("");
       return;
     }
 
@@ -305,11 +354,17 @@ const CreateRequestModal = ({
       }
     }
 
-    // 4. Validar equipos con estado
-    if (requestTypes[type].equipos?.estado) {
-      equipos.forEach((eq, i) => {
-        if (!eq.nombre_equipo || !eq.estado) {
-          newErrors.equipos = "Todos los equipos deben tener nombre y estado seleccionado.";
+    // 4. Validar equipos seleccionados desde inventario
+    if (requestTypes[type].equipos) {
+      equipos.forEach((eq) => {
+        if (!eq.equipo_id) {
+          newErrors.equipos = "Selecciona un equipo válido del inventario.";
+        }
+        if (requestTypes[type].equipos.estado !== undefined && !eq.estado) {
+          newErrors.equipos = "Todos los equipos deben tener estado seleccionado.";
+        }
+        if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
+          newErrors.equipos = "Indica la cantidad de equipos a retirar.";
         }
       });
     }
@@ -338,6 +393,27 @@ const CreateRequestModal = ({
     };
 
     loadClients();
+  }, [open, type]);
+
+  useEffect(() => {
+    const loadEquipmentOptions = async () => {
+      if (!open || !requestTypes[type]?.equipos) return;
+
+      setLoadingEquipment(true);
+      setEquipmentError("");
+      try {
+        const data = await getEquiposDisponibles();
+        setEquipmentOptions(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Error cargando equipos", error);
+        setEquipmentError("No pudimos cargar los equipos disponibles.");
+        setEquipmentOptions([]);
+      } finally {
+        setLoadingEquipment(false);
+      }
+    };
+
+    loadEquipmentOptions();
   }, [open, type]);
 
   // ✅ Actualiza valores del formulario
