@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchClients } from "../../../core/api/clientsApi";
+import { fetchClients } from "../../../../core/api/clientsApi";
 import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 
