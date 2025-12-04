@@ -9,3 +9,4 @@ export * from "./availabilityApi";
 export * from "./vacationsApi";
 export * from "./clientsApi";
 export * from "./technicalApplicationsApi";
+export * from "./schedulesApi";

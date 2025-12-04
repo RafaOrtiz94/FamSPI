@@ -25,6 +25,8 @@ import ClientesPage from "../modules/comercial/pages/Clientes";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
+import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
+import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
 import ServicioMantenimientos from "../modules/servicio/pages/Mantenimientos";
 import ServicioSolicitudes from "../modules/servicio/pages/Solicitudes";
@@ -103,6 +105,11 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
+            <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
+            <Route path="/dashboard/comercial/aprobaciones-planificacion" element={<AprobacionCronogramas />} />
           </Route>
 
           <Route

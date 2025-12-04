@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { FiClipboard, FiUsers, FiCheckSquare, FiFileText } from "react-icons/fi";
+import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
@@ -65,6 +65,24 @@ const ComercialView = () => {
                             <div>
                                 <p className="text-sm font-semibold text-gray-900">Business Case</p>
                                 <p className="text-xs text-gray-500">Inicia y completa tu caso</p>
+                            </div>
+                        </div>
+                    </button>
+                </Card>
+
+                {/* 👉 Planificación */}
+                <Card className="p-0">
+                    <button
+                        className="w-full text-left p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
+                        onClick={() => navigate("/dashboard/comercial/planificacion")}
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-purple-50 rounded-md text-purple-600">
+                                <FiCalendar size={18} />
+                            </div>
+                            <div>
+                                <p className="text-sm font-semibold text-gray-900">Planificación</p>
+                                <p className="text-xs text-gray-500">Cronograma mensual</p>
                             </div>
                         </div>
                     </button>

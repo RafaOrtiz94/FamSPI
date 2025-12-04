@@ -183,6 +183,7 @@ const equipmentPurchaseRoutes = require("./modules/equipment-purchases/equipment
 const personnelRequestsRoutes = require("./modules/personnel-requests/personnel-requests.routes");
 const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
 const clientsRoutes = require("./modules/clients/clients.routes");
+const schedulesRoutes = require("./modules/schedules/schedules.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -245,6 +246,7 @@ app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
 app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
 app.use("/api/v1/vacaciones", vacacionesRoutes);
 app.use("/api/v1/clients", clientsRoutes);
+app.use("/api/v1/schedules", schedulesRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores
