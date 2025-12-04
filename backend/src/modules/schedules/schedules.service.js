@@ -52,6 +52,32 @@ function ensureOwner(schedule, user) {
   }
 }
 
+async function getClientOrThrow(clientRequestId) {
+  const { rows } = await db.query(
+    `SELECT id, commercial_name, shipping_city, shipping_province, shipping_address
+       FROM client_requests
+      WHERE id = $1
+      LIMIT 1`,
+    [clientRequestId],
+  );
+  if (!rows.length) {
+    const error = new Error("Cliente no encontrado");
+    error.status = 404;
+    throw error;
+  }
+  return rows[0];
+}
+
+function resolveCity({ city, client }) {
+  return (
+    city ||
+    client?.shipping_city ||
+    client?.shipping_province ||
+    client?.shipping_address ||
+    null
+  );
+}
+
 async function listMySchedules(user) {
   assertAdvisor(user);
   const { rows } = await db.query(
@@ -82,7 +108,24 @@ async function getScheduleDetail({ id, user }) {
   const schedule = await findScheduleOrThrow(id);
   ensureOwner(schedule, user);
   const { rows: visits } = await db.query(
-    `SELECT * FROM scheduled_visits WHERE schedule_id = $1 ORDER BY planned_date ASC, priority ASC`,
+    `SELECT
+       sv.id,
+       sv.schedule_id,
+       sv.client_request_id,
+       COALESCE(sv.city, cr.shipping_city, cr.shipping_province, cr.shipping_address) AS city,
+       sv.planned_date,
+       sv.priority,
+       sv.notes,
+       sv.created_at,
+       sv.updated_at,
+       cr.commercial_name AS client_name,
+       cr.shipping_city AS client_city,
+       cr.shipping_province AS client_province,
+       cr.shipping_address AS client_address
+     FROM scheduled_visits sv
+     JOIN client_requests cr ON cr.id = sv.client_request_id
+     WHERE sv.schedule_id = $1
+     ORDER BY sv.planned_date ASC, sv.priority ASC`,
     [id],
   );
   return { ...schedule, visits };
@@ -185,18 +228,20 @@ async function addVisit({ scheduleId, clientRequestId, plannedDate, city, priori
     error.status = 400;
     throw error;
   }
-  if (!plannedDate || !city) {
-    const error = new Error("Fecha y ciudad son obligatorias");
+  if (!plannedDate || !clientRequestId) {
+    const error = new Error("Fecha y cliente son obligatorios");
     error.status = 400;
     throw error;
   }
+  const client = await getClientOrThrow(clientRequestId);
+  const targetCity = resolveCity({ city, client }) || "Ciudad no especificada";
   const { rows } = await db.query(
     `INSERT INTO scheduled_visits (schedule_id, client_request_id, planned_date, city, priority, notes)
      VALUES ($1,$2,$3,$4,$5,$6)
      ON CONFLICT (schedule_id, client_request_id, planned_date) DO UPDATE
      SET city = EXCLUDED.city, priority = EXCLUDED.priority, notes = EXCLUDED.notes, updated_at = NOW()
      RETURNING *`,
-    [scheduleId, clientRequestId, plannedDate, city, priority || 1, notes || null],
+    [scheduleId, clientRequestId, plannedDate, targetCity, priority || 1, notes || null],
   );
   return rows[0];
 }
@@ -217,12 +262,14 @@ async function updateVisit({ scheduleId, visitId, city, plannedDate, priority, n
     throw error;
   }
   const visit = rows[0];
+  const client = await getClientOrThrow(visit.client_request_id);
+  const targetCity = resolveCity({ city: city || visit.city, client }) || "Ciudad no especificada";
   const { rows: updated } = await db.query(
     `UPDATE scheduled_visits
      SET city = $1, planned_date = $2, priority = $3, notes = $4, updated_at = NOW()
      WHERE id = $5
      RETURNING *`,
-    [city || visit.city, plannedDate || visit.planned_date, priority || visit.priority, notes || visit.notes, visitId],
+    [targetCity, plannedDate || visit.planned_date, priority || visit.priority, notes || visit.notes, visitId],
   );
   return updated[0];
 }

@@ -50,8 +50,10 @@ const ScheduleCalendarView = ({ schedule }) => {
                     className="p-2 border rounded-md flex items-center justify-between text-sm bg-gray-50"
                   >
                     <div>
-                      <p className="font-semibold">Cliente #{visit.client_request_id}</p>
-                      <p className="text-xs text-gray-500">{visit.city}</p>
+                      <p className="font-semibold">{visit.client_name || `Cliente #${visit.client_request_id}`}</p>
+                      <p className="text-xs text-gray-500">
+                        {visit.city || visit.client_city || visit.client_province || "Ciudad no especificada"}
+                      </p>
                     </div>
                     <span className="text-xs text-gray-600">Prioridad {visit.priority || 1}</span>
                   </div>

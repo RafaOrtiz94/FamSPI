@@ -1,10 +1,37 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { fetchClients } from "../../../core/api/clientsApi";
 import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 
 const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit }) => {
   const [form, setForm] = useState({ month: "", year: new Date().getFullYear(), notes: "" });
   const [visitForm, setVisitForm] = useState({ client_request_id: "", planned_date: "", city: "", priority: 1, notes: "" });
+  const [clients, setClients] = useState([]);
+  const [clientSearch, setClientSearch] = useState("");
+
+  useEffect(() => {
+    fetchClients({ limit: 200 })
+      .then(setClients)
+      .catch(() => setClients([]));
+  }, []);
+
+  const filteredClients = useMemo(() => {
+    if (!clientSearch) return clients;
+    const term = clientSearch.toLowerCase();
+    return clients.filter(
+      (client) =>
+        client.commercial_name?.toLowerCase().includes(term) ||
+        String(client.id).includes(term) ||
+        client.shipping_city?.toLowerCase().includes(term),
+    );
+  }, [clients, clientSearch]);
+
+  const handleSelectClient = (value) => {
+    const selected = clients.find((client) => String(client.id) === String(value));
+    const inferredCity =
+      selected?.shipping_city || selected?.shipping_province || selected?.shipping_address || "";
+    setVisitForm((prev) => ({ ...prev, client_request_id: value, city: inferredCity }));
+  };
 
   const handleCreate = (e) => {
     e.preventDefault();
@@ -81,13 +108,27 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit }) => {
             </div>
 
             <form className="space-y-2" onSubmit={handleAddVisit}>
-              <input
-                type="number"
-                className="border rounded px-2 py-1 w-full"
-                placeholder="ID de cliente"
-                value={visitForm.client_request_id}
-                onChange={(e) => setVisitForm((prev) => ({ ...prev, client_request_id: e.target.value }))}
-              />
+              <div className="space-y-2">
+                <input
+                  type="text"
+                  className="border rounded px-2 py-1 w-full"
+                  placeholder="Buscar por nombre, ciudad o ID"
+                  value={clientSearch}
+                  onChange={(e) => setClientSearch(e.target.value)}
+                />
+                <select
+                  className="border rounded px-2 py-1 w-full"
+                  value={visitForm.client_request_id}
+                  onChange={(e) => handleSelectClient(e.target.value)}
+                >
+                  <option value="">Selecciona un cliente</option>
+                  {filteredClients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {client.commercial_name || "Cliente"} — {client.shipping_city || "Ciudad no especificada"}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <input
                 type="date"
                 className="border rounded px-2 py-1 w-full"
