@@ -185,6 +185,12 @@ const permisosRoutes = require("./modules/permisos/permisos.routes");
 const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
 const clientsRoutes = require("./modules/clients/clients.routes");
 const schedulesRoutes = require("./modules/schedules/schedules.routes");
+const {
+  businessCaseRoutes,
+  equipmentCatalogRoutes,
+  determinationsCatalogRoutes,
+  calculationTemplatesRoutes,
+} = require("./modules/business-case/businessCase.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -238,6 +244,10 @@ app.use("/api/v1/documents", documentsRoutes);
 app.use("/api/v1/files", filesRoutes);
 app.use("/api/v1/servicio", servicioRoutes);
 app.use("/api/v1/technical-applications", technicalApplicationsRoutes);
+app.use("/api/v1/business-case", businessCaseRoutes);
+app.use("/api/v1/equipment-catalog", equipmentCatalogRoutes);
+app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
+app.use("/api/v1/calculation-templates", calculationTemplatesRoutes);
 app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
