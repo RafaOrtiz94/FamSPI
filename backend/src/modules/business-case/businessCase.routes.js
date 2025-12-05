@@ -48,6 +48,8 @@ router.delete(
 
 router.get("/:id/calculations", verifyToken, requireRole(businessCaseRoles), ctrl.getCalculations);
 router.post("/:id/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculate);
+router.get("/:id/export/pdf", verifyToken, requireRole(businessCaseRoles), ctrl.exportPdf);
+router.get("/:id/export/excel", verifyToken, requireRole(businessCaseRoles), ctrl.exportExcel);
 
 // Equipment catalog
 const equipmentCatalogRoutes = express.Router();

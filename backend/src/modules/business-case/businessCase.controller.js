@@ -3,6 +3,8 @@ const logger = require("../../config/logger");
 const businessCaseService = require("./businessCase.service");
 const equipmentSelectionService = require("./equipmentSelection.service");
 const determinationsService = require("./determinations.service");
+const pdfGenerator = require("./pdfGenerator.service");
+const excelExporter = require("./excelExporter.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -188,6 +190,37 @@ async function recalculate(req, res) {
   }
 }
 
+async function exportPdf(req, res) {
+  try {
+    const buffer = await pdfGenerator.generateBusinessCasePdf(req.params.id);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename=business-case-${req.params.id}.pdf`);
+    res.send(buffer);
+  } catch (err) {
+    logger.error(err);
+    res
+      .status(err.status || 500)
+      .json({ ok: false, message: err.message || "No se pudo generar el PDF del Business Case" });
+  }
+}
+
+async function exportExcel(req, res) {
+  try {
+    const buffer = await excelExporter.generateBusinessCaseExcel(req.params.id);
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    res.setHeader("Content-Disposition", `attachment; filename=business-case-${req.params.id}.xlsx`);
+    res.send(buffer);
+  } catch (err) {
+    logger.error(err);
+    res
+      .status(err.status || 500)
+      .json({ ok: false, message: err.message || "No se pudo generar el Excel del Business Case" });
+  }
+}
+
 module.exports = {
   list,
   create,
@@ -201,4 +234,6 @@ module.exports = {
   getDeterminations,
   getCalculations,
   recalculate,
+  exportPdf,
+  exportExcel,
 };

@@ -37,6 +37,7 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
   const { state, updateState } = useBusinessCaseWizard();
   const { showToast } = useUI();
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState({ pdf: false, excel: false });
 
   const loadCalculations = async () => {
     if (!state.businessCaseId) return;
@@ -55,6 +56,31 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
     loadCalculations();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.businessCaseId]);
+
+  const handleExport = async (format) => {
+    if (!state.businessCaseId) return;
+    setExporting((prev) => ({ ...prev, [format]: true }));
+    try {
+      const res = await api.get(`/business-case/${state.businessCaseId}/export/${format}`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([res.data], {
+        type: format === "pdf"
+          ? "application/pdf"
+          : "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `business-case-${state.businessCaseId}.${format === "pdf" ? "pdf" : "xlsx"}`;
+      a.click();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      showToast("No se pudo exportar el Business Case", "error");
+    } finally {
+      setExporting((prev) => ({ ...prev, [format]: false }));
+    }
+  };
 
   const totals = state.calculations || {};
   const barData = useMemo(() => {
@@ -94,6 +120,24 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Resumen de cálculos</h2>
           <p className="text-sm text-gray-500">Consulta métricas clave y gráficos resumidos.</p>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <button
+            type="button"
+            onClick={() => handleExport("pdf")}
+            disabled={exporting.pdf || !state.businessCaseId}
+            className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            {exporting.pdf ? "Generando PDF..." : "Exportar PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExport("excel")}
+            disabled={exporting.excel || !state.businessCaseId}
+            className="px-3 py-2 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            {exporting.excel ? "Generando Excel..." : "Exportar Excel"}
+          </button>
         </div>
       </div>
 
