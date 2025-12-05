@@ -30,7 +30,15 @@ const Step1GeneralData = ({ onNext }) => {
       setLoadingClients(true);
       try {
         const res = await api.get("/clients", { params: { search: clientValue || undefined } });
-        setClients(res.data || []);
+        const payload = res.data;
+        const parsedClients = Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.clients)
+          ? payload.clients
+          : Array.isArray(payload)
+          ? payload
+          : [];
+        setClients(parsedClients);
       } catch (err) {
         console.warn("No se pudieron cargar clientes", err.message);
       } finally {
@@ -79,9 +87,10 @@ const Step1GeneralData = ({ onNext }) => {
             {...register("client", { required: "El cliente es obligatorio" })}
           />
           <datalist id="client-options">
-            {clients.map((client) => (
-              <option key={client.id || client.email || client.name} value={client.name || client.email || client.id} />
-            ))}
+            {Array.isArray(clients) &&
+              clients.map((client) => (
+                <option key={client.id || client.email || client.name} value={client.name || client.email || client.id} />
+              ))}
           </datalist>
           {loadingClients && <p className="text-xs text-gray-400">Cargando clientes...</p>}
           {errors.client && <p className="text-xs text-red-500">{errors.client.message}</p>}
