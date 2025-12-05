@@ -13,6 +13,7 @@ import api from "../../core/api";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import Card from "../../core/ui/components/Card";
+import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 
 const DashboardTI = () => {
   const [users, setUsers] = useState([]);
@@ -166,6 +167,9 @@ const DashboardTI = () => {
           </div>
         ))}
       </div>
+
+      {/* Widget de Permisos y Vacaciones */}
+      <PermisosStatusWidget />
 
     </div>
   );

@@ -5,7 +5,7 @@ import { useUI } from "../../core/ui/useUI";
 
 import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
-import VacationRequestsWidget from "../../core/ui/widgets/VacationRequestsWidget";
+import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import Button from "../../core/ui/components/Button";
 import Card from "../../core/ui/components/Card";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
@@ -68,10 +68,13 @@ const DashboardCalidad = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <AttendanceWidget />
         <ClientRequestWidget />
-        <VacationRequestsWidget />
+      </div>
+
+      <div className="mt-6">
+        <PermisosStatusWidget />
       </div>
     </DashboardLayout>
   );

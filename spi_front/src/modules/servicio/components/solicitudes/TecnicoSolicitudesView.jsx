@@ -5,7 +5,7 @@ import { useSolicitudes } from "../../../shared/solicitudes/hooks/useSolicitudes
 import { useModalManager } from "../../../shared/solicitudes/hooks/useModalManager";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { getRequests } from "../../../../core/api/requestsApi";
-import VacationRequestModal from "../../../shared/solicitudes/modals/VacationRequestModal";
+import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 import OrdenServicioModal from "./modals/OrdenServicioModal";
 import RequerimientoRepuestosModal from "./modals/RequerimientoRepuestosModal";
 import PrestamoEquiposModal from "./modals/PrestamoEquiposModal";
@@ -115,7 +115,7 @@ const TecnicoSolicitudesView = () => {
                 onSuccess={handleModalSuccess}
             />
 
-            <VacationRequestModal
+            <PermisoVacacionModal
                 open={isOpen("vacaciones")}
                 onClose={() => closeModal("vacaciones")}
                 onSuccess={handleModalSuccess}

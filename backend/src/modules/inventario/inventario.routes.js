@@ -15,6 +15,9 @@ router.use(verifyToken);
 // 📦 Consultar inventario completo
 router.get("/", controller.getInventario);
 
+// 📋 Listar equipos disponibles para selección
+router.get("/equipos-disponibles", controller.getEquiposDisponibles);
+
 // ➕ Registrar entrada o salida
 router.post("/movimiento", controller.addMovimiento);
 

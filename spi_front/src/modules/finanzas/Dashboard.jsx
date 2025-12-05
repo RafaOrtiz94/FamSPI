@@ -11,6 +11,7 @@ import Card from "../../core/ui/components/Card";
 import ActionCard from "../../core/ui/patterns/ActionCard";
 import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
+import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 const DashboardFinanzas = () => {
@@ -62,6 +63,8 @@ const DashboardFinanzas = () => {
                 <AttendanceWidget />
                 <ClientRequestWidget />
             </div>
+
+            <PermisosStatusWidget />
 
             <Card className="p-5 space-y-3">
                 <h2 className="text-lg font-semibold text-gray-900">Próximas capacidades</h2>

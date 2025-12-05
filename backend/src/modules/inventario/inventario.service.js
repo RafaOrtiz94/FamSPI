@@ -11,7 +11,7 @@ const logger = require("../../config/logger");
 /* ============================================================
    🧭 Obtener todo el inventario (vista completa)
    ============================================================ */
-async function getAllInventario({ search, tipo, request_id }) {
+async function getAllInventario({ search, tipo, request_id, estado }) {
   try {
     let query = `SELECT * FROM public.v_inventario_completo WHERE 1=1`;
     const params = [];
@@ -29,15 +29,31 @@ async function getAllInventario({ search, tipo, request_id }) {
     query += ` ORDER BY item_name ASC;`;
 
     const { rows } = await db.query(query, params);
-    if (request_id) {
-      return rows.filter(
-        (row) =>
-          `${row.request_id || row.silver_tx_id || ""}`.trim() ===
-          `${request_id}`.trim()
-      );
+
+    const filtered = request_id
+      ? rows.filter(
+          (row) =>
+            `${row.request_id || row.silver_tx_id || ""}`.trim() ===
+            `${request_id}`.trim()
+        )
+      : rows;
+
+    if (estado) {
+      const estadoLower = String(estado).toLowerCase();
+      return filtered.filter((row) => {
+        const candidates = [
+          row.estado,
+          row.status,
+          row.estado_actual,
+          row.item_status,
+        ];
+        return candidates
+          .map((value) => (value ? String(value).toLowerCase() : ""))
+          .some((value) => value === estadoLower);
+      });
     }
 
-    return rows;
+    return filtered;
   } catch (err) {
     logger.error("❌ Error al obtener inventario: %o", err);
     throw new Error("Error al consultar inventario");

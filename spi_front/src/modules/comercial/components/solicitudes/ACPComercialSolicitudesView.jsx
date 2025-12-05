@@ -5,14 +5,14 @@ import CreateRequestModal from "../CreateRequestModal";
 import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
-import VacationRequestModal from "../../../shared/solicitudes/modals/VacationRequestModal";
+import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 
 const ACPComercialSolicitudesView = () => {
     const { showToast } = useUI();
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
-    const [showVacationModal, setShowVacationModal] = useState(false);
+    const [showPermisoModal, setShowPermisoModal] = useState(false);
 
     const openRequestModal = (type) => {
         setPresetRequestType(type);
@@ -70,9 +70,9 @@ const ACPComercialSolicitudesView = () => {
                         <ActionCard
                             icon={FiClipboard}
                             subtitle="Talento Humano"
-                            title="Vacaciones"
+                            title="Permisos y Vacaciones"
                             color="orange"
-                            onClick={() => setShowVacationModal(true)}
+                            onClick={() => setShowPermisoModal(true)}
                         />
                     </div>
                 </div>
@@ -90,10 +90,10 @@ const ACPComercialSolicitudesView = () => {
                 hideButton={true}
             />
 
-            {/* VACATION MODAL */}
-            <VacationRequestModal
-                open={showVacationModal}
-                onClose={() => setShowVacationModal(false)}
+            {/* PERMISOS/VACACIONES MODAL */}
+            <PermisoVacacionModal
+                open={showPermisoModal}
+                onClose={() => setShowPermisoModal(false)}
             />
 
             {/* MODALES */}

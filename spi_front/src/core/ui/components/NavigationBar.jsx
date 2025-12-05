@@ -12,6 +12,7 @@ import {
   FiBookOpen,
   FiCpu,
   FiCheckCircle,
+  FiCalendar,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -60,6 +61,18 @@ const comercialLinks = [
   },
 ];
 
+const planificacionLink = {
+  name: "Planificación",
+  icon: FiCalendar,
+  path: "/dashboard/comercial/planificacion",
+};
+
+const aprobacionesPlanLink = {
+  name: "Aprobación de planes",
+  icon: FiCheckCircle,
+  path: "/dashboard/comercial/aprobaciones-planificacion",
+};
+
 const acpLinks = [
   {
     name: "Compras de equipos",
@@ -94,6 +107,12 @@ const auditLinks = [
     path: "/dashboard/auditoria",
   },
 ];
+
+const permisosLink = {
+  name: "Permisos y Vacaciones",
+  icon: FiCalendar,
+  path: "/dashboard/talento-humano/permisos",
+};
 
 const servicioLinks = [
   {
@@ -134,11 +153,11 @@ const servicioLinks = [
 ];
 
 const buildLinks = (scope) => {
-  const links = [getHomeLink(scope)];
+  const links = [getHomeLink(scope), permisosLink];
 
   // Comercial links
-  if (["comercial", "gerencia", "ti"].includes(scope)) {
-    links.push(...comercialLinks);
+  if (["comercial", "acp_comercial", "backoffice", "backoffice_comercial"].includes(scope)) {
+    links.push(...comercialLinks, planificacionLink);
   }
 
   if (["acp_comercial"].includes(scope)) {
@@ -174,6 +193,10 @@ const buildLinks = (scope) => {
 
   if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico"].includes(scope)) {
     links.push(...servicioLinks);
+  }
+
+  if (["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"].includes(scope)) {
+    links.push(aprobacionesPlanLink);
   }
 
   return links;

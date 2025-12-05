@@ -6,7 +6,7 @@ import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
-import VacationRequestsWidget from "../../../../core/ui/widgets/VacationRequestsWidget";
+import PermisosStatusWidget from "../../../shared/solicitudes/components/PermisosStatusWidget";
 
 const JefeComercialView = ({ onRefresh }) => {
     return (
@@ -74,7 +74,7 @@ const JefeComercialView = ({ onRefresh }) => {
             </div>
 
             <div className="mt-6">
-                <VacationRequestsWidget />
+                <PermisosStatusWidget />
             </div>
 
         </>

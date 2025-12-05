@@ -25,6 +25,8 @@ import ClientesPage from "../modules/comercial/pages/Clientes";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
+import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
+import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
 import ServicioMantenimientos from "../modules/servicio/pages/Mantenimientos";
 import ServicioSolicitudes from "../modules/servicio/pages/Solicitudes";
@@ -43,6 +45,7 @@ import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
 import Departamentos from "../modules/talento/pages/Departamentos";
+import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
 
 // 🧾 Páginas compartidas
 import RequestsPage from "../modules/RequestsPage";
@@ -98,11 +101,16 @@ const AppRoutes = () => {
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
           {/* Subrutas Comercial */}
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "jefe_comercial", "gerencia", "ti", "acp_comercial"]} />}>
+          <Route element={<ProtectedRoute allowedRoles={["comercial", "gerencia", "ti", "acp_comercial", "jefe_comercial"]} />}>
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
+            <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
+            <Route path="/dashboard/comercial/aprobaciones-planificacion" element={<AprobacionCronogramas />} />
           </Route>
 
           <Route
@@ -150,6 +158,7 @@ const AppRoutes = () => {
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
           <Route path="/dashboard/talento-humano/departamentos" element={<Departamentos />} />
+          <Route path="/dashboard/talento-humano/permisos" element={<PermisosPage />} />
 
           {/* Auditoría (solo Gerencia y TI) */}
           <Route element={<ProtectedRoute allowedRoles={["gerencia", "ti"]} />}>
