@@ -117,7 +117,11 @@ const Step5Investments = ({ onPrev, onNext }) => {
                 <td className="py-2 px-3 font-semibold text-gray-900">{inv.name}</td>
                 <td className="py-2 px-3 text-gray-700">{inv.quantity}</td>
                 <td className="py-2 px-3 text-gray-700">${inv.price ?? "-"}</td>
-                <td className="py-2 px-3 text-gray-700">${inv.total ?? inv.price * inv.quantity || "-"}</td>
+                <td className="py-2 px-3 text-gray-700">
+                  ${
+                    inv.total ?? (inv.price != null ? inv.price * inv.quantity : undefined) ?? "-"
+                  }
+                </td>
               </tr>
             ))}
             {!investments.length && (
