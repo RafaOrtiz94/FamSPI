@@ -82,10 +82,17 @@ const Step1GeneralData = ({ onNext }) => {
             <option value="">Selecciona un cliente</option>
             {Array.isArray(clients) &&
               clients.map((client) => {
-                const value = client.id || client.email || client.name;
-                const label = client.name || client.email || client.id;
+                const value = client.id || client.email || client.identificador || client.nombre || client.name;
+                const label =
+                  client.nombre || // API español
+                  client.commercial_name ||
+                  client.name ||
+                  client.display_name ||
+                  client.email ||
+                  client.identificador ||
+                  client.id;
                 return (
-                  <option key={value} value={value}>
+                  <option key={`${value}-${label}`} value={value}>
                     {label}
                   </option>
                 );
