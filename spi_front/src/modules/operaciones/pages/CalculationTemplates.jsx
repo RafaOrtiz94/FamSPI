@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { FiPlus, FiSend, FiX } from "react-icons/fi";
+import { FiPlus, FiSend, FiTrash2, FiX } from "react-icons/fi";
 import api from "../../../core/api";
 import { useUI } from "../../../core/ui/UIContext";
 import FormulaEditor from "../components/FormulaEditor";
@@ -8,7 +8,9 @@ const emptyTemplate = {
   name: "",
   description: "",
   type: "expression",
-  formula: "",
+  version: "1.0",
+  formula: {},
+  is_active: true,
 };
 
 const CalculationTemplates = () => {
@@ -18,23 +20,34 @@ const CalculationTemplates = () => {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyTemplate);
   const [applyTarget, setApplyTarget] = useState(null);
+  const [determinations, setDeterminations] = useState([]);
 
   const loadTemplates = async () => {
     try {
       const res = await api.get("/calculation-templates");
-      setTemplates(res.data || []);
+      setTemplates(res.data?.data || res.data || []);
     } catch (err) {
       showToast("No se pudieron cargar templates", "error");
     }
   };
 
+  const loadDeterminations = async () => {
+    try {
+      const res = await api.get("/determinations-catalog");
+      setDeterminations(res.data?.data || res.data || []);
+    } catch (err) {
+      setDeterminations([]);
+    }
+  };
+
   useEffect(() => {
     loadTemplates();
+    loadDeterminations();
   }, []);
 
   const openModal = (tpl) => {
     setEditing(tpl || null);
-    setForm(tpl || emptyTemplate);
+    setForm({ ...emptyTemplate, ...tpl });
     setModalOpen(true);
   };
 
@@ -57,14 +70,28 @@ const CalculationTemplates = () => {
     }
   };
 
+  const removeTemplate = async (tpl) => {
+    showLoader();
+    try {
+      await api.delete(`/calculation-templates/${tpl.id}`);
+      showToast("Template eliminado", "success");
+      await loadTemplates();
+    } catch (err) {
+      showToast(err.response?.data?.message || "No se pudo eliminar", "error");
+    } finally {
+      hideLoader();
+    }
+  };
+
   const applyTemplate = async () => {
-    if (!applyTarget) return;
+    if (!applyTarget?.id || !applyTarget?.determinationId) return;
     showLoader();
     try {
       await api.post(`/calculation-templates/${applyTarget.id}/apply`, {
         determinationId: applyTarget.determinationId,
       });
       showToast("Template aplicado", "success");
+      setApplyTarget(null);
     } catch (err) {
       showToast(err.response?.data?.message || "No se pudo aplicar", "error");
     } finally {
@@ -114,10 +141,17 @@ const CalculationTemplates = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setApplyTarget(tpl)}
+                    onClick={() => setApplyTarget({ id: tpl.id })}
                     className="px-3 py-1 rounded-lg border border-gray-200 text-gray-700"
                   >
                     Aplicar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeTemplate(tpl)}
+                    className="px-3 py-1 rounded-lg border border-red-200 text-red-700"
+                  >
+                    <FiTrash2 />
                   </button>
                 </td>
               </tr>
@@ -135,7 +169,7 @@ const CalculationTemplates = () => {
 
       {modalOpen && (
         <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-40">
-          <div className="bg-white rounded-xl shadow-lg w-full max-w-2xl p-6 space-y-4">
+          <div className="bg-white rounded-xl shadow-lg w-full max-w-3xl p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold text-gray-900">{editing ? "Editar" : "Crear"} template</h3>
               <button onClick={() => setModalOpen(false)} className="text-gray-500 hover:text-gray-700">
@@ -177,7 +211,7 @@ const CalculationTemplates = () => {
             <FormulaEditor
               open
               hideChrome
-              initialValue={{ formula: form.formula, type: form.type }}
+              initialValue={{ formula: form.formula, type: form.type, exampleContext: form.exampleContext }}
               onValidate={async (payload) => api.post("/determinations-catalog/formula/validate", payload)}
               onSave={(payload) => setForm((prev) => ({ ...prev, ...payload }))}
             />
@@ -204,12 +238,18 @@ const CalculationTemplates = () => {
               </button>
             </div>
             <p className="text-sm text-gray-600">Selecciona la determinación destino.</p>
-            <input
-              placeholder="ID de determinación"
+            <select
               value={applyTarget.determinationId || ""}
               onChange={(e) => setApplyTarget((prev) => ({ ...prev, determinationId: e.target.value }))}
               className="border rounded-lg px-3 py-2 w-full"
-            />
+            >
+              <option value="">Selecciona determinación</option>
+              {determinations.map((det) => (
+                <option key={det.id} value={det.id}>
+                  {det.name} ({det.roche_code || "-"})
+                </option>
+              ))}
+            </select>
             <div className="flex justify-end gap-2">
               <button onClick={() => setApplyTarget(null)} className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700">
                 Cancelar

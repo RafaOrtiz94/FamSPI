@@ -1,6 +1,10 @@
 const express = require("express");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
+const {
+  validateDeterminationEquipment,
+  validateEquipmentCapacity,
+} = require("../../middlewares/businessCaseValidation");
 const ctrl = require("./businessCase.controller");
 const equipmentCatalogCtrl = require("./equipmentCatalog.controller");
 const determinationsCatalogCtrl = require("./determinationsCatalog.controller");
@@ -19,11 +23,20 @@ router.delete("/:id", verifyToken, requireRole(["gerencia", "admin"]), ctrl.remo
 
 router.post("/:id/equipment", verifyToken, requireRole(businessCaseRoles), ctrl.selectEquipment);
 router.get("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminations);
-router.post("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.addDetermination);
+router.post(
+  "/:id/determinations",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  validateDeterminationEquipment,
+  validateEquipmentCapacity,
+  ctrl.addDetermination,
+);
 router.put(
   "/:id/determinations/:detId",
   verifyToken,
   requireRole(businessCaseRoles),
+  validateDeterminationEquipment,
+  validateEquipmentCapacity,
   ctrl.updateDetermination,
 );
 router.delete(
@@ -65,6 +78,24 @@ determinationsCatalogRoutes.get(
   determinationsCatalogCtrl.getDetails,
 );
 determinationsCatalogRoutes.post(
+  "/",
+  verifyToken,
+  requireRole(adminRoles),
+  determinationsCatalogCtrl.create,
+);
+determinationsCatalogRoutes.put(
+  "/:id",
+  verifyToken,
+  requireRole(adminRoles),
+  determinationsCatalogCtrl.update,
+);
+determinationsCatalogRoutes.delete(
+  "/:id",
+  verifyToken,
+  requireRole(adminRoles),
+  determinationsCatalogCtrl.remove,
+);
+determinationsCatalogRoutes.post(
   "/:id/formula",
   verifyToken,
   requireRole(adminRoles),
@@ -80,6 +111,9 @@ determinationsCatalogRoutes.post(
 // Calculation templates
 const calculationTemplatesRoutes = express.Router();
 calculationTemplatesRoutes.get("/", verifyToken, requireRole(businessCaseRoles), calculationTemplatesCtrl.list);
+calculationTemplatesRoutes.post("/", verifyToken, requireRole(adminRoles), calculationTemplatesCtrl.create);
+calculationTemplatesRoutes.put("/:id", verifyToken, requireRole(adminRoles), calculationTemplatesCtrl.update);
+calculationTemplatesRoutes.delete("/:id", verifyToken, requireRole(adminRoles), calculationTemplatesCtrl.remove);
 calculationTemplatesRoutes.post(
   "/:id/apply",
   verifyToken,

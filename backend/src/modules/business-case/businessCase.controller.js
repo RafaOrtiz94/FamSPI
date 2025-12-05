@@ -124,7 +124,7 @@ async function addDetermination(req, res) {
       value.monthlyQty,
       req.user,
     );
-    res.status(201).json({ ok: true, data: determination });
+    res.status(201).json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
   } catch (err) {
     logger.error(err);
     res.status(err.status || 500).json({ ok: false, message: err.message || "Error agregando determinación" });
@@ -141,7 +141,7 @@ async function updateDetermination(req, res) {
       req.params.detId,
       value.monthlyQty,
     );
-    res.json({ ok: true, data: determination });
+    res.json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
   } catch (err) {
     logger.error(err);
     res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando determinación" });

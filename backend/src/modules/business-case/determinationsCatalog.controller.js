@@ -13,6 +13,18 @@ const validateFormulaSchema = Joi.object({
   exampleContext: Joi.object().default({}),
 });
 
+const determinationSchema = Joi.object({
+  name: Joi.string().trim().required(),
+  roche_code: Joi.string().allow(null, "").trim(),
+  category: Joi.string().allow(null, "").trim(),
+  equipment_id: Joi.number().integer().allow(null),
+  version: Joi.string().allow(null, "").default("1.0"),
+  status: Joi.string().valid("active", "discontinuado").default("active"),
+  valid_from: Joi.date().optional(),
+  valid_to: Joi.date().allow(null),
+  metadata: Joi.object().default({}),
+});
+
 async function list(req, res) {
   try {
     const { equipmentId, q } = req.query;
@@ -86,9 +98,87 @@ async function validateFormula(req, res) {
   }
 }
 
+async function create(req, res) {
+  try {
+    const { error, value } = determinationSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const { rows } = await db.query(
+      `INSERT INTO catalog_determinations (name, roche_code, category, equipment_id, version, status, valid_from, valid_to, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, CURRENT_DATE),$8,$9)
+       RETURNING *`,
+      [
+        value.name,
+        value.roche_code,
+        value.category,
+        value.equipment_id,
+        value.version,
+        value.status,
+        value.valid_from,
+        value.valid_to,
+        JSON.stringify(value.metadata || {}),
+      ],
+    );
+
+    res.status(201).json({ ok: true, data: rows[0] });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error creando determinación" });
+  }
+}
+
+async function update(req, res) {
+  try {
+    const { error, value } = determinationSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const { rows } = await db.query(
+      `UPDATE catalog_determinations
+       SET name=$1, roche_code=$2, category=$3, equipment_id=$4, version=$5, status=$6, valid_from=COALESCE($7, valid_from),
+           valid_to=$8, metadata=$9, updated_at = now()
+       WHERE id=$10 RETURNING *`,
+      [
+        value.name,
+        value.roche_code,
+        value.category,
+        value.equipment_id,
+        value.version,
+        value.status,
+        value.valid_from,
+        value.valid_to,
+        JSON.stringify(value.metadata || {}),
+        req.params.id,
+      ],
+    );
+
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Determinación no encontrada" });
+    res.json({ ok: true, data: rows[0] });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error actualizando determinación" });
+  }
+}
+
+async function remove(req, res) {
+  try {
+    const { rows } = await db.query(
+      `UPDATE catalog_determinations SET status = 'discontinuado', updated_at = now() WHERE id = $1 RETURNING id`,
+      [req.params.id],
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Determinación no encontrada" });
+    res.status(204).send();
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error eliminando determinación" });
+  }
+}
+
 module.exports = {
   list,
   getDetails,
+  create,
+  update,
+  remove,
   updateFormula,
   validateFormula,
 };
