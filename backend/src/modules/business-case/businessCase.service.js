@@ -1,7 +1,6 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { ensureFolder } = require("../../utils/drive");
-const { v4: uuidv4 } = require("uuid");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -58,11 +57,8 @@ async function createBusinessCase(data, user) {
     modern_bc_metadata = {},
   } = data;
 
-  const id = uuidv4();
-
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
-      id,
       client_name,
       client_id,
       status,
@@ -78,12 +74,11 @@ async function createBusinessCase(data, user) {
       bc_system_type,
       request_type
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), true, 'modern', 'business_case'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), true, 'modern', 'business_case'
     ) RETURNING id;
   `;
 
   const { rows } = await db.query(insertQuery, [
-    id,
     client_name,
     client_id,
     status,

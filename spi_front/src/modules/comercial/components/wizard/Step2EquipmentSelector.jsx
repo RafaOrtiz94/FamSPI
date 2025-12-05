@@ -48,6 +48,22 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
   const [filters, setFilters] = useState({ search: "", category: "" });
   const [loading, setLoading] = useState(false);
 
+  const normalizeItem = (item) => {
+    const id =
+      item.id ?? item.equipment_id ?? item.equipmentId ?? item.bc_equipment_id ?? item.bcEquipmentId ?? item.code;
+
+    return {
+      id,
+      name: item.name ?? item.equipment_name ?? item.display_name ?? "Equipo",
+      code: item.code ?? item.codigo ?? item.equipment_code,
+      capacity: item.capacity ?? item.capacidad ?? item.capacidad_maxima,
+      price: item.price ?? item.precio ?? item.base_price,
+      description: item.description ?? item.descripcion ?? item.summary,
+      categories: item.categories ?? item.categorias ?? item.tags ?? [],
+      raw: item,
+    };
+  };
+
   const loadEquipment = async () => {
     setLoading(true);
     try {
@@ -66,10 +82,14 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
         ? payload.rows
         : Array.isArray(payload?.items?.data)
         ? payload.items.data
+        : Array.isArray(payload?.records)
+        ? payload.records
         : Array.isArray(payload)
         ? payload
         : [];
-      setItems(Array.isArray(parsedItems) ? parsedItems : []);
+
+      const normalized = (Array.isArray(parsedItems) ? parsedItems : []).map(normalizeItem).filter((i) => i.id);
+      setItems(normalized);
     } catch (err) {
       showToast("No se pudo cargar el catálogo", "error");
     } finally {
@@ -89,8 +109,21 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
     }
     showLoader();
     try {
+      const equipmentId =
+        item.id ||
+        item.raw?.id ||
+        item.raw?.equipment_id ||
+        item.raw?.equipmentId ||
+        item.raw?.bc_equipment_id ||
+        item.raw?.bcEquipmentId;
+
+      if (!equipmentId) {
+        showToast("No se pudo identificar el equipo seleccionado", "error");
+        return;
+      }
+
       await api.post(`/business-case/${state.businessCaseId}/equipment`, {
-        equipmentId: item.id,
+        equipmentId,
         isPrimary: true,
       });
       updateState({ selectedEquipment: item });
