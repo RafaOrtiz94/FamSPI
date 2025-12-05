@@ -23,11 +23,13 @@ const Step1GeneralData = ({ onNext }) => {
       setLoadingClients(true);
       try {
         const res = await api.get("/clients");
-        const payload = res.data;
+        const payload = res.data?.data ?? res.data;
         const parsedClients = Array.isArray(payload?.items)
           ? payload.items
           : Array.isArray(payload?.clients)
           ? payload.clients
+          : Array.isArray(payload?.data)
+          ? payload.data
           : Array.isArray(payload)
           ? payload
           : [];
