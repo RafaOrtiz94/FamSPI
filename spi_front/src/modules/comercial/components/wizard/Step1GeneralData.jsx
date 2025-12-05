@@ -22,10 +22,6 @@ const Step1GeneralData = ({ onNext }) => {
   const clientValue = watch("client");
 
   useEffect(() => {
-    updateState({ generalData: { ...defaultValues } });
-  }, [defaultValues, updateState]);
-
-  useEffect(() => {
     const fetchClients = async () => {
       setLoadingClients(true);
       try {
