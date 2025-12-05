@@ -64,10 +64,12 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
         ? payload.data
         : Array.isArray(payload?.rows)
         ? payload.rows
+        : Array.isArray(payload?.items?.data)
+        ? payload.items.data
         : Array.isArray(payload)
         ? payload
         : [];
-      setItems(parsedItems);
+      setItems(Array.isArray(parsedItems) ? parsedItems : []);
     } catch (err) {
       showToast("No se pudo cargar el catálogo", "error");
     } finally {
@@ -142,7 +144,7 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
         <p className="text-sm text-gray-500">Cargando catálogo...</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {items.map((item) => (
+          {(Array.isArray(items) ? items : []).map((item) => (
             <EquipmentCard
               key={item.id}
               item={item}
