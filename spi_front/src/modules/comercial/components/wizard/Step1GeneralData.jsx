@@ -15,17 +15,14 @@ const Step1GeneralData = ({ onNext }) => {
   const {
     register,
     handleSubmit,
-    watch,
     formState: { errors },
   } = useForm({ defaultValues });
-
-  const clientValue = watch("client");
 
   useEffect(() => {
     const fetchClients = async () => {
       setLoadingClients(true);
       try {
-        const res = await api.get("/clients", { params: { search: clientValue || undefined } });
+        const res = await api.get("/clients");
         const payload = res.data;
         const parsedClients = Array.isArray(payload?.items)
           ? payload.items
@@ -42,7 +39,7 @@ const Step1GeneralData = ({ onNext }) => {
       }
     };
     fetchClients();
-  }, [clientValue]);
+  }, []);
 
   const onSubmit = async (data) => {
     showLoader();
@@ -76,18 +73,22 @@ const Step1GeneralData = ({ onNext }) => {
           <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
             <FiUsers /> Cliente
           </span>
-          <input
-            list="client-options"
+          <select
             className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-            placeholder="Busca o escribe el cliente"
             {...register("client", { required: "El cliente es obligatorio" })}
-          />
-          <datalist id="client-options">
+          >
+            <option value="">Selecciona un cliente</option>
             {Array.isArray(clients) &&
-              clients.map((client) => (
-                <option key={client.id || client.email || client.name} value={client.name || client.email || client.id} />
-              ))}
-          </datalist>
+              clients.map((client) => {
+                const value = client.id || client.email || client.name;
+                const label = client.name || client.email || client.id;
+                return (
+                  <option key={value} value={value}>
+                    {label}
+                  </option>
+                );
+              })}
+          </select>
           {loadingClients && <p className="text-xs text-gray-400">Cargando clientes...</p>}
           {errors.client && <p className="text-xs text-red-500">{errors.client.message}</p>}
         </label>

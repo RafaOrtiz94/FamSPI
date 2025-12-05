@@ -10,7 +10,7 @@ Este wizard guía a los usuarios comerciales y técnicos a través de la creaci�
 ## Flujo paso a paso
 
 1. **Datos Generales**
-   - Completa Cliente (autocomplete), Fecha, Tipo y Observaciones.
+   - Selecciona el Cliente registrado desde la lista desplegable, define Fecha, Tipo y Observaciones.
    - Al enviar se crea el Business Case y se guarda el `businessCaseId` para los siguientes pasos.
 
 2. **Selección de Equipo**
