@@ -6,6 +6,7 @@ import { getRequests } from "../../../core/api/requestsApi";
 import { getPendingApprovals } from "../../../core/api/approvalsApi";
 import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
+import PermisosStatusWidget from "../../shared/solicitudes/components/PermisosStatusWidget";
 
 // Views
 import JefeTecnicoView from "../components/dashboard/JefeTecnicoView";
@@ -192,6 +193,9 @@ const ServicioDashboard = () => {
   return (
     <DashboardLayout includeWidgets={false}>
       {renderView()}
+      <div className="mt-6">
+        <PermisosStatusWidget />
+      </div>
     </DashboardLayout>
   );
 };

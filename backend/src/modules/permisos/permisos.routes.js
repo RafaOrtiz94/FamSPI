@@ -1,17 +1,29 @@
 const express = require("express");
-const router = express.Router({ mergeParams: true });
+const router = express.Router();
 const controller = require("./permisos.controller");
 const { verifyToken } = require("../../middlewares/auth");
 
-// Protegemos todas las rutas de permisos con el middleware de autenticación
 router.use(verifyToken);
 
-router.post("/", controller.crearSolicitud);
-router.get("/pending", controller.listarPendientes);
-router.get("/mis", controller.listarMias);
+// Crear solicitud (permiso o vacación)
+router.post("/", controller.create);
+
+// Aprobación parcial (jefe)
 router.post("/:id/aprobar-parcial", controller.aprobarParcial);
-router.post("/:id/justificantes", controller.subirJustificantes);
+
+// Subir justificantes (colaborador) - con multer para archivos
+router.post("/:id/justificantes", controller.upload.any(), controller.uploadJustificantes);
+
+// Aprobación final (jefe)
 router.post("/:id/aprobar-final", controller.aprobarFinal);
+
+// Rechazar
 router.post("/:id/rechazar", controller.rechazar);
+
+// Listar pendientes (jefes)
+router.get("/pendientes", controller.listarPendientes);
+
+// Listar mis solicitudes
+router.get("/mis-solicitudes", controller.listarMias);
 
 module.exports = router;

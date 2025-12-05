@@ -63,23 +63,65 @@ async function createSolicitud({ body, user }) {
   payload.tipo_solicitud = payload.tipo_solicitud || "permiso";
   payload.user_email = user?.email;
   payload.user_fullname = user?.fullname || user?.name || user?.email;
+  payload.user_id = user?.id;
   payload.approver_role = resolveApproverRole(user?.role || user?.rol || "");
 
+  let driveMeta = {};
+  let justificacionRequerida = [];
+  let esRecuperable = false;
+
+  // Validar y procesar según tipo de solicitud
   if (payload.tipo_solicitud === "permiso") {
     const validation = await validatePermisoRequest(payload);
-    payload.justificacion_requerida = validation.justificantes_requeridos || [];
-    payload.es_recuperable = Boolean(validation.es_recuperable);
+    justificacionRequerida = validation.justificantes_requeridos || [];
+    esRecuperable = Boolean(validation.es_recuperable);
+  } else if (payload.tipo_solicitud === "vacaciones") {
+    // Calcular días si no vienen
+    if (!payload.duracion_dias && payload.fecha_inicio && payload.fecha_fin) {
+      const start = new Date(payload.fecha_inicio);
+      const end = new Date(payload.fecha_fin);
+      const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+      payload.duracion_dias = diff >= 0 ? diff + 1 : 0;
+    }
+
+    // Calcular fecha de regreso si no viene
+    if (!payload.fecha_regreso && payload.fecha_fin) {
+      const endDate = new Date(payload.fecha_fin);
+      endDate.setDate(endDate.getDate() + 1);
+      payload.fecha_regreso = endDate.toISOString().split("T")[0];
+    }
+
+    // Generar documento en Drive para vacaciones
+    try {
+      const { uploadVacationDocument } = require("./permisos.drive");
+      driveMeta = await uploadVacationDocument({
+        user,
+        fecha_inicio: payload.fecha_inicio,
+        fecha_fin: payload.fecha_fin,
+        fecha_regreso: payload.fecha_regreso,
+        periodo: payload.periodo_vacaciones,
+        dias: payload.duracion_dias,
+      });
+    } catch (err) {
+      console.warn("No se pudo generar documento de vacaciones:", err.message);
+    }
   }
 
   const { rows } = await db.query(
     `INSERT INTO permisos_vacaciones (
-      user_email, user_fullname, approver_role, tipo_solicitud, tipo_permiso, subtipo_calamidad, duracion_horas, duracion_dias, fecha_inicio, fecha_fin,
-      es_recuperable, periodo_vacaciones, justificacion_requerida, status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'pending') RETURNING *`,
+      user_email, user_fullname, user_id, approver_role, department_id,
+      tipo_solicitud, tipo_permiso, subtipo_calamidad, 
+      duracion_horas, duracion_dias, fecha_inicio, fecha_fin, fecha_regreso,
+      es_recuperable, periodo_vacaciones, justificacion_requerida, 
+      drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
+      status
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,'pending') RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
+      payload.user_id,
       payload.approver_role,
+      user?.department_id || null,
       payload.tipo_solicitud,
       payload.tipo_permiso || null,
       payload.subtipo_calamidad || null,
@@ -87,9 +129,15 @@ async function createSolicitud({ body, user }) {
       payload.duracion_dias || null,
       payload.fecha_inicio || null,
       payload.fecha_fin || null,
-      payload.es_recuperable || false,
+      payload.fecha_regreso || null,
+      esRecuperable,
       payload.periodo_vacaciones || null,
-      payload.justificacion_requerida || null,
+      justificacionRequerida.length > 0 ? justificacionRequerida : null,
+      driveMeta.drive_doc_id || null,
+      driveMeta.drive_pdf_id || null,
+      driveMeta.drive_doc_link || null,
+      driveMeta.drive_pdf_link || null,
+      driveMeta.folderId || null,
     ]
   );
 
@@ -184,8 +232,8 @@ async function rechazar({ id, approver, observaciones }) {
   const obsArray = Array.isArray(observaciones)
     ? observaciones
     : observaciones
-    ? [observaciones]
-    : [];
+      ? [observaciones]
+      : [];
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
         SET status = 'rejected',
@@ -241,6 +289,15 @@ async function listarPorUsuario({ user }) {
   return { data: rows, summary };
 }
 
+async function getSolicitudById(id) {
+  await ensureTable();
+  const { rows } = await db.query(
+    `SELECT * FROM permisos_vacaciones WHERE id = $1`,
+    [id]
+  );
+  return rows[0] || null;
+}
+
 module.exports = {
   ensureTable,
   createSolicitud,
@@ -250,4 +307,5 @@ module.exports = {
   rechazar,
   listarPendientes,
   listarPorUsuario,
+  getSolicitudById,
 };

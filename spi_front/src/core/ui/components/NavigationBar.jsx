@@ -108,6 +108,12 @@ const auditLinks = [
   },
 ];
 
+const permisosLink = {
+  name: "Permisos y Vacaciones",
+  icon: FiCalendar,
+  path: "/dashboard/talento-humano/permisos",
+};
+
 const servicioLinks = [
   {
     name: "Mantenimientos",
@@ -147,7 +153,7 @@ const servicioLinks = [
 ];
 
 const buildLinks = (scope) => {
-  const links = [getHomeLink(scope)];
+  const links = [getHomeLink(scope), permisosLink];
 
   // Comercial links
   if (["comercial", "acp_comercial", "backoffice", "backoffice_comercial"].includes(scope)) {

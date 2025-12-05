@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { getEquipos } from "../../api/inventarioApi";
+import { getEquiposServicio } from "../../api/servicioApi";
 import { FiLoader } from "react-icons/fi";
 
 const EquipmentSelect = ({
@@ -22,9 +22,28 @@ const EquipmentSelect = ({
       setLoading(true);
       setError(null);
       try {
-        const data = await getEquipos(filter);
+        // Usamos el endpoint de servicio/equipos que devuelve la lista completa de activos
+        const data = await getEquiposServicio();
+
         if (isMounted) {
-          setEquipos(Array.isArray(data) ? data : []);
+          let filteredData = Array.isArray(data) ? data : [];
+
+          // Filtrado en cliente ya que el endpoint devuelve todo
+          if (filter && Object.keys(filter).length > 0) {
+            filteredData = filteredData.filter(item => {
+              return Object.entries(filter).every(([key, val]) => {
+                // Manejo especial para estado 'disponible' si el backend usa otros términos
+                if (key === 'estado' && val === 'disponible') {
+                  // Aceptamos disponible, operativo, bueno, etc. o si no tiene estado
+                  const status = (item.estado || "").toLowerCase();
+                  return status === 'disponible' || status === 'operativo' || status === 'bueno' || status === 'en uso' || status === "";
+                }
+                return String(item[key]).toLowerCase() === String(val).toLowerCase();
+              });
+            });
+          }
+
+          setEquipos(filteredData);
         }
       } catch (err) {
         console.error("Error loading equipos", err);
@@ -59,9 +78,12 @@ const EquipmentSelect = ({
           {loading ? "Cargando equipos..." : placeholder}
         </option>
         {equipos.map((equipo) => (
-          <option key={equipo.id || equipo.inventory_id || equipo.item_id} value={equipo.id || equipo.inventory_id || equipo.item_id}>
+          <option
+            key={equipo.id_equipo || equipo.id || equipo.inventory_id || equipo.item_id}
+            value={equipo.id_equipo || equipo.id || equipo.inventory_id || equipo.item_id}
+          >
             {equipo.nombre || equipo.item_name}
-            {equipo.marca ? ` - ${equipo.marca}` : ""}
+            {equipo.marca || equipo.fabricante ? ` - ${equipo.marca || equipo.fabricante}` : ""}
             {equipo.modelo ? ` ${equipo.modelo}` : ""}
             {equipo.estado ? ` (${equipo.estado})` : ""}
           </option>

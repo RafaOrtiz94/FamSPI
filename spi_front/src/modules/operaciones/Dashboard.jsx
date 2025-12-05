@@ -15,6 +15,7 @@ import { getMantenimientos } from "../../core/api/mantenimientosApi";
 import StatCard from "../../core/ui/patterns/StatCard";
 import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
+import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import Card from "../../core/ui/components/Card";
 import Button from "../../core/ui/components/Button";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
@@ -147,6 +148,8 @@ const DashboardOperaciones = () => {
         <AttendanceWidget />
         <ClientRequestWidget />
       </div>
+
+      <PermisosStatusWidget />
 
       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <Card className="p-5 lg:col-span-2 space-y-4">

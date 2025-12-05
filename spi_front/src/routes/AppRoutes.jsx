@@ -45,6 +45,7 @@ import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
 import Departamentos from "../modules/talento/pages/Departamentos";
+import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
 
 // 🧾 Páginas compartidas
 import RequestsPage from "../modules/RequestsPage";
@@ -100,7 +101,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
           {/* Subrutas Comercial */}
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "gerencia", "ti", "acp_comercial", "jefe_comercial"]} />}> 
+          <Route element={<ProtectedRoute allowedRoles={["comercial", "gerencia", "ti", "acp_comercial", "jefe_comercial"]} />}>
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
@@ -157,6 +158,7 @@ const AppRoutes = () => {
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
           <Route path="/dashboard/talento-humano/departamentos" element={<Departamentos />} />
+          <Route path="/dashboard/talento-humano/permisos" element={<PermisosPage />} />
 
           {/* Auditoría (solo Gerencia y TI) */}
           <Route element={<ProtectedRoute allowedRoles={["gerencia", "ti"]} />}>

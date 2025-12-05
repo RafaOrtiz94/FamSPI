@@ -1,0 +1,5954 @@
+--
+-- PostgreSQL database dump
+--
+
+\restrict APk7sK1ORKcb1kWOvpFBDQE5A5AeFqjRBVdphvvOrYC9mRqraWLGYbNMS1QUebb
+
+-- Dumped from database version 18.0
+-- Dumped by pg_dump version 18.0
+
+-- Started on 2025-12-04 17:27:43
+
+SET statement_timeout = 0;
+SET lock_timeout = 0;
+SET idle_in_transaction_session_timeout = 0;
+SET transaction_timeout = 0;
+SET client_encoding = 'UTF8';
+SET standard_conforming_strings = on;
+SELECT pg_catalog.set_config('search_path', '', false);
+SET check_function_bodies = false;
+SET xmloption = content;
+SET client_min_messages = warning;
+SET row_security = off;
+
+--
+-- TOC entry 8 (class 2615 OID 16984)
+-- Name: auditoria; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA auditoria;
+
+
+ALTER SCHEMA auditoria OWNER TO postgres;
+
+--
+-- TOC entry 7 (class 2615 OID 16385)
+-- Name: servicio; Type: SCHEMA; Schema: -; Owner: postgres
+--
+
+CREATE SCHEMA servicio;
+
+
+ALTER SCHEMA servicio OWNER TO postgres;
+
+--
+-- TOC entry 2 (class 3079 OID 16772)
+-- Name: pgcrypto; Type: EXTENSION; Schema: -; Owner: -
+--
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+
+--
+-- TOC entry 5873 (class 0 OID 0)
+-- Dependencies: 2
+-- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
+--
+
+COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
+
+
+--
+-- TOC entry 1004 (class 1247 OID 16387)
+-- Name: approval_action_enum; Type: TYPE; Schema: public; Owner: postgres
+--
+
+CREATE TYPE public.approval_action_enum AS ENUM (
+    'approve',
+    'reject'
+);
+
+
+ALTER TYPE public.approval_action_enum OWNER TO postgres;
+
+--
+-- TOC entry 1007 (class 1247 OID 16392)
+-- Name: request_status_enum; Type: TYPE; Schema: public; Owner: postgres
+--
+
+CREATE TYPE public.request_status_enum AS ENUM (
+    'pending',
+    'in_review',
+    'approved',
+    'rejected'
+);
+
+
+ALTER TYPE public.request_status_enum OWNER TO postgres;
+
+--
+-- TOC entry 325 (class 1255 OID 16401)
+-- Name: fn_log_request_status(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.fn_log_request_status() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    INSERT INTO public.request_status_history(request_id, old_status, new_status, changed_by)
+    VALUES (NEW.id, OLD.status, NEW.status, NEW.requester_id);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.fn_log_request_status() OWNER TO postgres;
+
+--
+-- TOC entry 367 (class 1255 OID 17460)
+-- Name: generate_personnel_request_number(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.generate_personnel_request_number() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.request_number := 'SP-' || TO_CHAR(NOW(), 'YYYY') || '-' || LPAD(NEW.id::TEXT, 5, '0');
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.generate_personnel_request_number() OWNER TO postgres;
+
+--
+-- TOC entry 369 (class 1255 OID 17464)
+-- Name: log_personnel_request_status_change(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.log_personnel_request_status_change() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO personnel_request_history (
+            personnel_request_id,
+            previous_status,
+            new_status,
+            changed_by
+        ) VALUES (
+            NEW.id,
+            OLD.status,
+            NEW.status,
+            NEW.approved_by_hr -- Esto debería ser el usuario actual, ajustar según contexto
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.log_personnel_request_status_change() OWNER TO postgres;
+
+--
+-- TOC entry 365 (class 1255 OID 17028)
+-- Name: recalculate_inventory(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.recalculate_inventory() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  UPDATE public.inventory i
+  SET quantity = (
+    SELECT COALESCE(SUM(
+      CASE 
+        WHEN m.movement_type = 'entrada' THEN m.quantity
+        WHEN m.movement_type = 'salida' THEN -m.quantity
+        ELSE 0
+      END
+    ), 0)
+    FROM public.inventory_movements m
+    WHERE m.inventory_id = i.id
+  ),
+  updated_at = NOW()
+  WHERE i.id = NEW.inventory_id;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.recalculate_inventory() OWNER TO postgres;
+
+--
+-- TOC entry 366 (class 1255 OID 17193)
+-- Name: update_attendance_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_attendance_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_attendance_timestamp() OWNER TO postgres;
+
+--
+-- TOC entry 368 (class 1255 OID 17462)
+-- Name: update_personnel_request_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_personnel_request_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_personnel_request_timestamp() OWNER TO postgres;
+
+--
+-- TOC entry 370 (class 1255 OID 26185)
+-- Name: update_remaining_quantity(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_remaining_quantity() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.remaining_quantity := NEW.annual_negotiated_quantity - NEW.consumed_quantity;
+    NEW.updated_at := CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_remaining_quantity() OWNER TO postgres;
+
+--
+-- TOC entry 371 (class 1255 OID 26346)
+-- Name: update_tech_docs_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_tech_docs_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_tech_docs_timestamp() OWNER TO postgres;
+
+--
+-- TOC entry 364 (class 1255 OID 16402)
+-- Name: update_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = now(); 
+  RETURN NEW;
+END; $$;
+
+
+ALTER FUNCTION public.update_timestamp() OWNER TO postgres;
+
+--
+-- TOC entry 326 (class 1255 OID 16403)
+-- Name: update_timestamp(); Type: FUNCTION; Schema: servicio; Owner: postgres
+--
+
+CREATE FUNCTION servicio.update_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION servicio.update_timestamp() OWNER TO postgres;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- TOC entry 264 (class 1259 OID 16986)
+-- Name: logs; Type: TABLE; Schema: auditoria; Owner: postgres
+--
+
+CREATE TABLE auditoria.logs (
+    id integer NOT NULL,
+    usuario_id integer,
+    usuario_email character varying(255),
+    rol character varying(100),
+    modulo character varying(100),
+    accion character varying(100),
+    descripcion text,
+    datos_anteriores jsonb,
+    datos_nuevos jsonb,
+    ip character varying(45),
+    user_agent text,
+    fecha timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    duracion_ms integer,
+    request_id integer,
+    mantenimiento_id integer,
+    inventario_id integer,
+    auto boolean DEFAULT false,
+    creado_en timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE auditoria.logs OWNER TO postgres;
+
+--
+-- TOC entry 5874 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: TABLE logs; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON TABLE auditoria.logs IS 'Registra todas las acciones de usuarios del sistema SPI Fam (creaciones, modificaciones, logins, etc.)';
+
+
+--
+-- TOC entry 5875 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.usuario_email; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.usuario_email IS 'Correo del usuario que realizó la acción';
+
+
+--
+-- TOC entry 5876 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.modulo; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.modulo IS 'Módulo afectado (auth, solicitudes, mantenimientos, etc.)';
+
+
+--
+-- TOC entry 5877 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.accion; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.accion IS 'Tipo de acción (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.)';
+
+
+--
+-- TOC entry 5878 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.descripcion; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.descripcion IS 'Descripción amigable de la acción realizada';
+
+
+--
+-- TOC entry 5879 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.datos_anteriores; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.datos_anteriores IS 'JSON con los datos antes del cambio';
+
+
+--
+-- TOC entry 5880 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.datos_nuevos; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.datos_nuevos IS 'JSON con los datos después del cambio';
+
+
+--
+-- TOC entry 5881 (class 0 OID 0)
+-- Dependencies: 264
+-- Name: COLUMN logs.fecha; Type: COMMENT; Schema: auditoria; Owner: postgres
+--
+
+COMMENT ON COLUMN auditoria.logs.fecha IS 'Fecha y hora del evento registrado';
+
+
+--
+-- TOC entry 263 (class 1259 OID 16985)
+-- Name: logs_id_seq; Type: SEQUENCE; Schema: auditoria; Owner: postgres
+--
+
+CREATE SEQUENCE auditoria.logs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE auditoria.logs_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5882 (class 0 OID 0)
+-- Dependencies: 263
+-- Name: logs_id_seq; Type: SEQUENCE OWNED BY; Schema: auditoria; Owner: postgres
+--
+
+ALTER SEQUENCE auditoria.logs_id_seq OWNED BY auditoria.logs.id;
+
+
+--
+-- TOC entry 320 (class 1259 OID 26419)
+-- Name: advisor_location_history; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.advisor_location_history (
+    id integer NOT NULL,
+    user_email text NOT NULL,
+    latitude double precision NOT NULL,
+    longitude double precision NOT NULL,
+    accuracy double precision,
+    "timestamp" timestamp with time zone DEFAULT now() NOT NULL,
+    activity_type text,
+    client_request_id integer,
+    visit_log_id integer,
+    speed double precision,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.advisor_location_history OWNER TO postgres;
+
+--
+-- TOC entry 319 (class 1259 OID 26418)
+-- Name: advisor_location_history_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.advisor_location_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.advisor_location_history_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5883 (class 0 OID 0)
+-- Dependencies: 319
+-- Name: advisor_location_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.advisor_location_history_id_seq OWNED BY public.advisor_location_history.id;
+
+
+--
+-- TOC entry 222 (class 1259 OID 16404)
+-- Name: audit_trail; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.audit_trail (
+    id integer NOT NULL,
+    action text NOT NULL,
+    user_id integer,
+    request_id integer,
+    details jsonb,
+    created_at timestamp without time zone DEFAULT now(),
+    module text DEFAULT 'core'::text,
+    entity text,
+    entity_id text,
+    ip text
+);
+
+
+ALTER TABLE public.audit_trail OWNER TO postgres;
+
+--
+-- TOC entry 223 (class 1259 OID 16412)
+-- Name: audit_trail_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.audit_trail_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.audit_trail_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5884 (class 0 OID 0)
+-- Dependencies: 223
+-- Name: audit_trail_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.audit_trail_id_seq OWNED BY public.audit_trail.id;
+
+
+--
+-- TOC entry 306 (class 1259 OID 26213)
+-- Name: bc_alerts; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.bc_alerts (
+    id integer NOT NULL,
+    business_case_id uuid,
+    contract_determination_id integer,
+    alert_type character varying(50) NOT NULL,
+    severity character varying(20) DEFAULT 'yellow'::character varying NOT NULL,
+    message text NOT NULL,
+    acknowledged boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    acknowledged_at timestamp without time zone,
+    acknowledged_by_user_id integer,
+    CONSTRAINT bc_alerts_alert_type_check CHECK (((alert_type)::text = ANY ((ARRAY['low_inventory'::character varying, 'product_discontinued'::character varying, 'unusual_consumption'::character varying, 'threshold_exceeded'::character varying])::text[]))),
+    CONSTRAINT bc_alerts_severity_check CHECK (((severity)::text = ANY ((ARRAY['yellow'::character varying, 'red'::character varying, 'critical'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.bc_alerts OWNER TO postgres;
+
+--
+-- TOC entry 5885 (class 0 OID 0)
+-- Dependencies: 306
+-- Name: TABLE bc_alerts; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.bc_alerts IS 'Alertas automáticas para Business Cases';
+
+
+--
+-- TOC entry 5886 (class 0 OID 0)
+-- Dependencies: 306
+-- Name: COLUMN bc_alerts.alert_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_alerts.alert_type IS 'Tipo: low_inventory, product_discontinued, unusual_consumption, threshold_exceeded';
+
+
+--
+-- TOC entry 5887 (class 0 OID 0)
+-- Dependencies: 306
+-- Name: COLUMN bc_alerts.severity; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_alerts.severity IS 'Severidad: yellow (30%), red (10%), critical (<5%)';
+
+
+--
+-- TOC entry 305 (class 1259 OID 26212)
+-- Name: bc_alerts_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bc_alerts_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.bc_alerts_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5888 (class 0 OID 0)
+-- Dependencies: 305
+-- Name: bc_alerts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.bc_alerts_id_seq OWNED BY public.bc_alerts.id;
+
+
+--
+-- TOC entry 298 (class 1259 OID 26094)
+-- Name: catalog_consumables; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.catalog_consumables (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    type character varying(50),
+    units_per_kit integer,
+    unit_price numeric(10,2),
+    version character varying(100),
+    status character varying(50) DEFAULT 'active'::character varying,
+    replaced_by_id integer,
+    valid_from date DEFAULT CURRENT_DATE NOT NULL,
+    valid_to date,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    performance jsonb DEFAULT '{}'::jsonb,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    CONSTRAINT catalog_consumables_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'discontinuado'::character varying])::text[]))),
+    CONSTRAINT catalog_consumables_type_check CHECK (((type)::text = ANY ((ARRAY['reactivo'::character varying, 'calibrador'::character varying, 'control'::character varying, 'diluyente'::character varying, 'material'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.catalog_consumables OWNER TO postgres;
+
+--
+-- TOC entry 5889 (class 0 OID 0)
+-- Dependencies: 298
+-- Name: TABLE catalog_consumables; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.catalog_consumables IS 'Catálogo de consumibles (reactivos, calibradores, controles)';
+
+
+--
+-- TOC entry 5890 (class 0 OID 0)
+-- Dependencies: 298
+-- Name: COLUMN catalog_consumables.units_per_kit; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_consumables.units_per_kit IS 'Unidades/determinaciones por kit';
+
+
+--
+-- TOC entry 5891 (class 0 OID 0)
+-- Dependencies: 298
+-- Name: COLUMN catalog_consumables.performance; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_consumables.performance IS 'Rendimiento por determinación en formato JSON';
+
+
+--
+-- TOC entry 297 (class 1259 OID 26093)
+-- Name: catalog_consumables_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.catalog_consumables_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.catalog_consumables_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5892 (class 0 OID 0)
+-- Dependencies: 297
+-- Name: catalog_consumables_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.catalog_consumables_id_seq OWNED BY public.catalog_consumables.id;
+
+
+--
+-- TOC entry 296 (class 1259 OID 26061)
+-- Name: catalog_determinations; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.catalog_determinations (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    roche_code character varying(100),
+    category character varying(100),
+    equipment_id integer,
+    version character varying(100),
+    status character varying(50) DEFAULT 'active'::character varying,
+    replaced_by_id integer,
+    valid_from date DEFAULT CURRENT_DATE NOT NULL,
+    valid_to date,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    CONSTRAINT catalog_determinations_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'discontinuado'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.catalog_determinations OWNER TO postgres;
+
+--
+-- TOC entry 5893 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: TABLE catalog_determinations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.catalog_determinations IS 'Catálogo de determinaciones médicas con versionamiento';
+
+
+--
+-- TOC entry 5894 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.valid_from; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.valid_from IS 'Fecha desde la cual esta versión es válida';
+
+
+--
+-- TOC entry 5895 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.valid_to; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.valid_to IS 'Fecha hasta la cual esta versión es válida (NULL si aún vigente)';
+
+
+--
+-- TOC entry 295 (class 1259 OID 26060)
+-- Name: catalog_determinations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.catalog_determinations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.catalog_determinations_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5896 (class 0 OID 0)
+-- Dependencies: 295
+-- Name: catalog_determinations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.catalog_determinations_id_seq OWNED BY public.catalog_determinations.id;
+
+
+--
+-- TOC entry 300 (class 1259 OID 26122)
+-- Name: catalog_equipment_consumables; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.catalog_equipment_consumables (
+    id integer NOT NULL,
+    equipment_id integer,
+    consumable_id integer,
+    determination_id integer,
+    consumption_rate numeric(10,4) DEFAULT 1.0 NOT NULL,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.catalog_equipment_consumables OWNER TO postgres;
+
+--
+-- TOC entry 5897 (class 0 OID 0)
+-- Dependencies: 300
+-- Name: TABLE catalog_equipment_consumables; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.catalog_equipment_consumables IS 'Relación entre equipos, determinaciones y sus consumibles';
+
+
+--
+-- TOC entry 5898 (class 0 OID 0)
+-- Dependencies: 300
+-- Name: COLUMN catalog_equipment_consumables.consumption_rate; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_equipment_consumables.consumption_rate IS 'Tasa de consumo del consumible por determinación';
+
+
+--
+-- TOC entry 299 (class 1259 OID 26121)
+-- Name: catalog_equipment_consumables_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.catalog_equipment_consumables_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.catalog_equipment_consumables_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5899 (class 0 OID 0)
+-- Dependencies: 299
+-- Name: catalog_equipment_consumables_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.catalog_equipment_consumables_id_seq OWNED BY public.catalog_equipment_consumables.id;
+
+
+--
+-- TOC entry 308 (class 1259 OID 26246)
+-- Name: catalog_investments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.catalog_investments (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    category character varying(100),
+    subcategory character varying(100),
+    suggested_price numeric(10,2),
+    suggested_quantity integer DEFAULT 1,
+    requires_lis boolean DEFAULT false,
+    requires_equipment boolean DEFAULT false,
+    status character varying(50) DEFAULT 'active'::character varying,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    metadata jsonb DEFAULT '{}'::jsonb,
+    CONSTRAINT catalog_investments_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'discontinued'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.catalog_investments OWNER TO postgres;
+
+--
+-- TOC entry 5900 (class 0 OID 0)
+-- Dependencies: 308
+-- Name: TABLE catalog_investments; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.catalog_investments IS 'Catálogo de inversiones adicionales para sugerir automáticamente';
+
+
+--
+-- TOC entry 5901 (class 0 OID 0)
+-- Dependencies: 308
+-- Name: COLUMN catalog_investments.requires_lis; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_investments.requires_lis IS 'TRUE si esta inversión es recomendada cuando se incluye LIS';
+
+
+--
+-- TOC entry 5902 (class 0 OID 0)
+-- Dependencies: 308
+-- Name: COLUMN catalog_investments.requires_equipment; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_investments.requires_equipment IS 'TRUE si esta inversión es recomendada con equipo principal';
+
+
+--
+-- TOC entry 307 (class 1259 OID 26245)
+-- Name: catalog_investments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.catalog_investments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.catalog_investments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5903 (class 0 OID 0)
+-- Dependencies: 307
+-- Name: catalog_investments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.catalog_investments_id_seq OWNED BY public.catalog_investments.id;
+
+
+--
+-- TOC entry 292 (class 1259 OID 25715)
+-- Name: client_assignments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.client_assignments (
+    id integer NOT NULL,
+    client_request_id integer NOT NULL,
+    assigned_to_email text NOT NULL,
+    assigned_by_email text,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.client_assignments OWNER TO postgres;
+
+--
+-- TOC entry 291 (class 1259 OID 25714)
+-- Name: client_assignments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.client_assignments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.client_assignments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5904 (class 0 OID 0)
+-- Dependencies: 291
+-- Name: client_assignments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.client_assignments_id_seq OWNED BY public.client_assignments.id;
+
+
+--
+-- TOC entry 270 (class 1259 OID 17130)
+-- Name: client_request_consent_tokens; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.client_request_consent_tokens (
+    id character varying(64) NOT NULL,
+    client_email character varying(255) NOT NULL,
+    client_name character varying(255),
+    code_hash character varying(255) NOT NULL,
+    code_last_four character varying(4),
+    status character varying(50) DEFAULT 'pending'::character varying NOT NULL,
+    attempts integer DEFAULT 0 NOT NULL,
+    expires_at timestamp without time zone NOT NULL,
+    verified_at timestamp without time zone,
+    verified_by_email character varying(255),
+    verified_by_user_id integer,
+    created_by_email character varying(255),
+    created_by_user_id integer,
+    used_at timestamp without time zone,
+    used_request_id integer,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.client_request_consent_tokens OWNER TO postgres;
+
+--
+-- TOC entry 269 (class 1259 OID 17112)
+-- Name: client_request_consents; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.client_request_consents (
+    id integer NOT NULL,
+    client_request_id integer NOT NULL,
+    event_type character varying(50) NOT NULL,
+    method character varying(50) NOT NULL,
+    details text,
+    evidence_file_id character varying(255),
+    actor_email character varying(255),
+    actor_role character varying(100),
+    actor_name character varying(255),
+    ip character varying(64),
+    user_agent text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.client_request_consents OWNER TO postgres;
+
+--
+-- TOC entry 268 (class 1259 OID 17111)
+-- Name: client_request_consents_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.client_request_consents_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.client_request_consents_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5905 (class 0 OID 0)
+-- Dependencies: 268
+-- Name: client_request_consents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.client_request_consents_id_seq OWNED BY public.client_request_consents.id;
+
+
+--
+-- TOC entry 267 (class 1259 OID 17084)
+-- Name: client_requests; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.client_requests (
+    id integer NOT NULL,
+    created_by character varying(255) NOT NULL,
+    status character varying(50) DEFAULT 'pending_consent'::character varying NOT NULL,
+    rejection_reason text,
+    lopdp_token character varying(255),
+    lopdp_consent_status character varying(50) DEFAULT 'pending'::character varying NOT NULL,
+    client_email character varying(255) NOT NULL,
+    client_type character varying(50) NOT NULL,
+    legal_person_business_name character varying(255),
+    nationality character varying(100),
+    natural_person_firstname character varying(255),
+    natural_person_lastname character varying(255),
+    commercial_name character varying(255),
+    ruc_cedula character varying(20) NOT NULL,
+    establishment_province character varying(100),
+    establishment_city character varying(100),
+    establishment_address text,
+    establishment_reference text,
+    establishment_phone character varying(50),
+    establishment_cellphone character varying(50),
+    legal_rep_name character varying(255),
+    legal_rep_position character varying(100),
+    legal_rep_id_document character varying(20),
+    legal_rep_cellphone character varying(50),
+    legal_rep_email character varying(255),
+    shipping_contact_name character varying(255),
+    shipping_address text,
+    shipping_city character varying(100),
+    shipping_province character varying(100),
+    shipping_reference text,
+    shipping_phone character varying(50),
+    shipping_cellphone character varying(50),
+    shipping_delivery_hours character varying(255),
+    operating_permit_status character varying(50),
+    drive_folder_id character varying(255),
+    legal_rep_appointment_file_id character varying(255),
+    ruc_file_id character varying(255),
+    id_file_id character varying(255),
+    operating_permit_file_id character varying(255),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    data_processing_consent boolean DEFAULT false NOT NULL,
+    establishment_name character varying(255),
+    consent_capture_method character varying(50) DEFAULT 'email_link'::character varying NOT NULL,
+    consent_capture_details text,
+    lopdp_consent_method character varying(50),
+    lopdp_consent_details text,
+    lopdp_consent_at timestamp without time zone,
+    lopdp_consent_ip character varying(64),
+    lopdp_consent_user_agent text,
+    consent_evidence_file_id character varying(255),
+    consent_recipient_email character varying(255),
+    consent_email_token_id character varying(64),
+    approval_status character varying(50) DEFAULT 'pendiente'::character varying,
+    approved_by integer,
+    approved_at timestamp without time zone,
+    client_id integer,
+    user_id integer,
+    client_sector character varying(20) DEFAULT 'privado'::character varying
+);
+
+
+ALTER TABLE public.client_requests OWNER TO postgres;
+
+--
+-- TOC entry 5906 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.rejection_reason; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.rejection_reason IS 'Motivo del rechazo si la solicitud fue rechazada';
+
+
+--
+-- TOC entry 5907 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.data_processing_consent; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.data_processing_consent IS 'Aceptación interna del tratamiento de datos';
+
+
+--
+-- TOC entry 5908 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.establishment_name; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.establishment_name IS 'Nombre del establecimiento registrado en la solicitud';
+
+
+--
+-- TOC entry 5909 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.consent_capture_method; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.consent_capture_method IS 'Método planificado para recolectar el consentimiento';
+
+
+--
+-- TOC entry 5910 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.lopdp_consent_method; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.lopdp_consent_method IS 'Método real utilizado para registrar la aceptación';
+
+
+--
+-- TOC entry 5911 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.consent_recipient_email; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.consent_recipient_email IS 'Correo al que se envió el código OTP LOPDP';
+
+
+--
+-- TOC entry 5912 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.consent_email_token_id; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.consent_email_token_id IS 'Token OTP verificado previamente para LOPDP';
+
+
+--
+-- TOC entry 5913 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.approval_status; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.approval_status IS 'Estado de aprobación: pendiente, aprobado, rechazado';
+
+
+--
+-- TOC entry 5914 (class 0 OID 0)
+-- Dependencies: 267
+-- Name: COLUMN client_requests.client_sector; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.client_requests.client_sector IS 'Sector del cliente: publico o privado';
+
+
+--
+-- TOC entry 266 (class 1259 OID 17083)
+-- Name: client_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.client_requests_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.client_requests_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5915 (class 0 OID 0)
+-- Dependencies: 266
+-- Name: client_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.client_requests_id_seq OWNED BY public.client_requests.id;
+
+
+--
+-- TOC entry 294 (class 1259 OID 25735)
+-- Name: client_visit_logs; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.client_visit_logs (
+    id integer NOT NULL,
+    client_request_id integer NOT NULL,
+    user_email text NOT NULL,
+    visit_date date NOT NULL,
+    status text NOT NULL,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    hora_entrada timestamp with time zone,
+    hora_salida timestamp with time zone,
+    lat_entrada double precision,
+    lng_entrada double precision,
+    lat_salida double precision,
+    lng_salida double precision,
+    observaciones text,
+    duracion_minutos integer,
+    CONSTRAINT client_visit_logs_status_check CHECK ((status = ANY (ARRAY['visited'::text, 'pending'::text, 'skipped'::text, 'in_visit'::text])))
+);
+
+
+ALTER TABLE public.client_visit_logs OWNER TO postgres;
+
+--
+-- TOC entry 293 (class 1259 OID 25734)
+-- Name: client_visit_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.client_visit_logs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.client_visit_logs_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5916 (class 0 OID 0)
+-- Dependencies: 293
+-- Name: client_visit_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.client_visit_logs_id_seq OWNED BY public.client_visit_logs.id;
+
+
+--
+-- TOC entry 276 (class 1259 OID 17244)
+-- Name: clients; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.clients (
+    id integer NOT NULL,
+    client_request_id integer,
+    razon_social text NOT NULL,
+    ruc text NOT NULL,
+    nombre_comercial text,
+    contacto_nombre text,
+    contacto_cargo text,
+    contacto_email text,
+    contacto_telefono text,
+    direccion text,
+    ciudad text,
+    provincia text,
+    pais text DEFAULT 'Ecuador'::text,
+    nombre_banco text,
+    tipo_cuenta text,
+    numero_cuenta text,
+    representante_nombre text,
+    representante_cedula text,
+    representante_email text,
+    representante_telefono text,
+    consentimiento_lopdp boolean DEFAULT false,
+    consentimiento_email text,
+    consentimiento_token text,
+    consentimiento_verificado boolean DEFAULT false,
+    consentimiento_fecha timestamp without time zone,
+    estado character varying(50) DEFAULT 'activo'::character varying,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    ruc_hash character varying(64),
+    client_sector character varying(20) DEFAULT 'privado'::character varying
+);
+
+
+ALTER TABLE public.clients OWNER TO postgres;
+
+--
+-- TOC entry 5917 (class 0 OID 0)
+-- Dependencies: 276
+-- Name: TABLE clients; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.clients IS 'Clientes aprobados con datos encriptados para máxima seguridad';
+
+
+--
+-- TOC entry 5918 (class 0 OID 0)
+-- Dependencies: 276
+-- Name: COLUMN clients.ruc_hash; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.clients.ruc_hash IS 'Hash SHA-256 del RUC para búsquedas sin exponer el dato real';
+
+
+--
+-- TOC entry 5919 (class 0 OID 0)
+-- Dependencies: 276
+-- Name: COLUMN clients.client_sector; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.clients.client_sector IS 'Sector del cliente: publico o privado';
+
+
+--
+-- TOC entry 275 (class 1259 OID 17243)
+-- Name: clients_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.clients_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.clients_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5920 (class 0 OID 0)
+-- Dependencies: 275
+-- Name: clients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.clients_id_seq OWNED BY public.clients.id;
+
+
+--
+-- TOC entry 302 (class 1259 OID 26152)
+-- Name: contract_determinations; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.contract_determinations (
+    id integer NOT NULL,
+    business_case_id uuid,
+    client_id integer,
+    determination_id integer,
+    annual_negotiated_quantity integer NOT NULL,
+    consumed_quantity integer DEFAULT 0,
+    remaining_quantity integer,
+    alert_threshold_yellow integer DEFAULT 30,
+    alert_threshold_red integer DEFAULT 10,
+    status character varying(50) DEFAULT 'active'::character varying,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT contract_determinations_alert_threshold_red_check CHECK (((alert_threshold_red > 0) AND (alert_threshold_red <= 100))),
+    CONSTRAINT contract_determinations_alert_threshold_yellow_check CHECK (((alert_threshold_yellow > 0) AND (alert_threshold_yellow <= 100))),
+    CONSTRAINT contract_determinations_annual_negotiated_quantity_check CHECK ((annual_negotiated_quantity > 0)),
+    CONSTRAINT contract_determinations_consumed_quantity_check CHECK ((consumed_quantity >= 0)),
+    CONSTRAINT contract_determinations_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'completed'::character varying, 'cancelled'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.contract_determinations OWNER TO postgres;
+
+--
+-- TOC entry 5921 (class 0 OID 0)
+-- Dependencies: 302
+-- Name: TABLE contract_determinations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.contract_determinations IS 'Inventario de determinaciones negociadas por Business Case';
+
+
+--
+-- TOC entry 5922 (class 0 OID 0)
+-- Dependencies: 302
+-- Name: COLUMN contract_determinations.alert_threshold_yellow; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.contract_determinations.alert_threshold_yellow IS 'Porcentaje restante para alerta amarilla';
+
+
+--
+-- TOC entry 5923 (class 0 OID 0)
+-- Dependencies: 302
+-- Name: COLUMN contract_determinations.alert_threshold_red; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.contract_determinations.alert_threshold_red IS 'Porcentaje restante para alerta roja';
+
+
+--
+-- TOC entry 301 (class 1259 OID 26151)
+-- Name: contract_determinations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.contract_determinations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.contract_determinations_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5924 (class 0 OID 0)
+-- Dependencies: 301
+-- Name: contract_determinations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.contract_determinations_id_seq OWNED BY public.contract_determinations.id;
+
+
+--
+-- TOC entry 262 (class 1259 OID 16959)
+-- Name: departments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.departments (
+    id integer NOT NULL,
+    code character varying(50) NOT NULL,
+    name character varying(100) NOT NULL,
+    description text,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.departments OWNER TO postgres;
+
+--
+-- TOC entry 261 (class 1259 OID 16958)
+-- Name: departments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.departments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.departments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5925 (class 0 OID 0)
+-- Dependencies: 261
+-- Name: departments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.departments_id_seq OWNED BY public.departments.id;
+
+
+--
+-- TOC entry 304 (class 1259 OID 26188)
+-- Name: determination_consumption_log; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.determination_consumption_log (
+    id integer NOT NULL,
+    contract_determination_id integer,
+    consumed_quantity integer NOT NULL,
+    consumption_date date DEFAULT CURRENT_DATE NOT NULL,
+    consumed_by_user_id integer,
+    source character varying(50) DEFAULT 'manual'::character varying,
+    notes text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT determination_consumption_log_consumed_quantity_check CHECK ((consumed_quantity > 0)),
+    CONSTRAINT determination_consumption_log_source_check CHECK (((source)::text = ANY ((ARRAY['manual'::character varying, 'lis_integration'::character varying, 'auto'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.determination_consumption_log OWNER TO postgres;
+
+--
+-- TOC entry 5926 (class 0 OID 0)
+-- Dependencies: 304
+-- Name: TABLE determination_consumption_log; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.determination_consumption_log IS 'Registro histórico de consumos de determinaciones';
+
+
+--
+-- TOC entry 5927 (class 0 OID 0)
+-- Dependencies: 304
+-- Name: COLUMN determination_consumption_log.source; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.determination_consumption_log.source IS 'Origen del registro: manual, lis_integration, auto';
+
+
+--
+-- TOC entry 303 (class 1259 OID 26187)
+-- Name: determination_consumption_log_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.determination_consumption_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.determination_consumption_log_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5928 (class 0 OID 0)
+-- Dependencies: 303
+-- Name: determination_consumption_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.determination_consumption_log_id_seq OWNED BY public.determination_consumption_log.id;
+
+
+--
+-- TOC entry 224 (class 1259 OID 16413)
+-- Name: document_signatures; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.document_signatures (
+    id bigint NOT NULL,
+    document_id bigint NOT NULL,
+    signer_user_id integer NOT NULL,
+    role_at_sign text,
+    signature_file_id text,
+    signed_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.document_signatures OWNER TO postgres;
+
+--
+-- TOC entry 5929 (class 0 OID 0)
+-- Dependencies: 224
+-- Name: TABLE document_signatures; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.document_signatures IS 'Firmas digitales PNG por documento/usuario/rol.';
+
+
+--
+-- TOC entry 225 (class 1259 OID 16422)
+-- Name: document_signatures_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.document_signatures_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.document_signatures_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5930 (class 0 OID 0)
+-- Dependencies: 225
+-- Name: document_signatures_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.document_signatures_id_seq OWNED BY public.document_signatures.id;
+
+
+--
+-- TOC entry 226 (class 1259 OID 16423)
+-- Name: documents; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.documents (
+    id bigint NOT NULL,
+    request_id integer NOT NULL,
+    request_type_id integer NOT NULL,
+    doc_drive_id text,
+    pdf_drive_id text,
+    folder_drive_id text,
+    version_number integer DEFAULT 1,
+    signed boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.documents OWNER TO postgres;
+
+--
+-- TOC entry 5931 (class 0 OID 0)
+-- Dependencies: 226
+-- Name: TABLE documents; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.documents IS 'Documentos generados desde plantillas: DOCX/PDF/firma y carpeta Drive por request.';
+
+
+--
+-- TOC entry 227 (class 1259 OID 16435)
+-- Name: documents_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.documents_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.documents_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5932 (class 0 OID 0)
+-- Dependencies: 227
+-- Name: documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.documents_id_seq OWNED BY public.documents.id;
+
+
+--
+-- TOC entry 228 (class 1259 OID 16436)
+-- Name: employees; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.employees (
+    id integer NOT NULL,
+    nombre text,
+    cedula text,
+    cargo text,
+    fecha_ingreso date,
+    estado text,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.employees OWNER TO postgres;
+
+--
+-- TOC entry 229 (class 1259 OID 16444)
+-- Name: employees_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.employees_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.employees_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5933 (class 0 OID 0)
+-- Dependencies: 229
+-- Name: employees_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.employees_id_seq OWNED BY public.employees.id;
+
+
+--
+-- TOC entry 286 (class 1259 OID 17468)
+-- Name: equipment_purchase_bc_items; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.equipment_purchase_bc_items (
+    id uuid NOT NULL,
+    request_id uuid,
+    name text NOT NULL,
+    characteristics text,
+    status text,
+    quantity numeric,
+    price numeric,
+    total numeric,
+    created_by integer,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.equipment_purchase_bc_items OWNER TO postgres;
+
+--
+-- TOC entry 279 (class 1259 OID 17321)
+-- Name: equipment_purchase_requests; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.equipment_purchase_requests (
+    id uuid NOT NULL,
+    created_by integer,
+    created_by_email text,
+    client_id integer,
+    client_name text NOT NULL,
+    client_email text,
+    provider_email text,
+    equipment jsonb DEFAULT '[]'::jsonb NOT NULL,
+    status text NOT NULL,
+    availability_email_sent_at timestamp with time zone,
+    availability_email_file_id text,
+    provider_response jsonb,
+    provider_response_at timestamp with time zone,
+    proforma_requested_at timestamp with time zone,
+    proforma_request_email_file_id text,
+    proforma_file_id text,
+    proforma_uploaded_at timestamp with time zone,
+    reservation_email_sent_at timestamp with time zone,
+    reservation_calendar_event_id text,
+    reservation_calendar_event_link text,
+    reservation_email_file_id text,
+    signed_proforma_file_id text,
+    signed_proforma_uploaded_at timestamp with time zone,
+    arrival_eta_email_sent_at timestamp with time zone,
+    arrival_eta_email_file_id text,
+    inspection_min_date date,
+    inspection_max_date date,
+    includes_starter_kit boolean,
+    inspection_recorded_at timestamp with time zone,
+    contract_file_id text,
+    contract_uploaded_at timestamp with time zone,
+    contract_reminder_event_id text,
+    contract_reminder_event_link text,
+    drive_folder_id text,
+    extra jsonb,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    equipment_type text DEFAULT 'new'::text,
+    reservation_expires_at timestamp with time zone,
+    reservation_renewed_at timestamp with time zone,
+    reservation_renewal_count integer DEFAULT 0,
+    cancelled_at timestamp with time zone,
+    cancellation_reason text,
+    assigned_to integer,
+    assigned_to_email text,
+    assigned_to_name text,
+    notes text,
+    bc_spreadsheet_id text,
+    bc_spreadsheet_url text,
+    bc_created_at timestamp with time zone,
+    bc_stage text DEFAULT 'pending_comercial'::text,
+    bc_progress jsonb DEFAULT '{}'::jsonb,
+    process_doc_id text,
+    process_doc_url text,
+    process_doc_created_at timestamp with time zone,
+    request_type text DEFAULT 'purchase'::text
+);
+
+
+ALTER TABLE public.equipment_purchase_requests OWNER TO postgres;
+
+--
+-- TOC entry 5934 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.equipment_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.equipment_type IS 'Tipo de equipo solicitado: new (nuevo) o cu (usado/reacondicionado)';
+
+
+--
+-- TOC entry 5935 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.reservation_expires_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.reservation_expires_at IS 'Fecha de expiración de la reserva (60 días después de la última reserva/renovación)';
+
+
+--
+-- TOC entry 5936 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.reservation_renewed_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.reservation_renewed_at IS 'Última fecha de renovación de la reserva';
+
+
+--
+-- TOC entry 5937 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.reservation_renewal_count; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.reservation_renewal_count IS 'Número de veces que se ha renovado la reserva';
+
+
+--
+-- TOC entry 5938 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.cancelled_at; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.cancelled_at IS 'Fecha de cancelación de la orden';
+
+
+--
+-- TOC entry 5939 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.cancellation_reason; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.cancellation_reason IS 'Razón de la cancelación (manual, auto-expiración, etc)';
+
+
+--
+-- TOC entry 230 (class 1259 OID 16445)
+-- Name: inventory; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.inventory (
+    id integer NOT NULL,
+    sku text,
+    name text,
+    quantity integer DEFAULT 0,
+    last_updated timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.inventory OWNER TO postgres;
+
+--
+-- TOC entry 231 (class 1259 OID 16453)
+-- Name: inventory_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.inventory_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.inventory_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5940 (class 0 OID 0)
+-- Dependencies: 231
+-- Name: inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.inventory_id_seq OWNED BY public.inventory.id;
+
+
+--
+-- TOC entry 232 (class 1259 OID 16454)
+-- Name: inventory_movements; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.inventory_movements (
+    id integer NOT NULL,
+    inventory_id integer,
+    type text,
+    quantity integer,
+    reason text,
+    created_by integer,
+    created_at timestamp without time zone DEFAULT now(),
+    silver_tx_id text,
+    movement_type character varying(20) DEFAULT 'entrada'::character varying,
+    CONSTRAINT inventory_movements_movement_type_check CHECK (((movement_type)::text = ANY ((ARRAY['entrada'::character varying, 'salida'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.inventory_movements OWNER TO postgres;
+
+--
+-- TOC entry 233 (class 1259 OID 16461)
+-- Name: inventory_movements_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.inventory_movements_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.inventory_movements_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5941 (class 0 OID 0)
+-- Dependencies: 233
+-- Name: inventory_movements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.inventory_movements_id_seq OWNED BY public.inventory_movements.id;
+
+
+--
+-- TOC entry 324 (class 1259 OID 26482)
+-- Name: permisos_vacaciones; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.permisos_vacaciones (
+    id integer NOT NULL,
+    user_email text NOT NULL,
+    user_fullname text,
+    tipo_solicitud text DEFAULT 'vacaciones'::text NOT NULL,
+    tipo_permiso text,
+    subtipo_calamidad text,
+    duracion_horas numeric(4,2),
+    duracion_dias numeric(5,2),
+    fecha_inicio date,
+    fecha_fin date,
+    es_recuperable boolean DEFAULT false,
+    periodo_vacaciones text,
+    justificacion_requerida text[],
+    justificantes_urls text[],
+    aprobacion_parcial_at timestamp with time zone,
+    aprobacion_parcial_por text,
+    aprobacion_final_at timestamp with time zone,
+    aprobacion_final_por text,
+    pdf_generado_url text,
+    observaciones text[],
+    status text DEFAULT 'pending'::text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    approver_role text,
+    user_id integer,
+    approver_id integer,
+    department_id integer,
+    fecha_regreso date,
+    rejection_reason text,
+    drive_doc_id text,
+    drive_pdf_id text,
+    drive_doc_link text,
+    drive_pdf_link text,
+    drive_folder_id text,
+    CONSTRAINT permisos_vacaciones_check CHECK ((((tipo_solicitud = 'permiso'::text) AND (tipo_permiso = ANY (ARRAY['estudios'::text, 'personal'::text, 'salud'::text, 'calamidad'::text]))) OR (tipo_solicitud = 'vacaciones'::text))),
+    CONSTRAINT permisos_vacaciones_check1 CHECK ((((tipo_permiso = 'calamidad'::text) AND (subtipo_calamidad = ANY (ARRAY['fallecimiento'::text, 'accidente'::text, 'desastre'::text]))) OR (tipo_permiso <> 'calamidad'::text))),
+    CONSTRAINT permisos_vacaciones_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'partially_approved'::text, 'pending_final'::text, 'approved'::text, 'rejected'::text]))),
+    CONSTRAINT permisos_vacaciones_tipo_solicitud_check CHECK ((tipo_solicitud = ANY (ARRAY['permiso'::text, 'vacaciones'::text])))
+);
+
+
+ALTER TABLE public.permisos_vacaciones OWNER TO postgres;
+
+--
+-- TOC entry 323 (class 1259 OID 26481)
+-- Name: permisos_vacaciones_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.permisos_vacaciones_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.permisos_vacaciones_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5942 (class 0 OID 0)
+-- Dependencies: 323
+-- Name: permisos_vacaciones_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.permisos_vacaciones_id_seq OWNED BY public.permisos_vacaciones.id;
+
+
+--
+-- TOC entry 285 (class 1259 OID 17430)
+-- Name: personnel_request_comments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.personnel_request_comments (
+    id integer NOT NULL,
+    personnel_request_id integer NOT NULL,
+    user_id integer NOT NULL,
+    comment text NOT NULL,
+    is_internal boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.personnel_request_comments OWNER TO postgres;
+
+--
+-- TOC entry 284 (class 1259 OID 17429)
+-- Name: personnel_request_comments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.personnel_request_comments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.personnel_request_comments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5943 (class 0 OID 0)
+-- Dependencies: 284
+-- Name: personnel_request_comments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.personnel_request_comments_id_seq OWNED BY public.personnel_request_comments.id;
+
+
+--
+-- TOC entry 283 (class 1259 OID 17407)
+-- Name: personnel_request_history; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.personnel_request_history (
+    id integer NOT NULL,
+    personnel_request_id integer NOT NULL,
+    previous_status character varying(50),
+    new_status character varying(50) NOT NULL,
+    changed_by integer,
+    change_reason text,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.personnel_request_history OWNER TO postgres;
+
+--
+-- TOC entry 282 (class 1259 OID 17406)
+-- Name: personnel_request_history_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.personnel_request_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.personnel_request_history_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5944 (class 0 OID 0)
+-- Dependencies: 282
+-- Name: personnel_request_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.personnel_request_history_id_seq OWNED BY public.personnel_request_history.id;
+
+
+--
+-- TOC entry 281 (class 1259 OID 17351)
+-- Name: personnel_requests; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.personnel_requests (
+    id integer NOT NULL,
+    request_number character varying(50) NOT NULL,
+    requester_id integer NOT NULL,
+    department_id integer,
+    position_title character varying(255) NOT NULL,
+    position_type character varying(50) NOT NULL,
+    quantity integer DEFAULT 1 NOT NULL,
+    start_date date,
+    end_date date,
+    education_level character varying(100) NOT NULL,
+    career_field character varying(255),
+    years_experience integer,
+    specific_skills text,
+    technical_knowledge text,
+    soft_skills text,
+    certifications text,
+    languages text,
+    main_responsibilities text NOT NULL,
+    specific_functions text,
+    reports_to character varying(255),
+    supervises character varying(255),
+    work_schedule character varying(100),
+    salary_range character varying(100),
+    benefits text,
+    work_location character varying(255),
+    justification text NOT NULL,
+    urgency_level character varying(50) DEFAULT 'normal'::character varying,
+    status character varying(50) DEFAULT 'pendiente'::character varying,
+    priority integer DEFAULT 3,
+    approved_by_manager integer,
+    approved_by_hr integer,
+    approved_by_finance integer,
+    manager_approval_date timestamp without time zone,
+    hr_approval_date timestamp without time zone,
+    finance_approval_date timestamp without time zone,
+    manager_notes text,
+    hr_notes text,
+    rejection_reason text,
+    drive_folder_id character varying(255),
+    job_description_file_id character varying(255),
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    completed_at timestamp without time zone,
+    CONSTRAINT personnel_requests_position_type_check CHECK (((position_type)::text = ANY ((ARRAY['permanente'::character varying, 'temporal'::character varying, 'reemplazo'::character varying, 'proyecto'::character varying])::text[]))),
+    CONSTRAINT personnel_requests_priority_check CHECK (((priority >= 1) AND (priority <= 5))),
+    CONSTRAINT personnel_requests_status_check CHECK (((status)::text = ANY ((ARRAY['pendiente'::character varying, 'en_revision'::character varying, 'aprobada'::character varying, 'rechazada'::character varying, 'en_proceso'::character varying, 'completada'::character varying, 'cancelada'::character varying])::text[]))),
+    CONSTRAINT personnel_requests_urgency_level_check CHECK (((urgency_level)::text = ANY ((ARRAY['baja'::character varying, 'normal'::character varying, 'alta'::character varying, 'urgente'::character varying])::text[]))),
+    CONSTRAINT valid_date_range CHECK (((end_date IS NULL) OR (end_date >= start_date)))
+);
+
+
+ALTER TABLE public.personnel_requests OWNER TO postgres;
+
+--
+-- TOC entry 5945 (class 0 OID 0)
+-- Dependencies: 281
+-- Name: TABLE personnel_requests; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.personnel_requests IS 'Solicitudes de personal con perfil profesional completo';
+
+
+--
+-- TOC entry 5946 (class 0 OID 0)
+-- Dependencies: 281
+-- Name: COLUMN personnel_requests.position_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.personnel_requests.position_type IS 'Tipo de contratación: permanente, temporal, reemplazo, proyecto';
+
+
+--
+-- TOC entry 5947 (class 0 OID 0)
+-- Dependencies: 281
+-- Name: COLUMN personnel_requests.urgency_level; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.personnel_requests.urgency_level IS 'Nivel de urgencia: baja, normal, alta, urgente';
+
+
+--
+-- TOC entry 5948 (class 0 OID 0)
+-- Dependencies: 281
+-- Name: COLUMN personnel_requests.status; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.personnel_requests.status IS 'Estado: pendiente, en_revision, aprobada, rechazada, en_proceso, completada, cancelada';
+
+
+--
+-- TOC entry 280 (class 1259 OID 17350)
+-- Name: personnel_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.personnel_requests_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.personnel_requests_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5949 (class 0 OID 0)
+-- Dependencies: 280
+-- Name: personnel_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.personnel_requests_id_seq OWNED BY public.personnel_requests.id;
+
+
+--
+-- TOC entry 234 (class 1259 OID 16462)
+-- Name: request_approvals; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.request_approvals (
+    id integer NOT NULL,
+    request_id integer,
+    approver_id integer,
+    token text,
+    token_expires_at timestamp without time zone,
+    used boolean DEFAULT false,
+    action text,
+    comments text,
+    acted_at timestamp without time zone
+);
+
+
+ALTER TABLE public.request_approvals OWNER TO postgres;
+
+--
+-- TOC entry 235 (class 1259 OID 16469)
+-- Name: request_approvals_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.request_approvals_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.request_approvals_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5950 (class 0 OID 0)
+-- Dependencies: 235
+-- Name: request_approvals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.request_approvals_id_seq OWNED BY public.request_approvals.id;
+
+
+--
+-- TOC entry 236 (class 1259 OID 16470)
+-- Name: request_attachments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.request_attachments (
+    id integer NOT NULL,
+    request_id integer,
+    drive_file_id text,
+    filename text,
+    mimetype text,
+    uploaded_by integer,
+    created_at timestamp without time zone DEFAULT now(),
+    drive_link text,
+    mime_type text,
+    size bigint,
+    title text
+);
+
+
+ALTER TABLE public.request_attachments OWNER TO postgres;
+
+--
+-- TOC entry 237 (class 1259 OID 16477)
+-- Name: request_attachments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.request_attachments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.request_attachments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5951 (class 0 OID 0)
+-- Dependencies: 237
+-- Name: request_attachments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.request_attachments_id_seq OWNED BY public.request_attachments.id;
+
+
+--
+-- TOC entry 238 (class 1259 OID 16478)
+-- Name: request_status_history; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.request_status_history (
+    id bigint NOT NULL,
+    request_id integer NOT NULL,
+    old_status text,
+    new_status text NOT NULL,
+    changed_by integer,
+    changed_at timestamp without time zone DEFAULT now(),
+    note text
+);
+
+
+ALTER TABLE public.request_status_history OWNER TO postgres;
+
+--
+-- TOC entry 5952 (class 0 OID 0)
+-- Dependencies: 238
+-- Name: TABLE request_status_history; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.request_status_history IS 'Historial completo de estados por request.';
+
+
+--
+-- TOC entry 239 (class 1259 OID 16487)
+-- Name: request_status_history_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.request_status_history_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.request_status_history_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5953 (class 0 OID 0)
+-- Dependencies: 239
+-- Name: request_status_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.request_status_history_id_seq OWNED BY public.request_status_history.id;
+
+
+--
+-- TOC entry 240 (class 1259 OID 16488)
+-- Name: request_types; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.request_types (
+    id integer NOT NULL,
+    title text NOT NULL,
+    drive_folder_id text,
+    schema jsonb,
+    created_at timestamp without time zone DEFAULT now(),
+    code text NOT NULL,
+    version text,
+    reference text,
+    template_doc_id text
+);
+
+
+ALTER TABLE public.request_types OWNER TO postgres;
+
+--
+-- TOC entry 241 (class 1259 OID 16497)
+-- Name: request_types_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.request_types_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.request_types_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5954 (class 0 OID 0)
+-- Dependencies: 241
+-- Name: request_types_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.request_types_id_seq OWNED BY public.request_types.id;
+
+
+--
+-- TOC entry 242 (class 1259 OID 16498)
+-- Name: request_versions; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.request_versions (
+    id integer NOT NULL,
+    request_id integer,
+    version_number integer,
+    payload jsonb,
+    created_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.request_versions OWNER TO postgres;
+
+--
+-- TOC entry 243 (class 1259 OID 16505)
+-- Name: request_versions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.request_versions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.request_versions_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5955 (class 0 OID 0)
+-- Dependencies: 243
+-- Name: request_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.request_versions_id_seq OWNED BY public.request_versions.id;
+
+
+--
+-- TOC entry 244 (class 1259 OID 16506)
+-- Name: requests; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.requests (
+    id integer NOT NULL,
+    requester_id integer NOT NULL,
+    status text DEFAULT 'pendiente'::text,
+    version_number integer DEFAULT 1,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    request_group_id uuid,
+    request_type_id integer,
+    payload jsonb,
+    acta_generada boolean DEFAULT false,
+    CONSTRAINT chk_requests_status CHECK ((status = ANY (ARRAY['pendiente'::text, 'en_revision'::text, 'aprobado'::text, 'rechazado'::text, 'cancelado'::text])))
+);
+
+
+ALTER TABLE public.requests OWNER TO postgres;
+
+--
+-- TOC entry 245 (class 1259 OID 16519)
+-- Name: requests_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.requests_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.requests_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5956 (class 0 OID 0)
+-- Dependencies: 245
+-- Name: requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.requests_id_seq OWNED BY public.requests.id;
+
+
+--
+-- TOC entry 318 (class 1259 OID 26390)
+-- Name: scheduled_visits; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.scheduled_visits (
+    id integer NOT NULL,
+    schedule_id integer NOT NULL,
+    client_request_id integer NOT NULL,
+    planned_date date NOT NULL,
+    city text NOT NULL,
+    priority integer DEFAULT 1,
+    notes text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.scheduled_visits OWNER TO postgres;
+
+--
+-- TOC entry 317 (class 1259 OID 26389)
+-- Name: scheduled_visits_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.scheduled_visits_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.scheduled_visits_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5957 (class 0 OID 0)
+-- Dependencies: 317
+-- Name: scheduled_visits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.scheduled_visits_id_seq OWNED BY public.scheduled_visits.id;
+
+
+--
+-- TOC entry 312 (class 1259 OID 26320)
+-- Name: technical_documents; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.technical_documents (
+    id integer NOT NULL,
+    document_type character varying(100) NOT NULL,
+    document_code character varying(50) NOT NULL,
+    user_id integer NOT NULL,
+    user_email character varying(255),
+    user_name character varying(255),
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    form_data jsonb NOT NULL,
+    file_name character varying(500),
+    file_path text,
+    drive_file_id character varying(255),
+    drive_folder_id character varying(255),
+    equipment_name character varying(255),
+    equipment_serial character varying(100),
+    status character varying(50) DEFAULT 'generated'::character varying,
+    notes text,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.technical_documents OWNER TO postgres;
+
+--
+-- TOC entry 5958 (class 0 OID 0)
+-- Dependencies: 312
+-- Name: TABLE technical_documents; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.technical_documents IS 'Registro de documentos técnicos generados por el área de Servicio Técnico';
+
+
+--
+-- TOC entry 5959 (class 0 OID 0)
+-- Dependencies: 312
+-- Name: COLUMN technical_documents.document_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.technical_documents.document_type IS 'Tipo de documento: DISINFECTION, TRAINING_ATTENDANCE, etc.';
+
+
+--
+-- TOC entry 5960 (class 0 OID 0)
+-- Dependencies: 312
+-- Name: COLUMN technical_documents.document_code; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.technical_documents.document_code IS 'Código del formato (Ej: F.ST-02, F.ST-05)';
+
+
+--
+-- TOC entry 5961 (class 0 OID 0)
+-- Dependencies: 312
+-- Name: COLUMN technical_documents.form_data; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.technical_documents.form_data IS 'Datos del formulario en formato JSON';
+
+
+--
+-- TOC entry 5962 (class 0 OID 0)
+-- Dependencies: 312
+-- Name: COLUMN technical_documents.drive_file_id; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.technical_documents.drive_file_id IS 'ID del archivo en Google Drive';
+
+
+--
+-- TOC entry 311 (class 1259 OID 26319)
+-- Name: technical_documents_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.technical_documents_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.technical_documents_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5963 (class 0 OID 0)
+-- Dependencies: 311
+-- Name: technical_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.technical_documents_id_seq OWNED BY public.technical_documents.id;
+
+
+--
+-- TOC entry 322 (class 1259 OID 26445)
+-- Name: travel_segments; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.travel_segments (
+    id integer NOT NULL,
+    user_email text NOT NULL,
+    from_client_id integer,
+    to_client_id integer,
+    from_lat double precision,
+    from_lng double precision,
+    to_lat double precision,
+    to_lng double precision,
+    start_time timestamp with time zone NOT NULL,
+    end_time timestamp with time zone NOT NULL,
+    duration_minutes integer NOT NULL,
+    distance_km double precision,
+    avg_speed_kmh double precision,
+    travel_date date NOT NULL,
+    created_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.travel_segments OWNER TO postgres;
+
+--
+-- TOC entry 321 (class 1259 OID 26444)
+-- Name: travel_segments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.travel_segments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.travel_segments_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5964 (class 0 OID 0)
+-- Dependencies: 321
+-- Name: travel_segments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.travel_segments_id_seq OWNED BY public.travel_segments.id;
+
+
+--
+-- TOC entry 274 (class 1259 OID 17170)
+-- Name: user_attendance_records; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.user_attendance_records (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    date date NOT NULL,
+    entry_time timestamp with time zone,
+    lunch_start_time timestamp with time zone,
+    lunch_end_time timestamp with time zone,
+    exit_time timestamp with time zone,
+    notes text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.user_attendance_records OWNER TO postgres;
+
+--
+-- TOC entry 5965 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: TABLE user_attendance_records; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.user_attendance_records IS 'Daily attendance records per user with entry, lunch, and exit times. Integrates with user signatures from lopdp_internal_signature_file_id.';
+
+
+--
+-- TOC entry 5966 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.user_id; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.user_id IS 'Foreign key to users table';
+
+
+--
+-- TOC entry 5967 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.date; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.date IS 'Date of the attendance record (without time component)';
+
+
+--
+-- TOC entry 5968 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.entry_time; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.entry_time IS 'Timestamp when user clocked in for the day';
+
+
+--
+-- TOC entry 5969 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.lunch_start_time; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.lunch_start_time IS 'Timestamp when user started lunch break (requires signature)';
+
+
+--
+-- TOC entry 5970 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.lunch_end_time; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.lunch_end_time IS 'Timestamp when user returned from lunch break';
+
+
+--
+-- TOC entry 5971 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.exit_time; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.exit_time IS 'Timestamp when user clocked out for the day (requires signature)';
+
+
+--
+-- TOC entry 5972 (class 0 OID 0)
+-- Dependencies: 274
+-- Name: COLUMN user_attendance_records.notes; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_attendance_records.notes IS 'Optional notes for special circumstances (late arrival, early departure, etc.)';
+
+
+--
+-- TOC entry 273 (class 1259 OID 17169)
+-- Name: user_attendance_records_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.user_attendance_records_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.user_attendance_records_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5973 (class 0 OID 0)
+-- Dependencies: 273
+-- Name: user_attendance_records_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.user_attendance_records_id_seq OWNED BY public.user_attendance_records.id;
+
+
+--
+-- TOC entry 278 (class 1259 OID 17298)
+-- Name: user_gmail_tokens; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.user_gmail_tokens (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    email character varying(255) NOT NULL,
+    access_token text NOT NULL,
+    refresh_token text,
+    expiry_date timestamp without time zone,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.user_gmail_tokens OWNER TO postgres;
+
+--
+-- TOC entry 5974 (class 0 OID 0)
+-- Dependencies: 278
+-- Name: TABLE user_gmail_tokens; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.user_gmail_tokens IS 'Tokens OAuth 2.0 de Gmail para envío de emails por usuario';
+
+
+--
+-- TOC entry 5975 (class 0 OID 0)
+-- Dependencies: 278
+-- Name: COLUMN user_gmail_tokens.access_token; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_gmail_tokens.access_token IS 'Token de acceso temporal de Gmail API';
+
+
+--
+-- TOC entry 5976 (class 0 OID 0)
+-- Dependencies: 278
+-- Name: COLUMN user_gmail_tokens.refresh_token; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_gmail_tokens.refresh_token IS 'Token para renovar el access_token automáticamente';
+
+
+--
+-- TOC entry 5977 (class 0 OID 0)
+-- Dependencies: 278
+-- Name: COLUMN user_gmail_tokens.expiry_date; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.user_gmail_tokens.expiry_date IS 'Fecha de expiración del access_token';
+
+
+--
+-- TOC entry 277 (class 1259 OID 17297)
+-- Name: user_gmail_tokens_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.user_gmail_tokens_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.user_gmail_tokens_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5978 (class 0 OID 0)
+-- Dependencies: 277
+-- Name: user_gmail_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.user_gmail_tokens_id_seq OWNED BY public.user_gmail_tokens.id;
+
+
+--
+-- TOC entry 272 (class 1259 OID 17155)
+-- Name: user_lopdp_consents; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.user_lopdp_consents (
+    id integer NOT NULL,
+    user_id integer,
+    user_email character varying(255) NOT NULL,
+    status character varying(50) NOT NULL,
+    pdf_file_id character varying(255),
+    signature_file_id character varying(255),
+    ip character varying(64),
+    user_agent text,
+    notes text,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE public.user_lopdp_consents OWNER TO postgres;
+
+--
+-- TOC entry 271 (class 1259 OID 17154)
+-- Name: user_lopdp_consents_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.user_lopdp_consents_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.user_lopdp_consents_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5979 (class 0 OID 0)
+-- Dependencies: 271
+-- Name: user_lopdp_consents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.user_lopdp_consents_id_seq OWNED BY public.user_lopdp_consents.id;
+
+
+--
+-- TOC entry 260 (class 1259 OID 16947)
+-- Name: user_sessions; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.user_sessions (
+    id integer NOT NULL,
+    user_email character varying(255) NOT NULL,
+    login_time timestamp without time zone DEFAULT now(),
+    logout_time timestamp without time zone,
+    ip character varying(64),
+    user_agent text,
+    refresh_token text
+);
+
+
+ALTER TABLE public.user_sessions OWNER TO postgres;
+
+--
+-- TOC entry 259 (class 1259 OID 16946)
+-- Name: user_sessions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.user_sessions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.user_sessions_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5980 (class 0 OID 0)
+-- Dependencies: 259
+-- Name: user_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.user_sessions_id_seq OWNED BY public.user_sessions.id;
+
+
+--
+-- TOC entry 246 (class 1259 OID 16520)
+-- Name: users; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.users (
+    id integer NOT NULL,
+    google_id text,
+    email text NOT NULL,
+    name text,
+    department_id integer,
+    role text,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now(),
+    fullname text,
+    lopdp_internal_status character varying(50) DEFAULT 'granted'::character varying NOT NULL,
+    lopdp_internal_signed_at timestamp without time zone,
+    lopdp_internal_pdf_file_id character varying(255),
+    lopdp_internal_signature_file_id character varying(255),
+    lopdp_internal_ip character varying(64),
+    lopdp_internal_user_agent text,
+    lopdp_internal_notes text
+);
+
+
+ALTER TABLE public.users OWNER TO postgres;
+
+--
+-- TOC entry 247 (class 1259 OID 16530)
+-- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.users_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.users_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5981 (class 0 OID 0)
+-- Dependencies: 247
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- TOC entry 309 (class 1259 OID 26271)
+-- Name: v_client_inventory; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_client_inventory AS
+ SELECT cd.id,
+    cd.business_case_id,
+    ep.client_name,
+    d.name AS determination_name,
+    cd.annual_negotiated_quantity,
+    cd.consumed_quantity,
+    cd.remaining_quantity,
+    round((((cd.remaining_quantity)::numeric / (cd.annual_negotiated_quantity)::numeric) * (100)::numeric), 2) AS percentage_remaining,
+    cd.status,
+    cd.alert_threshold_yellow,
+    cd.alert_threshold_red,
+        CASE
+            WHEN ((((cd.remaining_quantity)::numeric / (cd.annual_negotiated_quantity)::numeric) * (100)::numeric) <= (cd.alert_threshold_red)::numeric) THEN 'red'::text
+            WHEN ((((cd.remaining_quantity)::numeric / (cd.annual_negotiated_quantity)::numeric) * (100)::numeric) <= (cd.alert_threshold_yellow)::numeric) THEN 'yellow'::text
+            ELSE 'green'::text
+        END AS alert_level
+   FROM ((public.contract_determinations cd
+     JOIN public.equipment_purchase_requests ep ON ((cd.business_case_id = ep.id)))
+     JOIN public.catalog_determinations d ON ((cd.determination_id = d.id)))
+  WHERE ((cd.status)::text = 'active'::text)
+  ORDER BY cd.business_case_id, d.name;
+
+
+ALTER VIEW public.v_client_inventory OWNER TO postgres;
+
+--
+-- TOC entry 256 (class 1259 OID 16583)
+-- Name: equipos; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.equipos (
+    id_equipo integer NOT NULL,
+    nombre text NOT NULL,
+    modelo text,
+    fabricante text,
+    categoria text,
+    descripcion text,
+    serie text,
+    ubicacion_actual text,
+    fecha_instalacion date,
+    estado text DEFAULT 'operativo'::text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT equipos_estado_check CHECK ((estado = ANY (ARRAY['operativo'::text, 'en_mantenimiento'::text, 'fuera_de_servicio'::text])))
+);
+
+
+ALTER TABLE servicio.equipos OWNER TO postgres;
+
+--
+-- TOC entry 5982 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: TABLE equipos; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON TABLE servicio.equipos IS 'Catálogo único de equipos manejados por el área de servicio técnico.';
+
+
+--
+-- TOC entry 310 (class 1259 OID 26297)
+-- Name: v_equipment_determinations; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_equipment_determinations AS
+ SELECT e.id_equipo AS equipment_id,
+    e.nombre AS equipment_name,
+    e.modelo AS model,
+    e.fabricante AS manufacturer,
+    d.id AS determination_id,
+    d.name AS determination_name,
+    d.roche_code,
+    d.category,
+    d.version AS determination_version,
+    d.status AS determination_status
+   FROM (servicio.equipos e
+     LEFT JOIN public.catalog_determinations d ON ((d.equipment_id = e.id_equipo)))
+  ORDER BY e.nombre, d.name;
+
+
+ALTER VIEW public.v_equipment_determinations OWNER TO postgres;
+
+--
+-- TOC entry 5983 (class 0 OID 0)
+-- Dependencies: 310
+-- Name: VIEW v_equipment_determinations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_equipment_determinations IS 'Vista de equipos (servicio.equipos) con sus determinaciones';
+
+
+--
+-- TOC entry 265 (class 1259 OID 17035)
+-- Name: v_inventario_completo; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_inventario_completo AS
+ SELECT i.id AS inventory_id,
+    i.name AS item_name,
+    i.sku,
+    i.quantity AS stock_actual,
+    i.updated_at AS ultima_actualizacion,
+    COALESCE(sum(
+        CASE
+            WHEN ((m.movement_type)::text = 'entrada'::text) THEN m.quantity
+            ELSE 0
+        END), (0)::bigint) AS total_entradas,
+    COALESCE(sum(
+        CASE
+            WHEN ((m.movement_type)::text = 'salida'::text) THEN m.quantity
+            ELSE 0
+        END), (0)::bigint) AS total_salidas,
+    max(m.created_at) AS fecha_ultimo_movimiento,
+    ( SELECT um.movement_type
+           FROM public.inventory_movements um
+          WHERE (um.inventory_id = i.id)
+          ORDER BY um.created_at DESC
+         LIMIT 1) AS tipo_ultimo_movimiento,
+    ( SELECT u.name
+           FROM public.users u
+          WHERE (u.id = ( SELECT um.created_by
+                   FROM public.inventory_movements um
+                  WHERE (um.inventory_id = i.id)
+                  ORDER BY um.created_at DESC
+                 LIMIT 1))) AS usuario_ultimo_movimiento
+   FROM (public.inventory i
+     LEFT JOIN public.inventory_movements m ON ((i.id = m.inventory_id)))
+  GROUP BY i.id, i.name, i.sku, i.quantity, i.updated_at
+  ORDER BY i.name;
+
+
+ALTER VIEW public.v_inventario_completo OWNER TO postgres;
+
+--
+-- TOC entry 290 (class 1259 OID 25697)
+-- Name: vacaciones_solicitudes; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.vacaciones_solicitudes (
+    id integer NOT NULL,
+    requester_id integer NOT NULL,
+    approver_id integer,
+    approver_role text,
+    department_id integer,
+    start_date date NOT NULL,
+    end_date date NOT NULL,
+    return_date date NOT NULL,
+    period text,
+    days integer DEFAULT 0,
+    status text DEFAULT 'pendiente'::text,
+    drive_doc_id text,
+    drive_pdf_id text,
+    drive_doc_link text,
+    drive_pdf_link text,
+    drive_folder_id text,
+    created_at timestamp without time zone DEFAULT now(),
+    updated_at timestamp without time zone DEFAULT now()
+);
+
+
+ALTER TABLE public.vacaciones_solicitudes OWNER TO postgres;
+
+--
+-- TOC entry 289 (class 1259 OID 25696)
+-- Name: vacaciones_solicitudes_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.vacaciones_solicitudes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.vacaciones_solicitudes_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5985 (class 0 OID 0)
+-- Dependencies: 289
+-- Name: vacaciones_solicitudes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.vacaciones_solicitudes_id_seq OWNED BY public.vacaciones_solicitudes.id;
+
+
+--
+-- TOC entry 316 (class 1259 OID 26369)
+-- Name: visit_schedules; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.visit_schedules (
+    id integer NOT NULL,
+    user_email text NOT NULL,
+    month integer NOT NULL,
+    year integer NOT NULL,
+    status text DEFAULT 'draft'::text NOT NULL,
+    submitted_at timestamp with time zone,
+    reviewed_by_email text,
+    reviewed_at timestamp with time zone,
+    rejection_reason text,
+    notes text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT visit_schedules_month_check CHECK (((month >= 1) AND (month <= 12))),
+    CONSTRAINT visit_schedules_status_check CHECK ((status = ANY (ARRAY['draft'::text, 'pending_approval'::text, 'approved'::text, 'rejected'::text])))
+);
+
+
+ALTER TABLE public.visit_schedules OWNER TO postgres;
+
+--
+-- TOC entry 315 (class 1259 OID 26368)
+-- Name: visit_schedules_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.visit_schedules_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.visit_schedules_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5986 (class 0 OID 0)
+-- Dependencies: 315
+-- Name: visit_schedules_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.visit_schedules_id_seq OWNED BY public.visit_schedules.id;
+
+
+--
+-- TOC entry 248 (class 1259 OID 16531)
+-- Name: vw_dashboard_requests; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.vw_dashboard_requests AS
+ SELECT r.id AS request_id,
+    rt.code AS request_type_code,
+    rt.title AS request_type_title,
+    r.status,
+    r.created_at,
+    r.updated_at,
+    ( SELECT count(1) AS count
+           FROM (public.documents d
+             JOIN public.document_signatures ds ON ((ds.document_id = d.id)))
+          WHERE (d.request_id = r.id)) AS signatures,
+    ( SELECT max(h.changed_at) AS max
+           FROM public.request_status_history h
+          WHERE (h.request_id = r.id)) AS last_status_change
+   FROM (public.requests r
+     JOIN public.request_types rt ON ((rt.id = r.request_type_id)));
+
+
+ALTER VIEW public.vw_dashboard_requests OWNER TO postgres;
+
+--
+-- TOC entry 5987 (class 0 OID 0)
+-- Dependencies: 248
+-- Name: VIEW vw_dashboard_requests; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.vw_dashboard_requests IS 'Vista de consolidación de solicitudes, incluyendo estados pending, in_review, approved, rejected y cancelled.';
+
+
+--
+-- TOC entry 249 (class 1259 OID 16536)
+-- Name: vw_request_metrics; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.vw_request_metrics AS
+ SELECT status,
+    count(*) AS total
+   FROM public.requests
+  GROUP BY status
+  ORDER BY status;
+
+
+ALTER VIEW public.vw_request_metrics OWNER TO postgres;
+
+--
+-- TOC entry 5988 (class 0 OID 0)
+-- Dependencies: 249
+-- Name: VIEW vw_request_metrics; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.vw_request_metrics IS 'Resumen de solicitudes agrupadas por estado (incluye cancelled).';
+
+
+--
+-- TOC entry 314 (class 1259 OID 26351)
+-- Name: aplicaciones_tecnicas; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.aplicaciones_tecnicas (
+    id integer NOT NULL,
+    client text,
+    location text,
+    type text,
+    url text,
+    status text DEFAULT 'Disponible'::text,
+    assignee text,
+    archived boolean DEFAULT false,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE servicio.aplicaciones_tecnicas OWNER TO postgres;
+
+--
+-- TOC entry 313 (class 1259 OID 26350)
+-- Name: aplicaciones_tecnicas_id_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.aplicaciones_tecnicas_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.aplicaciones_tecnicas_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5989 (class 0 OID 0)
+-- Dependencies: 313
+-- Name: aplicaciones_tecnicas_id_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.aplicaciones_tecnicas_id_seq OWNED BY servicio.aplicaciones_tecnicas.id;
+
+
+--
+-- TOC entry 250 (class 1259 OID 16540)
+-- Name: cronograma_capacitacion; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.cronograma_capacitacion (
+    id_capacitacion integer NOT NULL,
+    titulo text NOT NULL,
+    descripcion text,
+    instructor text,
+    modalidad text,
+    fecha date NOT NULL,
+    hora_inicio time without time zone,
+    hora_fin time without time zone,
+    ubicacion text,
+    estado text DEFAULT 'Programada'::text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT cronograma_capacitacion_estado_check CHECK ((estado = ANY (ARRAY['Programada'::text, 'Realizada'::text, 'Cancelada'::text]))),
+    CONSTRAINT cronograma_capacitacion_modalidad_check CHECK ((modalidad = ANY (ARRAY['Presencial'::text, 'Virtual'::text, 'Mixta'::text])))
+);
+
+
+ALTER TABLE servicio.cronograma_capacitacion OWNER TO postgres;
+
+--
+-- TOC entry 251 (class 1259 OID 16553)
+-- Name: cronograma_capacitacion_id_capacitacion_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.cronograma_capacitacion_id_capacitacion_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.cronograma_capacitacion_id_capacitacion_seq OWNER TO postgres;
+
+--
+-- TOC entry 5990 (class 0 OID 0)
+-- Dependencies: 251
+-- Name: cronograma_capacitacion_id_capacitacion_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.cronograma_capacitacion_id_capacitacion_seq OWNED BY servicio.cronograma_capacitacion.id_capacitacion;
+
+
+--
+-- TOC entry 252 (class 1259 OID 16554)
+-- Name: cronograma_mantenimientos; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.cronograma_mantenimientos (
+    id_mantenimiento integer NOT NULL,
+    id_equipo integer NOT NULL,
+    tipo text DEFAULT 'Preventivo'::text,
+    descripcion text,
+    responsable text,
+    fecha_programada date NOT NULL,
+    fecha_realizacion date,
+    estado text DEFAULT 'Pendiente'::text,
+    observaciones text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    carpeta_drive_id text,
+    doc_drive_id text,
+    link_carpeta text,
+    link_doc text,
+    id integer GENERATED ALWAYS AS (id_mantenimiento) STORED,
+    request_id integer,
+    created_by integer,
+    next_maintenance_date date,
+    next_maintenance_status text DEFAULT 'pendiente'::text,
+    next_maintenance_conflict text,
+    next_reminder_sent_at timestamp with time zone,
+    firma_responsable text,
+    firma_receptor text,
+    CONSTRAINT cronograma_mantenimientos_estado_check CHECK ((estado = ANY (ARRAY['Pendiente'::text, 'En Proceso'::text, 'Cumplido'::text, 'No Cumplido'::text]))),
+    CONSTRAINT cronograma_mantenimientos_tipo_check CHECK ((tipo = ANY (ARRAY['Preventivo'::text, 'Correctivo'::text])))
+);
+
+
+ALTER TABLE servicio.cronograma_mantenimientos OWNER TO postgres;
+
+--
+-- TOC entry 5991 (class 0 OID 0)
+-- Dependencies: 252
+-- Name: TABLE cronograma_mantenimientos; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON TABLE servicio.cronograma_mantenimientos IS 'Registro de mantenimientos preventivos y correctivos asociados a cada equipo.';
+
+
+--
+-- TOC entry 253 (class 1259 OID 16568)
+-- Name: cronograma_mantenimientos_anuales; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.cronograma_mantenimientos_anuales (
+    id_mant_anual integer NOT NULL,
+    id_equipo integer NOT NULL,
+    mes text NOT NULL,
+    responsable text,
+    fecha_programada date,
+    estado text DEFAULT 'Pendiente'::text,
+    comentarios text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT cronograma_mantenimientos_anuales_estado_check CHECK ((estado = ANY (ARRAY['Pendiente'::text, 'Cumplido'::text, 'No Cumplido'::text]))),
+    CONSTRAINT cronograma_mantenimientos_anuales_mes_check CHECK ((mes = ANY (ARRAY['Enero'::text, 'Febrero'::text, 'Marzo'::text, 'Abril'::text, 'Mayo'::text, 'Junio'::text, 'Julio'::text, 'Agosto'::text, 'Septiembre'::text, 'Octubre'::text, 'Noviembre'::text, 'Diciembre'::text])))
+);
+
+
+ALTER TABLE servicio.cronograma_mantenimientos_anuales OWNER TO postgres;
+
+--
+-- TOC entry 5992 (class 0 OID 0)
+-- Dependencies: 253
+-- Name: TABLE cronograma_mantenimientos_anuales; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON TABLE servicio.cronograma_mantenimientos_anuales IS 'Plan anual de mantenimiento preventivo por equipo.';
+
+
+--
+-- TOC entry 254 (class 1259 OID 16581)
+-- Name: cronograma_mantenimientos_anuales_id_mant_anual_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq OWNER TO postgres;
+
+--
+-- TOC entry 5993 (class 0 OID 0)
+-- Dependencies: 254
+-- Name: cronograma_mantenimientos_anuales_id_mant_anual_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq OWNED BY servicio.cronograma_mantenimientos_anuales.id_mant_anual;
+
+
+--
+-- TOC entry 255 (class 1259 OID 16582)
+-- Name: cronograma_mantenimientos_id_mantenimiento_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.cronograma_mantenimientos_id_mantenimiento_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.cronograma_mantenimientos_id_mantenimiento_seq OWNER TO postgres;
+
+--
+-- TOC entry 5994 (class 0 OID 0)
+-- Dependencies: 255
+-- Name: cronograma_mantenimientos_id_mantenimiento_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.cronograma_mantenimientos_id_mantenimiento_seq OWNED BY servicio.cronograma_mantenimientos.id_mantenimiento;
+
+
+--
+-- TOC entry 288 (class 1259 OID 25678)
+-- Name: disponibilidad_tecnicos; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.disponibilidad_tecnicos (
+    id integer NOT NULL,
+    user_id integer,
+    name text,
+    status text DEFAULT 'no_disponible'::text,
+    note text,
+    updated_at timestamp with time zone DEFAULT now()
+);
+
+
+ALTER TABLE servicio.disponibilidad_tecnicos OWNER TO postgres;
+
+--
+-- TOC entry 287 (class 1259 OID 25677)
+-- Name: disponibilidad_tecnicos_id_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.disponibilidad_tecnicos_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.disponibilidad_tecnicos_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 5995 (class 0 OID 0)
+-- Dependencies: 287
+-- Name: disponibilidad_tecnicos_id_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.disponibilidad_tecnicos_id_seq OWNED BY servicio.disponibilidad_tecnicos.id;
+
+
+--
+-- TOC entry 257 (class 1259 OID 16594)
+-- Name: equipos_id_equipo_seq; Type: SEQUENCE; Schema: servicio; Owner: postgres
+--
+
+CREATE SEQUENCE servicio.equipos_id_equipo_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE servicio.equipos_id_equipo_seq OWNER TO postgres;
+
+--
+-- TOC entry 5996 (class 0 OID 0)
+-- Dependencies: 257
+-- Name: equipos_id_equipo_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
+--
+
+ALTER SEQUENCE servicio.equipos_id_equipo_seq OWNED BY servicio.equipos.id_equipo;
+
+
+--
+-- TOC entry 258 (class 1259 OID 16595)
+-- Name: vista_mantenimientos_por_equipo; Type: VIEW; Schema: servicio; Owner: postgres
+--
+
+CREATE VIEW servicio.vista_mantenimientos_por_equipo AS
+ SELECT e.id_equipo,
+    e.nombre AS equipo,
+    count(m.id_mantenimiento) AS total_mantenimientos,
+    sum(
+        CASE
+            WHEN (m.estado = 'Cumplido'::text) THEN 1
+            ELSE 0
+        END) AS cumplidos,
+    sum(
+        CASE
+            WHEN (m.estado = 'Pendiente'::text) THEN 1
+            ELSE 0
+        END) AS pendientes
+   FROM (servicio.equipos e
+     LEFT JOIN servicio.cronograma_mantenimientos m ON ((e.id_equipo = m.id_equipo)))
+  GROUP BY e.id_equipo, e.nombre
+  ORDER BY e.nombre;
+
+
+ALTER VIEW servicio.vista_mantenimientos_por_equipo OWNER TO postgres;
+
+--
+-- TOC entry 5242 (class 2604 OID 16989)
+-- Name: logs id; Type: DEFAULT; Schema: auditoria; Owner: postgres
+--
+
+ALTER TABLE ONLY auditoria.logs ALTER COLUMN id SET DEFAULT nextval('auditoria.logs_id_seq'::regclass);
+
+
+--
+-- TOC entry 5367 (class 2604 OID 26422)
+-- Name: advisor_location_history id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.advisor_location_history ALTER COLUMN id SET DEFAULT nextval('public.advisor_location_history_id_seq'::regclass);
+
+
+--
+-- TOC entry 5178 (class 2604 OID 16600)
+-- Name: audit_trail id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.audit_trail ALTER COLUMN id SET DEFAULT nextval('public.audit_trail_id_seq'::regclass);
+
+
+--
+-- TOC entry 5338 (class 2604 OID 26216)
+-- Name: bc_alerts id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_alerts ALTER COLUMN id SET DEFAULT nextval('public.bc_alerts_id_seq'::regclass);
+
+
+--
+-- TOC entry 5317 (class 2604 OID 26097)
+-- Name: catalog_consumables id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_consumables ALTER COLUMN id SET DEFAULT nextval('public.catalog_consumables_id_seq'::regclass);
+
+
+--
+-- TOC entry 5311 (class 2604 OID 26064)
+-- Name: catalog_determinations id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_determinations ALTER COLUMN id SET DEFAULT nextval('public.catalog_determinations_id_seq'::regclass);
+
+
+--
+-- TOC entry 5324 (class 2604 OID 26125)
+-- Name: catalog_equipment_consumables id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables ALTER COLUMN id SET DEFAULT nextval('public.catalog_equipment_consumables_id_seq'::regclass);
+
+
+--
+-- TOC entry 5342 (class 2604 OID 26249)
+-- Name: catalog_investments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_investments ALTER COLUMN id SET DEFAULT nextval('public.catalog_investments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5306 (class 2604 OID 25718)
+-- Name: client_assignments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_assignments ALTER COLUMN id SET DEFAULT nextval('public.client_assignments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5255 (class 2604 OID 17115)
+-- Name: client_request_consents id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_request_consents ALTER COLUMN id SET DEFAULT nextval('public.client_request_consents_id_seq'::regclass);
+
+
+--
+-- TOC entry 5246 (class 2604 OID 17087)
+-- Name: client_requests id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests ALTER COLUMN id SET DEFAULT nextval('public.client_requests_id_seq'::regclass);
+
+
+--
+-- TOC entry 5308 (class 2604 OID 25738)
+-- Name: client_visit_logs id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_visit_logs ALTER COLUMN id SET DEFAULT nextval('public.client_visit_logs_id_seq'::regclass);
+
+
+--
+-- TOC entry 5266 (class 2604 OID 17247)
+-- Name: clients id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients ALTER COLUMN id SET DEFAULT nextval('public.clients_id_seq'::regclass);
+
+
+--
+-- TOC entry 5327 (class 2604 OID 26155)
+-- Name: contract_determinations id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.contract_determinations ALTER COLUMN id SET DEFAULT nextval('public.contract_determinations_id_seq'::regclass);
+
+
+--
+-- TOC entry 5239 (class 2604 OID 16962)
+-- Name: departments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.departments ALTER COLUMN id SET DEFAULT nextval('public.departments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5334 (class 2604 OID 26191)
+-- Name: determination_consumption_log id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.determination_consumption_log ALTER COLUMN id SET DEFAULT nextval('public.determination_consumption_log_id_seq'::regclass);
+
+
+--
+-- TOC entry 5181 (class 2604 OID 16601)
+-- Name: document_signatures id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.document_signatures ALTER COLUMN id SET DEFAULT nextval('public.document_signatures_id_seq'::regclass);
+
+
+--
+-- TOC entry 5183 (class 2604 OID 16602)
+-- Name: documents id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.documents ALTER COLUMN id SET DEFAULT nextval('public.documents_id_seq'::regclass);
+
+
+--
+-- TOC entry 5188 (class 2604 OID 16603)
+-- Name: employees id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.employees ALTER COLUMN id SET DEFAULT nextval('public.employees_id_seq'::regclass);
+
+
+--
+-- TOC entry 5191 (class 2604 OID 16604)
+-- Name: inventory id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory ALTER COLUMN id SET DEFAULT nextval('public.inventory_id_seq'::regclass);
+
+
+--
+-- TOC entry 5195 (class 2604 OID 16605)
+-- Name: inventory_movements id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory_movements ALTER COLUMN id SET DEFAULT nextval('public.inventory_movements_id_seq'::regclass);
+
+
+--
+-- TOC entry 5372 (class 2604 OID 26485)
+-- Name: permisos_vacaciones id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.permisos_vacaciones ALTER COLUMN id SET DEFAULT nextval('public.permisos_vacaciones_id_seq'::regclass);
+
+
+--
+-- TOC entry 5294 (class 2604 OID 17433)
+-- Name: personnel_request_comments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_comments ALTER COLUMN id SET DEFAULT nextval('public.personnel_request_comments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5292 (class 2604 OID 17410)
+-- Name: personnel_request_history id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_history ALTER COLUMN id SET DEFAULT nextval('public.personnel_request_history_id_seq'::regclass);
+
+
+--
+-- TOC entry 5285 (class 2604 OID 17354)
+-- Name: personnel_requests id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests ALTER COLUMN id SET DEFAULT nextval('public.personnel_requests_id_seq'::regclass);
+
+
+--
+-- TOC entry 5198 (class 2604 OID 16606)
+-- Name: request_approvals id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_approvals ALTER COLUMN id SET DEFAULT nextval('public.request_approvals_id_seq'::regclass);
+
+
+--
+-- TOC entry 5200 (class 2604 OID 16607)
+-- Name: request_attachments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_attachments ALTER COLUMN id SET DEFAULT nextval('public.request_attachments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5202 (class 2604 OID 16608)
+-- Name: request_status_history id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_status_history ALTER COLUMN id SET DEFAULT nextval('public.request_status_history_id_seq'::regclass);
+
+
+--
+-- TOC entry 5204 (class 2604 OID 16609)
+-- Name: request_types id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_types ALTER COLUMN id SET DEFAULT nextval('public.request_types_id_seq'::regclass);
+
+
+--
+-- TOC entry 5206 (class 2604 OID 16610)
+-- Name: request_versions id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_versions ALTER COLUMN id SET DEFAULT nextval('public.request_versions_id_seq'::regclass);
+
+
+--
+-- TOC entry 5208 (class 2604 OID 16611)
+-- Name: requests id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.requests ALTER COLUMN id SET DEFAULT nextval('public.requests_id_seq'::regclass);
+
+
+--
+-- TOC entry 5363 (class 2604 OID 26393)
+-- Name: scheduled_visits id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.scheduled_visits ALTER COLUMN id SET DEFAULT nextval('public.scheduled_visits_id_seq'::regclass);
+
+
+--
+-- TOC entry 5350 (class 2604 OID 26323)
+-- Name: technical_documents id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.technical_documents ALTER COLUMN id SET DEFAULT nextval('public.technical_documents_id_seq'::regclass);
+
+
+--
+-- TOC entry 5370 (class 2604 OID 26448)
+-- Name: travel_segments id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.travel_segments ALTER COLUMN id SET DEFAULT nextval('public.travel_segments_id_seq'::regclass);
+
+
+--
+-- TOC entry 5263 (class 2604 OID 17173)
+-- Name: user_attendance_records id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_attendance_records ALTER COLUMN id SET DEFAULT nextval('public.user_attendance_records_id_seq'::regclass);
+
+
+--
+-- TOC entry 5274 (class 2604 OID 17301)
+-- Name: user_gmail_tokens id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_gmail_tokens ALTER COLUMN id SET DEFAULT nextval('public.user_gmail_tokens_id_seq'::regclass);
+
+
+--
+-- TOC entry 5261 (class 2604 OID 17158)
+-- Name: user_lopdp_consents id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_lopdp_consents ALTER COLUMN id SET DEFAULT nextval('public.user_lopdp_consents_id_seq'::regclass);
+
+
+--
+-- TOC entry 5237 (class 2604 OID 16950)
+-- Name: user_sessions id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_sessions ALTER COLUMN id SET DEFAULT nextval('public.user_sessions_id_seq'::regclass);
+
+
+--
+-- TOC entry 5214 (class 2604 OID 16612)
+-- Name: users id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
+
+
+--
+-- TOC entry 5301 (class 2604 OID 25700)
+-- Name: vacaciones_solicitudes id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.vacaciones_solicitudes ALTER COLUMN id SET DEFAULT nextval('public.vacaciones_solicitudes_id_seq'::regclass);
+
+
+--
+-- TOC entry 5359 (class 2604 OID 26372)
+-- Name: visit_schedules id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.visit_schedules ALTER COLUMN id SET DEFAULT nextval('public.visit_schedules_id_seq'::regclass);
+
+
+--
+-- TOC entry 5354 (class 2604 OID 26354)
+-- Name: aplicaciones_tecnicas id; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.aplicaciones_tecnicas ALTER COLUMN id SET DEFAULT nextval('servicio.aplicaciones_tecnicas_id_seq'::regclass);
+
+
+--
+-- TOC entry 5218 (class 2604 OID 16613)
+-- Name: cronograma_capacitacion id_capacitacion; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_capacitacion ALTER COLUMN id_capacitacion SET DEFAULT nextval('servicio.cronograma_capacitacion_id_capacitacion_seq'::regclass);
+
+
+--
+-- TOC entry 5222 (class 2604 OID 16614)
+-- Name: cronograma_mantenimientos id_mantenimiento; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos ALTER COLUMN id_mantenimiento SET DEFAULT nextval('servicio.cronograma_mantenimientos_id_mantenimiento_seq'::regclass);
+
+
+--
+-- TOC entry 5229 (class 2604 OID 16615)
+-- Name: cronograma_mantenimientos_anuales id_mant_anual; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales ALTER COLUMN id_mant_anual SET DEFAULT nextval('servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq'::regclass);
+
+
+--
+-- TOC entry 5298 (class 2604 OID 25681)
+-- Name: disponibilidad_tecnicos id; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.disponibilidad_tecnicos ALTER COLUMN id SET DEFAULT nextval('servicio.disponibilidad_tecnicos_id_seq'::regclass);
+
+
+--
+-- TOC entry 5233 (class 2604 OID 16616)
+-- Name: equipos id_equipo; Type: DEFAULT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos ALTER COLUMN id_equipo SET DEFAULT nextval('servicio.equipos_id_equipo_seq'::regclass);
+
+
+--
+-- TOC entry 5490 (class 2606 OID 16995)
+-- Name: logs logs_pkey; Type: CONSTRAINT; Schema: auditoria; Owner: postgres
+--
+
+ALTER TABLE ONLY auditoria.logs
+    ADD CONSTRAINT logs_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5623 (class 2606 OID 26433)
+-- Name: advisor_location_history advisor_location_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.advisor_location_history
+    ADD CONSTRAINT advisor_location_history_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5415 (class 2606 OID 16618)
+-- Name: audit_trail audit_trail_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.audit_trail
+    ADD CONSTRAINT audit_trail_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5590 (class 2606 OID 26229)
+-- Name: bc_alerts bc_alerts_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_alerts
+    ADD CONSTRAINT bc_alerts_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5568 (class 2606 OID 26112)
+-- Name: catalog_consumables catalog_consumables_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_consumables
+    ADD CONSTRAINT catalog_consumables_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5561 (class 2606 OID 26079)
+-- Name: catalog_determinations catalog_determinations_name_roche_code_version_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_determinations
+    ADD CONSTRAINT catalog_determinations_name_roche_code_version_key UNIQUE (name, roche_code, version);
+
+
+--
+-- TOC entry 5563 (class 2606 OID 26077)
+-- Name: catalog_determinations catalog_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_determinations
+    ADD CONSTRAINT catalog_determinations_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5573 (class 2606 OID 26290)
+-- Name: catalog_equipment_consumables catalog_equipment_consumables_equipment_id_consumable_id_de_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables
+    ADD CONSTRAINT catalog_equipment_consumables_equipment_id_consumable_id_de_key UNIQUE (equipment_id, consumable_id, determination_id);
+
+
+--
+-- TOC entry 5575 (class 2606 OID 26131)
+-- Name: catalog_equipment_consumables catalog_equipment_consumables_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables
+    ADD CONSTRAINT catalog_equipment_consumables_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5597 (class 2606 OID 26263)
+-- Name: catalog_investments catalog_investments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_investments
+    ADD CONSTRAINT catalog_investments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5378 (class 2606 OID 16619)
+-- Name: inventory_movements chk_inventory_movements_type; Type: CHECK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.inventory_movements
+    ADD CONSTRAINT chk_inventory_movements_type CHECK ((type = ANY (ARRAY['in'::text, 'out'::text]))) NOT VALID;
+
+
+--
+-- TOC entry 5380 (class 2606 OID 16620)
+-- Name: request_approvals chk_request_approvals_action; Type: CHECK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE public.request_approvals
+    ADD CONSTRAINT chk_request_approvals_action CHECK (((action IS NULL) OR (action = ANY (ARRAY['approve'::text, 'reject'::text])))) NOT VALID;
+
+
+--
+-- TOC entry 5553 (class 2606 OID 25728)
+-- Name: client_assignments client_assignments_client_request_id_assigned_to_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_assignments
+    ADD CONSTRAINT client_assignments_client_request_id_assigned_to_email_key UNIQUE (client_request_id, assigned_to_email);
+
+
+--
+-- TOC entry 5555 (class 2606 OID 25726)
+-- Name: client_assignments client_assignments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_assignments
+    ADD CONSTRAINT client_assignments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5503 (class 2606 OID 17146)
+-- Name: client_request_consent_tokens client_request_consent_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_request_consent_tokens
+    ADD CONSTRAINT client_request_consent_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5501 (class 2606 OID 17124)
+-- Name: client_request_consents client_request_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_request_consents
+    ADD CONSTRAINT client_request_consents_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5492 (class 2606 OID 17104)
+-- Name: client_requests client_requests_lopdp_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_lopdp_token_key UNIQUE (lopdp_token);
+
+
+--
+-- TOC entry 5494 (class 2606 OID 17102)
+-- Name: client_requests client_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5496 (class 2606 OID 17106)
+-- Name: client_requests client_requests_ruc_cedula_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_ruc_cedula_key UNIQUE (ruc_cedula);
+
+
+--
+-- TOC entry 5557 (class 2606 OID 25752)
+-- Name: client_visit_logs client_visit_logs_client_request_id_user_email_visit_date_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_visit_logs
+    ADD CONSTRAINT client_visit_logs_client_request_id_user_email_visit_date_key UNIQUE (client_request_id, user_email, visit_date);
+
+
+--
+-- TOC entry 5559 (class 2606 OID 25750)
+-- Name: client_visit_logs client_visit_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_visit_logs
+    ADD CONSTRAINT client_visit_logs_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5514 (class 2606 OID 17260)
+-- Name: clients clients_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients
+    ADD CONSTRAINT clients_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5516 (class 2606 OID 17262)
+-- Name: clients clients_ruc_hash_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients
+    ADD CONSTRAINT clients_ruc_hash_key UNIQUE (ruc_hash);
+
+
+--
+-- TOC entry 5579 (class 2606 OID 26170)
+-- Name: contract_determinations contract_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.contract_determinations
+    ADD CONSTRAINT contract_determinations_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5482 (class 2606 OID 16973)
+-- Name: departments departments_code_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.departments
+    ADD CONSTRAINT departments_code_key UNIQUE (code);
+
+
+--
+-- TOC entry 5484 (class 2606 OID 16971)
+-- Name: departments departments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.departments
+    ADD CONSTRAINT departments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5585 (class 2606 OID 26203)
+-- Name: determination_consumption_log determination_consumption_log_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.determination_consumption_log
+    ADD CONSTRAINT determination_consumption_log_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5420 (class 2606 OID 16622)
+-- Name: document_signatures document_signatures_document_id_signer_user_id_role_at_sign_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.document_signatures
+    ADD CONSTRAINT document_signatures_document_id_signer_user_id_role_at_sign_key UNIQUE (document_id, signer_user_id, role_at_sign);
+
+
+--
+-- TOC entry 5422 (class 2606 OID 16624)
+-- Name: document_signatures document_signatures_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.document_signatures
+    ADD CONSTRAINT document_signatures_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5424 (class 2606 OID 16626)
+-- Name: documents documents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5427 (class 2606 OID 16628)
+-- Name: employees employees_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.employees
+    ADD CONSTRAINT employees_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5545 (class 2606 OID 17477)
+-- Name: equipment_purchase_bc_items equipment_purchase_bc_items_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_purchase_bc_items
+    ADD CONSTRAINT equipment_purchase_bc_items_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5529 (class 2606 OID 17334)
+-- Name: equipment_purchase_requests equipment_purchase_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_purchase_requests
+    ADD CONSTRAINT equipment_purchase_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5434 (class 2606 OID 16630)
+-- Name: inventory_movements inventory_movements_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory_movements
+    ADD CONSTRAINT inventory_movements_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5429 (class 2606 OID 16632)
+-- Name: inventory inventory_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory
+    ADD CONSTRAINT inventory_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5431 (class 2606 OID 16634)
+-- Name: inventory inventory_sku_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory
+    ADD CONSTRAINT inventory_sku_key UNIQUE (sku);
+
+
+--
+-- TOC entry 5635 (class 2606 OID 26501)
+-- Name: permisos_vacaciones permisos_vacaciones_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.permisos_vacaciones
+    ADD CONSTRAINT permisos_vacaciones_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5543 (class 2606 OID 17443)
+-- Name: personnel_request_comments personnel_request_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_comments
+    ADD CONSTRAINT personnel_request_comments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5540 (class 2606 OID 17418)
+-- Name: personnel_request_history personnel_request_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_history
+    ADD CONSTRAINT personnel_request_history_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5535 (class 2606 OID 17378)
+-- Name: personnel_requests personnel_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5537 (class 2606 OID 17380)
+-- Name: personnel_requests personnel_requests_request_number_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_request_number_key UNIQUE (request_number);
+
+
+--
+-- TOC entry 5437 (class 2606 OID 16636)
+-- Name: request_approvals request_approvals_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_approvals
+    ADD CONSTRAINT request_approvals_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5439 (class 2606 OID 16638)
+-- Name: request_approvals request_approvals_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_approvals
+    ADD CONSTRAINT request_approvals_token_key UNIQUE (token);
+
+
+--
+-- TOC entry 5442 (class 2606 OID 16640)
+-- Name: request_attachments request_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_attachments
+    ADD CONSTRAINT request_attachments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5445 (class 2606 OID 16642)
+-- Name: request_status_history request_status_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_status_history
+    ADD CONSTRAINT request_status_history_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5448 (class 2606 OID 16644)
+-- Name: request_types request_types_code_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_types
+    ADD CONSTRAINT request_types_code_unique UNIQUE (code);
+
+
+--
+-- TOC entry 5450 (class 2606 OID 16646)
+-- Name: request_types request_types_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_types
+    ADD CONSTRAINT request_types_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5452 (class 2606 OID 16648)
+-- Name: request_versions request_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_versions
+    ADD CONSTRAINT request_versions_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5458 (class 2606 OID 16650)
+-- Name: requests requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.requests
+    ADD CONSTRAINT requests_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5619 (class 2606 OID 26405)
+-- Name: scheduled_visits scheduled_visits_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.scheduled_visits
+    ADD CONSTRAINT scheduled_visits_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5621 (class 2606 OID 26407)
+-- Name: scheduled_visits scheduled_visits_schedule_id_client_request_id_planned_date_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.scheduled_visits
+    ADD CONSTRAINT scheduled_visits_schedule_id_client_request_id_planned_date_key UNIQUE (schedule_id, client_request_id, planned_date);
+
+
+--
+-- TOC entry 5606 (class 2606 OID 26335)
+-- Name: technical_documents technical_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.technical_documents
+    ADD CONSTRAINT technical_documents_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5629 (class 2606 OID 26459)
+-- Name: travel_segments travel_segments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.travel_segments
+    ADD CONSTRAINT travel_segments_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5521 (class 2606 OID 17264)
+-- Name: clients unique_client_request; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients
+    ADD CONSTRAINT unique_client_request UNIQUE (client_request_id);
+
+
+--
+-- TOC entry 5510 (class 2606 OID 17184)
+-- Name: user_attendance_records unique_user_date; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_attendance_records
+    ADD CONSTRAINT unique_user_date UNIQUE (user_id, date);
+
+
+--
+-- TOC entry 5512 (class 2606 OID 17182)
+-- Name: user_attendance_records user_attendance_records_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_attendance_records
+    ADD CONSTRAINT user_attendance_records_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5525 (class 2606 OID 17311)
+-- Name: user_gmail_tokens user_gmail_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_gmail_tokens
+    ADD CONSTRAINT user_gmail_tokens_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5527 (class 2606 OID 17313)
+-- Name: user_gmail_tokens user_gmail_tokens_user_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_gmail_tokens
+    ADD CONSTRAINT user_gmail_tokens_user_id_key UNIQUE (user_id);
+
+
+--
+-- TOC entry 5505 (class 2606 OID 17166)
+-- Name: user_lopdp_consents user_lopdp_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_lopdp_consents
+    ADD CONSTRAINT user_lopdp_consents_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5480 (class 2606 OID 16957)
+-- Name: user_sessions user_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_sessions
+    ADD CONSTRAINT user_sessions_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5460 (class 2606 OID 16652)
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_email_key UNIQUE (email);
+
+
+--
+-- TOC entry 5462 (class 2606 OID 16654)
+-- Name: users users_google_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_google_id_key UNIQUE (google_id);
+
+
+--
+-- TOC entry 5464 (class 2606 OID 16656)
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5551 (class 2606 OID 25713)
+-- Name: vacaciones_solicitudes vacaciones_solicitudes_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.vacaciones_solicitudes
+    ADD CONSTRAINT vacaciones_solicitudes_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5612 (class 2606 OID 26386)
+-- Name: visit_schedules visit_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.visit_schedules
+    ADD CONSTRAINT visit_schedules_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5614 (class 2606 OID 26388)
+-- Name: visit_schedules visit_schedules_user_email_month_year_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.visit_schedules
+    ADD CONSTRAINT visit_schedules_user_email_month_year_key UNIQUE (user_email, month, year);
+
+
+--
+-- TOC entry 5608 (class 2606 OID 26363)
+-- Name: aplicaciones_tecnicas aplicaciones_tecnicas_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.aplicaciones_tecnicas
+    ADD CONSTRAINT aplicaciones_tecnicas_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5466 (class 2606 OID 16658)
+-- Name: cronograma_capacitacion cronograma_capacitacion_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_capacitacion
+    ADD CONSTRAINT cronograma_capacitacion_pkey PRIMARY KEY (id_capacitacion);
+
+
+--
+-- TOC entry 5474 (class 2606 OID 16660)
+-- Name: cronograma_mantenimientos_anuales cronograma_mantenimientos_anuales_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales
+    ADD CONSTRAINT cronograma_mantenimientos_anuales_pkey PRIMARY KEY (id_mant_anual);
+
+
+--
+-- TOC entry 5468 (class 2606 OID 17052)
+-- Name: cronograma_mantenimientos cronograma_mantenimientos_id_unique; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos
+    ADD CONSTRAINT cronograma_mantenimientos_id_unique UNIQUE (id);
+
+
+--
+-- TOC entry 5470 (class 2606 OID 16662)
+-- Name: cronograma_mantenimientos cronograma_mantenimientos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos
+    ADD CONSTRAINT cronograma_mantenimientos_pkey PRIMARY KEY (id_mantenimiento);
+
+
+--
+-- TOC entry 5547 (class 2606 OID 25688)
+-- Name: disponibilidad_tecnicos disponibilidad_tecnicos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.disponibilidad_tecnicos
+    ADD CONSTRAINT disponibilidad_tecnicos_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5549 (class 2606 OID 25690)
+-- Name: disponibilidad_tecnicos disponibilidad_tecnicos_user_id_key; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.disponibilidad_tecnicos
+    ADD CONSTRAINT disponibilidad_tecnicos_user_id_key UNIQUE (user_id);
+
+
+--
+-- TOC entry 5476 (class 2606 OID 16664)
+-- Name: equipos equipos_nombre_key; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos
+    ADD CONSTRAINT equipos_nombre_key UNIQUE (nombre);
+
+
+--
+-- TOC entry 5478 (class 2606 OID 16666)
+-- Name: equipos equipos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos
+    ADD CONSTRAINT equipos_pkey PRIMARY KEY (id_equipo);
+
+
+--
+-- TOC entry 5485 (class 1259 OID 16999)
+-- Name: idx_auditoria_accion; Type: INDEX; Schema: auditoria; Owner: postgres
+--
+
+CREATE INDEX idx_auditoria_accion ON auditoria.logs USING btree (accion);
+
+
+--
+-- TOC entry 5486 (class 1259 OID 16996)
+-- Name: idx_auditoria_fecha; Type: INDEX; Schema: auditoria; Owner: postgres
+--
+
+CREATE INDEX idx_auditoria_fecha ON auditoria.logs USING btree (fecha DESC);
+
+
+--
+-- TOC entry 5487 (class 1259 OID 16998)
+-- Name: idx_auditoria_modulo; Type: INDEX; Schema: auditoria; Owner: postgres
+--
+
+CREATE INDEX idx_auditoria_modulo ON auditoria.logs USING btree (modulo);
+
+
+--
+-- TOC entry 5488 (class 1259 OID 16997)
+-- Name: idx_auditoria_usuario; Type: INDEX; Schema: auditoria; Owner: postgres
+--
+
+CREATE INDEX idx_auditoria_usuario ON auditoria.logs USING btree (usuario_email);
+
+
+--
+-- TOC entry 5506 (class 1259 OID 17191)
+-- Name: idx_attendance_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_attendance_date ON public.user_attendance_records USING btree (date DESC);
+
+
+--
+-- TOC entry 5507 (class 1259 OID 17192)
+-- Name: idx_attendance_incomplete; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_attendance_incomplete ON public.user_attendance_records USING btree (user_id, date) WHERE (exit_time IS NULL);
+
+
+--
+-- TOC entry 5508 (class 1259 OID 17190)
+-- Name: idx_attendance_user_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_attendance_user_date ON public.user_attendance_records USING btree (user_id, date DESC);
+
+
+--
+-- TOC entry 5416 (class 1259 OID 16826)
+-- Name: idx_audit_created_at; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_audit_created_at ON public.audit_trail USING btree (created_at DESC);
+
+
+--
+-- TOC entry 5417 (class 1259 OID 16825)
+-- Name: idx_audit_module_action; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_audit_module_action ON public.audit_trail USING btree (module, action);
+
+
+--
+-- TOC entry 5418 (class 1259 OID 16827)
+-- Name: idx_audit_user; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_audit_user ON public.audit_trail USING btree (user_id);
+
+
+--
+-- TOC entry 5591 (class 1259 OID 26244)
+-- Name: idx_bc_alerts_acknowledged; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_alerts_acknowledged ON public.bc_alerts USING btree (acknowledged);
+
+
+--
+-- TOC entry 5592 (class 1259 OID 26240)
+-- Name: idx_bc_alerts_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_alerts_bc ON public.bc_alerts USING btree (business_case_id);
+
+
+--
+-- TOC entry 5593 (class 1259 OID 26241)
+-- Name: idx_bc_alerts_contract; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_alerts_contract ON public.bc_alerts USING btree (contract_determination_id);
+
+
+--
+-- TOC entry 5594 (class 1259 OID 26243)
+-- Name: idx_bc_alerts_severity; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_alerts_severity ON public.bc_alerts USING btree (severity);
+
+
+--
+-- TOC entry 5595 (class 1259 OID 26242)
+-- Name: idx_bc_alerts_type; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_alerts_type ON public.bc_alerts USING btree (alert_type);
+
+
+--
+-- TOC entry 5569 (class 1259 OID 26120)
+-- Name: idx_catalog_consumables_name; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_consumables_name ON public.catalog_consumables USING btree (name);
+
+
+--
+-- TOC entry 5570 (class 1259 OID 26118)
+-- Name: idx_catalog_consumables_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_consumables_status ON public.catalog_consumables USING btree (status);
+
+
+--
+-- TOC entry 5571 (class 1259 OID 26119)
+-- Name: idx_catalog_consumables_type; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_consumables_type ON public.catalog_consumables USING btree (type);
+
+
+--
+-- TOC entry 5564 (class 1259 OID 26283)
+-- Name: idx_catalog_determinations_equipment; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_determinations_equipment ON public.catalog_determinations USING btree (equipment_id);
+
+
+--
+-- TOC entry 5565 (class 1259 OID 26092)
+-- Name: idx_catalog_determinations_name; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_determinations_name ON public.catalog_determinations USING btree (name);
+
+
+--
+-- TOC entry 5566 (class 1259 OID 26090)
+-- Name: idx_catalog_determinations_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_determinations_status ON public.catalog_determinations USING btree (status);
+
+
+--
+-- TOC entry 5598 (class 1259 OID 26264)
+-- Name: idx_catalog_inv_category; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_inv_category ON public.catalog_investments USING btree (category);
+
+
+--
+-- TOC entry 5599 (class 1259 OID 26265)
+-- Name: idx_catalog_inv_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_catalog_inv_status ON public.catalog_investments USING btree (status);
+
+
+--
+-- TOC entry 5497 (class 1259 OID 17294)
+-- Name: idx_client_requests_approval_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_client_requests_approval_status ON public.client_requests USING btree (approval_status);
+
+
+--
+-- TOC entry 5498 (class 1259 OID 17296)
+-- Name: idx_client_requests_created_by; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_client_requests_created_by ON public.client_requests USING btree (created_by);
+
+
+--
+-- TOC entry 5499 (class 1259 OID 17295)
+-- Name: idx_client_requests_user_id; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_client_requests_user_id ON public.client_requests USING btree (user_id);
+
+
+--
+-- TOC entry 5517 (class 1259 OID 17293)
+-- Name: idx_clients_created_at; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_clients_created_at ON public.clients USING btree (created_at DESC);
+
+
+--
+-- TOC entry 5518 (class 1259 OID 17291)
+-- Name: idx_clients_estado; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_clients_estado ON public.clients USING btree (estado);
+
+
+--
+-- TOC entry 5519 (class 1259 OID 17292)
+-- Name: idx_clients_ruc_hash; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_clients_ruc_hash ON public.clients USING btree (ruc_hash);
+
+
+--
+-- TOC entry 5586 (class 1259 OID 26209)
+-- Name: idx_consumption_log_contract; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_consumption_log_contract ON public.determination_consumption_log USING btree (contract_determination_id);
+
+
+--
+-- TOC entry 5587 (class 1259 OID 26210)
+-- Name: idx_consumption_log_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_consumption_log_date ON public.determination_consumption_log USING btree (consumption_date);
+
+
+--
+-- TOC entry 5588 (class 1259 OID 26211)
+-- Name: idx_consumption_log_user; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_consumption_log_user ON public.determination_consumption_log USING btree (consumed_by_user_id);
+
+
+--
+-- TOC entry 5580 (class 1259 OID 26181)
+-- Name: idx_contract_det_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_contract_det_bc ON public.contract_determinations USING btree (business_case_id);
+
+
+--
+-- TOC entry 5581 (class 1259 OID 26182)
+-- Name: idx_contract_det_client; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_contract_det_client ON public.contract_determinations USING btree (client_id);
+
+
+--
+-- TOC entry 5582 (class 1259 OID 26183)
+-- Name: idx_contract_det_determination; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_contract_det_determination ON public.contract_determinations USING btree (determination_id);
+
+
+--
+-- TOC entry 5583 (class 1259 OID 26184)
+-- Name: idx_contract_det_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_contract_det_status ON public.contract_determinations USING btree (status);
+
+
+--
+-- TOC entry 5425 (class 1259 OID 16667)
+-- Name: idx_documents_request_id; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_documents_request_id ON public.documents USING btree (request_id);
+
+
+--
+-- TOC entry 5576 (class 1259 OID 26150)
+-- Name: idx_eq_cons_determination; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_eq_cons_determination ON public.catalog_equipment_consumables USING btree (determination_id);
+
+
+--
+-- TOC entry 5577 (class 1259 OID 26291)
+-- Name: idx_eq_cons_equipment; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_eq_cons_equipment ON public.catalog_equipment_consumables USING btree (equipment_id);
+
+
+--
+-- TOC entry 5432 (class 1259 OID 16668)
+-- Name: idx_inventory_movements_inventory; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_inventory_movements_inventory ON public.inventory_movements USING btree (inventory_id);
+
+
+--
+-- TOC entry 5624 (class 1259 OID 26477)
+-- Name: idx_location_history_activity; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_location_history_activity ON public.advisor_location_history USING btree (activity_type);
+
+
+--
+-- TOC entry 5625 (class 1259 OID 26476)
+-- Name: idx_location_history_client; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_location_history_client ON public.advisor_location_history USING btree (client_request_id);
+
+
+--
+-- TOC entry 5626 (class 1259 OID 26475)
+-- Name: idx_location_history_user_time; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_location_history_user_time ON public.advisor_location_history USING btree (user_email, "timestamp" DESC);
+
+
+--
+-- TOC entry 5630 (class 1259 OID 26505)
+-- Name: idx_permisos_approver; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_permisos_approver ON public.permisos_vacaciones USING btree (approver_role);
+
+
+--
+-- TOC entry 5631 (class 1259 OID 26503)
+-- Name: idx_permisos_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_permisos_status ON public.permisos_vacaciones USING btree (status);
+
+
+--
+-- TOC entry 5632 (class 1259 OID 26504)
+-- Name: idx_permisos_tipo; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_permisos_tipo ON public.permisos_vacaciones USING btree (tipo_solicitud);
+
+
+--
+-- TOC entry 5633 (class 1259 OID 26502)
+-- Name: idx_permisos_user_email; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_permisos_user_email ON public.permisos_vacaciones USING btree (user_email);
+
+
+--
+-- TOC entry 5541 (class 1259 OID 17459)
+-- Name: idx_personnel_request_comments_request; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_request_comments_request ON public.personnel_request_comments USING btree (personnel_request_id);
+
+
+--
+-- TOC entry 5538 (class 1259 OID 17458)
+-- Name: idx_personnel_request_history_request; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_request_history_request ON public.personnel_request_history USING btree (personnel_request_id);
+
+
+--
+-- TOC entry 5530 (class 1259 OID 17457)
+-- Name: idx_personnel_requests_created_at; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_requests_created_at ON public.personnel_requests USING btree (created_at DESC);
+
+
+--
+-- TOC entry 5531 (class 1259 OID 17455)
+-- Name: idx_personnel_requests_department; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_requests_department ON public.personnel_requests USING btree (department_id);
+
+
+--
+-- TOC entry 5532 (class 1259 OID 17454)
+-- Name: idx_personnel_requests_requester; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_requests_requester ON public.personnel_requests USING btree (requester_id);
+
+
+--
+-- TOC entry 5533 (class 1259 OID 17456)
+-- Name: idx_personnel_requests_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_personnel_requests_status ON public.personnel_requests USING btree (status);
+
+
+--
+-- TOC entry 5435 (class 1259 OID 16669)
+-- Name: idx_request_approvals_pending; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_request_approvals_pending ON public.request_approvals USING btree (used, token_expires_at);
+
+
+--
+-- TOC entry 5440 (class 1259 OID 16670)
+-- Name: idx_request_attachments_request; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_request_attachments_request ON public.request_attachments USING btree (request_id);
+
+
+--
+-- TOC entry 5446 (class 1259 OID 16671)
+-- Name: idx_request_types_schema_gin; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_request_types_schema_gin ON public.request_types USING gin (schema);
+
+
+--
+-- TOC entry 5454 (class 1259 OID 16672)
+-- Name: idx_requests_created_at; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_requests_created_at ON public.requests USING btree (created_at);
+
+
+--
+-- TOC entry 5455 (class 1259 OID 16673)
+-- Name: idx_requests_payload_gin; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_requests_payload_gin ON public.requests USING gin (payload);
+
+
+--
+-- TOC entry 5456 (class 1259 OID 16674)
+-- Name: idx_requests_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_requests_status ON public.requests USING btree (status);
+
+
+--
+-- TOC entry 5443 (class 1259 OID 16675)
+-- Name: idx_rsh_request_id; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_rsh_request_id ON public.request_status_history USING btree (request_id);
+
+
+--
+-- TOC entry 5615 (class 1259 OID 26474)
+-- Name: idx_scheduled_visits_city; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_scheduled_visits_city ON public.scheduled_visits USING btree (city);
+
+
+--
+-- TOC entry 5616 (class 1259 OID 26473)
+-- Name: idx_scheduled_visits_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_scheduled_visits_date ON public.scheduled_visits USING btree (planned_date);
+
+
+--
+-- TOC entry 5617 (class 1259 OID 26472)
+-- Name: idx_scheduled_visits_schedule; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_scheduled_visits_schedule ON public.scheduled_visits USING btree (schedule_id);
+
+
+--
+-- TOC entry 5600 (class 1259 OID 26343)
+-- Name: idx_tech_docs_created; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_tech_docs_created ON public.technical_documents USING btree (created_at DESC);
+
+
+--
+-- TOC entry 5601 (class 1259 OID 26344)
+-- Name: idx_tech_docs_equipment; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_tech_docs_equipment ON public.technical_documents USING btree (equipment_name);
+
+
+--
+-- TOC entry 5602 (class 1259 OID 26345)
+-- Name: idx_tech_docs_serial; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_tech_docs_serial ON public.technical_documents USING btree (equipment_serial);
+
+
+--
+-- TOC entry 5603 (class 1259 OID 26341)
+-- Name: idx_tech_docs_type; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_tech_docs_type ON public.technical_documents USING btree (document_type);
+
+
+--
+-- TOC entry 5604 (class 1259 OID 26342)
+-- Name: idx_tech_docs_user; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_tech_docs_user ON public.technical_documents USING btree (user_id);
+
+
+--
+-- TOC entry 5627 (class 1259 OID 26478)
+-- Name: idx_travel_segments_user_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_travel_segments_user_date ON public.travel_segments USING btree (user_email, travel_date);
+
+
+--
+-- TOC entry 5522 (class 1259 OID 17320)
+-- Name: idx_user_gmail_tokens_email; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_user_gmail_tokens_email ON public.user_gmail_tokens USING btree (email);
+
+
+--
+-- TOC entry 5523 (class 1259 OID 17319)
+-- Name: idx_user_gmail_tokens_user_id; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_user_gmail_tokens_user_id ON public.user_gmail_tokens USING btree (user_id);
+
+
+--
+-- TOC entry 5609 (class 1259 OID 26471)
+-- Name: idx_visit_schedules_month_year; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_visit_schedules_month_year ON public.visit_schedules USING btree (year, month, status);
+
+
+--
+-- TOC entry 5610 (class 1259 OID 26470)
+-- Name: idx_visit_schedules_user_status; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_visit_schedules_user_status ON public.visit_schedules USING btree (user_email, status);
+
+
+--
+-- TOC entry 5453 (class 1259 OID 16676)
+-- Name: uidx_request_versions_req_ver; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE UNIQUE INDEX uidx_request_versions_req_ver ON public.request_versions USING btree (request_id, version_number);
+
+
+--
+-- TOC entry 5471 (class 1259 OID 17071)
+-- Name: idx_cronograma_mantenimientos_next_status; Type: INDEX; Schema: servicio; Owner: postgres
+--
+
+CREATE INDEX idx_cronograma_mantenimientos_next_status ON servicio.cronograma_mantenimientos USING btree (next_maintenance_status);
+
+
+--
+-- TOC entry 5472 (class 1259 OID 17053)
+-- Name: idx_cronograma_mantenimientos_request_id; Type: INDEX; Schema: servicio; Owner: postgres
+--
+
+CREATE INDEX idx_cronograma_mantenimientos_request_id ON servicio.cronograma_mantenimientos USING btree (request_id);
+
+
+--
+-- TOC entry 5714 (class 2620 OID 26347)
+-- Name: technical_documents tech_docs_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER tech_docs_updated_at BEFORE UPDATE ON public.technical_documents FOR EACH ROW EXECUTE FUNCTION public.update_tech_docs_timestamp();
+
+
+--
+-- TOC entry 5709 (class 2620 OID 17194)
+-- Name: user_attendance_records trg_attendance_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_attendance_updated_at BEFORE UPDATE ON public.user_attendance_records FOR EACH ROW EXECUTE FUNCTION public.update_attendance_timestamp();
+
+
+--
+-- TOC entry 5697 (class 2620 OID 16677)
+-- Name: documents trg_documents_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_documents_updated_at BEFORE UPDATE ON public.documents FOR EACH ROW EXECUTE FUNCTION public.update_timestamp();
+
+
+--
+-- TOC entry 5710 (class 2620 OID 17461)
+-- Name: personnel_requests trg_generate_personnel_request_number; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_generate_personnel_request_number BEFORE INSERT ON public.personnel_requests FOR EACH ROW EXECUTE FUNCTION public.generate_personnel_request_number();
+
+
+--
+-- TOC entry 5698 (class 2620 OID 17031)
+-- Name: inventory_movements trg_inventory_after_delete; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_inventory_after_delete AFTER DELETE ON public.inventory_movements FOR EACH ROW EXECUTE FUNCTION public.recalculate_inventory();
+
+
+--
+-- TOC entry 5699 (class 2620 OID 17029)
+-- Name: inventory_movements trg_inventory_after_insert; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_inventory_after_insert AFTER INSERT ON public.inventory_movements FOR EACH ROW EXECUTE FUNCTION public.recalculate_inventory();
+
+
+--
+-- TOC entry 5700 (class 2620 OID 17030)
+-- Name: inventory_movements trg_inventory_after_update; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_inventory_after_update AFTER UPDATE ON public.inventory_movements FOR EACH ROW EXECUTE FUNCTION public.recalculate_inventory();
+
+
+--
+-- TOC entry 5711 (class 2620 OID 17465)
+-- Name: personnel_requests trg_log_personnel_request_status_change; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_log_personnel_request_status_change AFTER UPDATE ON public.personnel_requests FOR EACH ROW EXECUTE FUNCTION public.log_personnel_request_status_change();
+
+
+--
+-- TOC entry 5702 (class 2620 OID 16678)
+-- Name: requests trg_log_request_status; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_log_request_status AFTER UPDATE OF status ON public.requests FOR EACH ROW WHEN ((old.status IS DISTINCT FROM new.status)) EXECUTE FUNCTION public.fn_log_request_status();
+
+
+--
+-- TOC entry 5701 (class 2620 OID 16679)
+-- Name: request_types trg_request_types_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_request_types_updated_at BEFORE UPDATE ON public.request_types FOR EACH ROW EXECUTE FUNCTION public.update_timestamp();
+
+
+--
+-- TOC entry 5703 (class 2620 OID 16680)
+-- Name: requests trg_requests_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_requests_updated_at BEFORE UPDATE ON public.requests FOR EACH ROW EXECUTE FUNCTION public.update_timestamp();
+
+
+--
+-- TOC entry 5712 (class 2620 OID 17463)
+-- Name: personnel_requests trg_update_personnel_request_timestamp; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_update_personnel_request_timestamp BEFORE UPDATE ON public.personnel_requests FOR EACH ROW EXECUTE FUNCTION public.update_personnel_request_timestamp();
+
+
+--
+-- TOC entry 5713 (class 2620 OID 26186)
+-- Name: contract_determinations trg_update_remaining_quantity; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_update_remaining_quantity BEFORE INSERT OR UPDATE OF consumed_quantity, annual_negotiated_quantity ON public.contract_determinations FOR EACH ROW EXECUTE FUNCTION public.update_remaining_quantity();
+
+
+--
+-- TOC entry 5704 (class 2620 OID 16681)
+-- Name: users trg_users_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW EXECUTE FUNCTION public.update_timestamp();
+
+
+--
+-- TOC entry 5705 (class 2620 OID 16682)
+-- Name: cronograma_capacitacion capacitacion_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
+--
+
+CREATE TRIGGER capacitacion_update_timestamp BEFORE UPDATE ON servicio.cronograma_capacitacion FOR EACH ROW EXECUTE FUNCTION servicio.update_timestamp();
+
+
+--
+-- TOC entry 5708 (class 2620 OID 16683)
+-- Name: equipos equipos_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
+--
+
+CREATE TRIGGER equipos_update_timestamp BEFORE UPDATE ON servicio.equipos FOR EACH ROW EXECUTE FUNCTION servicio.update_timestamp();
+
+
+--
+-- TOC entry 5707 (class 2620 OID 16684)
+-- Name: cronograma_mantenimientos_anuales mantenimiento_anual_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
+--
+
+CREATE TRIGGER mantenimiento_anual_update_timestamp BEFORE UPDATE ON servicio.cronograma_mantenimientos_anuales FOR EACH ROW EXECUTE FUNCTION servicio.update_timestamp();
+
+
+--
+-- TOC entry 5706 (class 2620 OID 16685)
+-- Name: cronograma_mantenimientos mantenimiento_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
+--
+
+CREATE TRIGGER mantenimiento_update_timestamp BEFORE UPDATE ON servicio.cronograma_mantenimientos FOR EACH ROW EXECUTE FUNCTION servicio.update_timestamp();
+
+
+--
+-- TOC entry 5693 (class 2606 OID 26434)
+-- Name: advisor_location_history advisor_location_history_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.advisor_location_history
+    ADD CONSTRAINT advisor_location_history_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5694 (class 2606 OID 26439)
+-- Name: advisor_location_history advisor_location_history_visit_log_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.advisor_location_history
+    ADD CONSTRAINT advisor_location_history_visit_log_id_fkey FOREIGN KEY (visit_log_id) REFERENCES public.client_visit_logs(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5688 (class 2606 OID 26230)
+-- Name: bc_alerts bc_alerts_business_case_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_alerts
+    ADD CONSTRAINT bc_alerts_business_case_id_fkey FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5689 (class 2606 OID 26235)
+-- Name: bc_alerts bc_alerts_contract_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_alerts
+    ADD CONSTRAINT bc_alerts_contract_determination_id_fkey FOREIGN KEY (contract_determination_id) REFERENCES public.contract_determinations(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5681 (class 2606 OID 26113)
+-- Name: catalog_consumables catalog_consumables_replaced_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_consumables
+    ADD CONSTRAINT catalog_consumables_replaced_by_id_fkey FOREIGN KEY (replaced_by_id) REFERENCES public.catalog_consumables(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5679 (class 2606 OID 26284)
+-- Name: catalog_determinations catalog_determinations_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_determinations
+    ADD CONSTRAINT catalog_determinations_equipment_id_fkey FOREIGN KEY (equipment_id) REFERENCES servicio.equipos(id_equipo) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5680 (class 2606 OID 26085)
+-- Name: catalog_determinations catalog_determinations_replaced_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_determinations
+    ADD CONSTRAINT catalog_determinations_replaced_by_id_fkey FOREIGN KEY (replaced_by_id) REFERENCES public.catalog_determinations(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5682 (class 2606 OID 26139)
+-- Name: catalog_equipment_consumables catalog_equipment_consumables_consumable_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables
+    ADD CONSTRAINT catalog_equipment_consumables_consumable_id_fkey FOREIGN KEY (consumable_id) REFERENCES public.catalog_consumables(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5683 (class 2606 OID 26144)
+-- Name: catalog_equipment_consumables catalog_equipment_consumables_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables
+    ADD CONSTRAINT catalog_equipment_consumables_determination_id_fkey FOREIGN KEY (determination_id) REFERENCES public.catalog_determinations(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5684 (class 2606 OID 26292)
+-- Name: catalog_equipment_consumables catalog_equipment_consumables_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.catalog_equipment_consumables
+    ADD CONSTRAINT catalog_equipment_consumables_equipment_id_fkey FOREIGN KEY (equipment_id) REFERENCES servicio.equipos(id_equipo) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5677 (class 2606 OID 25729)
+-- Name: client_assignments client_assignments_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_assignments
+    ADD CONSTRAINT client_assignments_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5661 (class 2606 OID 17147)
+-- Name: client_request_consent_tokens client_request_consent_tokens_used_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_request_consent_tokens
+    ADD CONSTRAINT client_request_consent_tokens_used_request_id_fkey FOREIGN KEY (used_request_id) REFERENCES public.client_requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5660 (class 2606 OID 17125)
+-- Name: client_request_consents client_request_consents_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_request_consents
+    ADD CONSTRAINT client_request_consents_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5657 (class 2606 OID 17276)
+-- Name: client_requests client_requests_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_approved_by_fkey FOREIGN KEY (approved_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5658 (class 2606 OID 17281)
+-- Name: client_requests client_requests_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_client_id_fkey FOREIGN KEY (client_id) REFERENCES public.clients(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5659 (class 2606 OID 17286)
+-- Name: client_requests client_requests_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_requests
+    ADD CONSTRAINT client_requests_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5678 (class 2606 OID 25753)
+-- Name: client_visit_logs client_visit_logs_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.client_visit_logs
+    ADD CONSTRAINT client_visit_logs_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5663 (class 2606 OID 17265)
+-- Name: clients clients_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients
+    ADD CONSTRAINT clients_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5664 (class 2606 OID 17270)
+-- Name: clients clients_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.clients
+    ADD CONSTRAINT clients_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5685 (class 2606 OID 26171)
+-- Name: contract_determinations contract_determinations_business_case_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.contract_determinations
+    ADD CONSTRAINT contract_determinations_business_case_id_fkey FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5686 (class 2606 OID 26176)
+-- Name: contract_determinations contract_determinations_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.contract_determinations
+    ADD CONSTRAINT contract_determinations_determination_id_fkey FOREIGN KEY (determination_id) REFERENCES public.catalog_determinations(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5687 (class 2606 OID 26204)
+-- Name: determination_consumption_log determination_consumption_log_contract_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.determination_consumption_log
+    ADD CONSTRAINT determination_consumption_log_contract_determination_id_fkey FOREIGN KEY (contract_determination_id) REFERENCES public.contract_determinations(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5636 (class 2606 OID 16686)
+-- Name: document_signatures document_signatures_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.document_signatures
+    ADD CONSTRAINT document_signatures_document_id_fkey FOREIGN KEY (document_id) REFERENCES public.documents(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5637 (class 2606 OID 16691)
+-- Name: document_signatures document_signatures_signer_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.document_signatures
+    ADD CONSTRAINT document_signatures_signer_user_id_fkey FOREIGN KEY (signer_user_id) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5638 (class 2606 OID 16696)
+-- Name: documents documents_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5639 (class 2606 OID 16701)
+-- Name: documents documents_request_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.documents
+    ADD CONSTRAINT documents_request_type_id_fkey FOREIGN KEY (request_type_id) REFERENCES public.request_types(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5675 (class 2606 OID 17478)
+-- Name: equipment_purchase_bc_items equipment_purchase_bc_items_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_purchase_bc_items
+    ADD CONSTRAINT equipment_purchase_bc_items_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5665 (class 2606 OID 17314)
+-- Name: user_gmail_tokens fk_user_gmail_tokens_user; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_gmail_tokens
+    ADD CONSTRAINT fk_user_gmail_tokens_user FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5651 (class 2606 OID 16974)
+-- Name: users fk_users_department; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT fk_users_department FOREIGN KEY (department_id) REFERENCES public.departments(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5652 (class 2606 OID 16979)
+-- Name: users fk_users_departments; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.users
+    ADD CONSTRAINT fk_users_departments FOREIGN KEY (department_id) REFERENCES public.departments(id) ON UPDATE CASCADE ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5640 (class 2606 OID 16706)
+-- Name: inventory_movements inventory_movements_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory_movements
+    ADD CONSTRAINT inventory_movements_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5641 (class 2606 OID 16711)
+-- Name: inventory_movements inventory_movements_inventory_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.inventory_movements
+    ADD CONSTRAINT inventory_movements_inventory_id_fkey FOREIGN KEY (inventory_id) REFERENCES public.inventory(id);
+
+
+--
+-- TOC entry 5673 (class 2606 OID 17444)
+-- Name: personnel_request_comments personnel_request_comments_personnel_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_comments
+    ADD CONSTRAINT personnel_request_comments_personnel_request_id_fkey FOREIGN KEY (personnel_request_id) REFERENCES public.personnel_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5674 (class 2606 OID 17449)
+-- Name: personnel_request_comments personnel_request_comments_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_comments
+    ADD CONSTRAINT personnel_request_comments_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5671 (class 2606 OID 17424)
+-- Name: personnel_request_history personnel_request_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_history
+    ADD CONSTRAINT personnel_request_history_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5672 (class 2606 OID 17419)
+-- Name: personnel_request_history personnel_request_history_personnel_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_request_history
+    ADD CONSTRAINT personnel_request_history_personnel_request_id_fkey FOREIGN KEY (personnel_request_id) REFERENCES public.personnel_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5666 (class 2606 OID 17401)
+-- Name: personnel_requests personnel_requests_approved_by_finance_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_approved_by_finance_fkey FOREIGN KEY (approved_by_finance) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5667 (class 2606 OID 17396)
+-- Name: personnel_requests personnel_requests_approved_by_hr_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_approved_by_hr_fkey FOREIGN KEY (approved_by_hr) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5668 (class 2606 OID 17391)
+-- Name: personnel_requests personnel_requests_approved_by_manager_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_approved_by_manager_fkey FOREIGN KEY (approved_by_manager) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5669 (class 2606 OID 17386)
+-- Name: personnel_requests personnel_requests_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_department_id_fkey FOREIGN KEY (department_id) REFERENCES public.departments(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5670 (class 2606 OID 17381)
+-- Name: personnel_requests personnel_requests_requester_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.personnel_requests
+    ADD CONSTRAINT personnel_requests_requester_id_fkey FOREIGN KEY (requester_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5642 (class 2606 OID 16716)
+-- Name: request_approvals request_approvals_approver_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_approvals
+    ADD CONSTRAINT request_approvals_approver_id_fkey FOREIGN KEY (approver_id) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5643 (class 2606 OID 16721)
+-- Name: request_approvals request_approvals_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_approvals
+    ADD CONSTRAINT request_approvals_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.requests(id);
+
+
+--
+-- TOC entry 5644 (class 2606 OID 16726)
+-- Name: request_attachments request_attachments_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_attachments
+    ADD CONSTRAINT request_attachments_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.requests(id);
+
+
+--
+-- TOC entry 5645 (class 2606 OID 16731)
+-- Name: request_attachments request_attachments_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_attachments
+    ADD CONSTRAINT request_attachments_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5646 (class 2606 OID 16736)
+-- Name: request_status_history request_status_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_status_history
+    ADD CONSTRAINT request_status_history_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5647 (class 2606 OID 16741)
+-- Name: request_status_history request_status_history_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_status_history
+    ADD CONSTRAINT request_status_history_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5648 (class 2606 OID 16746)
+-- Name: request_versions request_versions_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.request_versions
+    ADD CONSTRAINT request_versions_request_id_fkey FOREIGN KEY (request_id) REFERENCES public.requests(id);
+
+
+--
+-- TOC entry 5649 (class 2606 OID 16751)
+-- Name: requests requests_request_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.requests
+    ADD CONSTRAINT requests_request_type_id_fkey FOREIGN KEY (request_type_id) REFERENCES public.request_types(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5650 (class 2606 OID 16756)
+-- Name: requests requests_requester_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.requests
+    ADD CONSTRAINT requests_requester_id_fkey FOREIGN KEY (requester_id) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5691 (class 2606 OID 26413)
+-- Name: scheduled_visits scheduled_visits_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.scheduled_visits
+    ADD CONSTRAINT scheduled_visits_client_request_id_fkey FOREIGN KEY (client_request_id) REFERENCES public.client_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5692 (class 2606 OID 26408)
+-- Name: scheduled_visits scheduled_visits_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.scheduled_visits
+    ADD CONSTRAINT scheduled_visits_schedule_id_fkey FOREIGN KEY (schedule_id) REFERENCES public.visit_schedules(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5690 (class 2606 OID 26336)
+-- Name: technical_documents technical_documents_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.technical_documents
+    ADD CONSTRAINT technical_documents_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE RESTRICT;
+
+
+--
+-- TOC entry 5695 (class 2606 OID 26460)
+-- Name: travel_segments travel_segments_from_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.travel_segments
+    ADD CONSTRAINT travel_segments_from_client_id_fkey FOREIGN KEY (from_client_id) REFERENCES public.client_requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5696 (class 2606 OID 26465)
+-- Name: travel_segments travel_segments_to_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.travel_segments
+    ADD CONSTRAINT travel_segments_to_client_id_fkey FOREIGN KEY (to_client_id) REFERENCES public.client_requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5662 (class 2606 OID 17185)
+-- Name: user_attendance_records user_attendance_records_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.user_attendance_records
+    ADD CONSTRAINT user_attendance_records_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5656 (class 2606 OID 16761)
+-- Name: cronograma_mantenimientos_anuales cronograma_mantenimientos_anuales_id_equipo_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales
+    ADD CONSTRAINT cronograma_mantenimientos_anuales_id_equipo_fkey FOREIGN KEY (id_equipo) REFERENCES servicio.equipos(id_equipo) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5653 (class 2606 OID 17059)
+-- Name: cronograma_mantenimientos cronograma_mantenimientos_created_by_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos
+    ADD CONSTRAINT cronograma_mantenimientos_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5654 (class 2606 OID 16766)
+-- Name: cronograma_mantenimientos cronograma_mantenimientos_id_equipo_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos
+    ADD CONSTRAINT cronograma_mantenimientos_id_equipo_fkey FOREIGN KEY (id_equipo) REFERENCES servicio.equipos(id_equipo) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5655 (class 2606 OID 17054)
+-- Name: cronograma_mantenimientos cronograma_mantenimientos_request_fk; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.cronograma_mantenimientos
+    ADD CONSTRAINT cronograma_mantenimientos_request_fk FOREIGN KEY (request_id) REFERENCES public.requests(id) ON DELETE SET NULL;
+
+
+--
+-- TOC entry 5676 (class 2606 OID 25691)
+-- Name: disponibilidad_tecnicos disponibilidad_tecnicos_user_id_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.disponibilidad_tecnicos
+    ADD CONSTRAINT disponibilidad_tecnicos_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5984 (class 0 OID 0)
+-- Dependencies: 265
+-- Name: TABLE v_inventario_completo; Type: ACL; Schema: public; Owner: postgres
+--
+
+GRANT SELECT ON TABLE public.v_inventario_completo TO PUBLIC;
+
+
+-- Completed on 2025-12-04 17:27:43
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict APk7sK1ORKcb1kWOvpFBDQE5A5AeFqjRBVdphvvOrYC9mRqraWLGYbNMS1QUebb
+

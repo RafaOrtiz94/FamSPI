@@ -1,86 +1,117 @@
 const permisosService = require("./permisos.service");
+const { uploadJustificante } = require("./permisos.drive");
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage() }); // Corrected multer storage
 
-const crearSolicitud = async (req, res) => {
+async function create(req, res) {
   try {
-    const solicitud = await permisosService.createSolicitud({ body: req.body || {}, user: req.user });
-    return res.json({ ok: true, data: solicitud });
+    const result = await permisosService.createSolicitud({ body: req.body, user: req.user });
+    res.status(201).json({ ok: true, data: result });
   } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo crear la solicitud" });
+    console.error("Error creando solicitud:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
-};
+}
 
-const aprobarParcial = async (req, res) => {
+async function aprobarParcial(req, res) {
   try {
-    const solicitud = await permisosService.aprobarParcial({ id: req.params.id, approver: req.user });
-    return res.json({ ok: true, data: solicitud });
+    const { id } = req.params;
+    const result = await permisosService.aprobarParcial({ id: Number(id), approver: req.user });
+    res.json({ ok: true, data: result });
   } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo aprobar parcialmente" });
+    console.error("Error aprobando parcialmente:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
-};
+}
 
-const subirJustificantes = async (req, res) => {
+async function uploadJustificantes(req, res) {
   try {
-    const urls = req.body?.justificantes_urls || req.body?.urls || [];
-    const solicitud = await permisosService.subirJustificantes({ id: req.params.id, urls, user: req.user });
-    return res.json({ ok: true, data: solicitud });
-  } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudieron cargar los justificantes" });
-  }
-};
+    const { id } = req.params;
+    const files = req.files || [];
 
-const aprobarFinal = async (req, res) => {
-  try {
-    const solicitud = await permisosService.aprobarFinal({ id: req.params.id, approver: req.user });
-    return res.json({ ok: true, data: solicitud });
-  } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo aprobar" });
-  }
-};
+    if (files.length === 0) {
+      return res.status(400).json({ ok: false, message: "No se enviaron archivos" });
+    }
 
-const rechazar = async (req, res) => {
-  try {
-    const solicitud = await permisosService.rechazar({
-      id: req.params.id,
-      approver: req.user,
-      observaciones: req.body?.observaciones || req.body?.motivo || null,
-    });
-    return res.json({ ok: true, data: solicitud });
-  } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo rechazar la solicitud" });
-  }
-};
+    // Obtener la solicitud para tener fecha_inicio y drive_folder_id
+    const solicitud = await permisosService.getSolicitudById(Number(id));
+    if (!solicitud) {
+      return res.status(404).json({ ok: false, message: "Solicitud no encontrada" });
+    }
 
-const listarPendientes = async (req, res) => {
-  try {
-    const data = await permisosService.listarPendientes({ stage: req.query?.stage, approver: req.user });
-    return res.json({ ok: true, data });
-  } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo obtener solicitudes" });
-  }
-};
+    const urls = [];
+    for (const file of files) {
+      const uploaded = await uploadJustificante({
+        user: req.user,
+        solicitudId: id,
+        fecha_inicio: solicitud.fecha_inicio,
+        fileBuffer: file.buffer,
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        existingFolderId: solicitud.drive_folder_id, // Usar la misma carpeta del acta
+      });
+      urls.push(uploaded.webViewLink);
+    }
 
-const listarMias = async (req, res) => {
-  try {
-    const data = await permisosService.listarPorUsuario({ user: req.user });
-    return res.json({ ok: true, data: data.data, summary: data.summary });
+    const result = await permisosService.subirJustificantes({ id: Number(id), urls, user: req.user });
+    res.json({ ok: true, data: result });
   } catch (error) {
-    const status = error.status || 400;
-    return res.status(status).json({ ok: false, message: error.message || "No se pudo obtener tus solicitudes" });
+    console.error("Error subiendo justificantes:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
-};
+}
+
+async function aprobarFinal(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.aprobarFinal({ id: Number(id), approver: req.user });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error aprobando finalmente:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function rechazar(req, res) {
+  try {
+    const { id } = req.params;
+    const { observaciones } = req.body;
+    const result = await permisosService.rechazar({ id: Number(id), approver: req.user, observaciones });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error rechazando:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function listarPendientes(req, res) {
+  try {
+    const { stage } = req.query;
+    const result = await permisosService.listarPendientes({ stage, approver: req.user });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error listando pendientes:", error);
+    res.status(500).json({ ok: false, message: error.message });
+  }
+}
+
+async function listarMias(req, res) {
+  try {
+    const result = await permisosService.listarPorUsuario({ user: req.user });
+    res.json({ ok: true, ...result });
+  } catch (error) {
+    console.error("Error listando mis solicitudes:", error);
+    res.status(500).json({ ok: false, message: error.message });
+  }
+}
 
 module.exports = {
-  crearSolicitud,
+  create,
   aprobarParcial,
-  subirJustificantes,
+  uploadJustificantes,
   aprobarFinal,
   rechazar,
   listarPendientes,
   listarMias,
+  upload,
 };
