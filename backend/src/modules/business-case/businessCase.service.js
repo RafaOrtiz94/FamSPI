@@ -1,3 +1,4 @@
+const { v4: uuidv4 } = require("uuid");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { ensureFolder } = require("../../utils/drive");
@@ -42,6 +43,7 @@ async function assertModernBusinessCase(id) {
 }
 
 async function createBusinessCase(data, user) {
+  const businessCaseId = uuidv4();
   const {
     client_name,
     client_id,
@@ -56,6 +58,7 @@ async function createBusinessCase(data, user) {
 
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
+      id,
       client_name,
       client_id,
       status,
@@ -71,11 +74,12 @@ async function createBusinessCase(data, user) {
       bc_system_type,
       request_type
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), true, 'modern', 'business_case'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), true, 'modern', 'business_case'
     ) RETURNING id;
   `;
 
   const { rows } = await db.query(insertQuery, [
+    businessCaseId,
     client_name,
     client_id,
     status,
@@ -88,7 +92,7 @@ async function createBusinessCase(data, user) {
     user?.id || null,
   ]);
 
-  const businessCaseId = rows[0].id;
+  const returnedId = rows[0].id || businessCaseId;
 
   try {
     const parentFolderId = process.env.BUSINESS_CASE_ROOT_FOLDER_ID;
@@ -97,13 +101,13 @@ async function createBusinessCase(data, user) {
 
     await db.query(`UPDATE equipment_purchase_requests SET drive_folder_id = $1 WHERE id = $2`, [
       folder.id,
-      businessCaseId,
+      returnedId,
     ]);
   } catch (error) {
     logger.warn({ error: error.message }, "No se pudo crear carpeta en Drive para el BC");
   }
 
-  const bcResult = await db.query(`SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`, [businessCaseId]);
+  const bcResult = await db.query(`SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`, [returnedId]);
   return mapBusinessCase(bcResult.rows[0]);
 }
 
