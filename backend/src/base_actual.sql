@@ -2,12 +2,12 @@
 -- PostgreSQL database dump
 --
 
-\restrict APk7sK1ORKcb1kWOvpFBDQE5A5AeFqjRBVdphvvOrYC9mRqraWLGYbNMS1QUebb
+\restrict LVGGLQT24c2vy3hKDXwZbkPmeR1InYvhEcMezufLOPBQtpy4BXUHYTYzkD2kDNk
 
 -- Dumped from database version 18.0
 -- Dumped by pg_dump version 18.0
 
--- Started on 2025-12-04 17:27:43
+-- Started on 2025-12-05 13:51:46
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -50,7 +50,7 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
 
 
 --
--- TOC entry 5873 (class 0 OID 0)
+-- TOC entry 6048 (class 0 OID 0)
 -- Dependencies: 2
 -- Name: EXTENSION pgcrypto; Type: COMMENT; Schema: -; Owner: 
 --
@@ -59,7 +59,7 @@ COMMENT ON EXTENSION pgcrypto IS 'cryptographic functions';
 
 
 --
--- TOC entry 1004 (class 1247 OID 16387)
+-- TOC entry 1028 (class 1247 OID 16387)
 -- Name: approval_action_enum; Type: TYPE; Schema: public; Owner: postgres
 --
 
@@ -72,7 +72,7 @@ CREATE TYPE public.approval_action_enum AS ENUM (
 ALTER TYPE public.approval_action_enum OWNER TO postgres;
 
 --
--- TOC entry 1007 (class 1247 OID 16392)
+-- TOC entry 1031 (class 1247 OID 16392)
 -- Name: request_status_enum; Type: TYPE; Schema: public; Owner: postgres
 --
 
@@ -87,7 +87,41 @@ CREATE TYPE public.request_status_enum AS ENUM (
 ALTER TYPE public.request_status_enum OWNER TO postgres;
 
 --
--- TOC entry 325 (class 1255 OID 16401)
+-- TOC entry 404 (class 1255 OID 27030)
+-- Name: bc_audit_trigger(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.bc_audit_trigger() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  INSERT INTO bc_audit_log (
+    business_case_id,
+    action,
+    entity_type,
+    entity_id,
+    before_value,
+    after_value,
+    changed_by
+  ) VALUES (
+    COALESCE(NEW.business_case_id, OLD.business_case_id),
+    TG_OP,
+    TG_TABLE_NAME,
+    COALESCE(NEW.id, OLD.id),
+    row_to_json(OLD),
+    row_to_json(NEW),
+    COALESCE(NEW.added_by, NEW.selected_by, NEW.changed_by)
+  );
+  
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.bc_audit_trigger() OWNER TO postgres;
+
+--
+-- TOC entry 343 (class 1255 OID 16401)
 -- Name: fn_log_request_status(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -107,7 +141,7 @@ $$;
 ALTER FUNCTION public.fn_log_request_status() OWNER TO postgres;
 
 --
--- TOC entry 367 (class 1255 OID 17460)
+-- TOC entry 387 (class 1255 OID 17460)
 -- Name: generate_personnel_request_number(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -124,7 +158,59 @@ $$;
 ALTER FUNCTION public.generate_personnel_request_number() OWNER TO postgres;
 
 --
--- TOC entry 369 (class 1255 OID 17464)
+-- TOC entry 403 (class 1255 OID 27029)
+-- Name: get_current_price(integer, integer, integer, character varying, date); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.get_current_price(p_equipment_id integer DEFAULT NULL::integer, p_consumable_id integer DEFAULT NULL::integer, p_determination_id integer DEFAULT NULL::integer, p_price_type character varying DEFAULT NULL::character varying, p_date date DEFAULT CURRENT_DATE) RETURNS numeric
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_price DECIMAL(12,2);
+BEGIN
+  -- Buscar en historial primero
+  SELECT price INTO v_price
+  FROM equipment_price_history
+  WHERE (
+    (p_equipment_id IS NOT NULL AND equipment_id = p_equipment_id) OR
+    (p_consumable_id IS NOT NULL AND consumable_id = p_consumable_id) OR
+    (p_determination_id IS NOT NULL AND determination_id = p_determination_id)
+  )
+  AND (p_price_type IS NULL OR price_type = p_price_type)
+  AND effective_from <= p_date
+  AND (effective_to IS NULL OR effective_to >= p_date)
+  ORDER BY effective_from DESC
+  LIMIT 1;
+  
+  -- Si no hay en historial, buscar en tablas actuales
+  IF v_price IS NULL THEN
+    IF p_equipment_id IS NOT NULL THEN
+      SELECT base_price INTO v_price FROM servicio.equipos WHERE id_equipo = p_equipment_id;
+    ELSIF p_consumable_id IS NOT NULL THEN
+      SELECT unit_price INTO v_price FROM catalog_consumables WHERE id = p_consumable_id;
+    ELSIF p_determination_id IS NOT NULL THEN
+      SELECT cost_per_test INTO v_price FROM catalog_determinations WHERE id = p_determination_id;
+    END IF;
+  END IF;
+  
+  RETURN COALESCE(v_price, 0);
+END;
+$$;
+
+
+ALTER FUNCTION public.get_current_price(p_equipment_id integer, p_consumable_id integer, p_determination_id integer, p_price_type character varying, p_date date) OWNER TO postgres;
+
+--
+-- TOC entry 6049 (class 0 OID 0)
+-- Dependencies: 403
+-- Name: FUNCTION get_current_price(p_equipment_id integer, p_consumable_id integer, p_determination_id integer, p_price_type character varying, p_date date); Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON FUNCTION public.get_current_price(p_equipment_id integer, p_consumable_id integer, p_determination_id integer, p_price_type character varying, p_date date) IS 'Obtiene el precio vigente de un equipo, consumible o determinación en una fecha específica';
+
+
+--
+-- TOC entry 389 (class 1255 OID 17464)
 -- Name: log_personnel_request_status_change(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -153,7 +239,98 @@ $$;
 ALTER FUNCTION public.log_personnel_request_status_change() OWNER TO postgres;
 
 --
--- TOC entry 365 (class 1255 OID 17028)
+-- TOC entry 384 (class 1255 OID 27127)
+-- Name: mark_business_case_as_modern(uuid); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.mark_business_case_as_modern(p_business_case_id uuid) RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  UPDATE equipment_purchase_requests
+  SET 
+    uses_modern_system = true,
+    bc_system_type = 'modern',
+    updated_at = now()
+  WHERE id = p_business_case_id;
+END;
+$$;
+
+
+ALTER FUNCTION public.mark_business_case_as_modern(p_business_case_id uuid) OWNER TO postgres;
+
+--
+-- TOC entry 6050 (class 0 OID 0)
+-- Dependencies: 384
+-- Name: FUNCTION mark_business_case_as_modern(p_business_case_id uuid); Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON FUNCTION public.mark_business_case_as_modern(p_business_case_id uuid) IS 'Marca un Business Case como modernizado (ya no usa Google Sheets)';
+
+
+--
+-- TOC entry 405 (class 1255 OID 27128)
+-- Name: migrate_legacy_bc_to_modern(uuid); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.migrate_legacy_bc_to_modern(p_business_case_id uuid) RETURNS TABLE(success boolean, message text)
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  v_bc_exists BOOLEAN;
+  v_already_modern BOOLEAN;
+BEGIN
+  -- Verificar que el BC existe
+  SELECT EXISTS(SELECT 1 FROM equipment_purchase_requests WHERE id = p_business_case_id)
+  INTO v_bc_exists;
+  
+  IF NOT v_bc_exists THEN
+    RETURN QUERY SELECT false, 'Business Case no encontrado';
+    RETURN;
+  END IF;
+  
+  -- Verificar si ya es moderno
+  SELECT uses_modern_system INTO v_already_modern
+  FROM equipment_purchase_requests
+  WHERE id = p_business_case_id;
+  
+  IF v_already_modern THEN
+    RETURN QUERY SELECT false, 'Business Case ya está en sistema moderno';
+    RETURN;
+  END IF;
+  
+  -- Marcar como moderno
+  UPDATE equipment_purchase_requests
+  SET 
+    uses_modern_system = true,
+    bc_system_type = 'modern',
+    bc_spreadsheet_id = NULL,  -- Ya no se usará Google Sheets
+    bc_spreadsheet_url = NULL,
+    modern_bc_metadata = jsonb_build_object(
+      'migrated_from_legacy', true,
+      'migration_date', now()
+    ),
+    updated_at = now()
+  WHERE id = p_business_case_id;
+  
+  RETURN QUERY SELECT true, 'Business Case migrado exitosamente a sistema moderno';
+END;
+$$;
+
+
+ALTER FUNCTION public.migrate_legacy_bc_to_modern(p_business_case_id uuid) OWNER TO postgres;
+
+--
+-- TOC entry 6051 (class 0 OID 0)
+-- Dependencies: 405
+-- Name: FUNCTION migrate_legacy_bc_to_modern(p_business_case_id uuid); Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON FUNCTION public.migrate_legacy_bc_to_modern(p_business_case_id uuid) IS 'Migra un Business Case legacy (Google Sheets) al sistema modernizado';
+
+
+--
+-- TOC entry 385 (class 1255 OID 17028)
 -- Name: recalculate_inventory(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -184,7 +361,7 @@ $$;
 ALTER FUNCTION public.recalculate_inventory() OWNER TO postgres;
 
 --
--- TOC entry 366 (class 1255 OID 17193)
+-- TOC entry 386 (class 1255 OID 17193)
 -- Name: update_attendance_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -201,7 +378,24 @@ $$;
 ALTER FUNCTION public.update_attendance_timestamp() OWNER TO postgres;
 
 --
--- TOC entry 368 (class 1255 OID 17462)
+-- TOC entry 345 (class 1255 OID 27074)
+-- Name: update_calculation_templates_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.update_calculation_templates_timestamp() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.update_calculation_templates_timestamp() OWNER TO postgres;
+
+--
+-- TOC entry 388 (class 1255 OID 17462)
 -- Name: update_personnel_request_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -218,7 +412,7 @@ $$;
 ALTER FUNCTION public.update_personnel_request_timestamp() OWNER TO postgres;
 
 --
--- TOC entry 370 (class 1255 OID 26185)
+-- TOC entry 390 (class 1255 OID 26185)
 -- Name: update_remaining_quantity(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -236,7 +430,7 @@ $$;
 ALTER FUNCTION public.update_remaining_quantity() OWNER TO postgres;
 
 --
--- TOC entry 371 (class 1255 OID 26346)
+-- TOC entry 391 (class 1255 OID 26346)
 -- Name: update_tech_docs_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -253,7 +447,7 @@ $$;
 ALTER FUNCTION public.update_tech_docs_timestamp() OWNER TO postgres;
 
 --
--- TOC entry 364 (class 1255 OID 16402)
+-- TOC entry 383 (class 1255 OID 16402)
 -- Name: update_timestamp(); Type: FUNCTION; Schema: public; Owner: postgres
 --
 
@@ -269,7 +463,40 @@ END; $$;
 ALTER FUNCTION public.update_timestamp() OWNER TO postgres;
 
 --
--- TOC entry 326 (class 1255 OID 16403)
+-- TOC entry 406 (class 1255 OID 27129)
+-- Name: validate_bc_system_consistency(); Type: FUNCTION; Schema: public; Owner: postgres
+--
+
+CREATE FUNCTION public.validate_bc_system_consistency() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- Si usa sistema moderno, no debe tener spreadsheet_id
+  IF NEW.uses_modern_system = true AND NEW.bc_system_type = 'modern' THEN
+    IF NEW.bc_spreadsheet_id IS NOT NULL THEN
+      RAISE WARNING 'BC moderno no debe tener bc_spreadsheet_id, limpiando...';
+      NEW.bc_spreadsheet_id := NULL;
+      NEW.bc_spreadsheet_url := NULL;
+    END IF;
+  END IF;
+  
+  -- Si es legacy, debe tener spreadsheet_id (al menos para BCs creados con sheets)
+  IF NEW.uses_modern_system = false AND NEW.bc_system_type = 'legacy' THEN
+    -- No forzamos, pero logueamos si falta
+    IF NEW.bc_spreadsheet_id IS NULL THEN
+      RAISE NOTICE 'BC legacy sin bc_spreadsheet_id (puede ser intencional si es nuevo)';
+    END IF;
+  END IF;
+  
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION public.validate_bc_system_consistency() OWNER TO postgres;
+
+--
+-- TOC entry 344 (class 1255 OID 16403)
 -- Name: update_timestamp(); Type: FUNCTION; Schema: servicio; Owner: postgres
 --
 
@@ -319,7 +546,7 @@ CREATE TABLE auditoria.logs (
 ALTER TABLE auditoria.logs OWNER TO postgres;
 
 --
--- TOC entry 5874 (class 0 OID 0)
+-- TOC entry 6052 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: TABLE logs; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -328,7 +555,7 @@ COMMENT ON TABLE auditoria.logs IS 'Registra todas las acciones de usuarios del 
 
 
 --
--- TOC entry 5875 (class 0 OID 0)
+-- TOC entry 6053 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.usuario_email; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -337,7 +564,7 @@ COMMENT ON COLUMN auditoria.logs.usuario_email IS 'Correo del usuario que realiz
 
 
 --
--- TOC entry 5876 (class 0 OID 0)
+-- TOC entry 6054 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.modulo; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -346,7 +573,7 @@ COMMENT ON COLUMN auditoria.logs.modulo IS 'Módulo afectado (auth, solicitudes,
 
 
 --
--- TOC entry 5877 (class 0 OID 0)
+-- TOC entry 6055 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.accion; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -355,7 +582,7 @@ COMMENT ON COLUMN auditoria.logs.accion IS 'Tipo de acción (CREATE, UPDATE, DEL
 
 
 --
--- TOC entry 5878 (class 0 OID 0)
+-- TOC entry 6056 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.descripcion; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -364,7 +591,7 @@ COMMENT ON COLUMN auditoria.logs.descripcion IS 'Descripción amigable de la acc
 
 
 --
--- TOC entry 5879 (class 0 OID 0)
+-- TOC entry 6057 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.datos_anteriores; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -373,7 +600,7 @@ COMMENT ON COLUMN auditoria.logs.datos_anteriores IS 'JSON con los datos antes d
 
 
 --
--- TOC entry 5880 (class 0 OID 0)
+-- TOC entry 6058 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.datos_nuevos; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -382,7 +609,7 @@ COMMENT ON COLUMN auditoria.logs.datos_nuevos IS 'JSON con los datos después de
 
 
 --
--- TOC entry 5881 (class 0 OID 0)
+-- TOC entry 6059 (class 0 OID 0)
 -- Dependencies: 264
 -- Name: COLUMN logs.fecha; Type: COMMENT; Schema: auditoria; Owner: postgres
 --
@@ -407,7 +634,7 @@ CREATE SEQUENCE auditoria.logs_id_seq
 ALTER SEQUENCE auditoria.logs_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5882 (class 0 OID 0)
+-- TOC entry 6060 (class 0 OID 0)
 -- Dependencies: 263
 -- Name: logs_id_seq; Type: SEQUENCE OWNED BY; Schema: auditoria; Owner: postgres
 --
@@ -454,7 +681,7 @@ CREATE SEQUENCE public.advisor_location_history_id_seq
 ALTER SEQUENCE public.advisor_location_history_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5883 (class 0 OID 0)
+-- TOC entry 6061 (class 0 OID 0)
 -- Dependencies: 319
 -- Name: advisor_location_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -500,7 +727,7 @@ CREATE SEQUENCE public.audit_trail_id_seq
 ALTER SEQUENCE public.audit_trail_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5884 (class 0 OID 0)
+-- TOC entry 6062 (class 0 OID 0)
 -- Dependencies: 223
 -- Name: audit_trail_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -532,7 +759,7 @@ CREATE TABLE public.bc_alerts (
 ALTER TABLE public.bc_alerts OWNER TO postgres;
 
 --
--- TOC entry 5885 (class 0 OID 0)
+-- TOC entry 6063 (class 0 OID 0)
 -- Dependencies: 306
 -- Name: TABLE bc_alerts; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -541,7 +768,7 @@ COMMENT ON TABLE public.bc_alerts IS 'Alertas automáticas para Business Cases';
 
 
 --
--- TOC entry 5886 (class 0 OID 0)
+-- TOC entry 6064 (class 0 OID 0)
 -- Dependencies: 306
 -- Name: COLUMN bc_alerts.alert_type; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -550,7 +777,7 @@ COMMENT ON COLUMN public.bc_alerts.alert_type IS 'Tipo: low_inventory, product_d
 
 
 --
--- TOC entry 5887 (class 0 OID 0)
+-- TOC entry 6065 (class 0 OID 0)
 -- Dependencies: 306
 -- Name: COLUMN bc_alerts.severity; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -575,12 +802,403 @@ CREATE SEQUENCE public.bc_alerts_id_seq
 ALTER SEQUENCE public.bc_alerts_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5888 (class 0 OID 0)
+-- TOC entry 6066 (class 0 OID 0)
 -- Dependencies: 305
 -- Name: bc_alerts_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.bc_alerts_id_seq OWNED BY public.bc_alerts.id;
+
+
+--
+-- TOC entry 334 (class 1259 OID 27009)
+-- Name: bc_audit_log; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.bc_audit_log (
+    id integer NOT NULL,
+    business_case_id uuid NOT NULL,
+    action character varying(100) NOT NULL,
+    entity_type character varying(50),
+    entity_id integer,
+    before_value jsonb,
+    after_value jsonb,
+    changed_by integer,
+    changed_at timestamp with time zone DEFAULT now(),
+    ip_address character varying(64),
+    user_agent text
+);
+
+
+ALTER TABLE public.bc_audit_log OWNER TO postgres;
+
+--
+-- TOC entry 6067 (class 0 OID 0)
+-- Dependencies: 334
+-- Name: TABLE bc_audit_log; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.bc_audit_log IS 'Registro completo de auditoría de todos los cambios en Business Cases';
+
+
+--
+-- TOC entry 6068 (class 0 OID 0)
+-- Dependencies: 334
+-- Name: COLUMN bc_audit_log.action; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_audit_log.action IS 'Acción realizada: equipment_selected, determination_added, calculation_run, etc.';
+
+
+--
+-- TOC entry 333 (class 1259 OID 27008)
+-- Name: bc_audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bc_audit_log_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.bc_audit_log_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6069 (class 0 OID 0)
+-- Dependencies: 333
+-- Name: bc_audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.bc_audit_log_id_seq OWNED BY public.bc_audit_log.id;
+
+
+--
+-- TOC entry 330 (class 1259 OID 26943)
+-- Name: bc_calculations; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.bc_calculations (
+    id integer NOT NULL,
+    business_case_id uuid NOT NULL,
+    total_monthly_tests integer DEFAULT 0,
+    total_reagent_consumption numeric(12,4) DEFAULT 0,
+    total_monthly_cost numeric(12,2) DEFAULT 0,
+    annual_projection numeric(12,2) DEFAULT 0,
+    equipment_utilization_percentage numeric(5,2) DEFAULT 0,
+    capacity_exceeded boolean DEFAULT false,
+    underutilized boolean DEFAULT false,
+    cost_per_test numeric(10,2) DEFAULT 0,
+    roi_months integer,
+    break_even_date date,
+    warnings jsonb DEFAULT '[]'::jsonb,
+    recommendations jsonb DEFAULT '[]'::jsonb,
+    calculated_at timestamp with time zone DEFAULT now(),
+    calculation_version integer DEFAULT 1,
+    calculation_engine character varying(50) DEFAULT 'v1.0'::character varying
+);
+
+
+ALTER TABLE public.bc_calculations OWNER TO postgres;
+
+--
+-- TOC entry 6070 (class 0 OID 0)
+-- Dependencies: 330
+-- Name: TABLE bc_calculations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.bc_calculations IS 'Cálculos consolidados del Business Case - reemplaza todas las fórmulas de Excel';
+
+
+--
+-- TOC entry 6071 (class 0 OID 0)
+-- Dependencies: 330
+-- Name: COLUMN bc_calculations.equipment_utilization_percentage; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_calculations.equipment_utilization_percentage IS '% de utilización del equipo basado en capacidad máxima';
+
+
+--
+-- TOC entry 6072 (class 0 OID 0)
+-- Dependencies: 330
+-- Name: COLUMN bc_calculations.warnings; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_calculations.warnings IS 'JSON array con advertencias (ej: capacidad excedida, bajo uso)';
+
+
+--
+-- TOC entry 6073 (class 0 OID 0)
+-- Dependencies: 330
+-- Name: COLUMN bc_calculations.recommendations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_calculations.recommendations IS 'JSON array con recomendaciones automáticas';
+
+
+--
+-- TOC entry 6074 (class 0 OID 0)
+-- Dependencies: 330
+-- Name: COLUMN bc_calculations.calculation_version; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_calculations.calculation_version IS 'Versión del cálculo, se incrementa cada vez que se recalcula';
+
+
+--
+-- TOC entry 329 (class 1259 OID 26942)
+-- Name: bc_calculations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bc_calculations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.bc_calculations_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6075 (class 0 OID 0)
+-- Dependencies: 329
+-- Name: bc_calculations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.bc_calculations_id_seq OWNED BY public.bc_calculations.id;
+
+
+--
+-- TOC entry 328 (class 1259 OID 26912)
+-- Name: bc_determinations; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.bc_determinations (
+    id integer NOT NULL,
+    business_case_id uuid NOT NULL,
+    determination_id integer NOT NULL,
+    monthly_quantity integer NOT NULL,
+    calculated_consumption numeric(12,4),
+    calculated_cost numeric(12,2),
+    calculation_details jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    added_by integer,
+    CONSTRAINT bc_determinations_monthly_quantity_check CHECK ((monthly_quantity > 0))
+);
+
+
+ALTER TABLE public.bc_determinations OWNER TO postgres;
+
+--
+-- TOC entry 6076 (class 0 OID 0)
+-- Dependencies: 328
+-- Name: TABLE bc_determinations; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.bc_determinations IS 'Determinaciones solicitadas en cada Business Case con cantidades y cálculosautomáticos';
+
+
+--
+-- TOC entry 6077 (class 0 OID 0)
+-- Dependencies: 328
+-- Name: COLUMN bc_determinations.monthly_quantity; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_determinations.monthly_quantity IS 'Cantidad mensual solicitada por el cliente';
+
+
+--
+-- TOC entry 6078 (class 0 OID 0)
+-- Dependencies: 328
+-- Name: COLUMN bc_determinations.calculated_consumption; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_determinations.calculated_consumption IS 'Consumo total de reactivos calculado automáticamente';
+
+
+--
+-- TOC entry 6079 (class 0 OID 0)
+-- Dependencies: 328
+-- Name: COLUMN bc_determinations.calculated_cost; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_determinations.calculated_cost IS 'Costo total calculado automáticamente por el motor';
+
+
+--
+-- TOC entry 6080 (class 0 OID 0)
+-- Dependencies: 328
+-- Name: COLUMN bc_determinations.calculation_details; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_determinations.calculation_details IS 'JSON con detalles del cálculo (fórmulas, factores, etc.)';
+
+
+--
+-- TOC entry 327 (class 1259 OID 26911)
+-- Name: bc_determinations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bc_determinations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.bc_determinations_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6081 (class 0 OID 0)
+-- Dependencies: 327
+-- Name: bc_determinations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.bc_determinations_id_seq OWNED BY public.bc_determinations.id;
+
+
+--
+-- TOC entry 326 (class 1259 OID 26886)
+-- Name: bc_equipment_selection; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.bc_equipment_selection (
+    id integer NOT NULL,
+    business_case_id uuid NOT NULL,
+    equipment_id integer NOT NULL,
+    is_primary boolean DEFAULT true,
+    selected_at timestamp with time zone DEFAULT now(),
+    selected_by integer
+);
+
+
+ALTER TABLE public.bc_equipment_selection OWNER TO postgres;
+
+--
+-- TOC entry 6082 (class 0 OID 0)
+-- Dependencies: 326
+-- Name: TABLE bc_equipment_selection; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.bc_equipment_selection IS 'Equipos seleccionados en cada Business Case (principal y backup)';
+
+
+--
+-- TOC entry 6083 (class 0 OID 0)
+-- Dependencies: 326
+-- Name: COLUMN bc_equipment_selection.is_primary; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.bc_equipment_selection.is_primary IS 'true = equipo principal, false = equipo de respaldo';
+
+
+--
+-- TOC entry 325 (class 1259 OID 26885)
+-- Name: bc_equipment_selection_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.bc_equipment_selection_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.bc_equipment_selection_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6084 (class 0 OID 0)
+-- Dependencies: 325
+-- Name: bc_equipment_selection_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.bc_equipment_selection_id_seq OWNED BY public.bc_equipment_selection.id;
+
+
+--
+-- TOC entry 338 (class 1259 OID 27049)
+-- Name: calculation_templates; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.calculation_templates (
+    id integer NOT NULL,
+    name character varying(255) NOT NULL,
+    description text,
+    formula jsonb NOT NULL,
+    category character varying(100),
+    required_variables jsonb DEFAULT '[]'::jsonb,
+    example_input jsonb,
+    example_output numeric(12,4),
+    created_by integer,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    version character varying(10) DEFAULT '1.0'::character varying,
+    is_active boolean DEFAULT true
+);
+
+
+ALTER TABLE public.calculation_templates OWNER TO postgres;
+
+--
+-- TOC entry 6085 (class 0 OID 0)
+-- Dependencies: 338
+-- Name: TABLE calculation_templates; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.calculation_templates IS 'Plantillas reutilizables de fórmulas de cálculo';
+
+
+--
+-- TOC entry 6086 (class 0 OID 0)
+-- Dependencies: 338
+-- Name: COLUMN calculation_templates.formula; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.calculation_templates.formula IS 'Fórmula en formato JSON {type, expression, variables}';
+
+
+--
+-- TOC entry 6087 (class 0 OID 0)
+-- Dependencies: 338
+-- Name: COLUMN calculation_templates.required_variables; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.calculation_templates.required_variables IS 'Array JSON con nombres de variables obligatorias';
+
+
+--
+-- TOC entry 337 (class 1259 OID 27048)
+-- Name: calculation_templates_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.calculation_templates_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.calculation_templates_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6088 (class 0 OID 0)
+-- Dependencies: 337
+-- Name: calculation_templates_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.calculation_templates_id_seq OWNED BY public.calculation_templates.id;
 
 
 --
@@ -603,6 +1221,11 @@ CREATE TABLE public.catalog_consumables (
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     performance jsonb DEFAULT '{}'::jsonb,
     metadata jsonb DEFAULT '{}'::jsonb,
+    yield_per_unit integer,
+    reorder_point integer,
+    lead_time_days integer,
+    supplier character varying(255),
+    supplier_code character varying(100),
     CONSTRAINT catalog_consumables_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'discontinuado'::character varying])::text[]))),
     CONSTRAINT catalog_consumables_type_check CHECK (((type)::text = ANY ((ARRAY['reactivo'::character varying, 'calibrador'::character varying, 'control'::character varying, 'diluyente'::character varying, 'material'::character varying])::text[])))
 );
@@ -611,7 +1234,7 @@ CREATE TABLE public.catalog_consumables (
 ALTER TABLE public.catalog_consumables OWNER TO postgres;
 
 --
--- TOC entry 5889 (class 0 OID 0)
+-- TOC entry 6089 (class 0 OID 0)
 -- Dependencies: 298
 -- Name: TABLE catalog_consumables; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -620,7 +1243,7 @@ COMMENT ON TABLE public.catalog_consumables IS 'Catálogo de consumibles (reacti
 
 
 --
--- TOC entry 5890 (class 0 OID 0)
+-- TOC entry 6090 (class 0 OID 0)
 -- Dependencies: 298
 -- Name: COLUMN catalog_consumables.units_per_kit; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -629,12 +1252,30 @@ COMMENT ON COLUMN public.catalog_consumables.units_per_kit IS 'Unidades/determin
 
 
 --
--- TOC entry 5891 (class 0 OID 0)
+-- TOC entry 6091 (class 0 OID 0)
 -- Dependencies: 298
 -- Name: COLUMN catalog_consumables.performance; Type: COMMENT; Schema: public; Owner: postgres
 --
 
 COMMENT ON COLUMN public.catalog_consumables.performance IS 'Rendimiento por determinación en formato JSON';
+
+
+--
+-- TOC entry 6092 (class 0 OID 0)
+-- Dependencies: 298
+-- Name: COLUMN catalog_consumables.yield_per_unit; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_consumables.yield_per_unit IS 'Número de determinaciones que rinde una unidad de consumible';
+
+
+--
+-- TOC entry 6093 (class 0 OID 0)
+-- Dependencies: 298
+-- Name: COLUMN catalog_consumables.reorder_point; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_consumables.reorder_point IS 'Punto de reorden para inventario';
 
 
 --
@@ -654,7 +1295,7 @@ CREATE SEQUENCE public.catalog_consumables_id_seq
 ALTER SEQUENCE public.catalog_consumables_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5892 (class 0 OID 0)
+-- TOC entry 6094 (class 0 OID 0)
 -- Dependencies: 297
 -- Name: catalog_consumables_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -681,6 +1322,18 @@ CREATE TABLE public.catalog_determinations (
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     metadata jsonb DEFAULT '{}'::jsonb,
+    volume_per_test numeric(10,4),
+    reagent_consumption numeric(10,4),
+    processing_time integer,
+    wash_cycles integer DEFAULT 0,
+    blank_required boolean DEFAULT false,
+    calibration_frequency integer,
+    cost_per_test numeric(10,2),
+    subcategory character varying(100),
+    calculation_formula jsonb,
+    formula_version character varying(10) DEFAULT '1.0'::character varying,
+    formula_type character varying(50) DEFAULT 'default'::character varying,
+    CONSTRAINT catalog_determinations_formula_type_check CHECK (((formula_type)::text = ANY ((ARRAY['default'::character varying, 'custom'::character varying, 'template'::character varying])::text[]))),
     CONSTRAINT catalog_determinations_status_check CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'discontinuado'::character varying])::text[])))
 );
 
@@ -688,7 +1341,7 @@ CREATE TABLE public.catalog_determinations (
 ALTER TABLE public.catalog_determinations OWNER TO postgres;
 
 --
--- TOC entry 5893 (class 0 OID 0)
+-- TOC entry 6095 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: TABLE catalog_determinations; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -697,7 +1350,7 @@ COMMENT ON TABLE public.catalog_determinations IS 'Catálogo de determinaciones 
 
 
 --
--- TOC entry 5894 (class 0 OID 0)
+-- TOC entry 6096 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN catalog_determinations.valid_from; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -706,12 +1359,75 @@ COMMENT ON COLUMN public.catalog_determinations.valid_from IS 'Fecha desde la cu
 
 
 --
--- TOC entry 5895 (class 0 OID 0)
+-- TOC entry 6097 (class 0 OID 0)
 -- Dependencies: 296
 -- Name: COLUMN catalog_determinations.valid_to; Type: COMMENT; Schema: public; Owner: postgres
 --
 
 COMMENT ON COLUMN public.catalog_determinations.valid_to IS 'Fecha hasta la cual esta versión es válida (NULL si aún vigente)';
+
+
+--
+-- TOC entry 6098 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.volume_per_test; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.volume_per_test IS 'Volumen de muestra requerido por prueba en mL';
+
+
+--
+-- TOC entry 6099 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.reagent_consumption; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.reagent_consumption IS 'Consumo de reactivo por prueba en mL - reemplaza fórmulas Excel';
+
+
+--
+-- TOC entry 6100 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.processing_time; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.processing_time IS 'Tiempo de procesamiento en segundos';
+
+
+--
+-- TOC entry 6101 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.cost_per_test; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.cost_per_test IS 'Costo directo por prueba calculado';
+
+
+--
+-- TOC entry 6102 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.calculation_formula; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.calculation_formula IS 'Fórmula personalizada de cálculo en formato JSON';
+
+
+--
+-- TOC entry 6103 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.formula_version; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.formula_version IS 'Versión de la fórmula para control de cambios';
+
+
+--
+-- TOC entry 6104 (class 0 OID 0)
+-- Dependencies: 296
+-- Name: COLUMN catalog_determinations.formula_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.catalog_determinations.formula_type IS 'default=fórmula estándar, custom=personalizada, template=basada en plantilla';
 
 
 --
@@ -731,7 +1447,7 @@ CREATE SEQUENCE public.catalog_determinations_id_seq
 ALTER SEQUENCE public.catalog_determinations_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5896 (class 0 OID 0)
+-- TOC entry 6105 (class 0 OID 0)
 -- Dependencies: 295
 -- Name: catalog_determinations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -757,7 +1473,7 @@ CREATE TABLE public.catalog_equipment_consumables (
 ALTER TABLE public.catalog_equipment_consumables OWNER TO postgres;
 
 --
--- TOC entry 5897 (class 0 OID 0)
+-- TOC entry 6106 (class 0 OID 0)
 -- Dependencies: 300
 -- Name: TABLE catalog_equipment_consumables; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -766,7 +1482,7 @@ COMMENT ON TABLE public.catalog_equipment_consumables IS 'Relación entre equipo
 
 
 --
--- TOC entry 5898 (class 0 OID 0)
+-- TOC entry 6107 (class 0 OID 0)
 -- Dependencies: 300
 -- Name: COLUMN catalog_equipment_consumables.consumption_rate; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -791,7 +1507,7 @@ CREATE SEQUENCE public.catalog_equipment_consumables_id_seq
 ALTER SEQUENCE public.catalog_equipment_consumables_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5899 (class 0 OID 0)
+-- TOC entry 6108 (class 0 OID 0)
 -- Dependencies: 299
 -- Name: catalog_equipment_consumables_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -824,7 +1540,7 @@ CREATE TABLE public.catalog_investments (
 ALTER TABLE public.catalog_investments OWNER TO postgres;
 
 --
--- TOC entry 5900 (class 0 OID 0)
+-- TOC entry 6109 (class 0 OID 0)
 -- Dependencies: 308
 -- Name: TABLE catalog_investments; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -833,7 +1549,7 @@ COMMENT ON TABLE public.catalog_investments IS 'Catálogo de inversiones adicion
 
 
 --
--- TOC entry 5901 (class 0 OID 0)
+-- TOC entry 6110 (class 0 OID 0)
 -- Dependencies: 308
 -- Name: COLUMN catalog_investments.requires_lis; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -842,7 +1558,7 @@ COMMENT ON COLUMN public.catalog_investments.requires_lis IS 'TRUE si esta inver
 
 
 --
--- TOC entry 5902 (class 0 OID 0)
+-- TOC entry 6111 (class 0 OID 0)
 -- Dependencies: 308
 -- Name: COLUMN catalog_investments.requires_equipment; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -867,7 +1583,7 @@ CREATE SEQUENCE public.catalog_investments_id_seq
 ALTER SEQUENCE public.catalog_investments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5903 (class 0 OID 0)
+-- TOC entry 6112 (class 0 OID 0)
 -- Dependencies: 307
 -- Name: catalog_investments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -908,7 +1624,7 @@ CREATE SEQUENCE public.client_assignments_id_seq
 ALTER SEQUENCE public.client_assignments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5904 (class 0 OID 0)
+-- TOC entry 6113 (class 0 OID 0)
 -- Dependencies: 291
 -- Name: client_assignments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -984,7 +1700,7 @@ CREATE SEQUENCE public.client_request_consents_id_seq
 ALTER SEQUENCE public.client_request_consents_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5905 (class 0 OID 0)
+-- TOC entry 6114 (class 0 OID 0)
 -- Dependencies: 268
 -- Name: client_request_consents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1063,7 +1779,7 @@ CREATE TABLE public.client_requests (
 ALTER TABLE public.client_requests OWNER TO postgres;
 
 --
--- TOC entry 5906 (class 0 OID 0)
+-- TOC entry 6115 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.rejection_reason; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1072,7 +1788,7 @@ COMMENT ON COLUMN public.client_requests.rejection_reason IS 'Motivo del rechazo
 
 
 --
--- TOC entry 5907 (class 0 OID 0)
+-- TOC entry 6116 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.data_processing_consent; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1081,7 +1797,7 @@ COMMENT ON COLUMN public.client_requests.data_processing_consent IS 'Aceptación
 
 
 --
--- TOC entry 5908 (class 0 OID 0)
+-- TOC entry 6117 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.establishment_name; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1090,7 +1806,7 @@ COMMENT ON COLUMN public.client_requests.establishment_name IS 'Nombre del estab
 
 
 --
--- TOC entry 5909 (class 0 OID 0)
+-- TOC entry 6118 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.consent_capture_method; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1099,7 +1815,7 @@ COMMENT ON COLUMN public.client_requests.consent_capture_method IS 'Método plan
 
 
 --
--- TOC entry 5910 (class 0 OID 0)
+-- TOC entry 6119 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.lopdp_consent_method; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1108,7 +1824,7 @@ COMMENT ON COLUMN public.client_requests.lopdp_consent_method IS 'Método real u
 
 
 --
--- TOC entry 5911 (class 0 OID 0)
+-- TOC entry 6120 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.consent_recipient_email; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1117,7 +1833,7 @@ COMMENT ON COLUMN public.client_requests.consent_recipient_email IS 'Correo al q
 
 
 --
--- TOC entry 5912 (class 0 OID 0)
+-- TOC entry 6121 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.consent_email_token_id; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1126,7 +1842,7 @@ COMMENT ON COLUMN public.client_requests.consent_email_token_id IS 'Token OTP ve
 
 
 --
--- TOC entry 5913 (class 0 OID 0)
+-- TOC entry 6122 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.approval_status; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1135,7 +1851,7 @@ COMMENT ON COLUMN public.client_requests.approval_status IS 'Estado de aprobaci�
 
 
 --
--- TOC entry 5914 (class 0 OID 0)
+-- TOC entry 6123 (class 0 OID 0)
 -- Dependencies: 267
 -- Name: COLUMN client_requests.client_sector; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1160,7 +1876,7 @@ CREATE SEQUENCE public.client_requests_id_seq
 ALTER SEQUENCE public.client_requests_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5915 (class 0 OID 0)
+-- TOC entry 6124 (class 0 OID 0)
 -- Dependencies: 266
 -- Name: client_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1212,7 +1928,7 @@ CREATE SEQUENCE public.client_visit_logs_id_seq
 ALTER SEQUENCE public.client_visit_logs_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5916 (class 0 OID 0)
+-- TOC entry 6125 (class 0 OID 0)
 -- Dependencies: 293
 -- Name: client_visit_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1263,7 +1979,7 @@ CREATE TABLE public.clients (
 ALTER TABLE public.clients OWNER TO postgres;
 
 --
--- TOC entry 5917 (class 0 OID 0)
+-- TOC entry 6126 (class 0 OID 0)
 -- Dependencies: 276
 -- Name: TABLE clients; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1272,7 +1988,7 @@ COMMENT ON TABLE public.clients IS 'Clientes aprobados con datos encriptados par
 
 
 --
--- TOC entry 5918 (class 0 OID 0)
+-- TOC entry 6127 (class 0 OID 0)
 -- Dependencies: 276
 -- Name: COLUMN clients.ruc_hash; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1281,7 +1997,7 @@ COMMENT ON COLUMN public.clients.ruc_hash IS 'Hash SHA-256 del RUC para búsqued
 
 
 --
--- TOC entry 5919 (class 0 OID 0)
+-- TOC entry 6128 (class 0 OID 0)
 -- Dependencies: 276
 -- Name: COLUMN clients.client_sector; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1306,7 +2022,7 @@ CREATE SEQUENCE public.clients_id_seq
 ALTER SEQUENCE public.clients_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5920 (class 0 OID 0)
+-- TOC entry 6129 (class 0 OID 0)
 -- Dependencies: 275
 -- Name: clients_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1343,7 +2059,7 @@ CREATE TABLE public.contract_determinations (
 ALTER TABLE public.contract_determinations OWNER TO postgres;
 
 --
--- TOC entry 5921 (class 0 OID 0)
+-- TOC entry 6130 (class 0 OID 0)
 -- Dependencies: 302
 -- Name: TABLE contract_determinations; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1352,7 +2068,7 @@ COMMENT ON TABLE public.contract_determinations IS 'Inventario de determinacione
 
 
 --
--- TOC entry 5922 (class 0 OID 0)
+-- TOC entry 6131 (class 0 OID 0)
 -- Dependencies: 302
 -- Name: COLUMN contract_determinations.alert_threshold_yellow; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1361,7 +2077,7 @@ COMMENT ON COLUMN public.contract_determinations.alert_threshold_yellow IS 'Porc
 
 
 --
--- TOC entry 5923 (class 0 OID 0)
+-- TOC entry 6132 (class 0 OID 0)
 -- Dependencies: 302
 -- Name: COLUMN contract_determinations.alert_threshold_red; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1386,7 +2102,7 @@ CREATE SEQUENCE public.contract_determinations_id_seq
 ALTER SEQUENCE public.contract_determinations_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5924 (class 0 OID 0)
+-- TOC entry 6133 (class 0 OID 0)
 -- Dependencies: 301
 -- Name: contract_determinations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1428,7 +2144,7 @@ CREATE SEQUENCE public.departments_id_seq
 ALTER SEQUENCE public.departments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5925 (class 0 OID 0)
+-- TOC entry 6134 (class 0 OID 0)
 -- Dependencies: 261
 -- Name: departments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1458,7 +2174,7 @@ CREATE TABLE public.determination_consumption_log (
 ALTER TABLE public.determination_consumption_log OWNER TO postgres;
 
 --
--- TOC entry 5926 (class 0 OID 0)
+-- TOC entry 6135 (class 0 OID 0)
 -- Dependencies: 304
 -- Name: TABLE determination_consumption_log; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1467,7 +2183,7 @@ COMMENT ON TABLE public.determination_consumption_log IS 'Registro histórico de
 
 
 --
--- TOC entry 5927 (class 0 OID 0)
+-- TOC entry 6136 (class 0 OID 0)
 -- Dependencies: 304
 -- Name: COLUMN determination_consumption_log.source; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1492,7 +2208,7 @@ CREATE SEQUENCE public.determination_consumption_log_id_seq
 ALTER SEQUENCE public.determination_consumption_log_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5928 (class 0 OID 0)
+-- TOC entry 6137 (class 0 OID 0)
 -- Dependencies: 303
 -- Name: determination_consumption_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1518,7 +2234,7 @@ CREATE TABLE public.document_signatures (
 ALTER TABLE public.document_signatures OWNER TO postgres;
 
 --
--- TOC entry 5929 (class 0 OID 0)
+-- TOC entry 6138 (class 0 OID 0)
 -- Dependencies: 224
 -- Name: TABLE document_signatures; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1542,7 +2258,7 @@ CREATE SEQUENCE public.document_signatures_id_seq
 ALTER SEQUENCE public.document_signatures_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5930 (class 0 OID 0)
+-- TOC entry 6139 (class 0 OID 0)
 -- Dependencies: 225
 -- Name: document_signatures_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1572,7 +2288,7 @@ CREATE TABLE public.documents (
 ALTER TABLE public.documents OWNER TO postgres;
 
 --
--- TOC entry 5931 (class 0 OID 0)
+-- TOC entry 6140 (class 0 OID 0)
 -- Dependencies: 226
 -- Name: TABLE documents; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1596,7 +2312,7 @@ CREATE SEQUENCE public.documents_id_seq
 ALTER SEQUENCE public.documents_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5932 (class 0 OID 0)
+-- TOC entry 6141 (class 0 OID 0)
 -- Dependencies: 227
 -- Name: documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1640,12 +2356,79 @@ CREATE SEQUENCE public.employees_id_seq
 ALTER SEQUENCE public.employees_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5933 (class 0 OID 0)
+-- TOC entry 6142 (class 0 OID 0)
 -- Dependencies: 229
 -- Name: employees_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.employees_id_seq OWNED BY public.employees.id;
+
+
+--
+-- TOC entry 332 (class 1259 OID 26970)
+-- Name: equipment_price_history; Type: TABLE; Schema: public; Owner: postgres
+--
+
+CREATE TABLE public.equipment_price_history (
+    id integer NOT NULL,
+    equipment_id integer,
+    consumable_id integer,
+    determination_id integer,
+    price numeric(12,2) NOT NULL,
+    price_type character varying(50) NOT NULL,
+    effective_from date NOT NULL,
+    effective_to date,
+    changed_by integer,
+    reason text,
+    created_at timestamp with time zone DEFAULT now(),
+    CONSTRAINT equipment_price_history_check CHECK ((((equipment_id IS NOT NULL) AND (consumable_id IS NULL) AND (determination_id IS NULL)) OR ((equipment_id IS NULL) AND (consumable_id IS NOT NULL) AND (determination_id IS NULL)) OR ((equipment_id IS NULL) AND (consumable_id IS NULL) AND (determination_id IS NOT NULL)))),
+    CONSTRAINT equipment_price_history_price_type_check CHECK (((price_type)::text = ANY ((ARRAY['base_price'::character varying, 'unit_price'::character varying, 'cost_per_test'::character varying, 'maintenance'::character varying])::text[])))
+);
+
+
+ALTER TABLE public.equipment_price_history OWNER TO postgres;
+
+--
+-- TOC entry 6143 (class 0 OID 0)
+-- Dependencies: 332
+-- Name: TABLE equipment_price_history; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON TABLE public.equipment_price_history IS 'Historial completo de cambios de precios para trazabilidad';
+
+
+--
+-- TOC entry 6144 (class 0 OID 0)
+-- Dependencies: 332
+-- Name: COLUMN equipment_price_history.price_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_price_history.price_type IS 'Tipo de precio: base_price, unit_price, cost_per_test, maintenance';
+
+
+--
+-- TOC entry 331 (class 1259 OID 26969)
+-- Name: equipment_price_history_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
+--
+
+CREATE SEQUENCE public.equipment_price_history_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.equipment_price_history_id_seq OWNER TO postgres;
+
+--
+-- TOC entry 6145 (class 0 OID 0)
+-- Dependencies: 331
+-- Name: equipment_price_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
+--
+
+ALTER SEQUENCE public.equipment_price_history_id_seq OWNED BY public.equipment_price_history.id;
 
 
 --
@@ -1730,14 +2513,18 @@ CREATE TABLE public.equipment_purchase_requests (
     process_doc_id text,
     process_doc_url text,
     process_doc_created_at timestamp with time zone,
-    request_type text DEFAULT 'purchase'::text
+    request_type text DEFAULT 'purchase'::text,
+    uses_modern_system boolean DEFAULT false,
+    bc_system_type character varying(50) DEFAULT 'legacy'::character varying,
+    modern_bc_metadata jsonb DEFAULT '{}'::jsonb,
+    CONSTRAINT equipment_purchase_requests_bc_system_type_check CHECK (((bc_system_type)::text = ANY ((ARRAY['legacy'::character varying, 'modern'::character varying])::text[])))
 );
 
 
 ALTER TABLE public.equipment_purchase_requests OWNER TO postgres;
 
 --
--- TOC entry 5934 (class 0 OID 0)
+-- TOC entry 6146 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.equipment_type; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1746,7 +2533,7 @@ COMMENT ON COLUMN public.equipment_purchase_requests.equipment_type IS 'Tipo de 
 
 
 --
--- TOC entry 5935 (class 0 OID 0)
+-- TOC entry 6147 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.reservation_expires_at; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1755,7 +2542,7 @@ COMMENT ON COLUMN public.equipment_purchase_requests.reservation_expires_at IS '
 
 
 --
--- TOC entry 5936 (class 0 OID 0)
+-- TOC entry 6148 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.reservation_renewed_at; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1764,7 +2551,7 @@ COMMENT ON COLUMN public.equipment_purchase_requests.reservation_renewed_at IS '
 
 
 --
--- TOC entry 5937 (class 0 OID 0)
+-- TOC entry 6149 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.reservation_renewal_count; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1773,7 +2560,7 @@ COMMENT ON COLUMN public.equipment_purchase_requests.reservation_renewal_count I
 
 
 --
--- TOC entry 5938 (class 0 OID 0)
+-- TOC entry 6150 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.cancelled_at; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -1782,12 +2569,39 @@ COMMENT ON COLUMN public.equipment_purchase_requests.cancelled_at IS 'Fecha de c
 
 
 --
--- TOC entry 5939 (class 0 OID 0)
+-- TOC entry 6151 (class 0 OID 0)
 -- Dependencies: 279
 -- Name: COLUMN equipment_purchase_requests.cancellation_reason; Type: COMMENT; Schema: public; Owner: postgres
 --
 
 COMMENT ON COLUMN public.equipment_purchase_requests.cancellation_reason IS 'Razón de la cancelación (manual, auto-expiración, etc)';
+
+
+--
+-- TOC entry 6152 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.uses_modern_system; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.uses_modern_system IS 'true = usa sistema modernizado (BD), false = usa Google Sheets (legacy)';
+
+
+--
+-- TOC entry 6153 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.bc_system_type; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.bc_system_type IS 'Tipo de sistema: legacy (Google Sheets) o modern (nuevo sistema con motor de cálculos)';
+
+
+--
+-- TOC entry 6154 (class 0 OID 0)
+-- Dependencies: 279
+-- Name: COLUMN equipment_purchase_requests.modern_bc_metadata; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON COLUMN public.equipment_purchase_requests.modern_bc_metadata IS 'Metadata adicional para BCs modernos (configuraciones, flags, etc.)';
 
 
 --
@@ -1824,7 +2638,7 @@ CREATE SEQUENCE public.inventory_id_seq
 ALTER SEQUENCE public.inventory_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5940 (class 0 OID 0)
+-- TOC entry 6155 (class 0 OID 0)
 -- Dependencies: 231
 -- Name: inventory_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1870,7 +2684,7 @@ CREATE SEQUENCE public.inventory_movements_id_seq
 ALTER SEQUENCE public.inventory_movements_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5941 (class 0 OID 0)
+-- TOC entry 6156 (class 0 OID 0)
 -- Dependencies: 233
 -- Name: inventory_movements_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1944,7 +2758,7 @@ CREATE SEQUENCE public.permisos_vacaciones_id_seq
 ALTER SEQUENCE public.permisos_vacaciones_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5942 (class 0 OID 0)
+-- TOC entry 6157 (class 0 OID 0)
 -- Dependencies: 323
 -- Name: permisos_vacaciones_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -1986,7 +2800,7 @@ CREATE SEQUENCE public.personnel_request_comments_id_seq
 ALTER SEQUENCE public.personnel_request_comments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5943 (class 0 OID 0)
+-- TOC entry 6158 (class 0 OID 0)
 -- Dependencies: 284
 -- Name: personnel_request_comments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2029,7 +2843,7 @@ CREATE SEQUENCE public.personnel_request_history_id_seq
 ALTER SEQUENCE public.personnel_request_history_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5944 (class 0 OID 0)
+-- TOC entry 6159 (class 0 OID 0)
 -- Dependencies: 282
 -- Name: personnel_request_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2097,7 +2911,7 @@ CREATE TABLE public.personnel_requests (
 ALTER TABLE public.personnel_requests OWNER TO postgres;
 
 --
--- TOC entry 5945 (class 0 OID 0)
+-- TOC entry 6160 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: TABLE personnel_requests; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2106,7 +2920,7 @@ COMMENT ON TABLE public.personnel_requests IS 'Solicitudes de personal con perfi
 
 
 --
--- TOC entry 5946 (class 0 OID 0)
+-- TOC entry 6161 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: COLUMN personnel_requests.position_type; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2115,7 +2929,7 @@ COMMENT ON COLUMN public.personnel_requests.position_type IS 'Tipo de contrataci
 
 
 --
--- TOC entry 5947 (class 0 OID 0)
+-- TOC entry 6162 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: COLUMN personnel_requests.urgency_level; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2124,7 +2938,7 @@ COMMENT ON COLUMN public.personnel_requests.urgency_level IS 'Nivel de urgencia:
 
 
 --
--- TOC entry 5948 (class 0 OID 0)
+-- TOC entry 6163 (class 0 OID 0)
 -- Dependencies: 281
 -- Name: COLUMN personnel_requests.status; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2149,7 +2963,7 @@ CREATE SEQUENCE public.personnel_requests_id_seq
 ALTER SEQUENCE public.personnel_requests_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5949 (class 0 OID 0)
+-- TOC entry 6164 (class 0 OID 0)
 -- Dependencies: 280
 -- Name: personnel_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2194,7 +3008,7 @@ CREATE SEQUENCE public.request_approvals_id_seq
 ALTER SEQUENCE public.request_approvals_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5950 (class 0 OID 0)
+-- TOC entry 6165 (class 0 OID 0)
 -- Dependencies: 235
 -- Name: request_approvals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2241,7 +3055,7 @@ CREATE SEQUENCE public.request_attachments_id_seq
 ALTER SEQUENCE public.request_attachments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5951 (class 0 OID 0)
+-- TOC entry 6166 (class 0 OID 0)
 -- Dependencies: 237
 -- Name: request_attachments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2268,7 +3082,7 @@ CREATE TABLE public.request_status_history (
 ALTER TABLE public.request_status_history OWNER TO postgres;
 
 --
--- TOC entry 5952 (class 0 OID 0)
+-- TOC entry 6167 (class 0 OID 0)
 -- Dependencies: 238
 -- Name: TABLE request_status_history; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2292,7 +3106,7 @@ CREATE SEQUENCE public.request_status_history_id_seq
 ALTER SEQUENCE public.request_status_history_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5953 (class 0 OID 0)
+-- TOC entry 6168 (class 0 OID 0)
 -- Dependencies: 239
 -- Name: request_status_history_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2337,7 +3151,7 @@ CREATE SEQUENCE public.request_types_id_seq
 ALTER SEQUENCE public.request_types_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5954 (class 0 OID 0)
+-- TOC entry 6169 (class 0 OID 0)
 -- Dependencies: 241
 -- Name: request_types_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2378,7 +3192,7 @@ CREATE SEQUENCE public.request_versions_id_seq
 ALTER SEQUENCE public.request_versions_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5955 (class 0 OID 0)
+-- TOC entry 6170 (class 0 OID 0)
 -- Dependencies: 243
 -- Name: request_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2425,7 +3239,7 @@ CREATE SEQUENCE public.requests_id_seq
 ALTER SEQUENCE public.requests_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5956 (class 0 OID 0)
+-- TOC entry 6171 (class 0 OID 0)
 -- Dependencies: 245
 -- Name: requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2470,7 +3284,7 @@ CREATE SEQUENCE public.scheduled_visits_id_seq
 ALTER SEQUENCE public.scheduled_visits_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5957 (class 0 OID 0)
+-- TOC entry 6172 (class 0 OID 0)
 -- Dependencies: 317
 -- Name: scheduled_visits_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2507,7 +3321,7 @@ CREATE TABLE public.technical_documents (
 ALTER TABLE public.technical_documents OWNER TO postgres;
 
 --
--- TOC entry 5958 (class 0 OID 0)
+-- TOC entry 6173 (class 0 OID 0)
 -- Dependencies: 312
 -- Name: TABLE technical_documents; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2516,7 +3330,7 @@ COMMENT ON TABLE public.technical_documents IS 'Registro de documentos técnicos
 
 
 --
--- TOC entry 5959 (class 0 OID 0)
+-- TOC entry 6174 (class 0 OID 0)
 -- Dependencies: 312
 -- Name: COLUMN technical_documents.document_type; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2525,7 +3339,7 @@ COMMENT ON COLUMN public.technical_documents.document_type IS 'Tipo de documento
 
 
 --
--- TOC entry 5960 (class 0 OID 0)
+-- TOC entry 6175 (class 0 OID 0)
 -- Dependencies: 312
 -- Name: COLUMN technical_documents.document_code; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2534,7 +3348,7 @@ COMMENT ON COLUMN public.technical_documents.document_code IS 'Código del forma
 
 
 --
--- TOC entry 5961 (class 0 OID 0)
+-- TOC entry 6176 (class 0 OID 0)
 -- Dependencies: 312
 -- Name: COLUMN technical_documents.form_data; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2543,7 +3357,7 @@ COMMENT ON COLUMN public.technical_documents.form_data IS 'Datos del formulario 
 
 
 --
--- TOC entry 5962 (class 0 OID 0)
+-- TOC entry 6177 (class 0 OID 0)
 -- Dependencies: 312
 -- Name: COLUMN technical_documents.drive_file_id; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2568,7 +3382,7 @@ CREATE SEQUENCE public.technical_documents_id_seq
 ALTER SEQUENCE public.technical_documents_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5963 (class 0 OID 0)
+-- TOC entry 6178 (class 0 OID 0)
 -- Dependencies: 311
 -- Name: technical_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2619,7 +3433,7 @@ CREATE SEQUENCE public.travel_segments_id_seq
 ALTER SEQUENCE public.travel_segments_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5964 (class 0 OID 0)
+-- TOC entry 6179 (class 0 OID 0)
 -- Dependencies: 321
 -- Name: travel_segments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2649,7 +3463,7 @@ CREATE TABLE public.user_attendance_records (
 ALTER TABLE public.user_attendance_records OWNER TO postgres;
 
 --
--- TOC entry 5965 (class 0 OID 0)
+-- TOC entry 6180 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: TABLE user_attendance_records; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2658,7 +3472,7 @@ COMMENT ON TABLE public.user_attendance_records IS 'Daily attendance records per
 
 
 --
--- TOC entry 5966 (class 0 OID 0)
+-- TOC entry 6181 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.user_id; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2667,7 +3481,7 @@ COMMENT ON COLUMN public.user_attendance_records.user_id IS 'Foreign key to user
 
 
 --
--- TOC entry 5967 (class 0 OID 0)
+-- TOC entry 6182 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.date; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2676,7 +3490,7 @@ COMMENT ON COLUMN public.user_attendance_records.date IS 'Date of the attendance
 
 
 --
--- TOC entry 5968 (class 0 OID 0)
+-- TOC entry 6183 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.entry_time; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2685,7 +3499,7 @@ COMMENT ON COLUMN public.user_attendance_records.entry_time IS 'Timestamp when u
 
 
 --
--- TOC entry 5969 (class 0 OID 0)
+-- TOC entry 6184 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.lunch_start_time; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2694,7 +3508,7 @@ COMMENT ON COLUMN public.user_attendance_records.lunch_start_time IS 'Timestamp 
 
 
 --
--- TOC entry 5970 (class 0 OID 0)
+-- TOC entry 6185 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.lunch_end_time; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2703,7 +3517,7 @@ COMMENT ON COLUMN public.user_attendance_records.lunch_end_time IS 'Timestamp wh
 
 
 --
--- TOC entry 5971 (class 0 OID 0)
+-- TOC entry 6186 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.exit_time; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2712,7 +3526,7 @@ COMMENT ON COLUMN public.user_attendance_records.exit_time IS 'Timestamp when us
 
 
 --
--- TOC entry 5972 (class 0 OID 0)
+-- TOC entry 6187 (class 0 OID 0)
 -- Dependencies: 274
 -- Name: COLUMN user_attendance_records.notes; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2737,7 +3551,7 @@ CREATE SEQUENCE public.user_attendance_records_id_seq
 ALTER SEQUENCE public.user_attendance_records_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5973 (class 0 OID 0)
+-- TOC entry 6188 (class 0 OID 0)
 -- Dependencies: 273
 -- Name: user_attendance_records_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2765,7 +3579,7 @@ CREATE TABLE public.user_gmail_tokens (
 ALTER TABLE public.user_gmail_tokens OWNER TO postgres;
 
 --
--- TOC entry 5974 (class 0 OID 0)
+-- TOC entry 6189 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: TABLE user_gmail_tokens; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2774,7 +3588,7 @@ COMMENT ON TABLE public.user_gmail_tokens IS 'Tokens OAuth 2.0 de Gmail para env
 
 
 --
--- TOC entry 5975 (class 0 OID 0)
+-- TOC entry 6190 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN user_gmail_tokens.access_token; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2783,7 +3597,7 @@ COMMENT ON COLUMN public.user_gmail_tokens.access_token IS 'Token de acceso temp
 
 
 --
--- TOC entry 5976 (class 0 OID 0)
+-- TOC entry 6191 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN user_gmail_tokens.refresh_token; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2792,7 +3606,7 @@ COMMENT ON COLUMN public.user_gmail_tokens.refresh_token IS 'Token para renovar 
 
 
 --
--- TOC entry 5977 (class 0 OID 0)
+-- TOC entry 6192 (class 0 OID 0)
 -- Dependencies: 278
 -- Name: COLUMN user_gmail_tokens.expiry_date; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -2817,7 +3631,7 @@ CREATE SEQUENCE public.user_gmail_tokens_id_seq
 ALTER SEQUENCE public.user_gmail_tokens_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5978 (class 0 OID 0)
+-- TOC entry 6193 (class 0 OID 0)
 -- Dependencies: 277
 -- Name: user_gmail_tokens_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2863,7 +3677,7 @@ CREATE SEQUENCE public.user_lopdp_consents_id_seq
 ALTER SEQUENCE public.user_lopdp_consents_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5979 (class 0 OID 0)
+-- TOC entry 6194 (class 0 OID 0)
 -- Dependencies: 271
 -- Name: user_lopdp_consents_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2906,7 +3720,7 @@ CREATE SEQUENCE public.user_sessions_id_seq
 ALTER SEQUENCE public.user_sessions_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5980 (class 0 OID 0)
+-- TOC entry 6195 (class 0 OID 0)
 -- Dependencies: 259
 -- Name: user_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -2958,12 +3772,271 @@ CREATE SEQUENCE public.users_id_seq
 ALTER SEQUENCE public.users_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5981 (class 0 OID 0)
+-- TOC entry 6196 (class 0 OID 0)
 -- Dependencies: 247
 -- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- TOC entry 340 (class 1259 OID 27112)
+-- Name: v_business_cases; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_business_cases AS
+ SELECT id AS business_case_id,
+    client_name,
+    client_id,
+    status,
+    bc_stage,
+    bc_progress,
+    assigned_to_email,
+    assigned_to_name,
+    drive_folder_id,
+    extra,
+    modern_bc_metadata,
+    created_at,
+    updated_at,
+    created_by,
+    bc_created_at,
+    uses_modern_system,
+    bc_system_type
+   FROM public.equipment_purchase_requests
+  WHERE ((uses_modern_system = true) AND ((bc_system_type)::text = 'modern'::text));
+
+
+ALTER VIEW public.v_business_cases OWNER TO postgres;
+
+--
+-- TOC entry 6197 (class 0 OID 0)
+-- Dependencies: 340
+-- Name: VIEW v_business_cases; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_business_cases IS 'Vista de Business Cases que usan el sistema modernizado (no incluye legacy de Google Sheets)';
+
+
+--
+-- TOC entry 256 (class 1259 OID 16583)
+-- Name: equipos; Type: TABLE; Schema: servicio; Owner: postgres
+--
+
+CREATE TABLE servicio.equipos (
+    id_equipo integer NOT NULL,
+    nombre text NOT NULL,
+    modelo text,
+    fabricante text,
+    categoria text,
+    descripcion text,
+    serie text,
+    ubicacion_actual text,
+    fecha_instalacion date,
+    estado text DEFAULT 'operativo'::text,
+    created_at timestamp with time zone DEFAULT now(),
+    updated_at timestamp with time zone DEFAULT now(),
+    code character varying(50),
+    manufacturer character varying(255),
+    category_type character varying(100),
+    capacity_per_hour integer,
+    max_daily_capacity integer,
+    installation_days integer DEFAULT 7,
+    training_hours integer DEFAULT 16,
+    warranty_months integer DEFAULT 12,
+    base_price numeric(12,2),
+    maintenance_cost numeric(12,2),
+    technical_specs jsonb DEFAULT '{}'::jsonb,
+    notes text,
+    created_by integer,
+    updated_by integer,
+    default_calculation_formula jsonb,
+    calculation_engine character varying(50) DEFAULT 'standard'::character varying,
+    CONSTRAINT equipos_estado_check CHECK ((estado = ANY (ARRAY['operativo'::text, 'en_mantenimiento'::text, 'fuera_de_servicio'::text])))
+);
+
+
+ALTER TABLE servicio.equipos OWNER TO postgres;
+
+--
+-- TOC entry 6198 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: TABLE equipos; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON TABLE servicio.equipos IS 'Catálogo único de equipos manejados por el área de servicio técnico.';
+
+
+--
+-- TOC entry 6199 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.code; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.code IS 'Código único del equipo (ej: c311, c501) - corresponde a hojas de Excel';
+
+
+--
+-- TOC entry 6200 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.capacity_per_hour; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.capacity_per_hour IS 'Determinaciones que puede procesar por hora';
+
+
+--
+-- TOC entry 6201 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.max_daily_capacity; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.max_daily_capacity IS 'Capacidad máxima de determinaciones por día';
+
+
+--
+-- TOC entry 6202 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.technical_specs; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.technical_specs IS 'Especificaciones técnicas en JSON flexible (voltaje, dimensiones, etc.)';
+
+
+--
+-- TOC entry 6203 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.default_calculation_formula; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.default_calculation_formula IS 'Fórmula por defecto para todas las determinaciones de este equipo';
+
+
+--
+-- TOC entry 6204 (class 0 OID 0)
+-- Dependencies: 256
+-- Name: COLUMN equipos.calculation_engine; Type: COMMENT; Schema: servicio; Owner: postgres
+--
+
+COMMENT ON COLUMN servicio.equipos.calculation_engine IS 'Motor de cálculo: standard, advanced, custom';
+
+
+--
+-- TOC entry 342 (class 1259 OID 27122)
+-- Name: v_business_cases_complete; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_business_cases_complete AS
+ SELECT bc.id AS business_case_id,
+    bc.client_name,
+    bc.client_id,
+    bc.status,
+    bc.bc_stage,
+    bc.created_at,
+    bc.bc_system_type,
+    eq.id_equipo AS equipment_id,
+    eq.code AS equipment_code,
+    eq.nombre AS equipment_name,
+    eq.fabricante AS manufacturer,
+    calc.total_monthly_tests,
+    calc.total_monthly_cost,
+    calc.annual_projection,
+    calc.equipment_utilization_percentage,
+    calc.cost_per_test,
+    calc.capacity_exceeded,
+    calc.underutilized,
+    ( SELECT count(*) AS count
+           FROM public.bc_determinations
+          WHERE (bc_determinations.business_case_id = bc.id)) AS total_determinations,
+    ( SELECT count(*) AS count
+           FROM public.equipment_purchase_bc_items
+          WHERE (equipment_purchase_bc_items.request_id = bc.id)) AS total_investments
+   FROM (((public.equipment_purchase_requests bc
+     LEFT JOIN public.bc_equipment_selection bes ON (((bes.business_case_id = bc.id) AND (bes.is_primary = true))))
+     LEFT JOIN servicio.equipos eq ON ((eq.id_equipo = bes.equipment_id)))
+     LEFT JOIN public.bc_calculations calc ON ((calc.business_case_id = bc.id)));
+
+
+ALTER VIEW public.v_business_cases_complete OWNER TO postgres;
+
+--
+-- TOC entry 6205 (class 0 OID 0)
+-- Dependencies: 342
+-- Name: VIEW v_business_cases_complete; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_business_cases_complete IS 'Vista completa de todos los Business Cases (modernos y legacy) con detalles';
+
+
+--
+-- TOC entry 341 (class 1259 OID 27117)
+-- Name: v_business_cases_legacy; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_business_cases_legacy AS
+ SELECT id AS business_case_id,
+    client_name,
+    client_id,
+    status,
+    bc_stage,
+    bc_spreadsheet_id,
+    bc_spreadsheet_url,
+    assigned_to_email,
+    drive_folder_id,
+    created_at,
+    bc_created_at
+   FROM public.equipment_purchase_requests
+  WHERE ((uses_modern_system = false) OR ((bc_system_type)::text = 'legacy'::text));
+
+
+ALTER VIEW public.v_business_cases_legacy OWNER TO postgres;
+
+--
+-- TOC entry 6206 (class 0 OID 0)
+-- Dependencies: 341
+-- Name: VIEW v_business_cases_legacy; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_business_cases_legacy IS 'Vista de Business Cases legacy (Google Sheets) - para backward compatibility';
+
+
+--
+-- TOC entry 336 (class 1259 OID 27038)
+-- Name: v_business_cases_modern; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_business_cases_modern AS
+ SELECT bes.business_case_id,
+    eq.code AS equipment_code,
+    eq.nombre AS equipment_name,
+    eq.fabricante AS manufacturer,
+    calc.total_monthly_tests,
+    calc.total_monthly_cost,
+    calc.annual_projection,
+    calc.equipment_utilization_percentage,
+    calc.cost_per_test,
+    calc.roi_months,
+    calc.capacity_exceeded,
+    calc.underutilized,
+    calc.calculated_at,
+    count(DISTINCT bd.id) AS total_determinations_requested
+   FROM (((public.bc_equipment_selection bes
+     JOIN servicio.equipos eq ON ((eq.id_equipo = bes.equipment_id)))
+     LEFT JOIN public.bc_calculations calc ON ((calc.business_case_id = bes.business_case_id)))
+     LEFT JOIN public.bc_determinations bd ON ((bd.business_case_id = bes.business_case_id)))
+  WHERE (bes.is_primary = true)
+  GROUP BY bes.business_case_id, eq.code, eq.nombre, eq.fabricante, calc.total_monthly_tests, calc.total_monthly_cost, calc.annual_projection, calc.equipment_utilization_percentage, calc.cost_per_test, calc.roi_months, calc.capacity_exceeded, calc.underutilized, calc.calculated_at;
+
+
+ALTER VIEW public.v_business_cases_modern OWNER TO postgres;
+
+--
+-- TOC entry 6207 (class 0 OID 0)
+-- Dependencies: 336
+-- Name: VIEW v_business_cases_modern; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_business_cases_modern IS 'Vista resumen de Business Cases modernizados con cálculos automáticos';
 
 
 --
@@ -2998,36 +4071,44 @@ CREATE VIEW public.v_client_inventory AS
 ALTER VIEW public.v_client_inventory OWNER TO postgres;
 
 --
--- TOC entry 256 (class 1259 OID 16583)
--- Name: equipos; Type: TABLE; Schema: servicio; Owner: postgres
+-- TOC entry 339 (class 1259 OID 27076)
+-- Name: v_determinations_with_formulas; Type: VIEW; Schema: public; Owner: postgres
 --
 
-CREATE TABLE servicio.equipos (
-    id_equipo integer NOT NULL,
-    nombre text NOT NULL,
-    modelo text,
-    fabricante text,
-    categoria text,
-    descripcion text,
-    serie text,
-    ubicacion_actual text,
-    fecha_instalacion date,
-    estado text DEFAULT 'operativo'::text,
-    created_at timestamp with time zone DEFAULT now(),
-    updated_at timestamp with time zone DEFAULT now(),
-    CONSTRAINT equipos_estado_check CHECK ((estado = ANY (ARRAY['operativo'::text, 'en_mantenimiento'::text, 'fuera_de_servicio'::text])))
-);
+CREATE VIEW public.v_determinations_with_formulas AS
+ SELECT d.id,
+    d.name,
+    d.roche_code,
+    d.category,
+    d.equipment_id,
+    e.nombre AS equipment_name,
+    e.code AS equipment_code,
+    d.formula_type,
+    d.calculation_formula,
+        CASE
+            WHEN (d.calculation_formula IS NOT NULL) THEN 'Personalizada'::text
+            WHEN (e.default_calculation_formula IS NOT NULL) THEN 'Del Equipo'::text
+            ELSE 'Por Defecto'::text
+        END AS formula_source,
+    d.volume_per_test,
+    d.reagent_consumption,
+    d.processing_time,
+    d.cost_per_test,
+    d.status
+   FROM (public.catalog_determinations d
+     LEFT JOIN servicio.equipos e ON ((e.id_equipo = d.equipment_id)))
+  WHERE ((d.status)::text = 'active'::text);
 
 
-ALTER TABLE servicio.equipos OWNER TO postgres;
+ALTER VIEW public.v_determinations_with_formulas OWNER TO postgres;
 
 --
--- TOC entry 5982 (class 0 OID 0)
--- Dependencies: 256
--- Name: TABLE equipos; Type: COMMENT; Schema: servicio; Owner: postgres
+-- TOC entry 6208 (class 0 OID 0)
+-- Dependencies: 339
+-- Name: VIEW v_determinations_with_formulas; Type: COMMENT; Schema: public; Owner: postgres
 --
 
-COMMENT ON TABLE servicio.equipos IS 'Catálogo único de equipos manejados por el área de servicio técnico.';
+COMMENT ON VIEW public.v_determinations_with_formulas IS 'Vista de determinaciones mostrando origen de su fórmula de cálculo';
 
 
 --
@@ -3054,12 +4135,49 @@ CREATE VIEW public.v_equipment_determinations AS
 ALTER VIEW public.v_equipment_determinations OWNER TO postgres;
 
 --
--- TOC entry 5983 (class 0 OID 0)
+-- TOC entry 6209 (class 0 OID 0)
 -- Dependencies: 310
 -- Name: VIEW v_equipment_determinations; Type: COMMENT; Schema: public; Owner: postgres
 --
 
 COMMENT ON VIEW public.v_equipment_determinations IS 'Vista de equipos (servicio.equipos) con sus determinaciones';
+
+
+--
+-- TOC entry 335 (class 1259 OID 27033)
+-- Name: v_equipment_full_catalog; Type: VIEW; Schema: public; Owner: postgres
+--
+
+CREATE VIEW public.v_equipment_full_catalog AS
+ SELECT e.id_equipo AS equipment_id,
+    e.code AS equipment_code,
+    e.nombre AS equipment_name,
+    e.fabricante AS manufacturer,
+    e.modelo AS model,
+    e.category_type AS category,
+    e.capacity_per_hour,
+    e.max_daily_capacity,
+    e.base_price,
+    e.estado AS status,
+    count(DISTINCT d.id) AS total_determinations,
+    count(DISTINCT c.id) AS total_consumables
+   FROM (((servicio.equipos e
+     LEFT JOIN public.catalog_determinations d ON (((d.equipment_id = e.id_equipo) AND ((d.status)::text = 'active'::text))))
+     LEFT JOIN public.catalog_equipment_consumables ec ON ((ec.equipment_id = e.id_equipo)))
+     LEFT JOIN public.catalog_consumables c ON (((c.id = ec.consumable_id) AND ((c.status)::text = 'active'::text))))
+  WHERE (e.estado = 'operativo'::text)
+  GROUP BY e.id_equipo, e.code, e.nombre, e.fabricante, e.modelo, e.category_type, e.capacity_per_hour, e.max_daily_capacity, e.base_price, e.estado;
+
+
+ALTER VIEW public.v_equipment_full_catalog OWNER TO postgres;
+
+--
+-- TOC entry 6210 (class 0 OID 0)
+-- Dependencies: 335
+-- Name: VIEW v_equipment_full_catalog; Type: COMMENT; Schema: public; Owner: postgres
+--
+
+COMMENT ON VIEW public.v_equipment_full_catalog IS 'Vista consolidada de equipos con conteo de determinaciones y consumibles disponibles';
 
 
 --
@@ -3150,7 +4268,7 @@ CREATE SEQUENCE public.vacaciones_solicitudes_id_seq
 ALTER SEQUENCE public.vacaciones_solicitudes_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5985 (class 0 OID 0)
+-- TOC entry 6212 (class 0 OID 0)
 -- Dependencies: 289
 -- Name: vacaciones_solicitudes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -3200,7 +4318,7 @@ CREATE SEQUENCE public.visit_schedules_id_seq
 ALTER SEQUENCE public.visit_schedules_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5986 (class 0 OID 0)
+-- TOC entry 6213 (class 0 OID 0)
 -- Dependencies: 315
 -- Name: visit_schedules_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
@@ -3234,7 +4352,7 @@ CREATE VIEW public.vw_dashboard_requests AS
 ALTER VIEW public.vw_dashboard_requests OWNER TO postgres;
 
 --
--- TOC entry 5987 (class 0 OID 0)
+-- TOC entry 6214 (class 0 OID 0)
 -- Dependencies: 248
 -- Name: VIEW vw_dashboard_requests; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -3258,7 +4376,7 @@ CREATE VIEW public.vw_request_metrics AS
 ALTER VIEW public.vw_request_metrics OWNER TO postgres;
 
 --
--- TOC entry 5988 (class 0 OID 0)
+-- TOC entry 6215 (class 0 OID 0)
 -- Dependencies: 249
 -- Name: VIEW vw_request_metrics; Type: COMMENT; Schema: public; Owner: postgres
 --
@@ -3304,7 +4422,7 @@ CREATE SEQUENCE servicio.aplicaciones_tecnicas_id_seq
 ALTER SEQUENCE servicio.aplicaciones_tecnicas_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5989 (class 0 OID 0)
+-- TOC entry 6216 (class 0 OID 0)
 -- Dependencies: 313
 -- Name: aplicaciones_tecnicas_id_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3354,7 +4472,7 @@ CREATE SEQUENCE servicio.cronograma_capacitacion_id_capacitacion_seq
 ALTER SEQUENCE servicio.cronograma_capacitacion_id_capacitacion_seq OWNER TO postgres;
 
 --
--- TOC entry 5990 (class 0 OID 0)
+-- TOC entry 6217 (class 0 OID 0)
 -- Dependencies: 251
 -- Name: cronograma_capacitacion_id_capacitacion_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3400,7 +4518,7 @@ CREATE TABLE servicio.cronograma_mantenimientos (
 ALTER TABLE servicio.cronograma_mantenimientos OWNER TO postgres;
 
 --
--- TOC entry 5991 (class 0 OID 0)
+-- TOC entry 6218 (class 0 OID 0)
 -- Dependencies: 252
 -- Name: TABLE cronograma_mantenimientos; Type: COMMENT; Schema: servicio; Owner: postgres
 --
@@ -3431,7 +4549,7 @@ CREATE TABLE servicio.cronograma_mantenimientos_anuales (
 ALTER TABLE servicio.cronograma_mantenimientos_anuales OWNER TO postgres;
 
 --
--- TOC entry 5992 (class 0 OID 0)
+-- TOC entry 6219 (class 0 OID 0)
 -- Dependencies: 253
 -- Name: TABLE cronograma_mantenimientos_anuales; Type: COMMENT; Schema: servicio; Owner: postgres
 --
@@ -3456,7 +4574,7 @@ CREATE SEQUENCE servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq
 ALTER SEQUENCE servicio.cronograma_mantenimientos_anuales_id_mant_anual_seq OWNER TO postgres;
 
 --
--- TOC entry 5993 (class 0 OID 0)
+-- TOC entry 6220 (class 0 OID 0)
 -- Dependencies: 254
 -- Name: cronograma_mantenimientos_anuales_id_mant_anual_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3481,7 +4599,7 @@ CREATE SEQUENCE servicio.cronograma_mantenimientos_id_mantenimiento_seq
 ALTER SEQUENCE servicio.cronograma_mantenimientos_id_mantenimiento_seq OWNER TO postgres;
 
 --
--- TOC entry 5994 (class 0 OID 0)
+-- TOC entry 6221 (class 0 OID 0)
 -- Dependencies: 255
 -- Name: cronograma_mantenimientos_id_mantenimiento_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3523,7 +4641,7 @@ CREATE SEQUENCE servicio.disponibilidad_tecnicos_id_seq
 ALTER SEQUENCE servicio.disponibilidad_tecnicos_id_seq OWNER TO postgres;
 
 --
--- TOC entry 5995 (class 0 OID 0)
+-- TOC entry 6222 (class 0 OID 0)
 -- Dependencies: 287
 -- Name: disponibilidad_tecnicos_id_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3548,7 +4666,7 @@ CREATE SEQUENCE servicio.equipos_id_equipo_seq
 ALTER SEQUENCE servicio.equipos_id_equipo_seq OWNER TO postgres;
 
 --
--- TOC entry 5996 (class 0 OID 0)
+-- TOC entry 6223 (class 0 OID 0)
 -- Dependencies: 257
 -- Name: equipos_id_equipo_seq; Type: SEQUENCE OWNED BY; Schema: servicio; Owner: postgres
 --
@@ -3584,7 +4702,7 @@ CREATE VIEW servicio.vista_mantenimientos_por_equipo AS
 ALTER VIEW servicio.vista_mantenimientos_por_equipo OWNER TO postgres;
 
 --
--- TOC entry 5242 (class 2604 OID 16989)
+-- TOC entry 5307 (class 2604 OID 16989)
 -- Name: logs id; Type: DEFAULT; Schema: auditoria; Owner: postgres
 --
 
@@ -3592,7 +4710,7 @@ ALTER TABLE ONLY auditoria.logs ALTER COLUMN id SET DEFAULT nextval('auditoria.l
 
 
 --
--- TOC entry 5367 (class 2604 OID 26422)
+-- TOC entry 5439 (class 2604 OID 26422)
 -- Name: advisor_location_history id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3600,7 +4718,7 @@ ALTER TABLE ONLY public.advisor_location_history ALTER COLUMN id SET DEFAULT nex
 
 
 --
--- TOC entry 5178 (class 2604 OID 16600)
+-- TOC entry 5238 (class 2604 OID 16600)
 -- Name: audit_trail id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3608,7 +4726,7 @@ ALTER TABLE ONLY public.audit_trail ALTER COLUMN id SET DEFAULT nextval('public.
 
 
 --
--- TOC entry 5338 (class 2604 OID 26216)
+-- TOC entry 5410 (class 2604 OID 26216)
 -- Name: bc_alerts id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3616,7 +4734,47 @@ ALTER TABLE ONLY public.bc_alerts ALTER COLUMN id SET DEFAULT nextval('public.bc
 
 
 --
--- TOC entry 5317 (class 2604 OID 26097)
+-- TOC entry 5473 (class 2604 OID 27012)
+-- Name: bc_audit_log id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_audit_log ALTER COLUMN id SET DEFAULT nextval('public.bc_audit_log_id_seq'::regclass);
+
+
+--
+-- TOC entry 5457 (class 2604 OID 26946)
+-- Name: bc_calculations id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_calculations ALTER COLUMN id SET DEFAULT nextval('public.bc_calculations_id_seq'::regclass);
+
+
+--
+-- TOC entry 5453 (class 2604 OID 26915)
+-- Name: bc_determinations id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations ALTER COLUMN id SET DEFAULT nextval('public.bc_determinations_id_seq'::regclass);
+
+
+--
+-- TOC entry 5450 (class 2604 OID 26889)
+-- Name: bc_equipment_selection id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection ALTER COLUMN id SET DEFAULT nextval('public.bc_equipment_selection_id_seq'::regclass);
+
+
+--
+-- TOC entry 5475 (class 2604 OID 27052)
+-- Name: calculation_templates id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.calculation_templates ALTER COLUMN id SET DEFAULT nextval('public.calculation_templates_id_seq'::regclass);
+
+
+--
+-- TOC entry 5389 (class 2604 OID 26097)
 -- Name: catalog_consumables id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3624,7 +4782,7 @@ ALTER TABLE ONLY public.catalog_consumables ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5311 (class 2604 OID 26064)
+-- TOC entry 5379 (class 2604 OID 26064)
 -- Name: catalog_determinations id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3632,7 +4790,7 @@ ALTER TABLE ONLY public.catalog_determinations ALTER COLUMN id SET DEFAULT nextv
 
 
 --
--- TOC entry 5324 (class 2604 OID 26125)
+-- TOC entry 5396 (class 2604 OID 26125)
 -- Name: catalog_equipment_consumables id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3640,7 +4798,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables ALTER COLUMN id SET DEFAUL
 
 
 --
--- TOC entry 5342 (class 2604 OID 26249)
+-- TOC entry 5414 (class 2604 OID 26249)
 -- Name: catalog_investments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3648,7 +4806,7 @@ ALTER TABLE ONLY public.catalog_investments ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5306 (class 2604 OID 25718)
+-- TOC entry 5374 (class 2604 OID 25718)
 -- Name: client_assignments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3656,7 +4814,7 @@ ALTER TABLE ONLY public.client_assignments ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
--- TOC entry 5255 (class 2604 OID 17115)
+-- TOC entry 5320 (class 2604 OID 17115)
 -- Name: client_request_consents id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3664,7 +4822,7 @@ ALTER TABLE ONLY public.client_request_consents ALTER COLUMN id SET DEFAULT next
 
 
 --
--- TOC entry 5246 (class 2604 OID 17087)
+-- TOC entry 5311 (class 2604 OID 17087)
 -- Name: client_requests id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3672,7 +4830,7 @@ ALTER TABLE ONLY public.client_requests ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
--- TOC entry 5308 (class 2604 OID 25738)
+-- TOC entry 5376 (class 2604 OID 25738)
 -- Name: client_visit_logs id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3680,7 +4838,7 @@ ALTER TABLE ONLY public.client_visit_logs ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- TOC entry 5266 (class 2604 OID 17247)
+-- TOC entry 5331 (class 2604 OID 17247)
 -- Name: clients id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3688,7 +4846,7 @@ ALTER TABLE ONLY public.clients ALTER COLUMN id SET DEFAULT nextval('public.clie
 
 
 --
--- TOC entry 5327 (class 2604 OID 26155)
+-- TOC entry 5399 (class 2604 OID 26155)
 -- Name: contract_determinations id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3696,7 +4854,7 @@ ALTER TABLE ONLY public.contract_determinations ALTER COLUMN id SET DEFAULT next
 
 
 --
--- TOC entry 5239 (class 2604 OID 16962)
+-- TOC entry 5304 (class 2604 OID 16962)
 -- Name: departments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3704,7 +4862,7 @@ ALTER TABLE ONLY public.departments ALTER COLUMN id SET DEFAULT nextval('public.
 
 
 --
--- TOC entry 5334 (class 2604 OID 26191)
+-- TOC entry 5406 (class 2604 OID 26191)
 -- Name: determination_consumption_log id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3712,7 +4870,7 @@ ALTER TABLE ONLY public.determination_consumption_log ALTER COLUMN id SET DEFAUL
 
 
 --
--- TOC entry 5181 (class 2604 OID 16601)
+-- TOC entry 5241 (class 2604 OID 16601)
 -- Name: document_signatures id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3720,7 +4878,7 @@ ALTER TABLE ONLY public.document_signatures ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5183 (class 2604 OID 16602)
+-- TOC entry 5243 (class 2604 OID 16602)
 -- Name: documents id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3728,7 +4886,7 @@ ALTER TABLE ONLY public.documents ALTER COLUMN id SET DEFAULT nextval('public.do
 
 
 --
--- TOC entry 5188 (class 2604 OID 16603)
+-- TOC entry 5248 (class 2604 OID 16603)
 -- Name: employees id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3736,7 +4894,15 @@ ALTER TABLE ONLY public.employees ALTER COLUMN id SET DEFAULT nextval('public.em
 
 
 --
--- TOC entry 5191 (class 2604 OID 16604)
+-- TOC entry 5471 (class 2604 OID 26973)
+-- Name: equipment_price_history id; Type: DEFAULT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history ALTER COLUMN id SET DEFAULT nextval('public.equipment_price_history_id_seq'::regclass);
+
+
+--
+-- TOC entry 5251 (class 2604 OID 16604)
 -- Name: inventory id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3744,7 +4910,7 @@ ALTER TABLE ONLY public.inventory ALTER COLUMN id SET DEFAULT nextval('public.in
 
 
 --
--- TOC entry 5195 (class 2604 OID 16605)
+-- TOC entry 5255 (class 2604 OID 16605)
 -- Name: inventory_movements id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3752,7 +4918,7 @@ ALTER TABLE ONLY public.inventory_movements ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5372 (class 2604 OID 26485)
+-- TOC entry 5444 (class 2604 OID 26485)
 -- Name: permisos_vacaciones id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3760,7 +4926,7 @@ ALTER TABLE ONLY public.permisos_vacaciones ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5294 (class 2604 OID 17433)
+-- TOC entry 5362 (class 2604 OID 17433)
 -- Name: personnel_request_comments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3768,7 +4934,7 @@ ALTER TABLE ONLY public.personnel_request_comments ALTER COLUMN id SET DEFAULT n
 
 
 --
--- TOC entry 5292 (class 2604 OID 17410)
+-- TOC entry 5360 (class 2604 OID 17410)
 -- Name: personnel_request_history id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3776,7 +4942,7 @@ ALTER TABLE ONLY public.personnel_request_history ALTER COLUMN id SET DEFAULT ne
 
 
 --
--- TOC entry 5285 (class 2604 OID 17354)
+-- TOC entry 5353 (class 2604 OID 17354)
 -- Name: personnel_requests id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3784,7 +4950,7 @@ ALTER TABLE ONLY public.personnel_requests ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
--- TOC entry 5198 (class 2604 OID 16606)
+-- TOC entry 5258 (class 2604 OID 16606)
 -- Name: request_approvals id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3792,7 +4958,7 @@ ALTER TABLE ONLY public.request_approvals ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- TOC entry 5200 (class 2604 OID 16607)
+-- TOC entry 5260 (class 2604 OID 16607)
 -- Name: request_attachments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3800,7 +4966,7 @@ ALTER TABLE ONLY public.request_attachments ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5202 (class 2604 OID 16608)
+-- TOC entry 5262 (class 2604 OID 16608)
 -- Name: request_status_history id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3808,7 +4974,7 @@ ALTER TABLE ONLY public.request_status_history ALTER COLUMN id SET DEFAULT nextv
 
 
 --
--- TOC entry 5204 (class 2604 OID 16609)
+-- TOC entry 5264 (class 2604 OID 16609)
 -- Name: request_types id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3816,7 +4982,7 @@ ALTER TABLE ONLY public.request_types ALTER COLUMN id SET DEFAULT nextval('publi
 
 
 --
--- TOC entry 5206 (class 2604 OID 16610)
+-- TOC entry 5266 (class 2604 OID 16610)
 -- Name: request_versions id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3824,7 +4990,7 @@ ALTER TABLE ONLY public.request_versions ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
--- TOC entry 5208 (class 2604 OID 16611)
+-- TOC entry 5268 (class 2604 OID 16611)
 -- Name: requests id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3832,7 +4998,7 @@ ALTER TABLE ONLY public.requests ALTER COLUMN id SET DEFAULT nextval('public.req
 
 
 --
--- TOC entry 5363 (class 2604 OID 26393)
+-- TOC entry 5435 (class 2604 OID 26393)
 -- Name: scheduled_visits id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3840,7 +5006,7 @@ ALTER TABLE ONLY public.scheduled_visits ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
--- TOC entry 5350 (class 2604 OID 26323)
+-- TOC entry 5422 (class 2604 OID 26323)
 -- Name: technical_documents id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3848,7 +5014,7 @@ ALTER TABLE ONLY public.technical_documents ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5370 (class 2604 OID 26448)
+-- TOC entry 5442 (class 2604 OID 26448)
 -- Name: travel_segments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3856,7 +5022,7 @@ ALTER TABLE ONLY public.travel_segments ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
--- TOC entry 5263 (class 2604 OID 17173)
+-- TOC entry 5328 (class 2604 OID 17173)
 -- Name: user_attendance_records id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3864,7 +5030,7 @@ ALTER TABLE ONLY public.user_attendance_records ALTER COLUMN id SET DEFAULT next
 
 
 --
--- TOC entry 5274 (class 2604 OID 17301)
+-- TOC entry 5339 (class 2604 OID 17301)
 -- Name: user_gmail_tokens id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3872,7 +5038,7 @@ ALTER TABLE ONLY public.user_gmail_tokens ALTER COLUMN id SET DEFAULT nextval('p
 
 
 --
--- TOC entry 5261 (class 2604 OID 17158)
+-- TOC entry 5326 (class 2604 OID 17158)
 -- Name: user_lopdp_consents id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3880,7 +5046,7 @@ ALTER TABLE ONLY public.user_lopdp_consents ALTER COLUMN id SET DEFAULT nextval(
 
 
 --
--- TOC entry 5237 (class 2604 OID 16950)
+-- TOC entry 5302 (class 2604 OID 16950)
 -- Name: user_sessions id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3888,7 +5054,7 @@ ALTER TABLE ONLY public.user_sessions ALTER COLUMN id SET DEFAULT nextval('publi
 
 
 --
--- TOC entry 5214 (class 2604 OID 16612)
+-- TOC entry 5274 (class 2604 OID 16612)
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3896,7 +5062,7 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 
 --
--- TOC entry 5301 (class 2604 OID 25700)
+-- TOC entry 5369 (class 2604 OID 25700)
 -- Name: vacaciones_solicitudes id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3904,7 +5070,7 @@ ALTER TABLE ONLY public.vacaciones_solicitudes ALTER COLUMN id SET DEFAULT nextv
 
 
 --
--- TOC entry 5359 (class 2604 OID 26372)
+-- TOC entry 5431 (class 2604 OID 26372)
 -- Name: visit_schedules id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
@@ -3912,7 +5078,7 @@ ALTER TABLE ONLY public.visit_schedules ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
--- TOC entry 5354 (class 2604 OID 26354)
+-- TOC entry 5426 (class 2604 OID 26354)
 -- Name: aplicaciones_tecnicas id; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3920,7 +5086,7 @@ ALTER TABLE ONLY servicio.aplicaciones_tecnicas ALTER COLUMN id SET DEFAULT next
 
 
 --
--- TOC entry 5218 (class 2604 OID 16613)
+-- TOC entry 5278 (class 2604 OID 16613)
 -- Name: cronograma_capacitacion id_capacitacion; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3928,7 +5094,7 @@ ALTER TABLE ONLY servicio.cronograma_capacitacion ALTER COLUMN id_capacitacion S
 
 
 --
--- TOC entry 5222 (class 2604 OID 16614)
+-- TOC entry 5282 (class 2604 OID 16614)
 -- Name: cronograma_mantenimientos id_mantenimiento; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3936,7 +5102,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos ALTER COLUMN id_mantenimient
 
 
 --
--- TOC entry 5229 (class 2604 OID 16615)
+-- TOC entry 5289 (class 2604 OID 16615)
 -- Name: cronograma_mantenimientos_anuales id_mant_anual; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3944,7 +5110,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales ALTER COLUMN id_mant
 
 
 --
--- TOC entry 5298 (class 2604 OID 25681)
+-- TOC entry 5366 (class 2604 OID 25681)
 -- Name: disponibilidad_tecnicos id; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3952,7 +5118,7 @@ ALTER TABLE ONLY servicio.disponibilidad_tecnicos ALTER COLUMN id SET DEFAULT ne
 
 
 --
--- TOC entry 5233 (class 2604 OID 16616)
+-- TOC entry 5293 (class 2604 OID 16616)
 -- Name: equipos id_equipo; Type: DEFAULT; Schema: servicio; Owner: postgres
 --
 
@@ -3960,7 +5126,7 @@ ALTER TABLE ONLY servicio.equipos ALTER COLUMN id_equipo SET DEFAULT nextval('se
 
 
 --
--- TOC entry 5490 (class 2606 OID 16995)
+-- TOC entry 5603 (class 2606 OID 16995)
 -- Name: logs logs_pkey; Type: CONSTRAINT; Schema: auditoria; Owner: postgres
 --
 
@@ -3969,7 +5135,7 @@ ALTER TABLE ONLY auditoria.logs
 
 
 --
--- TOC entry 5623 (class 2606 OID 26433)
+-- TOC entry 5738 (class 2606 OID 26433)
 -- Name: advisor_location_history advisor_location_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3978,7 +5144,7 @@ ALTER TABLE ONLY public.advisor_location_history
 
 
 --
--- TOC entry 5415 (class 2606 OID 16618)
+-- TOC entry 5523 (class 2606 OID 16618)
 -- Name: audit_trail audit_trail_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3987,7 +5153,7 @@ ALTER TABLE ONLY public.audit_trail
 
 
 --
--- TOC entry 5590 (class 2606 OID 26229)
+-- TOC entry 5705 (class 2606 OID 26229)
 -- Name: bc_alerts bc_alerts_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -3996,7 +5162,88 @@ ALTER TABLE ONLY public.bc_alerts
 
 
 --
--- TOC entry 5568 (class 2606 OID 26112)
+-- TOC entry 5774 (class 2606 OID 27020)
+-- Name: bc_audit_log bc_audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_audit_log
+    ADD CONSTRAINT bc_audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5764 (class 2606 OID 26967)
+-- Name: bc_calculations bc_calculations_business_case_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_calculations
+    ADD CONSTRAINT bc_calculations_business_case_id_key UNIQUE (business_case_id);
+
+
+--
+-- TOC entry 5766 (class 2606 OID 26965)
+-- Name: bc_calculations bc_calculations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_calculations
+    ADD CONSTRAINT bc_calculations_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5758 (class 2606 OID 26929)
+-- Name: bc_determinations bc_determinations_business_case_id_determination_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations
+    ADD CONSTRAINT bc_determinations_business_case_id_determination_id_key UNIQUE (business_case_id, determination_id);
+
+
+--
+-- TOC entry 5760 (class 2606 OID 26927)
+-- Name: bc_determinations bc_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations
+    ADD CONSTRAINT bc_determinations_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5752 (class 2606 OID 26898)
+-- Name: bc_equipment_selection bc_equipment_selection_business_case_id_is_primary_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection
+    ADD CONSTRAINT bc_equipment_selection_business_case_id_is_primary_key UNIQUE (business_case_id, is_primary);
+
+
+--
+-- TOC entry 5754 (class 2606 OID 26896)
+-- Name: bc_equipment_selection bc_equipment_selection_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection
+    ADD CONSTRAINT bc_equipment_selection_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5779 (class 2606 OID 27066)
+-- Name: calculation_templates calculation_templates_name_key; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.calculation_templates
+    ADD CONSTRAINT calculation_templates_name_key UNIQUE (name);
+
+
+--
+-- TOC entry 5781 (class 2606 OID 27064)
+-- Name: calculation_templates calculation_templates_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.calculation_templates
+    ADD CONSTRAINT calculation_templates_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5683 (class 2606 OID 26112)
 -- Name: catalog_consumables catalog_consumables_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4005,7 +5252,7 @@ ALTER TABLE ONLY public.catalog_consumables
 
 
 --
--- TOC entry 5561 (class 2606 OID 26079)
+-- TOC entry 5676 (class 2606 OID 26079)
 -- Name: catalog_determinations catalog_determinations_name_roche_code_version_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4014,7 +5261,7 @@ ALTER TABLE ONLY public.catalog_determinations
 
 
 --
--- TOC entry 5563 (class 2606 OID 26077)
+-- TOC entry 5678 (class 2606 OID 26077)
 -- Name: catalog_determinations catalog_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4023,7 +5270,7 @@ ALTER TABLE ONLY public.catalog_determinations
 
 
 --
--- TOC entry 5573 (class 2606 OID 26290)
+-- TOC entry 5688 (class 2606 OID 26290)
 -- Name: catalog_equipment_consumables catalog_equipment_consumables_equipment_id_consumable_id_de_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4032,7 +5279,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables
 
 
 --
--- TOC entry 5575 (class 2606 OID 26131)
+-- TOC entry 5690 (class 2606 OID 26131)
 -- Name: catalog_equipment_consumables catalog_equipment_consumables_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4041,7 +5288,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables
 
 
 --
--- TOC entry 5597 (class 2606 OID 26263)
+-- TOC entry 5712 (class 2606 OID 26263)
 -- Name: catalog_investments catalog_investments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4050,7 +5297,7 @@ ALTER TABLE ONLY public.catalog_investments
 
 
 --
--- TOC entry 5378 (class 2606 OID 16619)
+-- TOC entry 5481 (class 2606 OID 16619)
 -- Name: inventory_movements chk_inventory_movements_type; Type: CHECK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4059,7 +5306,7 @@ ALTER TABLE public.inventory_movements
 
 
 --
--- TOC entry 5380 (class 2606 OID 16620)
+-- TOC entry 5483 (class 2606 OID 16620)
 -- Name: request_approvals chk_request_approvals_action; Type: CHECK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4068,7 +5315,7 @@ ALTER TABLE public.request_approvals
 
 
 --
--- TOC entry 5553 (class 2606 OID 25728)
+-- TOC entry 5668 (class 2606 OID 25728)
 -- Name: client_assignments client_assignments_client_request_id_assigned_to_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4077,7 +5324,7 @@ ALTER TABLE ONLY public.client_assignments
 
 
 --
--- TOC entry 5555 (class 2606 OID 25726)
+-- TOC entry 5670 (class 2606 OID 25726)
 -- Name: client_assignments client_assignments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4086,7 +5333,7 @@ ALTER TABLE ONLY public.client_assignments
 
 
 --
--- TOC entry 5503 (class 2606 OID 17146)
+-- TOC entry 5616 (class 2606 OID 17146)
 -- Name: client_request_consent_tokens client_request_consent_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4095,7 +5342,7 @@ ALTER TABLE ONLY public.client_request_consent_tokens
 
 
 --
--- TOC entry 5501 (class 2606 OID 17124)
+-- TOC entry 5614 (class 2606 OID 17124)
 -- Name: client_request_consents client_request_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4104,7 +5351,7 @@ ALTER TABLE ONLY public.client_request_consents
 
 
 --
--- TOC entry 5492 (class 2606 OID 17104)
+-- TOC entry 5605 (class 2606 OID 17104)
 -- Name: client_requests client_requests_lopdp_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4113,7 +5360,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5494 (class 2606 OID 17102)
+-- TOC entry 5607 (class 2606 OID 17102)
 -- Name: client_requests client_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4122,7 +5369,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5496 (class 2606 OID 17106)
+-- TOC entry 5609 (class 2606 OID 17106)
 -- Name: client_requests client_requests_ruc_cedula_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4131,7 +5378,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5557 (class 2606 OID 25752)
+-- TOC entry 5672 (class 2606 OID 25752)
 -- Name: client_visit_logs client_visit_logs_client_request_id_user_email_visit_date_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4140,7 +5387,7 @@ ALTER TABLE ONLY public.client_visit_logs
 
 
 --
--- TOC entry 5559 (class 2606 OID 25750)
+-- TOC entry 5674 (class 2606 OID 25750)
 -- Name: client_visit_logs client_visit_logs_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4149,7 +5396,7 @@ ALTER TABLE ONLY public.client_visit_logs
 
 
 --
--- TOC entry 5514 (class 2606 OID 17260)
+-- TOC entry 5627 (class 2606 OID 17260)
 -- Name: clients clients_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4158,7 +5405,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- TOC entry 5516 (class 2606 OID 17262)
+-- TOC entry 5629 (class 2606 OID 17262)
 -- Name: clients clients_ruc_hash_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4167,7 +5414,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- TOC entry 5579 (class 2606 OID 26170)
+-- TOC entry 5694 (class 2606 OID 26170)
 -- Name: contract_determinations contract_determinations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4176,7 +5423,7 @@ ALTER TABLE ONLY public.contract_determinations
 
 
 --
--- TOC entry 5482 (class 2606 OID 16973)
+-- TOC entry 5595 (class 2606 OID 16973)
 -- Name: departments departments_code_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4185,7 +5432,7 @@ ALTER TABLE ONLY public.departments
 
 
 --
--- TOC entry 5484 (class 2606 OID 16971)
+-- TOC entry 5597 (class 2606 OID 16971)
 -- Name: departments departments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4194,7 +5441,7 @@ ALTER TABLE ONLY public.departments
 
 
 --
--- TOC entry 5585 (class 2606 OID 26203)
+-- TOC entry 5700 (class 2606 OID 26203)
 -- Name: determination_consumption_log determination_consumption_log_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4203,7 +5450,7 @@ ALTER TABLE ONLY public.determination_consumption_log
 
 
 --
--- TOC entry 5420 (class 2606 OID 16622)
+-- TOC entry 5528 (class 2606 OID 16622)
 -- Name: document_signatures document_signatures_document_id_signer_user_id_role_at_sign_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4212,7 +5459,7 @@ ALTER TABLE ONLY public.document_signatures
 
 
 --
--- TOC entry 5422 (class 2606 OID 16624)
+-- TOC entry 5530 (class 2606 OID 16624)
 -- Name: document_signatures document_signatures_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4221,7 +5468,7 @@ ALTER TABLE ONLY public.document_signatures
 
 
 --
--- TOC entry 5424 (class 2606 OID 16626)
+-- TOC entry 5532 (class 2606 OID 16626)
 -- Name: documents documents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4230,7 +5477,7 @@ ALTER TABLE ONLY public.documents
 
 
 --
--- TOC entry 5427 (class 2606 OID 16628)
+-- TOC entry 5535 (class 2606 OID 16628)
 -- Name: employees employees_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4239,7 +5486,16 @@ ALTER TABLE ONLY public.employees
 
 
 --
--- TOC entry 5545 (class 2606 OID 17477)
+-- TOC entry 5769 (class 2606 OID 26984)
+-- Name: equipment_price_history equipment_price_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history
+    ADD CONSTRAINT equipment_price_history_pkey PRIMARY KEY (id);
+
+
+--
+-- TOC entry 5660 (class 2606 OID 17477)
 -- Name: equipment_purchase_bc_items equipment_purchase_bc_items_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4248,7 +5504,7 @@ ALTER TABLE ONLY public.equipment_purchase_bc_items
 
 
 --
--- TOC entry 5529 (class 2606 OID 17334)
+-- TOC entry 5642 (class 2606 OID 17334)
 -- Name: equipment_purchase_requests equipment_purchase_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4257,7 +5513,7 @@ ALTER TABLE ONLY public.equipment_purchase_requests
 
 
 --
--- TOC entry 5434 (class 2606 OID 16630)
+-- TOC entry 5542 (class 2606 OID 16630)
 -- Name: inventory_movements inventory_movements_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4266,7 +5522,7 @@ ALTER TABLE ONLY public.inventory_movements
 
 
 --
--- TOC entry 5429 (class 2606 OID 16632)
+-- TOC entry 5537 (class 2606 OID 16632)
 -- Name: inventory inventory_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4275,7 +5531,7 @@ ALTER TABLE ONLY public.inventory
 
 
 --
--- TOC entry 5431 (class 2606 OID 16634)
+-- TOC entry 5539 (class 2606 OID 16634)
 -- Name: inventory inventory_sku_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4284,7 +5540,7 @@ ALTER TABLE ONLY public.inventory
 
 
 --
--- TOC entry 5635 (class 2606 OID 26501)
+-- TOC entry 5750 (class 2606 OID 26501)
 -- Name: permisos_vacaciones permisos_vacaciones_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4293,7 +5549,7 @@ ALTER TABLE ONLY public.permisos_vacaciones
 
 
 --
--- TOC entry 5543 (class 2606 OID 17443)
+-- TOC entry 5658 (class 2606 OID 17443)
 -- Name: personnel_request_comments personnel_request_comments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4302,7 +5558,7 @@ ALTER TABLE ONLY public.personnel_request_comments
 
 
 --
--- TOC entry 5540 (class 2606 OID 17418)
+-- TOC entry 5655 (class 2606 OID 17418)
 -- Name: personnel_request_history personnel_request_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4311,7 +5567,7 @@ ALTER TABLE ONLY public.personnel_request_history
 
 
 --
--- TOC entry 5535 (class 2606 OID 17378)
+-- TOC entry 5650 (class 2606 OID 17378)
 -- Name: personnel_requests personnel_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4320,7 +5576,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5537 (class 2606 OID 17380)
+-- TOC entry 5652 (class 2606 OID 17380)
 -- Name: personnel_requests personnel_requests_request_number_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4329,7 +5585,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5437 (class 2606 OID 16636)
+-- TOC entry 5545 (class 2606 OID 16636)
 -- Name: request_approvals request_approvals_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4338,7 +5594,7 @@ ALTER TABLE ONLY public.request_approvals
 
 
 --
--- TOC entry 5439 (class 2606 OID 16638)
+-- TOC entry 5547 (class 2606 OID 16638)
 -- Name: request_approvals request_approvals_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4347,7 +5603,7 @@ ALTER TABLE ONLY public.request_approvals
 
 
 --
--- TOC entry 5442 (class 2606 OID 16640)
+-- TOC entry 5550 (class 2606 OID 16640)
 -- Name: request_attachments request_attachments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4356,7 +5612,7 @@ ALTER TABLE ONLY public.request_attachments
 
 
 --
--- TOC entry 5445 (class 2606 OID 16642)
+-- TOC entry 5553 (class 2606 OID 16642)
 -- Name: request_status_history request_status_history_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4365,7 +5621,7 @@ ALTER TABLE ONLY public.request_status_history
 
 
 --
--- TOC entry 5448 (class 2606 OID 16644)
+-- TOC entry 5556 (class 2606 OID 16644)
 -- Name: request_types request_types_code_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4374,7 +5630,7 @@ ALTER TABLE ONLY public.request_types
 
 
 --
--- TOC entry 5450 (class 2606 OID 16646)
+-- TOC entry 5558 (class 2606 OID 16646)
 -- Name: request_types request_types_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4383,7 +5639,7 @@ ALTER TABLE ONLY public.request_types
 
 
 --
--- TOC entry 5452 (class 2606 OID 16648)
+-- TOC entry 5560 (class 2606 OID 16648)
 -- Name: request_versions request_versions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4392,7 +5648,7 @@ ALTER TABLE ONLY public.request_versions
 
 
 --
--- TOC entry 5458 (class 2606 OID 16650)
+-- TOC entry 5566 (class 2606 OID 16650)
 -- Name: requests requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4401,7 +5657,7 @@ ALTER TABLE ONLY public.requests
 
 
 --
--- TOC entry 5619 (class 2606 OID 26405)
+-- TOC entry 5734 (class 2606 OID 26405)
 -- Name: scheduled_visits scheduled_visits_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4410,7 +5666,7 @@ ALTER TABLE ONLY public.scheduled_visits
 
 
 --
--- TOC entry 5621 (class 2606 OID 26407)
+-- TOC entry 5736 (class 2606 OID 26407)
 -- Name: scheduled_visits scheduled_visits_schedule_id_client_request_id_planned_date_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4419,7 +5675,7 @@ ALTER TABLE ONLY public.scheduled_visits
 
 
 --
--- TOC entry 5606 (class 2606 OID 26335)
+-- TOC entry 5721 (class 2606 OID 26335)
 -- Name: technical_documents technical_documents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4428,7 +5684,7 @@ ALTER TABLE ONLY public.technical_documents
 
 
 --
--- TOC entry 5629 (class 2606 OID 26459)
+-- TOC entry 5744 (class 2606 OID 26459)
 -- Name: travel_segments travel_segments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4437,7 +5693,7 @@ ALTER TABLE ONLY public.travel_segments
 
 
 --
--- TOC entry 5521 (class 2606 OID 17264)
+-- TOC entry 5634 (class 2606 OID 17264)
 -- Name: clients unique_client_request; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4446,7 +5702,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- TOC entry 5510 (class 2606 OID 17184)
+-- TOC entry 5623 (class 2606 OID 17184)
 -- Name: user_attendance_records unique_user_date; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4455,7 +5711,7 @@ ALTER TABLE ONLY public.user_attendance_records
 
 
 --
--- TOC entry 5512 (class 2606 OID 17182)
+-- TOC entry 5625 (class 2606 OID 17182)
 -- Name: user_attendance_records user_attendance_records_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4464,7 +5720,7 @@ ALTER TABLE ONLY public.user_attendance_records
 
 
 --
--- TOC entry 5525 (class 2606 OID 17311)
+-- TOC entry 5638 (class 2606 OID 17311)
 -- Name: user_gmail_tokens user_gmail_tokens_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4473,7 +5729,7 @@ ALTER TABLE ONLY public.user_gmail_tokens
 
 
 --
--- TOC entry 5527 (class 2606 OID 17313)
+-- TOC entry 5640 (class 2606 OID 17313)
 -- Name: user_gmail_tokens user_gmail_tokens_user_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4482,7 +5738,7 @@ ALTER TABLE ONLY public.user_gmail_tokens
 
 
 --
--- TOC entry 5505 (class 2606 OID 17166)
+-- TOC entry 5618 (class 2606 OID 17166)
 -- Name: user_lopdp_consents user_lopdp_consents_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4491,7 +5747,7 @@ ALTER TABLE ONLY public.user_lopdp_consents
 
 
 --
--- TOC entry 5480 (class 2606 OID 16957)
+-- TOC entry 5593 (class 2606 OID 16957)
 -- Name: user_sessions user_sessions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4500,7 +5756,7 @@ ALTER TABLE ONLY public.user_sessions
 
 
 --
--- TOC entry 5460 (class 2606 OID 16652)
+-- TOC entry 5568 (class 2606 OID 16652)
 -- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4509,7 +5765,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- TOC entry 5462 (class 2606 OID 16654)
+-- TOC entry 5570 (class 2606 OID 16654)
 -- Name: users users_google_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4518,7 +5774,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- TOC entry 5464 (class 2606 OID 16656)
+-- TOC entry 5572 (class 2606 OID 16656)
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4527,7 +5783,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- TOC entry 5551 (class 2606 OID 25713)
+-- TOC entry 5666 (class 2606 OID 25713)
 -- Name: vacaciones_solicitudes vacaciones_solicitudes_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4536,7 +5792,7 @@ ALTER TABLE ONLY public.vacaciones_solicitudes
 
 
 --
--- TOC entry 5612 (class 2606 OID 26386)
+-- TOC entry 5727 (class 2606 OID 26386)
 -- Name: visit_schedules visit_schedules_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4545,7 +5801,7 @@ ALTER TABLE ONLY public.visit_schedules
 
 
 --
--- TOC entry 5614 (class 2606 OID 26388)
+-- TOC entry 5729 (class 2606 OID 26388)
 -- Name: visit_schedules visit_schedules_user_email_month_year_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -4554,7 +5810,7 @@ ALTER TABLE ONLY public.visit_schedules
 
 
 --
--- TOC entry 5608 (class 2606 OID 26363)
+-- TOC entry 5723 (class 2606 OID 26363)
 -- Name: aplicaciones_tecnicas aplicaciones_tecnicas_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4563,7 +5819,7 @@ ALTER TABLE ONLY servicio.aplicaciones_tecnicas
 
 
 --
--- TOC entry 5466 (class 2606 OID 16658)
+-- TOC entry 5574 (class 2606 OID 16658)
 -- Name: cronograma_capacitacion cronograma_capacitacion_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4572,7 +5828,7 @@ ALTER TABLE ONLY servicio.cronograma_capacitacion
 
 
 --
--- TOC entry 5474 (class 2606 OID 16660)
+-- TOC entry 5582 (class 2606 OID 16660)
 -- Name: cronograma_mantenimientos_anuales cronograma_mantenimientos_anuales_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4581,7 +5837,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales
 
 
 --
--- TOC entry 5468 (class 2606 OID 17052)
+-- TOC entry 5576 (class 2606 OID 17052)
 -- Name: cronograma_mantenimientos cronograma_mantenimientos_id_unique; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4590,7 +5846,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos
 
 
 --
--- TOC entry 5470 (class 2606 OID 16662)
+-- TOC entry 5578 (class 2606 OID 16662)
 -- Name: cronograma_mantenimientos cronograma_mantenimientos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4599,7 +5855,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos
 
 
 --
--- TOC entry 5547 (class 2606 OID 25688)
+-- TOC entry 5662 (class 2606 OID 25688)
 -- Name: disponibilidad_tecnicos disponibilidad_tecnicos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4608,7 +5864,7 @@ ALTER TABLE ONLY servicio.disponibilidad_tecnicos
 
 
 --
--- TOC entry 5549 (class 2606 OID 25690)
+-- TOC entry 5664 (class 2606 OID 25690)
 -- Name: disponibilidad_tecnicos disponibilidad_tecnicos_user_id_key; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4617,7 +5873,7 @@ ALTER TABLE ONLY servicio.disponibilidad_tecnicos
 
 
 --
--- TOC entry 5476 (class 2606 OID 16664)
+-- TOC entry 5584 (class 2606 OID 16664)
 -- Name: equipos equipos_nombre_key; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4626,7 +5882,7 @@ ALTER TABLE ONLY servicio.equipos
 
 
 --
--- TOC entry 5478 (class 2606 OID 16666)
+-- TOC entry 5586 (class 2606 OID 16666)
 -- Name: equipos equipos_pkey; Type: CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -4635,7 +5891,16 @@ ALTER TABLE ONLY servicio.equipos
 
 
 --
--- TOC entry 5485 (class 1259 OID 16999)
+-- TOC entry 5591 (class 2606 OID 26881)
+-- Name: equipos servicio_equipos_code_unique; Type: CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos
+    ADD CONSTRAINT servicio_equipos_code_unique UNIQUE (code);
+
+
+--
+-- TOC entry 5598 (class 1259 OID 16999)
 -- Name: idx_auditoria_accion; Type: INDEX; Schema: auditoria; Owner: postgres
 --
 
@@ -4643,7 +5908,7 @@ CREATE INDEX idx_auditoria_accion ON auditoria.logs USING btree (accion);
 
 
 --
--- TOC entry 5486 (class 1259 OID 16996)
+-- TOC entry 5599 (class 1259 OID 16996)
 -- Name: idx_auditoria_fecha; Type: INDEX; Schema: auditoria; Owner: postgres
 --
 
@@ -4651,7 +5916,7 @@ CREATE INDEX idx_auditoria_fecha ON auditoria.logs USING btree (fecha DESC);
 
 
 --
--- TOC entry 5487 (class 1259 OID 16998)
+-- TOC entry 5600 (class 1259 OID 16998)
 -- Name: idx_auditoria_modulo; Type: INDEX; Schema: auditoria; Owner: postgres
 --
 
@@ -4659,7 +5924,7 @@ CREATE INDEX idx_auditoria_modulo ON auditoria.logs USING btree (modulo);
 
 
 --
--- TOC entry 5488 (class 1259 OID 16997)
+-- TOC entry 5601 (class 1259 OID 16997)
 -- Name: idx_auditoria_usuario; Type: INDEX; Schema: auditoria; Owner: postgres
 --
 
@@ -4667,7 +5932,7 @@ CREATE INDEX idx_auditoria_usuario ON auditoria.logs USING btree (usuario_email)
 
 
 --
--- TOC entry 5506 (class 1259 OID 17191)
+-- TOC entry 5619 (class 1259 OID 17191)
 -- Name: idx_attendance_date; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4675,7 +5940,7 @@ CREATE INDEX idx_attendance_date ON public.user_attendance_records USING btree (
 
 
 --
--- TOC entry 5507 (class 1259 OID 17192)
+-- TOC entry 5620 (class 1259 OID 17192)
 -- Name: idx_attendance_incomplete; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4683,7 +5948,7 @@ CREATE INDEX idx_attendance_incomplete ON public.user_attendance_records USING b
 
 
 --
--- TOC entry 5508 (class 1259 OID 17190)
+-- TOC entry 5621 (class 1259 OID 17190)
 -- Name: idx_attendance_user_date; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4691,7 +5956,7 @@ CREATE INDEX idx_attendance_user_date ON public.user_attendance_records USING bt
 
 
 --
--- TOC entry 5416 (class 1259 OID 16826)
+-- TOC entry 5524 (class 1259 OID 16826)
 -- Name: idx_audit_created_at; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4699,7 +5964,7 @@ CREATE INDEX idx_audit_created_at ON public.audit_trail USING btree (created_at 
 
 
 --
--- TOC entry 5417 (class 1259 OID 16825)
+-- TOC entry 5525 (class 1259 OID 16825)
 -- Name: idx_audit_module_action; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4707,7 +5972,7 @@ CREATE INDEX idx_audit_module_action ON public.audit_trail USING btree (module, 
 
 
 --
--- TOC entry 5418 (class 1259 OID 16827)
+-- TOC entry 5526 (class 1259 OID 16827)
 -- Name: idx_audit_user; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4715,7 +5980,7 @@ CREATE INDEX idx_audit_user ON public.audit_trail USING btree (user_id);
 
 
 --
--- TOC entry 5591 (class 1259 OID 26244)
+-- TOC entry 5706 (class 1259 OID 26244)
 -- Name: idx_bc_alerts_acknowledged; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4723,7 +5988,7 @@ CREATE INDEX idx_bc_alerts_acknowledged ON public.bc_alerts USING btree (acknowl
 
 
 --
--- TOC entry 5592 (class 1259 OID 26240)
+-- TOC entry 5707 (class 1259 OID 26240)
 -- Name: idx_bc_alerts_bc; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4731,7 +5996,7 @@ CREATE INDEX idx_bc_alerts_bc ON public.bc_alerts USING btree (business_case_id)
 
 
 --
--- TOC entry 5593 (class 1259 OID 26241)
+-- TOC entry 5708 (class 1259 OID 26241)
 -- Name: idx_bc_alerts_contract; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4739,7 +6004,7 @@ CREATE INDEX idx_bc_alerts_contract ON public.bc_alerts USING btree (contract_de
 
 
 --
--- TOC entry 5594 (class 1259 OID 26243)
+-- TOC entry 5709 (class 1259 OID 26243)
 -- Name: idx_bc_alerts_severity; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4747,7 +6012,7 @@ CREATE INDEX idx_bc_alerts_severity ON public.bc_alerts USING btree (severity);
 
 
 --
--- TOC entry 5595 (class 1259 OID 26242)
+-- TOC entry 5710 (class 1259 OID 26242)
 -- Name: idx_bc_alerts_type; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4755,7 +6020,87 @@ CREATE INDEX idx_bc_alerts_type ON public.bc_alerts USING btree (alert_type);
 
 
 --
--- TOC entry 5569 (class 1259 OID 26120)
+-- TOC entry 5775 (class 1259 OID 27027)
+-- Name: idx_bc_audit_action; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_audit_action ON public.bc_audit_log USING btree (action);
+
+
+--
+-- TOC entry 5776 (class 1259 OID 27026)
+-- Name: idx_bc_audit_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_audit_bc ON public.bc_audit_log USING btree (business_case_id);
+
+
+--
+-- TOC entry 5777 (class 1259 OID 27028)
+-- Name: idx_bc_audit_date; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_audit_date ON public.bc_audit_log USING btree (changed_at);
+
+
+--
+-- TOC entry 5767 (class 1259 OID 26968)
+-- Name: idx_bc_calculations_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_calculations_bc ON public.bc_calculations USING btree (business_case_id);
+
+
+--
+-- TOC entry 5761 (class 1259 OID 26940)
+-- Name: idx_bc_determinations_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_determinations_bc ON public.bc_determinations USING btree (business_case_id);
+
+
+--
+-- TOC entry 5762 (class 1259 OID 26941)
+-- Name: idx_bc_determinations_det; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_determinations_det ON public.bc_determinations USING btree (determination_id);
+
+
+--
+-- TOC entry 5755 (class 1259 OID 26909)
+-- Name: idx_bc_equipment_bc; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_equipment_bc ON public.bc_equipment_selection USING btree (business_case_id);
+
+
+--
+-- TOC entry 5756 (class 1259 OID 26910)
+-- Name: idx_bc_equipment_equip; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_bc_equipment_equip ON public.bc_equipment_selection USING btree (equipment_id);
+
+
+--
+-- TOC entry 5782 (class 1259 OID 27073)
+-- Name: idx_calc_templates_active; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_calc_templates_active ON public.calculation_templates USING btree (is_active) WHERE (is_active = true);
+
+
+--
+-- TOC entry 5783 (class 1259 OID 27072)
+-- Name: idx_calc_templates_category; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_calc_templates_category ON public.calculation_templates USING btree (category);
+
+
+--
+-- TOC entry 5684 (class 1259 OID 26120)
 -- Name: idx_catalog_consumables_name; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4763,7 +6108,7 @@ CREATE INDEX idx_catalog_consumables_name ON public.catalog_consumables USING bt
 
 
 --
--- TOC entry 5570 (class 1259 OID 26118)
+-- TOC entry 5685 (class 1259 OID 26118)
 -- Name: idx_catalog_consumables_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4771,7 +6116,7 @@ CREATE INDEX idx_catalog_consumables_status ON public.catalog_consumables USING 
 
 
 --
--- TOC entry 5571 (class 1259 OID 26119)
+-- TOC entry 5686 (class 1259 OID 26119)
 -- Name: idx_catalog_consumables_type; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4779,7 +6124,7 @@ CREATE INDEX idx_catalog_consumables_type ON public.catalog_consumables USING bt
 
 
 --
--- TOC entry 5564 (class 1259 OID 26283)
+-- TOC entry 5679 (class 1259 OID 26283)
 -- Name: idx_catalog_determinations_equipment; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4787,7 +6132,7 @@ CREATE INDEX idx_catalog_determinations_equipment ON public.catalog_determinatio
 
 
 --
--- TOC entry 5565 (class 1259 OID 26092)
+-- TOC entry 5680 (class 1259 OID 26092)
 -- Name: idx_catalog_determinations_name; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4795,7 +6140,7 @@ CREATE INDEX idx_catalog_determinations_name ON public.catalog_determinations US
 
 
 --
--- TOC entry 5566 (class 1259 OID 26090)
+-- TOC entry 5681 (class 1259 OID 26090)
 -- Name: idx_catalog_determinations_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4803,7 +6148,7 @@ CREATE INDEX idx_catalog_determinations_status ON public.catalog_determinations 
 
 
 --
--- TOC entry 5598 (class 1259 OID 26264)
+-- TOC entry 5713 (class 1259 OID 26264)
 -- Name: idx_catalog_inv_category; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4811,7 +6156,7 @@ CREATE INDEX idx_catalog_inv_category ON public.catalog_investments USING btree 
 
 
 --
--- TOC entry 5599 (class 1259 OID 26265)
+-- TOC entry 5714 (class 1259 OID 26265)
 -- Name: idx_catalog_inv_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4819,7 +6164,7 @@ CREATE INDEX idx_catalog_inv_status ON public.catalog_investments USING btree (s
 
 
 --
--- TOC entry 5497 (class 1259 OID 17294)
+-- TOC entry 5610 (class 1259 OID 17294)
 -- Name: idx_client_requests_approval_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4827,7 +6172,7 @@ CREATE INDEX idx_client_requests_approval_status ON public.client_requests USING
 
 
 --
--- TOC entry 5498 (class 1259 OID 17296)
+-- TOC entry 5611 (class 1259 OID 17296)
 -- Name: idx_client_requests_created_by; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4835,7 +6180,7 @@ CREATE INDEX idx_client_requests_created_by ON public.client_requests USING btre
 
 
 --
--- TOC entry 5499 (class 1259 OID 17295)
+-- TOC entry 5612 (class 1259 OID 17295)
 -- Name: idx_client_requests_user_id; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4843,7 +6188,7 @@ CREATE INDEX idx_client_requests_user_id ON public.client_requests USING btree (
 
 
 --
--- TOC entry 5517 (class 1259 OID 17293)
+-- TOC entry 5630 (class 1259 OID 17293)
 -- Name: idx_clients_created_at; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4851,7 +6196,7 @@ CREATE INDEX idx_clients_created_at ON public.clients USING btree (created_at DE
 
 
 --
--- TOC entry 5518 (class 1259 OID 17291)
+-- TOC entry 5631 (class 1259 OID 17291)
 -- Name: idx_clients_estado; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4859,7 +6204,7 @@ CREATE INDEX idx_clients_estado ON public.clients USING btree (estado);
 
 
 --
--- TOC entry 5519 (class 1259 OID 17292)
+-- TOC entry 5632 (class 1259 OID 17292)
 -- Name: idx_clients_ruc_hash; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4867,7 +6212,7 @@ CREATE INDEX idx_clients_ruc_hash ON public.clients USING btree (ruc_hash);
 
 
 --
--- TOC entry 5586 (class 1259 OID 26209)
+-- TOC entry 5701 (class 1259 OID 26209)
 -- Name: idx_consumption_log_contract; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4875,7 +6220,7 @@ CREATE INDEX idx_consumption_log_contract ON public.determination_consumption_lo
 
 
 --
--- TOC entry 5587 (class 1259 OID 26210)
+-- TOC entry 5702 (class 1259 OID 26210)
 -- Name: idx_consumption_log_date; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4883,7 +6228,7 @@ CREATE INDEX idx_consumption_log_date ON public.determination_consumption_log US
 
 
 --
--- TOC entry 5588 (class 1259 OID 26211)
+-- TOC entry 5703 (class 1259 OID 26211)
 -- Name: idx_consumption_log_user; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4891,7 +6236,7 @@ CREATE INDEX idx_consumption_log_user ON public.determination_consumption_log US
 
 
 --
--- TOC entry 5580 (class 1259 OID 26181)
+-- TOC entry 5695 (class 1259 OID 26181)
 -- Name: idx_contract_det_bc; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4899,7 +6244,7 @@ CREATE INDEX idx_contract_det_bc ON public.contract_determinations USING btree (
 
 
 --
--- TOC entry 5581 (class 1259 OID 26182)
+-- TOC entry 5696 (class 1259 OID 26182)
 -- Name: idx_contract_det_client; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4907,7 +6252,7 @@ CREATE INDEX idx_contract_det_client ON public.contract_determinations USING btr
 
 
 --
--- TOC entry 5582 (class 1259 OID 26183)
+-- TOC entry 5697 (class 1259 OID 26183)
 -- Name: idx_contract_det_determination; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4915,7 +6260,7 @@ CREATE INDEX idx_contract_det_determination ON public.contract_determinations US
 
 
 --
--- TOC entry 5583 (class 1259 OID 26184)
+-- TOC entry 5698 (class 1259 OID 26184)
 -- Name: idx_contract_det_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4923,7 +6268,7 @@ CREATE INDEX idx_contract_det_status ON public.contract_determinations USING btr
 
 
 --
--- TOC entry 5425 (class 1259 OID 16667)
+-- TOC entry 5533 (class 1259 OID 16667)
 -- Name: idx_documents_request_id; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4931,7 +6276,7 @@ CREATE INDEX idx_documents_request_id ON public.documents USING btree (request_i
 
 
 --
--- TOC entry 5576 (class 1259 OID 26150)
+-- TOC entry 5691 (class 1259 OID 26150)
 -- Name: idx_eq_cons_determination; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4939,7 +6284,7 @@ CREATE INDEX idx_eq_cons_determination ON public.catalog_equipment_consumables U
 
 
 --
--- TOC entry 5577 (class 1259 OID 26291)
+-- TOC entry 5692 (class 1259 OID 26291)
 -- Name: idx_eq_cons_equipment; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4947,7 +6292,23 @@ CREATE INDEX idx_eq_cons_equipment ON public.catalog_equipment_consumables USING
 
 
 --
--- TOC entry 5432 (class 1259 OID 16668)
+-- TOC entry 5643 (class 1259 OID 27086)
+-- Name: idx_equipment_purchase_requests_modern; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_equipment_purchase_requests_modern ON public.equipment_purchase_requests USING btree (uses_modern_system) WHERE (uses_modern_system = true);
+
+
+--
+-- TOC entry 5644 (class 1259 OID 27085)
+-- Name: idx_equipment_purchase_requests_system_type; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_equipment_purchase_requests_system_type ON public.equipment_purchase_requests USING btree (bc_system_type) WHERE ((bc_system_type)::text = 'modern'::text);
+
+
+--
+-- TOC entry 5540 (class 1259 OID 16668)
 -- Name: idx_inventory_movements_inventory; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4955,7 +6316,7 @@ CREATE INDEX idx_inventory_movements_inventory ON public.inventory_movements USI
 
 
 --
--- TOC entry 5624 (class 1259 OID 26477)
+-- TOC entry 5739 (class 1259 OID 26477)
 -- Name: idx_location_history_activity; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4963,7 +6324,7 @@ CREATE INDEX idx_location_history_activity ON public.advisor_location_history US
 
 
 --
--- TOC entry 5625 (class 1259 OID 26476)
+-- TOC entry 5740 (class 1259 OID 26476)
 -- Name: idx_location_history_client; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4971,7 +6332,7 @@ CREATE INDEX idx_location_history_client ON public.advisor_location_history USIN
 
 
 --
--- TOC entry 5626 (class 1259 OID 26475)
+-- TOC entry 5741 (class 1259 OID 26475)
 -- Name: idx_location_history_user_time; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4979,7 +6340,7 @@ CREATE INDEX idx_location_history_user_time ON public.advisor_location_history U
 
 
 --
--- TOC entry 5630 (class 1259 OID 26505)
+-- TOC entry 5745 (class 1259 OID 26505)
 -- Name: idx_permisos_approver; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4987,7 +6348,7 @@ CREATE INDEX idx_permisos_approver ON public.permisos_vacaciones USING btree (ap
 
 
 --
--- TOC entry 5631 (class 1259 OID 26503)
+-- TOC entry 5746 (class 1259 OID 26503)
 -- Name: idx_permisos_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -4995,7 +6356,7 @@ CREATE INDEX idx_permisos_status ON public.permisos_vacaciones USING btree (stat
 
 
 --
--- TOC entry 5632 (class 1259 OID 26504)
+-- TOC entry 5747 (class 1259 OID 26504)
 -- Name: idx_permisos_tipo; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5003,7 +6364,7 @@ CREATE INDEX idx_permisos_tipo ON public.permisos_vacaciones USING btree (tipo_s
 
 
 --
--- TOC entry 5633 (class 1259 OID 26502)
+-- TOC entry 5748 (class 1259 OID 26502)
 -- Name: idx_permisos_user_email; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5011,7 +6372,7 @@ CREATE INDEX idx_permisos_user_email ON public.permisos_vacaciones USING btree (
 
 
 --
--- TOC entry 5541 (class 1259 OID 17459)
+-- TOC entry 5656 (class 1259 OID 17459)
 -- Name: idx_personnel_request_comments_request; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5019,7 +6380,7 @@ CREATE INDEX idx_personnel_request_comments_request ON public.personnel_request_
 
 
 --
--- TOC entry 5538 (class 1259 OID 17458)
+-- TOC entry 5653 (class 1259 OID 17458)
 -- Name: idx_personnel_request_history_request; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5027,7 +6388,7 @@ CREATE INDEX idx_personnel_request_history_request ON public.personnel_request_h
 
 
 --
--- TOC entry 5530 (class 1259 OID 17457)
+-- TOC entry 5645 (class 1259 OID 17457)
 -- Name: idx_personnel_requests_created_at; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5035,7 +6396,7 @@ CREATE INDEX idx_personnel_requests_created_at ON public.personnel_requests USIN
 
 
 --
--- TOC entry 5531 (class 1259 OID 17455)
+-- TOC entry 5646 (class 1259 OID 17455)
 -- Name: idx_personnel_requests_department; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5043,7 +6404,7 @@ CREATE INDEX idx_personnel_requests_department ON public.personnel_requests USIN
 
 
 --
--- TOC entry 5532 (class 1259 OID 17454)
+-- TOC entry 5647 (class 1259 OID 17454)
 -- Name: idx_personnel_requests_requester; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5051,7 +6412,7 @@ CREATE INDEX idx_personnel_requests_requester ON public.personnel_requests USING
 
 
 --
--- TOC entry 5533 (class 1259 OID 17456)
+-- TOC entry 5648 (class 1259 OID 17456)
 -- Name: idx_personnel_requests_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5059,7 +6420,31 @@ CREATE INDEX idx_personnel_requests_status ON public.personnel_requests USING bt
 
 
 --
--- TOC entry 5435 (class 1259 OID 16669)
+-- TOC entry 5770 (class 1259 OID 27006)
+-- Name: idx_price_history_consumable; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_price_history_consumable ON public.equipment_price_history USING btree (consumable_id) WHERE (consumable_id IS NOT NULL);
+
+
+--
+-- TOC entry 5771 (class 1259 OID 27007)
+-- Name: idx_price_history_dates; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_price_history_dates ON public.equipment_price_history USING btree (effective_from, effective_to);
+
+
+--
+-- TOC entry 5772 (class 1259 OID 27005)
+-- Name: idx_price_history_equipment; Type: INDEX; Schema: public; Owner: postgres
+--
+
+CREATE INDEX idx_price_history_equipment ON public.equipment_price_history USING btree (equipment_id) WHERE (equipment_id IS NOT NULL);
+
+
+--
+-- TOC entry 5543 (class 1259 OID 16669)
 -- Name: idx_request_approvals_pending; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5067,7 +6452,7 @@ CREATE INDEX idx_request_approvals_pending ON public.request_approvals USING btr
 
 
 --
--- TOC entry 5440 (class 1259 OID 16670)
+-- TOC entry 5548 (class 1259 OID 16670)
 -- Name: idx_request_attachments_request; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5075,7 +6460,7 @@ CREATE INDEX idx_request_attachments_request ON public.request_attachments USING
 
 
 --
--- TOC entry 5446 (class 1259 OID 16671)
+-- TOC entry 5554 (class 1259 OID 16671)
 -- Name: idx_request_types_schema_gin; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5083,7 +6468,7 @@ CREATE INDEX idx_request_types_schema_gin ON public.request_types USING gin (sch
 
 
 --
--- TOC entry 5454 (class 1259 OID 16672)
+-- TOC entry 5562 (class 1259 OID 16672)
 -- Name: idx_requests_created_at; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5091,7 +6476,7 @@ CREATE INDEX idx_requests_created_at ON public.requests USING btree (created_at)
 
 
 --
--- TOC entry 5455 (class 1259 OID 16673)
+-- TOC entry 5563 (class 1259 OID 16673)
 -- Name: idx_requests_payload_gin; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5099,7 +6484,7 @@ CREATE INDEX idx_requests_payload_gin ON public.requests USING gin (payload);
 
 
 --
--- TOC entry 5456 (class 1259 OID 16674)
+-- TOC entry 5564 (class 1259 OID 16674)
 -- Name: idx_requests_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5107,7 +6492,7 @@ CREATE INDEX idx_requests_status ON public.requests USING btree (status);
 
 
 --
--- TOC entry 5443 (class 1259 OID 16675)
+-- TOC entry 5551 (class 1259 OID 16675)
 -- Name: idx_rsh_request_id; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5115,7 +6500,7 @@ CREATE INDEX idx_rsh_request_id ON public.request_status_history USING btree (re
 
 
 --
--- TOC entry 5615 (class 1259 OID 26474)
+-- TOC entry 5730 (class 1259 OID 26474)
 -- Name: idx_scheduled_visits_city; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5123,7 +6508,7 @@ CREATE INDEX idx_scheduled_visits_city ON public.scheduled_visits USING btree (c
 
 
 --
--- TOC entry 5616 (class 1259 OID 26473)
+-- TOC entry 5731 (class 1259 OID 26473)
 -- Name: idx_scheduled_visits_date; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5131,7 +6516,7 @@ CREATE INDEX idx_scheduled_visits_date ON public.scheduled_visits USING btree (p
 
 
 --
--- TOC entry 5617 (class 1259 OID 26472)
+-- TOC entry 5732 (class 1259 OID 26472)
 -- Name: idx_scheduled_visits_schedule; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5139,7 +6524,7 @@ CREATE INDEX idx_scheduled_visits_schedule ON public.scheduled_visits USING btre
 
 
 --
--- TOC entry 5600 (class 1259 OID 26343)
+-- TOC entry 5715 (class 1259 OID 26343)
 -- Name: idx_tech_docs_created; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5147,7 +6532,7 @@ CREATE INDEX idx_tech_docs_created ON public.technical_documents USING btree (cr
 
 
 --
--- TOC entry 5601 (class 1259 OID 26344)
+-- TOC entry 5716 (class 1259 OID 26344)
 -- Name: idx_tech_docs_equipment; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5155,7 +6540,7 @@ CREATE INDEX idx_tech_docs_equipment ON public.technical_documents USING btree (
 
 
 --
--- TOC entry 5602 (class 1259 OID 26345)
+-- TOC entry 5717 (class 1259 OID 26345)
 -- Name: idx_tech_docs_serial; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5163,7 +6548,7 @@ CREATE INDEX idx_tech_docs_serial ON public.technical_documents USING btree (equ
 
 
 --
--- TOC entry 5603 (class 1259 OID 26341)
+-- TOC entry 5718 (class 1259 OID 26341)
 -- Name: idx_tech_docs_type; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5171,7 +6556,7 @@ CREATE INDEX idx_tech_docs_type ON public.technical_documents USING btree (docum
 
 
 --
--- TOC entry 5604 (class 1259 OID 26342)
+-- TOC entry 5719 (class 1259 OID 26342)
 -- Name: idx_tech_docs_user; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5179,7 +6564,7 @@ CREATE INDEX idx_tech_docs_user ON public.technical_documents USING btree (user_
 
 
 --
--- TOC entry 5627 (class 1259 OID 26478)
+-- TOC entry 5742 (class 1259 OID 26478)
 -- Name: idx_travel_segments_user_date; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5187,7 +6572,7 @@ CREATE INDEX idx_travel_segments_user_date ON public.travel_segments USING btree
 
 
 --
--- TOC entry 5522 (class 1259 OID 17320)
+-- TOC entry 5635 (class 1259 OID 17320)
 -- Name: idx_user_gmail_tokens_email; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5195,7 +6580,7 @@ CREATE INDEX idx_user_gmail_tokens_email ON public.user_gmail_tokens USING btree
 
 
 --
--- TOC entry 5523 (class 1259 OID 17319)
+-- TOC entry 5636 (class 1259 OID 17319)
 -- Name: idx_user_gmail_tokens_user_id; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5203,7 +6588,7 @@ CREATE INDEX idx_user_gmail_tokens_user_id ON public.user_gmail_tokens USING btr
 
 
 --
--- TOC entry 5609 (class 1259 OID 26471)
+-- TOC entry 5724 (class 1259 OID 26471)
 -- Name: idx_visit_schedules_month_year; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5211,7 +6596,7 @@ CREATE INDEX idx_visit_schedules_month_year ON public.visit_schedules USING btre
 
 
 --
--- TOC entry 5610 (class 1259 OID 26470)
+-- TOC entry 5725 (class 1259 OID 26470)
 -- Name: idx_visit_schedules_user_status; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5219,7 +6604,7 @@ CREATE INDEX idx_visit_schedules_user_status ON public.visit_schedules USING btr
 
 
 --
--- TOC entry 5453 (class 1259 OID 16676)
+-- TOC entry 5561 (class 1259 OID 16676)
 -- Name: uidx_request_versions_req_ver; Type: INDEX; Schema: public; Owner: postgres
 --
 
@@ -5227,7 +6612,7 @@ CREATE UNIQUE INDEX uidx_request_versions_req_ver ON public.request_versions USI
 
 
 --
--- TOC entry 5471 (class 1259 OID 17071)
+-- TOC entry 5579 (class 1259 OID 17071)
 -- Name: idx_cronograma_mantenimientos_next_status; Type: INDEX; Schema: servicio; Owner: postgres
 --
 
@@ -5235,7 +6620,7 @@ CREATE INDEX idx_cronograma_mantenimientos_next_status ON servicio.cronograma_ma
 
 
 --
--- TOC entry 5472 (class 1259 OID 17053)
+-- TOC entry 5580 (class 1259 OID 17053)
 -- Name: idx_cronograma_mantenimientos_request_id; Type: INDEX; Schema: servicio; Owner: postgres
 --
 
@@ -5243,7 +6628,47 @@ CREATE INDEX idx_cronograma_mantenimientos_request_id ON servicio.cronograma_man
 
 
 --
--- TOC entry 5714 (class 2620 OID 26347)
+-- TOC entry 5587 (class 1259 OID 26883)
+-- Name: idx_equipos_category; Type: INDEX; Schema: servicio; Owner: postgres
+--
+
+CREATE INDEX idx_equipos_category ON servicio.equipos USING btree (category_type);
+
+
+--
+-- TOC entry 5588 (class 1259 OID 26882)
+-- Name: idx_equipos_code; Type: INDEX; Schema: servicio; Owner: postgres
+--
+
+CREATE INDEX idx_equipos_code ON servicio.equipos USING btree (code);
+
+
+--
+-- TOC entry 5589 (class 1259 OID 26884)
+-- Name: idx_equipos_estado; Type: INDEX; Schema: servicio; Owner: postgres
+--
+
+CREATE INDEX idx_equipos_estado ON servicio.equipos USING btree (estado);
+
+
+--
+-- TOC entry 5882 (class 2620 OID 27032)
+-- Name: bc_determinations bc_determinations_audit; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER bc_determinations_audit AFTER INSERT OR DELETE OR UPDATE ON public.bc_determinations FOR EACH ROW EXECUTE FUNCTION public.bc_audit_trigger();
+
+
+--
+-- TOC entry 5881 (class 2620 OID 27031)
+-- Name: bc_equipment_selection bc_equipment_audit; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER bc_equipment_audit AFTER INSERT OR DELETE OR UPDATE ON public.bc_equipment_selection FOR EACH ROW EXECUTE FUNCTION public.bc_audit_trigger();
+
+
+--
+-- TOC entry 5880 (class 2620 OID 26347)
 -- Name: technical_documents tech_docs_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5251,7 +6676,7 @@ CREATE TRIGGER tech_docs_updated_at BEFORE UPDATE ON public.technical_documents 
 
 
 --
--- TOC entry 5709 (class 2620 OID 17194)
+-- TOC entry 5874 (class 2620 OID 17194)
 -- Name: user_attendance_records trg_attendance_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5259,7 +6684,7 @@ CREATE TRIGGER trg_attendance_updated_at BEFORE UPDATE ON public.user_attendance
 
 
 --
--- TOC entry 5697 (class 2620 OID 16677)
+-- TOC entry 5862 (class 2620 OID 16677)
 -- Name: documents trg_documents_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5267,7 +6692,7 @@ CREATE TRIGGER trg_documents_updated_at BEFORE UPDATE ON public.documents FOR EA
 
 
 --
--- TOC entry 5710 (class 2620 OID 17461)
+-- TOC entry 5876 (class 2620 OID 17461)
 -- Name: personnel_requests trg_generate_personnel_request_number; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5275,7 +6700,7 @@ CREATE TRIGGER trg_generate_personnel_request_number BEFORE INSERT ON public.per
 
 
 --
--- TOC entry 5698 (class 2620 OID 17031)
+-- TOC entry 5863 (class 2620 OID 17031)
 -- Name: inventory_movements trg_inventory_after_delete; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5283,7 +6708,7 @@ CREATE TRIGGER trg_inventory_after_delete AFTER DELETE ON public.inventory_movem
 
 
 --
--- TOC entry 5699 (class 2620 OID 17029)
+-- TOC entry 5864 (class 2620 OID 17029)
 -- Name: inventory_movements trg_inventory_after_insert; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5291,7 +6716,7 @@ CREATE TRIGGER trg_inventory_after_insert AFTER INSERT ON public.inventory_movem
 
 
 --
--- TOC entry 5700 (class 2620 OID 17030)
+-- TOC entry 5865 (class 2620 OID 17030)
 -- Name: inventory_movements trg_inventory_after_update; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5299,7 +6724,7 @@ CREATE TRIGGER trg_inventory_after_update AFTER UPDATE ON public.inventory_movem
 
 
 --
--- TOC entry 5711 (class 2620 OID 17465)
+-- TOC entry 5877 (class 2620 OID 17465)
 -- Name: personnel_requests trg_log_personnel_request_status_change; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5307,7 +6732,7 @@ CREATE TRIGGER trg_log_personnel_request_status_change AFTER UPDATE ON public.pe
 
 
 --
--- TOC entry 5702 (class 2620 OID 16678)
+-- TOC entry 5867 (class 2620 OID 16678)
 -- Name: requests trg_log_request_status; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5315,7 +6740,7 @@ CREATE TRIGGER trg_log_request_status AFTER UPDATE OF status ON public.requests 
 
 
 --
--- TOC entry 5701 (class 2620 OID 16679)
+-- TOC entry 5866 (class 2620 OID 16679)
 -- Name: request_types trg_request_types_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5323,7 +6748,7 @@ CREATE TRIGGER trg_request_types_updated_at BEFORE UPDATE ON public.request_type
 
 
 --
--- TOC entry 5703 (class 2620 OID 16680)
+-- TOC entry 5868 (class 2620 OID 16680)
 -- Name: requests trg_requests_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5331,7 +6756,7 @@ CREATE TRIGGER trg_requests_updated_at BEFORE UPDATE ON public.requests FOR EACH
 
 
 --
--- TOC entry 5712 (class 2620 OID 17463)
+-- TOC entry 5878 (class 2620 OID 17463)
 -- Name: personnel_requests trg_update_personnel_request_timestamp; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5339,7 +6764,7 @@ CREATE TRIGGER trg_update_personnel_request_timestamp BEFORE UPDATE ON public.pe
 
 
 --
--- TOC entry 5713 (class 2620 OID 26186)
+-- TOC entry 5879 (class 2620 OID 26186)
 -- Name: contract_determinations trg_update_remaining_quantity; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5347,7 +6772,7 @@ CREATE TRIGGER trg_update_remaining_quantity BEFORE INSERT OR UPDATE OF consumed
 
 
 --
--- TOC entry 5704 (class 2620 OID 16681)
+-- TOC entry 5869 (class 2620 OID 16681)
 -- Name: users trg_users_updated_at; Type: TRIGGER; Schema: public; Owner: postgres
 --
 
@@ -5355,7 +6780,23 @@ CREATE TRIGGER trg_users_updated_at BEFORE UPDATE ON public.users FOR EACH ROW E
 
 
 --
--- TOC entry 5705 (class 2620 OID 16682)
+-- TOC entry 5875 (class 2620 OID 27130)
+-- Name: equipment_purchase_requests trigger_validate_bc_system; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER trigger_validate_bc_system BEFORE INSERT OR UPDATE ON public.equipment_purchase_requests FOR EACH ROW EXECUTE FUNCTION public.validate_bc_system_consistency();
+
+
+--
+-- TOC entry 5883 (class 2620 OID 27075)
+-- Name: calculation_templates update_calc_templates_timestamp; Type: TRIGGER; Schema: public; Owner: postgres
+--
+
+CREATE TRIGGER update_calc_templates_timestamp BEFORE UPDATE ON public.calculation_templates FOR EACH ROW EXECUTE FUNCTION public.update_calculation_templates_timestamp();
+
+
+--
+-- TOC entry 5870 (class 2620 OID 16682)
 -- Name: cronograma_capacitacion capacitacion_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
 --
 
@@ -5363,7 +6804,7 @@ CREATE TRIGGER capacitacion_update_timestamp BEFORE UPDATE ON servicio.cronogram
 
 
 --
--- TOC entry 5708 (class 2620 OID 16683)
+-- TOC entry 5873 (class 2620 OID 16683)
 -- Name: equipos equipos_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
 --
 
@@ -5371,7 +6812,7 @@ CREATE TRIGGER equipos_update_timestamp BEFORE UPDATE ON servicio.equipos FOR EA
 
 
 --
--- TOC entry 5707 (class 2620 OID 16684)
+-- TOC entry 5872 (class 2620 OID 16684)
 -- Name: cronograma_mantenimientos_anuales mantenimiento_anual_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
 --
 
@@ -5379,7 +6820,7 @@ CREATE TRIGGER mantenimiento_anual_update_timestamp BEFORE UPDATE ON servicio.cr
 
 
 --
--- TOC entry 5706 (class 2620 OID 16685)
+-- TOC entry 5871 (class 2620 OID 16685)
 -- Name: cronograma_mantenimientos mantenimiento_update_timestamp; Type: TRIGGER; Schema: servicio; Owner: postgres
 --
 
@@ -5387,7 +6828,7 @@ CREATE TRIGGER mantenimiento_update_timestamp BEFORE UPDATE ON servicio.cronogra
 
 
 --
--- TOC entry 5693 (class 2606 OID 26434)
+-- TOC entry 5844 (class 2606 OID 26434)
 -- Name: advisor_location_history advisor_location_history_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5396,7 +6837,7 @@ ALTER TABLE ONLY public.advisor_location_history
 
 
 --
--- TOC entry 5694 (class 2606 OID 26439)
+-- TOC entry 5845 (class 2606 OID 26439)
 -- Name: advisor_location_history advisor_location_history_visit_log_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5405,7 +6846,7 @@ ALTER TABLE ONLY public.advisor_location_history
 
 
 --
--- TOC entry 5688 (class 2606 OID 26230)
+-- TOC entry 5839 (class 2606 OID 26230)
 -- Name: bc_alerts bc_alerts_business_case_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5414,7 +6855,7 @@ ALTER TABLE ONLY public.bc_alerts
 
 
 --
--- TOC entry 5689 (class 2606 OID 26235)
+-- TOC entry 5840 (class 2606 OID 26235)
 -- Name: bc_alerts bc_alerts_contract_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5423,7 +6864,61 @@ ALTER TABLE ONLY public.bc_alerts
 
 
 --
--- TOC entry 5681 (class 2606 OID 26113)
+-- TOC entry 5859 (class 2606 OID 27021)
+-- Name: bc_audit_log bc_audit_log_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_audit_log
+    ADD CONSTRAINT bc_audit_log_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5851 (class 2606 OID 26935)
+-- Name: bc_determinations bc_determinations_added_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations
+    ADD CONSTRAINT bc_determinations_added_by_fkey FOREIGN KEY (added_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5852 (class 2606 OID 26930)
+-- Name: bc_determinations bc_determinations_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations
+    ADD CONSTRAINT bc_determinations_determination_id_fkey FOREIGN KEY (determination_id) REFERENCES public.catalog_determinations(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5848 (class 2606 OID 26899)
+-- Name: bc_equipment_selection bc_equipment_selection_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection
+    ADD CONSTRAINT bc_equipment_selection_equipment_id_fkey FOREIGN KEY (equipment_id) REFERENCES servicio.equipos(id_equipo) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5849 (class 2606 OID 26904)
+-- Name: bc_equipment_selection bc_equipment_selection_selected_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection
+    ADD CONSTRAINT bc_equipment_selection_selected_by_fkey FOREIGN KEY (selected_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5861 (class 2606 OID 27067)
+-- Name: calculation_templates calculation_templates_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.calculation_templates
+    ADD CONSTRAINT calculation_templates_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5832 (class 2606 OID 26113)
 -- Name: catalog_consumables catalog_consumables_replaced_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5432,7 +6927,7 @@ ALTER TABLE ONLY public.catalog_consumables
 
 
 --
--- TOC entry 5679 (class 2606 OID 26284)
+-- TOC entry 5830 (class 2606 OID 26284)
 -- Name: catalog_determinations catalog_determinations_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5441,7 +6936,7 @@ ALTER TABLE ONLY public.catalog_determinations
 
 
 --
--- TOC entry 5680 (class 2606 OID 26085)
+-- TOC entry 5831 (class 2606 OID 26085)
 -- Name: catalog_determinations catalog_determinations_replaced_by_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5450,7 +6945,7 @@ ALTER TABLE ONLY public.catalog_determinations
 
 
 --
--- TOC entry 5682 (class 2606 OID 26139)
+-- TOC entry 5833 (class 2606 OID 26139)
 -- Name: catalog_equipment_consumables catalog_equipment_consumables_consumable_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5459,7 +6954,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables
 
 
 --
--- TOC entry 5683 (class 2606 OID 26144)
+-- TOC entry 5834 (class 2606 OID 26144)
 -- Name: catalog_equipment_consumables catalog_equipment_consumables_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5468,7 +6963,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables
 
 
 --
--- TOC entry 5684 (class 2606 OID 26292)
+-- TOC entry 5835 (class 2606 OID 26292)
 -- Name: catalog_equipment_consumables catalog_equipment_consumables_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5477,7 +6972,7 @@ ALTER TABLE ONLY public.catalog_equipment_consumables
 
 
 --
--- TOC entry 5677 (class 2606 OID 25729)
+-- TOC entry 5828 (class 2606 OID 25729)
 -- Name: client_assignments client_assignments_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5486,7 +6981,7 @@ ALTER TABLE ONLY public.client_assignments
 
 
 --
--- TOC entry 5661 (class 2606 OID 17147)
+-- TOC entry 5811 (class 2606 OID 17147)
 -- Name: client_request_consent_tokens client_request_consent_tokens_used_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5495,7 +6990,7 @@ ALTER TABLE ONLY public.client_request_consent_tokens
 
 
 --
--- TOC entry 5660 (class 2606 OID 17125)
+-- TOC entry 5810 (class 2606 OID 17125)
 -- Name: client_request_consents client_request_consents_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5504,7 +6999,7 @@ ALTER TABLE ONLY public.client_request_consents
 
 
 --
--- TOC entry 5657 (class 2606 OID 17276)
+-- TOC entry 5807 (class 2606 OID 17276)
 -- Name: client_requests client_requests_approved_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5513,7 +7008,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5658 (class 2606 OID 17281)
+-- TOC entry 5808 (class 2606 OID 17281)
 -- Name: client_requests client_requests_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5522,7 +7017,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5659 (class 2606 OID 17286)
+-- TOC entry 5809 (class 2606 OID 17286)
 -- Name: client_requests client_requests_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5531,7 +7026,7 @@ ALTER TABLE ONLY public.client_requests
 
 
 --
--- TOC entry 5678 (class 2606 OID 25753)
+-- TOC entry 5829 (class 2606 OID 25753)
 -- Name: client_visit_logs client_visit_logs_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5540,7 +7035,7 @@ ALTER TABLE ONLY public.client_visit_logs
 
 
 --
--- TOC entry 5663 (class 2606 OID 17265)
+-- TOC entry 5813 (class 2606 OID 17265)
 -- Name: clients clients_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5549,7 +7044,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- TOC entry 5664 (class 2606 OID 17270)
+-- TOC entry 5814 (class 2606 OID 17270)
 -- Name: clients clients_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5558,7 +7053,7 @@ ALTER TABLE ONLY public.clients
 
 
 --
--- TOC entry 5685 (class 2606 OID 26171)
+-- TOC entry 5836 (class 2606 OID 26171)
 -- Name: contract_determinations contract_determinations_business_case_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5567,7 +7062,7 @@ ALTER TABLE ONLY public.contract_determinations
 
 
 --
--- TOC entry 5686 (class 2606 OID 26176)
+-- TOC entry 5837 (class 2606 OID 26176)
 -- Name: contract_determinations contract_determinations_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5576,7 +7071,7 @@ ALTER TABLE ONLY public.contract_determinations
 
 
 --
--- TOC entry 5687 (class 2606 OID 26204)
+-- TOC entry 5838 (class 2606 OID 26204)
 -- Name: determination_consumption_log determination_consumption_log_contract_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5585,7 +7080,7 @@ ALTER TABLE ONLY public.determination_consumption_log
 
 
 --
--- TOC entry 5636 (class 2606 OID 16686)
+-- TOC entry 5784 (class 2606 OID 16686)
 -- Name: document_signatures document_signatures_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5594,7 +7089,7 @@ ALTER TABLE ONLY public.document_signatures
 
 
 --
--- TOC entry 5637 (class 2606 OID 16691)
+-- TOC entry 5785 (class 2606 OID 16691)
 -- Name: document_signatures document_signatures_signer_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5603,7 +7098,7 @@ ALTER TABLE ONLY public.document_signatures
 
 
 --
--- TOC entry 5638 (class 2606 OID 16696)
+-- TOC entry 5786 (class 2606 OID 16696)
 -- Name: documents documents_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5612,7 +7107,7 @@ ALTER TABLE ONLY public.documents
 
 
 --
--- TOC entry 5639 (class 2606 OID 16701)
+-- TOC entry 5787 (class 2606 OID 16701)
 -- Name: documents documents_request_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5621,7 +7116,43 @@ ALTER TABLE ONLY public.documents
 
 
 --
--- TOC entry 5675 (class 2606 OID 17478)
+-- TOC entry 5855 (class 2606 OID 27000)
+-- Name: equipment_price_history equipment_price_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history
+    ADD CONSTRAINT equipment_price_history_changed_by_fkey FOREIGN KEY (changed_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5856 (class 2606 OID 26990)
+-- Name: equipment_price_history equipment_price_history_consumable_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history
+    ADD CONSTRAINT equipment_price_history_consumable_id_fkey FOREIGN KEY (consumable_id) REFERENCES public.catalog_consumables(id);
+
+
+--
+-- TOC entry 5857 (class 2606 OID 26995)
+-- Name: equipment_price_history equipment_price_history_determination_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history
+    ADD CONSTRAINT equipment_price_history_determination_id_fkey FOREIGN KEY (determination_id) REFERENCES public.catalog_determinations(id);
+
+
+--
+-- TOC entry 5858 (class 2606 OID 26985)
+-- Name: equipment_price_history equipment_price_history_equipment_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_price_history
+    ADD CONSTRAINT equipment_price_history_equipment_id_fkey FOREIGN KEY (equipment_id) REFERENCES servicio.equipos(id_equipo);
+
+
+--
+-- TOC entry 5825 (class 2606 OID 17478)
 -- Name: equipment_purchase_bc_items equipment_purchase_bc_items_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5630,7 +7161,52 @@ ALTER TABLE ONLY public.equipment_purchase_bc_items
 
 
 --
--- TOC entry 5665 (class 2606 OID 17314)
+-- TOC entry 5860 (class 2606 OID 27102)
+-- Name: bc_audit_log fk_bc_audit_log_bc; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_audit_log
+    ADD CONSTRAINT fk_bc_audit_log_bc FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5854 (class 2606 OID 27097)
+-- Name: bc_calculations fk_bc_calculations_bc; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_calculations
+    ADD CONSTRAINT fk_bc_calculations_bc FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5853 (class 2606 OID 27092)
+-- Name: bc_determinations fk_bc_determinations_bc; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_determinations
+    ADD CONSTRAINT fk_bc_determinations_bc FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5850 (class 2606 OID 27087)
+-- Name: bc_equipment_selection fk_bc_equipment_selection_bc; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.bc_equipment_selection
+    ADD CONSTRAINT fk_bc_equipment_selection_bc FOREIGN KEY (business_case_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5826 (class 2606 OID 27107)
+-- Name: equipment_purchase_bc_items fk_bc_items_request; Type: FK CONSTRAINT; Schema: public; Owner: postgres
+--
+
+ALTER TABLE ONLY public.equipment_purchase_bc_items
+    ADD CONSTRAINT fk_bc_items_request FOREIGN KEY (request_id) REFERENCES public.equipment_purchase_requests(id) ON DELETE CASCADE;
+
+
+--
+-- TOC entry 5815 (class 2606 OID 17314)
 -- Name: user_gmail_tokens fk_user_gmail_tokens_user; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5639,7 +7215,7 @@ ALTER TABLE ONLY public.user_gmail_tokens
 
 
 --
--- TOC entry 5651 (class 2606 OID 16974)
+-- TOC entry 5799 (class 2606 OID 16974)
 -- Name: users fk_users_department; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5648,7 +7224,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- TOC entry 5652 (class 2606 OID 16979)
+-- TOC entry 5800 (class 2606 OID 16979)
 -- Name: users fk_users_departments; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5657,7 +7233,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- TOC entry 5640 (class 2606 OID 16706)
+-- TOC entry 5788 (class 2606 OID 16706)
 -- Name: inventory_movements inventory_movements_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5666,7 +7242,7 @@ ALTER TABLE ONLY public.inventory_movements
 
 
 --
--- TOC entry 5641 (class 2606 OID 16711)
+-- TOC entry 5789 (class 2606 OID 16711)
 -- Name: inventory_movements inventory_movements_inventory_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5675,7 +7251,7 @@ ALTER TABLE ONLY public.inventory_movements
 
 
 --
--- TOC entry 5673 (class 2606 OID 17444)
+-- TOC entry 5823 (class 2606 OID 17444)
 -- Name: personnel_request_comments personnel_request_comments_personnel_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5684,7 +7260,7 @@ ALTER TABLE ONLY public.personnel_request_comments
 
 
 --
--- TOC entry 5674 (class 2606 OID 17449)
+-- TOC entry 5824 (class 2606 OID 17449)
 -- Name: personnel_request_comments personnel_request_comments_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5693,7 +7269,7 @@ ALTER TABLE ONLY public.personnel_request_comments
 
 
 --
--- TOC entry 5671 (class 2606 OID 17424)
+-- TOC entry 5821 (class 2606 OID 17424)
 -- Name: personnel_request_history personnel_request_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5702,7 +7278,7 @@ ALTER TABLE ONLY public.personnel_request_history
 
 
 --
--- TOC entry 5672 (class 2606 OID 17419)
+-- TOC entry 5822 (class 2606 OID 17419)
 -- Name: personnel_request_history personnel_request_history_personnel_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5711,7 +7287,7 @@ ALTER TABLE ONLY public.personnel_request_history
 
 
 --
--- TOC entry 5666 (class 2606 OID 17401)
+-- TOC entry 5816 (class 2606 OID 17401)
 -- Name: personnel_requests personnel_requests_approved_by_finance_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5720,7 +7296,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5667 (class 2606 OID 17396)
+-- TOC entry 5817 (class 2606 OID 17396)
 -- Name: personnel_requests personnel_requests_approved_by_hr_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5729,7 +7305,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5668 (class 2606 OID 17391)
+-- TOC entry 5818 (class 2606 OID 17391)
 -- Name: personnel_requests personnel_requests_approved_by_manager_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5738,7 +7314,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5669 (class 2606 OID 17386)
+-- TOC entry 5819 (class 2606 OID 17386)
 -- Name: personnel_requests personnel_requests_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5747,7 +7323,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5670 (class 2606 OID 17381)
+-- TOC entry 5820 (class 2606 OID 17381)
 -- Name: personnel_requests personnel_requests_requester_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5756,7 +7332,7 @@ ALTER TABLE ONLY public.personnel_requests
 
 
 --
--- TOC entry 5642 (class 2606 OID 16716)
+-- TOC entry 5790 (class 2606 OID 16716)
 -- Name: request_approvals request_approvals_approver_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5765,7 +7341,7 @@ ALTER TABLE ONLY public.request_approvals
 
 
 --
--- TOC entry 5643 (class 2606 OID 16721)
+-- TOC entry 5791 (class 2606 OID 16721)
 -- Name: request_approvals request_approvals_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5774,7 +7350,7 @@ ALTER TABLE ONLY public.request_approvals
 
 
 --
--- TOC entry 5644 (class 2606 OID 16726)
+-- TOC entry 5792 (class 2606 OID 16726)
 -- Name: request_attachments request_attachments_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5783,7 +7359,7 @@ ALTER TABLE ONLY public.request_attachments
 
 
 --
--- TOC entry 5645 (class 2606 OID 16731)
+-- TOC entry 5793 (class 2606 OID 16731)
 -- Name: request_attachments request_attachments_uploaded_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5792,7 +7368,7 @@ ALTER TABLE ONLY public.request_attachments
 
 
 --
--- TOC entry 5646 (class 2606 OID 16736)
+-- TOC entry 5794 (class 2606 OID 16736)
 -- Name: request_status_history request_status_history_changed_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5801,7 +7377,7 @@ ALTER TABLE ONLY public.request_status_history
 
 
 --
--- TOC entry 5647 (class 2606 OID 16741)
+-- TOC entry 5795 (class 2606 OID 16741)
 -- Name: request_status_history request_status_history_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5810,7 +7386,7 @@ ALTER TABLE ONLY public.request_status_history
 
 
 --
--- TOC entry 5648 (class 2606 OID 16746)
+-- TOC entry 5796 (class 2606 OID 16746)
 -- Name: request_versions request_versions_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5819,7 +7395,7 @@ ALTER TABLE ONLY public.request_versions
 
 
 --
--- TOC entry 5649 (class 2606 OID 16751)
+-- TOC entry 5797 (class 2606 OID 16751)
 -- Name: requests requests_request_type_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5828,7 +7404,7 @@ ALTER TABLE ONLY public.requests
 
 
 --
--- TOC entry 5650 (class 2606 OID 16756)
+-- TOC entry 5798 (class 2606 OID 16756)
 -- Name: requests requests_requester_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5837,7 +7413,7 @@ ALTER TABLE ONLY public.requests
 
 
 --
--- TOC entry 5691 (class 2606 OID 26413)
+-- TOC entry 5842 (class 2606 OID 26413)
 -- Name: scheduled_visits scheduled_visits_client_request_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5846,7 +7422,7 @@ ALTER TABLE ONLY public.scheduled_visits
 
 
 --
--- TOC entry 5692 (class 2606 OID 26408)
+-- TOC entry 5843 (class 2606 OID 26408)
 -- Name: scheduled_visits scheduled_visits_schedule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5855,7 +7431,7 @@ ALTER TABLE ONLY public.scheduled_visits
 
 
 --
--- TOC entry 5690 (class 2606 OID 26336)
+-- TOC entry 5841 (class 2606 OID 26336)
 -- Name: technical_documents technical_documents_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5864,7 +7440,7 @@ ALTER TABLE ONLY public.technical_documents
 
 
 --
--- TOC entry 5695 (class 2606 OID 26460)
+-- TOC entry 5846 (class 2606 OID 26460)
 -- Name: travel_segments travel_segments_from_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5873,7 +7449,7 @@ ALTER TABLE ONLY public.travel_segments
 
 
 --
--- TOC entry 5696 (class 2606 OID 26465)
+-- TOC entry 5847 (class 2606 OID 26465)
 -- Name: travel_segments travel_segments_to_client_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5882,7 +7458,7 @@ ALTER TABLE ONLY public.travel_segments
 
 
 --
--- TOC entry 5662 (class 2606 OID 17185)
+-- TOC entry 5812 (class 2606 OID 17185)
 -- Name: user_attendance_records user_attendance_records_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
@@ -5891,7 +7467,7 @@ ALTER TABLE ONLY public.user_attendance_records
 
 
 --
--- TOC entry 5656 (class 2606 OID 16761)
+-- TOC entry 5804 (class 2606 OID 16761)
 -- Name: cronograma_mantenimientos_anuales cronograma_mantenimientos_anuales_id_equipo_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -5900,7 +7476,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos_anuales
 
 
 --
--- TOC entry 5653 (class 2606 OID 17059)
+-- TOC entry 5801 (class 2606 OID 17059)
 -- Name: cronograma_mantenimientos cronograma_mantenimientos_created_by_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -5909,7 +7485,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos
 
 
 --
--- TOC entry 5654 (class 2606 OID 16766)
+-- TOC entry 5802 (class 2606 OID 16766)
 -- Name: cronograma_mantenimientos cronograma_mantenimientos_id_equipo_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -5918,7 +7494,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos
 
 
 --
--- TOC entry 5655 (class 2606 OID 17054)
+-- TOC entry 5803 (class 2606 OID 17054)
 -- Name: cronograma_mantenimientos cronograma_mantenimientos_request_fk; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -5927,7 +7503,7 @@ ALTER TABLE ONLY servicio.cronograma_mantenimientos
 
 
 --
--- TOC entry 5676 (class 2606 OID 25691)
+-- TOC entry 5827 (class 2606 OID 25691)
 -- Name: disponibilidad_tecnicos disponibilidad_tecnicos_user_id_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
 --
 
@@ -5936,7 +7512,25 @@ ALTER TABLE ONLY servicio.disponibilidad_tecnicos
 
 
 --
--- TOC entry 5984 (class 0 OID 0)
+-- TOC entry 5805 (class 2606 OID 26870)
+-- Name: equipos equipos_created_by_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos
+    ADD CONSTRAINT equipos_created_by_fkey FOREIGN KEY (created_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 5806 (class 2606 OID 26875)
+-- Name: equipos equipos_updated_by_fkey; Type: FK CONSTRAINT; Schema: servicio; Owner: postgres
+--
+
+ALTER TABLE ONLY servicio.equipos
+    ADD CONSTRAINT equipos_updated_by_fkey FOREIGN KEY (updated_by) REFERENCES public.users(id);
+
+
+--
+-- TOC entry 6211 (class 0 OID 0)
 -- Dependencies: 265
 -- Name: TABLE v_inventario_completo; Type: ACL; Schema: public; Owner: postgres
 --
@@ -5944,11 +7538,11 @@ ALTER TABLE ONLY servicio.disponibilidad_tecnicos
 GRANT SELECT ON TABLE public.v_inventario_completo TO PUBLIC;
 
 
--- Completed on 2025-12-04 17:27:43
+-- Completed on 2025-12-05 13:51:46
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict APk7sK1ORKcb1kWOvpFBDQE5A5AeFqjRBVdphvvOrYC9mRqraWLGYbNMS1QUebb
+\unrestrict LVGGLQT24c2vy3hKDXwZbkPmeR1InYvhEcMezufLOPBQtpy4BXUHYTYzkD2kDNk
 

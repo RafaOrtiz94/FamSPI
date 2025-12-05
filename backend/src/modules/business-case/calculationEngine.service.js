@@ -9,12 +9,12 @@
  * 3. Pipeline: Cálculos en pasos secuenciales
  */
 
-const mathjs = require('mathjs');
+const { create, all } = require('mathjs');
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 
 // Crear scope limitado y seguro de mathjs
-const mathEngine = mathjs.create({
+const mathEngine = create(all, {
     number: 'BigNumber',
     precision: 14
 });
