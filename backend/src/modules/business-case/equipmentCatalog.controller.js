@@ -1,17 +1,24 @@
 const Joi = require("joi");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const calculationEngine = require("./calculationEngine.service");
 
 const equipmentSchema = Joi.object({
-  code: Joi.string().required(),
-  nombre: Joi.string().required(),
-  fabricante: Joi.string().required(),
-  modelo: Joi.string().allow(null, ""),
-  category_type: Joi.string().allow(null, ""),
-  capacity_per_hour: Joi.number().integer().allow(null),
-  max_daily_capacity: Joi.number().integer().allow(null),
-  base_price: Joi.number().allow(null),
-  estado: Joi.string().default("operativo"),
+  code: Joi.string().trim().required(),
+  nombre: Joi.string().trim().required(),
+  fabricante: Joi.string().trim().required(),
+  modelo: Joi.string().allow(null, "").trim(),
+  category_type: Joi.string().allow(null, "").trim(),
+  capacity_per_hour: Joi.number().integer().min(0).allow(null),
+  max_daily_capacity: Joi.number().integer().min(0).allow(null),
+  base_price: Joi.number().min(0).allow(null),
+  estado: Joi.string().valid("operativo", "inactivo", "mantenimiento").default("operativo"),
+});
+
+const equipmentFormulaSchema = Joi.object({
+  calculationType: Joi.string().valid("consumption", "cost").required(),
+  formula: Joi.object().required(),
+  exampleContext: Joi.object().default({}),
 });
 
 async function list(req, res) {
@@ -125,10 +132,42 @@ async function update(req, res) {
   }
 }
 
+async function updateFormula(req, res) {
+  try {
+    const { error, value } = equipmentFormulaSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const validation = await calculationEngine.validateFormula(value.formula, value.exampleContext);
+    if (!validation.isValid) {
+      return res.status(400).json({ ok: false, message: `Fórmula inválida: ${validation.error}` });
+    }
+
+    const existing = await db.query(
+      `SELECT id_equipo, default_calculation_formula FROM servicio.equipos WHERE id_equipo = $1`,
+      [req.params.id],
+    );
+    if (!existing.rows.length) return res.status(404).json({ ok: false, message: "Equipo no encontrado" });
+
+    const currentFormula = existing.rows[0].default_calculation_formula || {};
+    const updatedFormula = { ...currentFormula, [value.calculationType]: value.formula };
+
+    const { rows } = await db.query(
+      `UPDATE servicio.equipos SET default_calculation_formula = $1, updated_at = now() WHERE id_equipo = $2 RETURNING *`,
+      [JSON.stringify(updatedFormula), req.params.id],
+    );
+
+    res.json({ ok: true, data: rows[0], validation });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error actualizando fórmula del equipo" });
+  }
+}
+
 module.exports = {
   list,
   getDetails,
   getDeterminations,
   create,
   update,
+  updateFormula,
 };

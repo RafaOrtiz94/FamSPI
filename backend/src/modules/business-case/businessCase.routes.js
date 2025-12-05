@@ -48,6 +48,12 @@ equipmentCatalogRoutes.get(
 );
 equipmentCatalogRoutes.post("/", verifyToken, requireRole(adminRoles), equipmentCatalogCtrl.create);
 equipmentCatalogRoutes.put("/:id", verifyToken, requireRole(adminRoles), equipmentCatalogCtrl.update);
+equipmentCatalogRoutes.post(
+  "/:id/formula",
+  verifyToken,
+  requireRole(adminRoles),
+  equipmentCatalogCtrl.updateFormula,
+);
 
 // Determinations catalog
 const determinationsCatalogRoutes = express.Router();
@@ -63,6 +69,12 @@ determinationsCatalogRoutes.post(
   verifyToken,
   requireRole(adminRoles),
   determinationsCatalogCtrl.updateFormula,
+);
+determinationsCatalogRoutes.post(
+  "/formula/validate",
+  verifyToken,
+  requireRole(adminRoles),
+  determinationsCatalogCtrl.validateFormula,
 );
 
 // Calculation templates
