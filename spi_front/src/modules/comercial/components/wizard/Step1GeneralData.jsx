@@ -43,12 +43,44 @@ const Step1GeneralData = ({ onNext }) => {
     fetchClients();
   }, []);
 
-  const onSubmit = async (data) => {
+  const formatClientLabel = (client) =>
+    client?.nombre ||
+    client?.commercial_name ||
+    client?.name ||
+    client?.display_name ||
+    client?.email ||
+    client?.identificador ||
+    client?.id ||
+    "Cliente";
+
+  const onSubmit = async (formData) => {
+    const selected = clients.find(
+      (c) =>
+        String(c.id) === String(formData.client) ||
+        String(c.email) === String(formData.client) ||
+        String(c.identificador) === String(formData.client),
+    );
+
+    const client_name = selected ? formatClientLabel(selected) : formData.client;
+    const client_id = selected?.id && Number.isFinite(Number(selected.id)) ? Number(selected.id) : undefined;
+
+    const payload = {
+      client_name,
+      client_id,
+      status: "draft",
+      bc_stage: "pending_comercial",
+      modern_bc_metadata: {
+        businessType: formData.businessType,
+        notes: formData.notes,
+        date: formData.date,
+      },
+    };
+
     showLoader();
     try {
-      const res = await api.post("/business-case", data);
-      const bcId = res.data?.id || res.data?.businessCaseId;
-      updateState({ generalData: data, businessCaseId: bcId });
+      const res = await api.post("/business-case", payload);
+      const bcId = res.data?.id || res.data?.businessCaseId || res.data?.data?.id || res.data?.data?.businessCaseId;
+      updateState({ generalData: formData, businessCaseId: bcId });
       showToast("Datos guardados correctamente", "success");
       if (onNext) onNext();
     } catch (err) {

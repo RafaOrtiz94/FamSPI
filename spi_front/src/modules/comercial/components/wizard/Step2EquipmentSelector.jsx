@@ -57,7 +57,17 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
           category: filters.category || undefined,
         },
       });
-      setItems(res.data?.items || res.data || []);
+      const payload = res.data?.data ?? res.data;
+      const parsedItems = Array.isArray(payload?.items)
+        ? payload.items
+        : Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.rows)
+        ? payload.rows
+        : Array.isArray(payload)
+        ? payload
+        : [];
+      setItems(parsedItems);
     } catch (err) {
       showToast("No se pudo cargar el catálogo", "error");
     } finally {
