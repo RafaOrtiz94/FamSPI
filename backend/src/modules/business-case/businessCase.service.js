@@ -1,12 +1,14 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { ensureFolder } = require("../../utils/drive");
+const { v4: uuidv4 } = require("uuid");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
 
 const DEFAULT_PAGE_SIZE = 20;
 
 function mapBusinessCase(row) {
   if (!row) return null;
+  const businessCaseId = row.business_case_id || row.id;
   const progress = typeof row.bc_progress === "string" ? JSON.parse(row.bc_progress) : row.bc_progress;
   const extra = typeof row.extra === "string" ? JSON.parse(row.extra) : row.extra;
   const metadata =
@@ -14,6 +16,8 @@ function mapBusinessCase(row) {
 
   return {
     ...row,
+    business_case_id: businessCaseId,
+    id: businessCaseId,
     bc_progress: progress || {},
     extra: extra || {},
     modern_bc_metadata: metadata || {},
@@ -54,8 +58,11 @@ async function createBusinessCase(data, user) {
     modern_bc_metadata = {},
   } = data;
 
+  const id = uuidv4();
+
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
+      id,
       client_name,
       client_id,
       status,
@@ -71,11 +78,12 @@ async function createBusinessCase(data, user) {
       bc_system_type,
       request_type
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), true, 'modern', 'business_case'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), true, 'modern', 'business_case'
     ) RETURNING id;
   `;
 
   const { rows } = await db.query(insertQuery, [
+    id,
     client_name,
     client_id,
     status,
