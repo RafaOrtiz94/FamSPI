@@ -57,7 +57,7 @@ export const getEquipmentModels = async (filters = {}) => {
     });
   }
 
-  const { data } = await api.get("/equipment-catalog", {
+  const { data } = await api.get("/inventario/modelos", {
     params: Object.keys(params).length ? params : undefined,
   });
   return data.data || data.rows || [];

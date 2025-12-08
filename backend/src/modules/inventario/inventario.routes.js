@@ -18,6 +18,7 @@ router.get("/", controller.getInventario);
 // 📋 Listar equipos disponibles para selección
 router.get("/equipos-disponibles", controller.getEquiposDisponibles);
 router.get("/equipos-cliente/:cliente_id", controller.getEquiposPorCliente);
+router.get("/modelos", controller.listModelos);
 
 // ➕ Crear unidad desde modelo
 router.post("/equipos-unidad", controller.createUnidad);

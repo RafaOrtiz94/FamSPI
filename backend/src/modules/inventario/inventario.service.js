@@ -22,6 +22,31 @@ const ALLOWED_STATES = new Set([
   "proceso_retiro",
 ]);
 
+async function listModelos({ search } = {}) {
+  try {
+    const params = [];
+    let where = "";
+
+    if (search) {
+      params.push(`%${String(search).toLowerCase()}%`);
+      where = `WHERE LOWER(nombre) LIKE $1 OR LOWER(modelo) LIKE $1 OR LOWER(fabricante) LIKE $1`;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, sku, nombre, fabricante, modelo, categoria
+         FROM public.equipos_modelo
+         ${where}
+        ORDER BY nombre ASC`,
+      params,
+    );
+
+    return rows;
+  } catch (err) {
+    logger.error("❌ Error listando modelos: %o", err);
+    throw new Error("Error al obtener modelos de equipos");
+  }
+}
+
 /* ============================================================
    🧭 Obtener todo el inventario (vista completa)
    ============================================================ */
@@ -301,6 +326,7 @@ async function cambiarEstadoUnidad({ unidad_id, estado, detalle = null, request_
 module.exports = {
   getAllInventario,
   registrarMovimiento,
+  listModelos,
   createUnidad,
   captureSerial,
   assignUnidad,

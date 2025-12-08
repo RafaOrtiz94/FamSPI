@@ -7,6 +7,7 @@
 const {
   getAllInventario,
   registrarMovimiento,
+  listModelos,
   createUnidad,
   captureSerial,
   assignUnidad,
@@ -77,6 +78,12 @@ exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
     });
 
   res.status(200).json({ ok: true, data: simplified });
+});
+
+exports.listModelos = asyncHandler(async (req, res) => {
+  const { q } = req.query;
+  const modelos = await listModelos({ search: q });
+  res.status(200).json({ ok: true, data: modelos });
 });
 
 exports.createUnidad = asyncHandler(async (req, res) => {
