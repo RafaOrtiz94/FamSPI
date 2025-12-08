@@ -35,12 +35,10 @@ exports.getInventario = asyncHandler(async (req, res) => {
    ============================================================ */
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
   const { estado, serial_pendiente, cliente_id } = req.query;
-  const hasCliente = cliente_id !== undefined && cliente_id !== null && `${cliente_id}`.length;
-
   const equipos = await getAllInventario({
-    estado: hasCliente ? undefined : estado || "no_asignado",
+    estado: estado || undefined,
     serial_pendiente,
-    cliente_id: hasCliente ? cliente_id : null,
+    cliente_id: cliente_id !== undefined ? cliente_id : null,
   });
   const simplified = equipos
     .map((row) => ({
