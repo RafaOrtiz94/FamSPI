@@ -706,8 +706,8 @@ async function getAcpCommercialUsers() {
 
 async function getEquipmentCatalog() {
   const { rows } = await db.query(
-    `SELECT id_equipo AS id, nombre, modelo, fabricante, categoria, descripcion, serie
-       FROM servicio.equipos
+    `SELECT id, sku, nombre, fabricante, modelo, categoria, serie, estado
+       FROM public.equipos
       ORDER BY nombre ASC`
   );
 
@@ -715,11 +715,12 @@ async function getEquipmentCatalog() {
     return rows.map((row) => ({
       id: row.id,
       name: row.nombre,
-      model: row.modelo,
+      sku: row.sku,
       maker: row.fabricante,
+      model: row.modelo,
       category: row.categoria,
-      description: row.descripcion,
       serial: row.serie,
+      status: row.estado,
     }));
   }
 
