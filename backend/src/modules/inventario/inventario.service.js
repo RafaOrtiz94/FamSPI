@@ -11,7 +11,7 @@ const logger = require("../../config/logger");
 /* ============================================================
    🧭 Obtener todo el inventario (vista completa)
    ============================================================ */
-async function getAllInventario({ search, tipo, request_id, estado }) {
+async function getAllInventario({ search, tipo, request_id, estado, serial_pendiente }) {
   try {
     let query = `SELECT * FROM public.v_inventario_completo WHERE 1=1`;
     const params = [];
@@ -24,6 +24,11 @@ async function getAllInventario({ search, tipo, request_id, estado }) {
     if (tipo && (tipo === "entrada" || tipo === "salida")) {
       params.push(tipo);
       query += ` AND tipo_ultimo_movimiento = $${params.length}`;
+    }
+
+    if (serial_pendiente !== undefined) {
+      params.push(Boolean(serial_pendiente));
+      query += ` AND serial_pendiente = $${params.length}`;
     }
 
     query += ` ORDER BY item_name ASC;`;
@@ -80,7 +85,66 @@ async function registrarMovimiento({ inventory_id, quantity, movement_type, crea
   }
 }
 
+async function captureSerial({ unidad_id, serial, cliente_id = null, sucursal_id = null, request_id = null, detalle = null, user_id = null }) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: existingRows } = await client.query(
+      `SELECT id, serial, serial_pendiente, estado
+         FROM public.equipos_unidad
+        WHERE id = $1
+        LIMIT 1`,
+      [unidad_id],
+    );
+
+    const current = existingRows[0];
+    if (!current) {
+      throw new Error("Unidad no encontrada");
+    }
+
+    const { rows: duplicates } = await client.query(
+      `SELECT id FROM public.equipos_unidad WHERE LOWER(serial) = LOWER($1) AND id <> $2 LIMIT 1`,
+      [serial, unidad_id],
+    );
+    if (duplicates.length) {
+      const error = new Error("El serial ya está registrado en otra unidad");
+      error.status = 409;
+      throw error;
+    }
+
+    await client.query(
+      `UPDATE public.equipos_unidad
+          SET serial = $1,
+              serial_pendiente = false,
+              cliente_id = COALESCE($2, cliente_id),
+              sucursal_id = COALESCE($3, sucursal_id),
+              request_id = COALESCE($4, request_id),
+              updated_at = now()
+        WHERE id = $5`,
+      [serial, cliente_id, sucursal_id, request_id, unidad_id],
+    );
+
+    const evento = current.serial && current.serial === serial ? "serial_confirmado" : "serial_capturado";
+    await client.query(
+      `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+      [unidad_id, evento, detalle || null, request_id, cliente_id, sucursal_id, user_id],
+    );
+
+    await client.query("COMMIT");
+    return { unidad_id, serial, evento };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error("❌ Error capturando serial: %o", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getAllInventario,
   registrarMovimiento,
+  captureSerial,
 };

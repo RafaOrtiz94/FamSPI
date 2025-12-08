@@ -18,6 +18,9 @@ router.get("/", controller.getInventario);
 // 📋 Listar equipos disponibles para selección
 router.get("/equipos-disponibles", controller.getEquiposDisponibles);
 
+// 🏷️ Capturar o confirmar serial de unidad
+router.post("/equipos-unidad/:id/serial", controller.captureSerial);
+
 // ➕ Registrar entrada o salida
 router.post("/movimiento", controller.addMovimiento);
 

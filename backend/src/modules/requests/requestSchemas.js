@@ -1,7 +1,7 @@
 module.exports = {
   inspection: {
     type: "object",
-    required: ["nombre_cliente", "direccion_cliente", "fecha_instalacion"],
+    required: ["nombre_cliente", "direccion_cliente", "fecha_instalacion", "unidad_id", "serial"],
     properties: {
       nombre_cliente: { type: "string" },
       direccion_cliente: { type: "string" },
@@ -10,6 +10,9 @@ module.exports = {
       fecha_instalacion: { type: "string" },
       fecha_tope_instalacion: { type: "string" },
       requiere_lis: { type: "boolean" },
+      unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      serial: { type: "string" },
+      serial_pendiente: { type: "boolean" },
       equipos: {
         type: "array",
         items: {
@@ -27,13 +30,16 @@ module.exports = {
   },
   retiro: {
     type: "object",
-    required: ["nombre_cliente", "fecha_retiro"],
+    required: ["nombre_cliente", "fecha_retiro", "unidad_id", "serial"],
     properties: {
       nombre_cliente: { type: "string" },
       direccion_cliente: { type: "string" },
       persona_contacto: { type: "string" },
       celular_contacto: { type: "string" },
       fecha_retiro: { type: "string" },
+      unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      serial: { type: "string" },
+      serial_pendiente: { type: "boolean" },
       equipos: {
         type: "array",
         items: {

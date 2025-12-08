@@ -706,20 +706,27 @@ async function getAcpCommercialUsers() {
 
 async function getEquipmentCatalog() {
   const { rows } = await db.query(
-    `SELECT id, sku, nombre, fabricante, modelo, categoria, serie, estado
-       FROM public.equipos
-      ORDER BY nombre ASC`
+    `SELECT u.id      AS unidad_id,
+            u.serial,
+            u.estado,
+            m.nombre  AS modelo,
+            m.sku,
+            m.fabricante,
+            m.categoria
+       FROM public.equipos_unidad u
+       JOIN public.equipos_modelo m ON m.id = u.modelo_id
+      ORDER BY m.nombre ASC, u.id ASC`
   );
 
   if (rows.length) {
     return rows.map((row) => ({
-      id: row.id,
-      name: row.nombre,
+      id: row.unidad_id,
+      name: row.modelo,
       sku: row.sku,
       maker: row.fabricante,
       model: row.modelo,
       category: row.categoria,
-      serial: row.serie,
+      serial: row.serial,
       status: row.estado,
     }));
   }

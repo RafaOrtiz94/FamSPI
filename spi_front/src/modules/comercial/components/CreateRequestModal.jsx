@@ -79,9 +79,9 @@ const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
     ⚙️ Componente para Input de Equipo con Select de Estado
 ============================================================ */
 const requestTypesForEquipments = {
-  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
-  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1 },
-  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
+  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "" },
+  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1, serial: "", unidad_id: "" },
+  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "" },
 };
 
 const EquipoInput = ({
@@ -96,6 +96,7 @@ const EquipoInput = ({
   disabled,
 }) => {
   const keys = Object.keys(requestTypesForEquipments[type] || {});
+  const renderKeys = keys.filter((k) => k !== "unidad_id");
 
   const isStateField = (k) => k === "estado" && (type === "inspection" || type === "compra");
   const isQuantityField = (k) => k === "cantidad";
@@ -106,11 +107,13 @@ const EquipoInput = ({
     const selected = equipmentOptions.find((opt) => `${opt.id}` === `${value}`);
     updateEquipo(index, "equipo_id", value);
     updateEquipo(index, "nombre_equipo", selected?.nombre || "");
+    updateEquipo(index, "unidad_id", selected?.unidad_id || selected?.id || value);
+    updateEquipo(index, "serial", selected?.serial || "");
   };
 
   return (
     <div className="flex items-start gap-2 mb-3 flex-wrap sm:flex-nowrap w-full">
-      {keys.map((k) => (
+      {renderKeys.map((k) => (
         <div key={k} className="flex-1 min-w-[160px]">
           {isEquipmentField(k) ? (
             <select
@@ -125,8 +128,8 @@ const EquipoInput = ({
               {equipmentOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
                   {opt.nombre}
-                  {opt.marca ? ` - ${opt.marca}` : ""}
                   {opt.modelo ? ` ${opt.modelo}` : ""}
+                  {opt.serial ? ` | Serie ${opt.serial}` : " | Serial pendiente"}
                 </option>
               ))}
             </select>
@@ -366,6 +369,9 @@ const CreateRequestModal = ({
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
           newErrors.equipos = "Indica la cantidad de equipos a retirar.";
         }
+        if ((type === "inspection" || type === "retiro") && !eq.serial) {
+          newErrors.equipos = "Debes registrar el serial del equipo.";
+        }
       });
     }
 
@@ -480,7 +486,13 @@ const CreateRequestModal = ({
     setProgressStep("validating");
     try {
       const payload = { ...formData };
-      if (equipos.length > 0) payload.equipos = equipos;
+      if (equipos.length > 0) {
+        payload.equipos = equipos;
+        const principal = equipos[0];
+        payload.unidad_id = principal.unidad_id || principal.equipo_id;
+        payload.serial = principal.serial;
+        payload.serial_pendiente = !principal.serial;
+      }
 
       setProgressStep("preparing");
       setProgressStep("submitting");

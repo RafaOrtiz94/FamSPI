@@ -24,6 +24,7 @@ const { createClientFolder, moveClientFolderToApproved } = require("../../utils/
 const crypto = require("crypto");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
+const { captureSerial } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
@@ -863,12 +864,75 @@ async function listRequests({ page = 1, pageSize = 50, status, q }) {
   return { count: total, rows: mappedRows };
 }
 
+async function syncEquipmentFromRequest({ requestId, status, client = db }) {
+  const normalizedStatus = (status || "").toLowerCase();
+  if (!requestId || !normalizedStatus.includes("aprob")) return null;
+
+  const { rows } = await client.query(
+    `SELECT r.payload, rt.code AS type_code
+       FROM requests r
+       JOIN request_types rt ON rt.id = r.request_type_id
+      WHERE r.id = $1
+      LIMIT 1`,
+    [requestId],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload || {};
+  const unidad_id = payload.unidad_id || payload.equipo_id || null;
+  const serial = payload.serial || null;
+  if (!unidad_id || !serial) return null;
+
+  let estado = payload.estado_equipo || payload.estado || null;
+  if (!estado) {
+    if (row.type_code === "F.ST-20") estado = "reservado";
+    if (row.type_code === "F.ST-21") estado = "retirado";
+  }
+
+  try {
+    await captureSerial({
+      unidad_id,
+      serial,
+      request_id: requestId,
+      detalle: `Actualizado por solicitud ${row.type_code || ""} aprobada`,
+      user_id: null,
+    });
+  } catch (error) {
+    logger.warn({ error }, "No se pudo registrar serial desde la solicitud");
+  }
+
+  if (estado) {
+    try {
+      await client.query(
+        `UPDATE public.equipos_unidad SET estado = $1, updated_at = now() WHERE id = $2`,
+        [estado, unidad_id],
+      );
+
+      await client.query(
+        `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, created_at)
+         VALUES ($1, $2, $3, $4, now())`,
+        [unidad_id, row.type_code === "F.ST-21" ? "retiro_programado" : "inspeccion_solicitada", estado, requestId],
+      );
+    } catch (err) {
+      logger.warn({ err }, "No se pudo actualizar estado del equipo desde solicitud");
+    }
+  }
+
+  return true;
+}
+
 async function updateRequestStatus(id, status, client = db) {
   const { rows } = await client.query(
     `UPDATE requests SET status=$1, updated_at=now() WHERE id=$2 RETURNING *`,
     [status, id]
   );
-  return rows[0];
+  const updated = rows[0];
+  if (updated) {
+    setImmediate(() => syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client }));
+  }
+  return updated;
 }
 
 async function resolveRequesterProfile({ requester_id, requester_email, requester_name }) {
