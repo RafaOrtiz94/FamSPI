@@ -77,7 +77,7 @@ router.put(
 router.post(
   "/",
   verifyToken,
-  requireRole(["jefe_comercial"]),
+  requireRole(["jefe_comercial", "tecnico"]),
   upload.fields([
     { name: "files", maxCount: 10 },
     { name: "files[]", maxCount: 10 },

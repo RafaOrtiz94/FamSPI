@@ -1,10 +1,13 @@
 ﻿// src/modules/comercial/components/CreateRequestModal.jsx
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Dialog } from "@headlessui/react";
 import { FiSend, FiX, FiPlus, FiTrash2, FiPhone } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
 import FileUploader from "../../../core/ui/components/FileUploader";
+import { createRequest } from "../../../core/api/requestsApi";
+import { getUsers } from "../../../core/api/usersApi";
+import { useUI } from "../../../core/ui/useUI";
 
 const CLIENT_REQUIRED_FILES = [
   { key: "doc1", label: "Archivo obligatorio 1" },
@@ -212,15 +215,20 @@ const TODAY = getTodayDate();
 /* ============================================================
     🧾 Modal principal
 ============================================================ */
-const CreateRequestModal = ({ open, onClose, onSubmit }) => {
+const CreateRequestModal = ({ open, onClose, onCreated }) => {
   const [type, setType] = useState(null);
   const [formData, setFormData] = useState({});
   const [equipos, setEquipos] = useState([]);
   const [files, setFiles] = useState([]);
   const [errors, setErrors] = useState({});
   const [clientFiles, setClientFiles] = useState(INITIAL_CLIENT_FILES_STATE);
+  const [submitting, setSubmitting] = useState(false);
+  const [serverErrors, setServerErrors] = useState([]);
+  const [clients, setClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
 
   const todayDateString = useMemo(() => TODAY, []);
+  const { showToast } = useUI();
 
   const resetClientFiles = () => setClientFiles({ ...INITIAL_CLIENT_FILES_STATE });
 
@@ -235,6 +243,26 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
     setClientFile(key, null);
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const loadClients = async () => {
+      try {
+        setLoadingClients(true);
+        const data = await getUsers();
+        setClients(
+          (data || [])
+            .map((u) => u.fullname || u.name || u.email)
+            .filter(Boolean)
+        );
+      } catch (err) {
+        console.error("No se pudo cargar la lista de clientes", err);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+    loadClients();
+  }, [open]);
+
   // ✅ Validar formulario
   const validateForm = () => {
     if (!type) return false;
@@ -243,7 +271,8 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
 
     // 1. Validaciones de Campos Requeridos
     requiredFields.forEach((field) => {
-      if (!formData[field]) {
+      const value = typeof formData[field] === "string" ? formData[field].trim() : formData[field];
+      if (!value) {
         newErrors[field] = "Este campo es obligatorio.";
       }
     });
@@ -321,27 +350,58 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
     setEquipos(equipos.filter((_, i) => i !== index));
   };
 
+  const buildFieldErrorMap = (validationErrors = []) => {
+    const map = {};
+    validationErrors.forEach((err) => {
+      const key = (err.instancePath || err.keyword || "").replace("/", "");
+      if (key) map[key] = err.message || "Campo inválido";
+    });
+    return map;
+  };
+
   // ✅ Envío al backend (ya estructurado)
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    setServerErrors([]);
     if (!validateForm()) return;
 
     const payload = { ...formData };
     if (equipos.length > 0) payload.equipos = equipos;
 
-    // Envía con el identificador correcto del tipo
-    onSubmit({
-      request_type_id: type,
-      payload,
-      files,
-    });
-
-    // Limpiar estado
-    setFiles([]);
-    setFormData({});
-    setEquipos([]);
-    setErrors({});
-    setType(null);
+    try {
+      setSubmitting(true);
+      await createRequest({ request_type_id: type, payload, files });
+      showToast("Solicitud enviada correctamente ✅", "success");
+      if (onCreated) onCreated();
+      // Limpiar estado
+      setFiles([]);
+      setFormData({});
+      setEquipos([]);
+      setErrors({});
+      setType(null);
+      resetClientFiles();
+      onClose?.();
+    } catch (err) {
+      console.error("Error al crear solicitud", err);
+      const validationErrors = err?.response?.data?.details || err?.validationErrors || [];
+      const parsedErrors = Array.isArray(validationErrors)
+        ? validationErrors
+        : Array.isArray(validationErrors?.errors)
+        ? validationErrors.errors
+        : [];
+      if (parsedErrors.length) {
+        const fieldMap = buildFieldErrorMap(parsedErrors);
+        setErrors((prev) => ({ ...prev, ...fieldMap }));
+        setServerErrors(parsedErrors.map((e) => e.message || JSON.stringify(e)));
+        showToast("Revisa los campos requeridos", "error");
+      } else {
+        const message = err?.response?.data?.message || "No se pudo crear la solicitud";
+        setServerErrors([message]);
+        showToast(message, "error");
+      }
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -374,6 +434,7 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                 setFormData({});
                 setEquipos([]);
                 setErrors({});
+                setServerErrors([]);
               }}
               value={type || ""}
             >
@@ -385,6 +446,17 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
               ))}
             </select>
           </div>
+
+          {serverErrors.length > 0 && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <p className="font-semibold mb-1">Corrige los siguientes puntos:</p>
+              <ul className="list-disc list-inside space-y-1">
+                {serverErrors.map((err, idx) => (
+                  <li key={idx}>{err}</li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Campos dinámicos */}
           {type && (
@@ -406,6 +478,28 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                       onChange={handleChange}
                       error={errors[f]}
                     />
+                  ) : f === "nombre_cliente" ? (
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        name={f}
+                        list="clientes-options"
+                        placeholder="Selecciona o escribe el cliente"
+                        value={formData[f] || ""}
+                        onChange={handleChange}
+                        className={`w-full p-2 rounded-lg border ${
+                          errors[f] ? "border-red-500" : "border-gray-300 dark:border-gray-600"
+                        } bg-white dark:bg-gray-700 text-gray-900 dark:text-white`}
+                      />
+                      <datalist id="clientes-options">
+                        {clients.map((c) => (
+                          <option key={c} value={c} />
+                        ))}
+                      </datalist>
+                      {loadingClients && (
+                        <p className="text-xs text-gray-500">Cargando clientes...</p>
+                      )}
+                    </div>
                   ) : f === "requiere_lis" ? (
                     <label className="flex items-center gap-2 text-sm">
                       <input
@@ -523,6 +617,14 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
     <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
       Adjuntos (opcional)
     </p>
+    <input
+      type="file"
+      multiple
+      onChange={(e) =>
+        setFiles((prev) => [...prev, ...Array.from(e.target.files || [])])
+      }
+      className="mb-3 block w-full text-sm text-gray-700 dark:text-gray-200"
+    />
     <FileUploader
       multiple
       helper="Arrastra o selecciona PDFs / imágenes"
@@ -567,6 +669,7 @@ const CreateRequestModal = ({ open, onClose, onSubmit }) => {
                   </Button>
                   <Button
                     type="submit"
+                    disabled={submitting}
                     className="bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2"
                   >
                     <FiSend /> Enviar

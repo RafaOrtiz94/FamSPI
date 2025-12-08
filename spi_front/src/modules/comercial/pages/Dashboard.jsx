@@ -30,12 +30,7 @@ import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
 import { useDashboard } from "../../../core/hooks/useDashboard";
 
-import {
-  getRequests,
-  getRequestById,
-  createRequest,
-  cancelRequest,
-} from "../../../core/api/requestsApi";
+import { getRequests, getRequestById, cancelRequest } from "../../../core/api/requestsApi";
 import { getDocumentsByRequest } from "../../../core/api/documentsApi";
 import { getFilesByRequest } from "../../../core/api/filesApi";
 import { getInventoryByRequest } from "../../../core/api/inventarioApi";
@@ -247,27 +242,12 @@ const ComercialDashboard = () => {
   // ============================
   // 🧾 Funciones CRUD
   // ============================
-  const handleCreate = async ({ request_type_id, payload, files }) => {
+  const handleCreate = async () => {
     try {
-      setLoadingMessage("Creando solicitud...");
-      await new Promise(res => setTimeout(res, 800)); 
-
-      if (files && files.length > 0) {
-        setLoadingMessage("Adjuntando archivos...");
-        await new Promise(res => setTimeout(res, 800));
-      }
-      
-      await createRequest({ request_type_id, payload, files });
-      
-      setLoadingMessage("Finalizando...");
-      await new Promise(res => setTimeout(res, 800));
-
-
-      showToast("Solicitud creada correctamente ✅", "success");
-      setModalOpen(false);
+      setLoadingMessage("Actualizando solicitudes...");
       await load();
     } catch {
-      showToast("No se pudo crear la solicitud", "error");
+      showToast("No se pudo actualizar la lista", "error");
     } finally {
       setLoadingMessage("");
     }
@@ -500,7 +480,7 @@ const ComercialDashboard = () => {
       <CreateRequestModal
         open={modalOpen}
         onClose={() => setModalOpen(false)}
-        onSubmit={handleCreate}
+        onCreated={handleCreate}
       />
 
       <RequestDetailModal
