@@ -138,6 +138,17 @@ async function createUnidad({ modelo_id, serial = null, cliente_id = null, sucur
   try {
     await client.query("BEGIN");
 
+    const { rows: modeloRows } = await client.query(
+      `SELECT id, nombre, modelo FROM public.equipos_modelo WHERE id = $1 LIMIT 1`,
+      [modelo_id],
+    );
+
+    if (!modeloRows.length) {
+      const error = new Error("Modelo no encontrado");
+      error.status = 400;
+      throw error;
+    }
+
     const cleanedSerial = serial && String(serial).trim().length ? String(serial).trim() : null;
     const serialPendiente = !cleanedSerial;
     const finalSerial = cleanedSerial || `SIN-SERIE-${Date.now()}`;

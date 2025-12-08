@@ -38,10 +38,12 @@ exports.getInventario = asyncHandler(async (req, res) => {
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
   const { estado, serial_pendiente, cliente_id, incluir_no_asignados } = req.query;
 
+  const normalizedClientId = cliente_id === "" ? null : cliente_id;
+
   const filters = {
     estado: estado || undefined,
     serial_pendiente,
-    cliente_id: cliente_id !== undefined ? cliente_id : null,
+    cliente_id: normalizedClientId !== undefined ? normalizedClientId : null,
   };
 
   let equipos = await getAllInventario(filters);

@@ -455,21 +455,22 @@ const CreateRequestModal = ({
 
     // 4. Validar equipos seleccionados desde inventario
     if (requestTypes[type].equipos) {
-      equipos.forEach((eq) => {
-        if (!eq.equipo_id) {
-          newErrors.equipos = "Selecciona un equipo válido del inventario.";
+      if (!equipos.length) {
+        newErrors.equipos = "Agrega al menos un equipo";
+      }
+
+      equipos.forEach((eq, idx) => {
+        if (!eq.unidad_id && !eq.equipo_id) {
+          newErrors.equipos = newErrors.equipos || `Selecciona una unidad válida para el equipo #${idx + 1}`;
         }
         if (requestTypes[type].equipos.estado !== undefined && !eq.estado) {
-          newErrors.equipos = "Todos los equipos deben tener estado seleccionado.";
+          newErrors.equipos = newErrors.equipos || "Todos los equipos deben tener estado seleccionado.";
         }
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
-          newErrors.equipos = "Indica la cantidad de equipos a retirar.";
+          newErrors.equipos = newErrors.equipos || "Indica la cantidad de equipos a retirar.";
         }
-        if ((type === "inspection" || type === "retiro" || type === "mantenimiento") && (eq.serial_pendiente || !eq.serial)) {
-          newErrors.equipos = "Debes registrar el serial del equipo.";
-        }
-        if (!eq.unidad_id && !eq.equipo_id) {
-          newErrors.equipos = "Debes seleccionar una unidad válida.";
+        if (!eq.serial || !`${eq.serial}`.trim()) {
+          newErrors.equipos = newErrors.equipos || `Captura el serial del equipo #${idx + 1}`;
         }
       });
     }
@@ -848,8 +849,8 @@ const CreateRequestModal = ({
                         <option value="">{loadingModels ? "Cargando modelos..." : "Selecciona un modelo"}</option>
                         {equipmentModels.map((model) => (
                           <option key={model.id || model.equipment_id} value={model.id || model.equipment_id}>
-                            {(model.nombre || model.name || "Modelo")}
-                            {model.modelo ? ` ${model.modelo}` : ""}
+                            {model.nombre || model.modelo || model.name || "Modelo"}
+                            {model.modelo && model.modelo !== model.nombre ? ` ${model.modelo}` : ""}
                             {model.fabricante || model.brand ? ` | ${model.fabricante || model.brand}` : ""}
                             {model.sku ? ` | SKU ${model.sku}` : ""}
                           </option>

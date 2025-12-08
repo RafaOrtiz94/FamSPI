@@ -437,6 +437,38 @@ function normalizePayload(schemaKey, payload) {
   return { normalizedPayload, schema };
 }
 
+function extractEquipmentInfo(payload = {}) {
+  const topLevelUnidad = payload.unidad_id || payload.equipo_id || null;
+  const topLevelSerial = payload.serial || null;
+  const topLevelEstado = payload.estado_equipo || payload.estado || null;
+  if (topLevelUnidad || topLevelSerial) {
+    return { unidad_id: topLevelUnidad, serial: topLevelSerial, estado: topLevelEstado };
+  }
+
+  if (Array.isArray(payload.equipos)) {
+    const found = payload.equipos.find((item) => item?.unidad_id || item?.serial);
+    if (found) {
+      return {
+        unidad_id: found.unidad_id || found.equipo_id || null,
+        serial: found.serial || null,
+        estado: found.estado || topLevelEstado || null,
+      };
+    }
+  }
+
+  return { unidad_id: null, serial: null, estado: topLevelEstado };
+}
+
+async function logEquipmentHistory({ unidad_id, request_id, evento, detalle = null, cliente_id = null, sucursal_id = null, user_id = null }) {
+  if (!unidad_id) return null;
+  await db.query(
+    `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, created_by, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+    [unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, user_id],
+  );
+  return true;
+}
+
 // ================================================= ================
 // 🧾 Crear solicitud principal con validación AJV + logs
 // ================================================= ================
@@ -501,6 +533,14 @@ async function createRequest({
     + `VALUES($1, $2, $3)`,
     [request.id, version, JSON.stringify(normalizedPayload)]
   );
+
+  setImmediate(() => {
+    syncEquipmentOnCreate({
+      requestId: request.id,
+      typeCode: code,
+      payload: normalizedPayload,
+    }).catch((err) => logger.warn({ err }, "No se pudo registrar equipo desde creación de solicitud"));
+  });
 
   await logAction({
     user_id: requester_id,
@@ -864,6 +904,36 @@ async function listRequests({ page = 1, pageSize = 50, status, q }) {
   return { count: total, rows: mappedRows };
 }
 
+async function syncEquipmentOnCreate({ requestId, typeCode, payload }) {
+  const { unidad_id, serial, estado } = extractEquipmentInfo(payload || {});
+  if (!unidad_id && !serial) return null;
+
+  if (serial) {
+    try {
+      await captureSerial({
+        unidad_id: unidad_id || null,
+        serial,
+        request_id: requestId,
+        detalle: `Serial registrado desde solicitud ${typeCode || ""}`,
+        user_id: null,
+      });
+    } catch (error) {
+      logger.warn({ error }, "No se pudo guardar el serial al crear solicitud");
+    }
+  }
+
+  const evento = typeCode === "F.ST-21" ? "retiro_programado" : typeCode === "F.ST-20" ? "inspeccion_solicitada" : "solicitud_registrada";
+  const detalle = estado ? `${evento} (${estado})` : evento;
+  await logEquipmentHistory({
+    unidad_id,
+    request_id: requestId,
+    evento,
+    detalle,
+    user_id: null,
+  });
+  return true;
+}
+
 async function syncEquipmentFromRequest({ requestId, status, client = db }) {
   const normalizedStatus = (status || "").toLowerCase();
   if (!requestId || !normalizedStatus.includes("aprob")) return null;
@@ -881,11 +951,10 @@ async function syncEquipmentFromRequest({ requestId, status, client = db }) {
   if (!row) return null;
 
   const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload || {};
-  const unidad_id = payload.unidad_id || payload.equipo_id || null;
-  const serial = payload.serial || null;
+  const { unidad_id, serial, estado: estadoPayload } = extractEquipmentInfo(payload);
   if (!unidad_id || !serial) return null;
 
-  let estado = payload.estado_equipo || payload.estado || null;
+  let estado = estadoPayload || null;
   if (!estado) {
     if (row.type_code === "F.ST-20") estado = "en_evaluacion";
     if (row.type_code === "F.ST-21") estado = "proceso_retiro";
