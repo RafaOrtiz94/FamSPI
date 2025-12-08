@@ -8,7 +8,7 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
-import { captureUnidadSerial, createUnidad, getEquiposDisponibles } from "../../../core/api/inventarioApi";
+import { captureUnidadSerial, createUnidad, getEquiposDisponibles, getEquipmentModels } from "../../../core/api/inventarioApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -344,6 +344,9 @@ const CreateRequestModal = ({
   const [newUnidadModelId, setNewUnidadModelId] = useState("");
   const [createUnidadMessage, setCreateUnidadMessage] = useState("");
   const [createUnidadError, setCreateUnidadError] = useState("");
+  const [equipmentModels, setEquipmentModels] = useState([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
   const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
@@ -374,6 +377,8 @@ const CreateRequestModal = ({
       setCreateUnidadError("");
       setCreateUnidadMessage("");
       setNewUnidadModelId("");
+      setEquipmentModels([]);
+      setModelsError("");
       return;
     }
 
@@ -395,6 +400,26 @@ const CreateRequestModal = ({
       setSelectedClientId("");
     }
   }, [open, presetType, initialData, isEditing]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const fetchModels = async () => {
+      setLoadingModels(true);
+      setModelsError("");
+      try {
+        const models = await getEquipmentModels();
+        setEquipmentModels(models);
+      } catch (err) {
+        const message = err?.response?.data?.message || err.message || "No se pudieron cargar los modelos";
+        setModelsError(message);
+      } finally {
+        setLoadingModels(false);
+      }
+    };
+
+    fetchModels();
+  }, [open]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -573,13 +598,14 @@ const CreateRequestModal = ({
   const handleCreateUnidad = async () => {
     setCreateUnidadError("");
     setCreateUnidadMessage("");
-    if (!newUnidadModelId) {
-      setCreateUnidadError("Ingresa el modelo_id del equipo a crear.");
+    const modeloId = Number(newUnidadModelId);
+    if (!modeloId) {
+      setCreateUnidadError("Selecciona el modelo del equipo a crear.");
       return;
     }
     setCreatingUnidad(true);
     try {
-      const created = await createUnidad({ modelo_id: newUnidadModelId });
+      const created = await createUnidad({ modelo_id: modeloId });
       setCreateUnidadMessage(`Unidad creada (#${created.id || created.unidad_id || created})`);
       setNewUnidadModelId("");
       setIncludeUnassigned(true);
@@ -811,25 +837,34 @@ const CreateRequestModal = ({
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
                   <div className="mt-3 space-y-2">
-                    <p className="text-xs text-gray-600 dark:text-gray-300">Crear unidad rápida (modelo_id requerido)</p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="number"
-                        min={1}
+                    <p className="text-xs text-gray-600 dark:text-gray-300">Crear unidad rápida (selecciona el modelo)</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <select
                         value={newUnidadModelId}
                         onChange={(e) => setNewUnidadModelId(e.target.value)}
-                        className="w-40 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        placeholder="modelo_id"
-                      />
+                        className="flex-1 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        disabled={loadingModels}
+                      >
+                        <option value="">{loadingModels ? "Cargando modelos..." : "Selecciona un modelo"}</option>
+                        {equipmentModels.map((model) => (
+                          <option key={model.id || model.equipment_id} value={model.id || model.equipment_id}>
+                            {(model.nombre || model.name || "Modelo")}
+                            {model.modelo ? ` ${model.modelo}` : ""}
+                            {model.fabricante || model.brand ? ` | ${model.fabricante || model.brand}` : ""}
+                            {model.sku ? ` | SKU ${model.sku}` : ""}
+                          </option>
+                        ))}
+                      </select>
                       <Button
                         type="button"
                         onClick={handleCreateUnidad}
-                        disabled={creatingUnidad}
+                        disabled={creatingUnidad || loadingModels}
                         className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-60"
                       >
                         {creatingUnidad ? "Creando..." : "Crear unidad"}
                       </Button>
                     </div>
+                    {modelsError && <p className="text-xs text-red-500">{modelsError}</p>}
                     {createUnidadMessage && <p className="text-xs text-green-600">{createUnidadMessage}</p>}
                     {createUnidadError && <p className="text-xs text-red-500">{createUnidadError}</p>}
                   </div>

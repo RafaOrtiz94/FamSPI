@@ -47,6 +47,22 @@ export const createUnidad = async (payload) => {
   return data.data || data;
 };
 
+export const getEquipmentModels = async (filters = {}) => {
+  const params = {};
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.length) {
+        params[key] = value;
+      }
+    });
+  }
+
+  const { data } = await api.get("/equipment-catalog", {
+    params: Object.keys(params).length ? params : undefined,
+  });
+  return data.data || data.rows || [];
+};
+
 export const assignUnidad = async (id, payload) => {
   const { data } = await api.post(`/inventario/equipos-unidad/${id}/asignar`, payload);
   return data.data || data;
