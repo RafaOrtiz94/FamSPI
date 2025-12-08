@@ -20,7 +20,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     setLoading(true);
     try {
       const res = await api.get(`/equipment-catalog/${equipmentId}/determinations`);
-      setOptions(res.data || []);
+      setOptions(res.data?.data || []);
     } catch (err) {
       showToast("No se pudieron cargar determinaciones", "error");
     } finally {
@@ -32,7 +32,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     if (!bcId) return;
     try {
       const res = await api.get(`/business-case/${bcId}/determinations`);
-      updateState({ determinations: res.data || [] });
+      updateState({ determinations: res.data?.data || [] });
     } catch (err) {
       console.warn("No se pudieron cargar determinaciones existentes", err.message);
     }
@@ -64,7 +64,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
         monthlyQty: qty,
       });
       const refreshed = await api.get(`/business-case/${bcId}/determinations`);
-      updateState({ determinations: refreshed.data || [] });
+      updateState({ determinations: refreshed.data?.data || [] });
     } catch (err) {
       showToast(err.response?.data?.message || "No se pudo registrar la determinación", "error");
     } finally {

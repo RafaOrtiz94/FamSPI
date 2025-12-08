@@ -1,5 +1,7 @@
 import api from "./index";
 
+console.log("DEBUG ENV →", process.env.REACT_APP_API_BASE_URL);
+
 /**
  * ==========================================================
  * 🔐 Auth API — SPI Fam (JWT Header-based)

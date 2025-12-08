@@ -8,9 +8,8 @@ const EquipmentCard = ({ item, onSelect, selected }) => (
   <button
     type="button"
     onClick={() => onSelect(item)}
-    className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${
-      selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"
-    }`}
+    className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"
+      }`}
   >
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -77,16 +76,16 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
       const parsedItems = Array.isArray(payload?.items)
         ? payload.items
         : Array.isArray(payload?.data)
-        ? payload.data
-        : Array.isArray(payload?.rows)
-        ? payload.rows
-        : Array.isArray(payload?.items?.data)
-        ? payload.items.data
-        : Array.isArray(payload?.records)
-        ? payload.records
-        : Array.isArray(payload)
-        ? payload
-        : [];
+          ? payload.data
+          : Array.isArray(payload?.rows)
+            ? payload.rows
+            : Array.isArray(payload?.items?.data)
+              ? payload.items.data
+              : Array.isArray(payload?.records)
+                ? payload.records
+                : Array.isArray(payload)
+                  ? payload
+                  : [];
 
       const normalized = (Array.isArray(parsedItems) ? parsedItems : []).map(normalizeItem).filter((i) => i.id);
       setItems(normalized);
