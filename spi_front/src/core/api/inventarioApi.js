@@ -42,6 +42,11 @@ export const captureUnidadSerial = async (id, payload) => {
   return data.data || data;
 };
 
+export const createUnidad = async (payload) => {
+  const { data } = await api.post(`/inventario/equipos-unidad`, payload);
+  return data.data || data;
+};
+
 export const assignUnidad = async (id, payload) => {
   const { data } = await api.post(`/inventario/equipos-unidad/${id}/asignar`, payload);
   return data.data || data;

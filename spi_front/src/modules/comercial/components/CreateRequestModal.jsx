@@ -8,7 +8,7 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
-import { captureUnidadSerial, getEquiposDisponibles } from "../../../core/api/inventarioApi";
+import { captureUnidadSerial, createUnidad, getEquiposDisponibles } from "../../../core/api/inventarioApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -95,6 +95,9 @@ const EquipoInput = ({
   equipmentError,
   disabled,
   selectedClientId,
+  onViewUnassigned,
+  includeUnassigned,
+  needsClientEquipment,
 }) => {
   const keys = Object.keys(requestTypesForEquipments[type] || {});
   const renderKeys = keys.filter((k) => k !== "unidad_id");
@@ -203,7 +206,19 @@ const EquipoInput = ({
             </div>
           )}
           {isEquipmentField(k) && !equipmentLoading && equipmentOptions.length === 0 && (
-            <p className="text-xs text-gray-500 mt-1">No hay equipos disponibles.</p>
+            <div className="text-xs text-gray-500 mt-1 space-y-1">
+              <p>No hay equipos disponibles.</p>
+              {needsClientEquipment && !includeUnassigned && (
+                <button
+                  type="button"
+                  onClick={onViewUnassigned}
+                  className="text-blue-600 hover:underline"
+                  disabled={disabled}
+                >
+                  Ver no asignados
+                </button>
+              )}
+            </div>
           )}
           {isEquipmentField(k) && equipmentError && (
             <p className="text-xs text-red-500 mt-1">{equipmentError}</p>
@@ -324,10 +339,16 @@ const CreateRequestModal = ({
   const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [loadingEquipment, setLoadingEquipment] = useState(false);
   const [equipmentError, setEquipmentError] = useState("");
+  const [includeUnassigned, setIncludeUnassigned] = useState(false);
+  const [creatingUnidad, setCreatingUnidad] = useState(false);
+  const [newUnidadModelId, setNewUnidadModelId] = useState("");
+  const [createUnidadMessage, setCreateUnidadMessage] = useState("");
+  const [createUnidadError, setCreateUnidadError] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
-  const clientSelectionRequired = type === "inspection" || type === "retiro";
+  const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
   const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
+  const needsClientEquipment = clientSelectionRequired;
 
   const submissionSteps = useMemo(
     () => [
@@ -349,27 +370,31 @@ const CreateRequestModal = ({
       setSelectedClientId("");
       setEquipmentOptions([]);
       setEquipmentError("");
+      setIncludeUnassigned(false);
+      setCreateUnidadError("");
+      setCreateUnidadMessage("");
+      setNewUnidadModelId("");
       return;
     }
 
     if (isEditing && initialData) {
       setType(presetType || (initialData.client_type ? "cliente" : null));
       if (presetType !== "cliente") {
-      setFormData(initialData);
+        setFormData(initialData);
+      }
+    } else if (presetType) {
+      setType(presetType);
+    } else {
+      setType(null);
     }
-  } else if (presetType) {
-    setType(presetType);
-  } else {
-    setType(null);
-  }
 
-  if (!isEditing) {
-    setFormData({});
-    setEquipos([]);
-    setErrors({});
-    setSelectedClientId("");
-  }
-}, [open, presetType, initialData, isEditing]);
+    if (!isEditing) {
+      setFormData({});
+      setEquipos([]);
+      setErrors({});
+      setSelectedClientId("");
+    }
+  }, [open, presetType, initialData, isEditing]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -415,8 +440,11 @@ const CreateRequestModal = ({
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
           newErrors.equipos = "Indica la cantidad de equipos a retirar.";
         }
-        if ((type === "inspection" || type === "retiro") && (eq.serial_pendiente || !eq.serial)) {
+        if ((type === "inspection" || type === "retiro" || type === "mantenimiento") && (eq.serial_pendiente || !eq.serial)) {
           newErrors.equipos = "Debes registrar el serial del equipo.";
+        }
+        if (!eq.unidad_id && !eq.equipo_id) {
+          newErrors.equipos = "Debes seleccionar una unidad válida.";
         }
       });
     }
@@ -448,6 +476,10 @@ const CreateRequestModal = ({
   }, [open, type]);
 
   useEffect(() => {
+    setIncludeUnassigned(false);
+  }, [type]);
+
+  useEffect(() => {
     const loadEquipmentOptions = async () => {
       if (!open || !requestTypes[type]?.equipos) return;
 
@@ -461,6 +493,9 @@ const CreateRequestModal = ({
       setEquipmentError("");
       try {
         const filters = needsClient ? { cliente_id: selectedClientId } : {};
+        if (includeUnassigned) {
+          filters.incluir_no_asignados = true;
+        }
         const data = await getEquiposDisponibles(filters);
         setEquipmentOptions(Array.isArray(data) ? data : []);
       } catch (error) {
@@ -473,7 +508,7 @@ const CreateRequestModal = ({
     };
 
     loadEquipmentOptions();
-  }, [open, type, selectedClientId]);
+  }, [open, type, selectedClientId, includeUnassigned]);
 
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
@@ -506,6 +541,7 @@ const CreateRequestModal = ({
     if (!selected) return;
 
     setSelectedClientId(`${clientId}`);
+    setIncludeUnassigned(false);
 
     setFormData((prev) => ({
       ...prev,
@@ -526,8 +562,33 @@ const CreateRequestModal = ({
     }
   };
 
+  const handleViewUnassigned = () => {
+    setIncludeUnassigned(true);
+  };
+
   const removeEquipo = (index) => {
     setEquipos(equipos.filter((_, i) => i !== index));
+  };
+
+  const handleCreateUnidad = async () => {
+    setCreateUnidadError("");
+    setCreateUnidadMessage("");
+    if (!newUnidadModelId) {
+      setCreateUnidadError("Ingresa el modelo_id del equipo a crear.");
+      return;
+    }
+    setCreatingUnidad(true);
+    try {
+      const created = await createUnidad({ modelo_id: newUnidadModelId });
+      setCreateUnidadMessage(`Unidad creada (#${created.id || created.unidad_id || created})`);
+      setNewUnidadModelId("");
+      setIncludeUnassigned(true);
+    } catch (error) {
+      const message = error?.response?.data?.message || error.message || "No se pudo crear la unidad";
+      setCreateUnidadError(message);
+    } finally {
+      setCreatingUnidad(false);
+    }
   };
 
   // ✅ Envío al backend (ya estructurado)
@@ -730,6 +791,9 @@ const CreateRequestModal = ({
                         equipmentError={equipmentError}
                         selectedClientId={selectedClientId}
                         disabled={clientSelectionRequired && !hasSelectedClient}
+                        onViewUnassigned={handleViewUnassigned}
+                        includeUnassigned={includeUnassigned}
+                        needsClientEquipment={needsClientEquipment}
                       />
                     ))}
                   {errors.equipos && (
@@ -746,6 +810,29 @@ const CreateRequestModal = ({
                   {clientSelectionRequired && !hasSelectedClient && (
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-gray-600 dark:text-gray-300">Crear unidad rápida (modelo_id requerido)</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        value={newUnidadModelId}
+                        onChange={(e) => setNewUnidadModelId(e.target.value)}
+                        className="w-40 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        placeholder="modelo_id"
+                      />
+                      <Button
+                        type="button"
+                        onClick={handleCreateUnidad}
+                        disabled={creatingUnidad}
+                        className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-60"
+                      >
+                        {creatingUnidad ? "Creando..." : "Crear unidad"}
+                      </Button>
+                    </div>
+                    {createUnidadMessage && <p className="text-xs text-green-600">{createUnidadMessage}</p>}
+                    {createUnidadError && <p className="text-xs text-red-500">{createUnidadError}</p>}
+                  </div>
                 </div>
               )}
 

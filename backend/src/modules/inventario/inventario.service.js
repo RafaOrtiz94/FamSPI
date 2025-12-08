@@ -9,9 +9,9 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 
 const ALLOWED_STATES = new Set([
-  "disponible",
-  "reservado",
+  "no_asignado",
   "asignado",
+  "reservado",
   "en_transito",
   "retirado",
   "baja",
@@ -20,7 +20,6 @@ const ALLOWED_STATES = new Set([
   "en_evaluacion",
   "evaluado",
   "proceso_retiro",
-  "no_asignado",
 ]);
 
 /* ============================================================
@@ -106,6 +105,51 @@ async function registrarMovimiento({ inventory_id, quantity, movement_type, crea
   } catch (err) {
     logger.error("❌ Error al registrar movimiento: %o", err);
     throw new Error("Error al registrar movimiento de inventario");
+  }
+}
+
+async function createUnidad({ modelo_id, serial = null, cliente_id = null, sucursal_id = null, user_id = null }) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const cleanedSerial = serial && String(serial).trim().length ? String(serial).trim() : null;
+    const serialPendiente = !cleanedSerial;
+    const finalSerial = cleanedSerial || `SIN-SERIE-${Date.now()}`;
+
+    const { rows: duplicates } = await client.query(
+      `SELECT id FROM public.equipos_unidad WHERE LOWER(serial) = LOWER($1) LIMIT 1`,
+      [finalSerial],
+    );
+    if (duplicates.length) {
+      const error = new Error("El serial ya está registrado en otra unidad");
+      error.status = 409;
+      throw error;
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO public.equipos_unidad (modelo_id, serial, serial_pendiente, cliente_id, sucursal_id, estado, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'no_asignado', now(), now())
+       RETURNING id, serial, serial_pendiente, estado`,
+      [modelo_id, finalSerial, serialPendiente, cliente_id, sucursal_id],
+    );
+
+    const unidad = rows[0];
+
+    await client.query(
+      `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, cliente_id, sucursal_id, created_by, created_at)
+       VALUES ($1, 'unidad_creada', $2, $3, $4, $5, now())`,
+      [unidad.id, serialPendiente ? "Unidad creada sin serial" : "Unidad creada con serial", cliente_id, sucursal_id, user_id],
+    );
+
+    await client.query("COMMIT");
+    return unidad;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error("❌ Error al crear unidad: %o", error);
+    throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -257,6 +301,7 @@ async function cambiarEstadoUnidad({ unidad_id, estado, detalle = null, request_
 module.exports = {
   getAllInventario,
   registrarMovimiento,
+  createUnidad,
   captureSerial,
   assignUnidad,
   cambiarEstadoUnidad,

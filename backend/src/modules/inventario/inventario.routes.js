@@ -19,6 +19,9 @@ router.get("/", controller.getInventario);
 router.get("/equipos-disponibles", controller.getEquiposDisponibles);
 router.get("/equipos-cliente/:cliente_id", controller.getEquiposPorCliente);
 
+// ➕ Crear unidad desde modelo
+router.post("/equipos-unidad", controller.createUnidad);
+
 // 🏷️ Capturar o confirmar serial de unidad
 router.post("/equipos-unidad/:id/serial", controller.captureSerial);
 

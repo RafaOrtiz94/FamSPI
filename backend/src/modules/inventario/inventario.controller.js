@@ -7,6 +7,7 @@
 const {
   getAllInventario,
   registrarMovimiento,
+  createUnidad,
   captureSerial,
   assignUnidad,
   cambiarEstadoUnidad,
@@ -34,12 +35,27 @@ exports.getInventario = asyncHandler(async (req, res) => {
    📋 GET /api/v1/inventario/equipos-disponibles
    ============================================================ */
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
-  const { estado, serial_pendiente, cliente_id } = req.query;
-  const equipos = await getAllInventario({
+  const { estado, serial_pendiente, cliente_id, incluir_no_asignados } = req.query;
+
+  const filters = {
     estado: estado || undefined,
     serial_pendiente,
     cliente_id: cliente_id !== undefined ? cliente_id : null,
-  });
+  };
+
+  let equipos = await getAllInventario(filters);
+
+  const includeUnassigned = String(incluir_no_asignados || "").toLowerCase() === "true";
+  if (includeUnassigned && cliente_id) {
+    const unassigned = await getAllInventario({
+      estado: estado || undefined,
+      serial_pendiente,
+      cliente_id: null,
+    });
+    const seen = new Set(equipos.map((row) => row.unidad_id || row.inventory_id || row.id));
+    equipos = [...equipos, ...unassigned.filter((row) => !seen.has(row.unidad_id || row.inventory_id || row.id))];
+  }
+
   const simplified = equipos
     .map((row) => ({
       id: row.unidad_id || row.inventory_id || row.id || row.item_id || row.itemid,
@@ -61,6 +77,29 @@ exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
     });
 
   res.status(200).json({ ok: true, data: simplified });
+});
+
+exports.createUnidad = asyncHandler(async (req, res) => {
+  const { modelo_id, serial = null, cliente_id = null, sucursal_id = null } = req.body || {};
+  const userId = req.user?.id || null;
+
+  if (!modelo_id) {
+    return res.status(400).json({ ok: false, message: "modelo_id es requerido" });
+  }
+
+  try {
+    const result = await createUnidad({
+      modelo_id,
+      serial,
+      cliente_id,
+      sucursal_id,
+      user_id: userId,
+    });
+    res.status(201).json({ ok: true, data: result });
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ ok: false, message: error.message || "No se pudo crear la unidad" });
+  }
 });
 
 exports.captureSerial = asyncHandler(async (req, res) => {
