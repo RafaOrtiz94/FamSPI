@@ -420,7 +420,7 @@ function resolveSchemaKey(code) {
 
 function normalizePayload(schemaKey, payload) {
   const schema = requestSchemas[schemaKey] || { properties: {} };
-  const normalizedPayload = {};
+  const normalizedPayload = { ...(payload || {}) };
   for (const key of Object.keys(schema.properties || {})) {
     if (key === "equipos") {
       if (Array.isArray(payload?.equipos)) {

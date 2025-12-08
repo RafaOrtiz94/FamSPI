@@ -8,7 +8,7 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
-import { getEquiposDisponibles } from "../../../core/api/inventarioApi";
+import { captureUnidadSerial, getEquiposDisponibles } from "../../../core/api/inventarioApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -79,9 +79,9 @@ const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
     ⚙️ Componente para Input de Equipo con Select de Estado
 ============================================================ */
 const requestTypesForEquipments = {
-  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "" },
-  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1, serial: "", unidad_id: "" },
-  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "" },
+  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
+  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1, serial: "", unidad_id: "", serial_pendiente: false },
+  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
 };
 
 const EquipoInput = ({
@@ -94,6 +94,7 @@ const EquipoInput = ({
   equipmentLoading,
   equipmentError,
   disabled,
+  selectedClientId,
 }) => {
   const keys = Object.keys(requestTypesForEquipments[type] || {});
   const renderKeys = keys.filter((k) => k !== "unidad_id");
@@ -101,6 +102,10 @@ const EquipoInput = ({
   const isStateField = (k) => k === "estado" && (type === "inspection" || type === "compra");
   const isQuantityField = (k) => k === "cantidad";
   const isEquipmentField = (k) => k === "equipo_id";
+  const isSerialField = (k) => k === "serial";
+  const [serialSaving, setSerialSaving] = useState(false);
+  const [serialMessage, setSerialMessage] = useState("");
+  const [serialError, setSerialError] = useState("");
 
   const handleEquipmentSelect = (e) => {
     const value = e.target.value;
@@ -109,6 +114,30 @@ const EquipoInput = ({
     updateEquipo(index, "nombre_equipo", selected?.nombre || "");
     updateEquipo(index, "unidad_id", selected?.unidad_id || selected?.id || value);
     updateEquipo(index, "serial", selected?.serial || "");
+    updateEquipo(index, "serial_pendiente", !!selected?.serial_pendiente);
+    if (selected?.estado) {
+      updateEquipo(index, "estado", selected.estado);
+    }
+  };
+
+  const handleSaveSerial = async () => {
+    if (!equipo.unidad_id || !equipo.serial) {
+      setSerialError("Debes seleccionar el equipo y escribir el serial.");
+      return;
+    }
+    setSerialSaving(true);
+    setSerialError("");
+    setSerialMessage("");
+    try {
+      await captureUnidadSerial(equipo.unidad_id, { serial: equipo.serial, cliente_id: selectedClientId || undefined });
+      updateEquipo(index, "serial_pendiente", false);
+      setSerialMessage("Serial guardado");
+    } catch (err) {
+      const message = err?.response?.data?.message || err.message || "No se pudo guardar el serial";
+      setSerialError(message);
+    } finally {
+      setSerialSaving(false);
+    }
   };
 
   return (
@@ -145,17 +174,33 @@ const EquipoInput = ({
               {type === "inspection" ? <option value="cu">CU</option> : <option value="usado">Usado</option>}
             </select>
           ) : (
-            <input
-              type={isQuantityField(k) ? "number" : "text"}
-              placeholder={k.replaceAll("_", " ")}
-              value={equipo[k]}
-              min={isQuantityField(k) ? 1 : null}
-              onChange={(e) =>
-                updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
-              }
-              disabled={disabled}
-              className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            />
+            <div className="flex flex-col gap-1 w-full">
+              <div className={`flex ${isSerialField(k) ? "gap-2" : ""}`}>
+                <input
+                  type={isQuantityField(k) ? "number" : "text"}
+                  placeholder={k.replaceAll("_", " ")}
+                  value={equipo[k]}
+                  min={isQuantityField(k) ? 1 : null}
+                  onChange={(e) =>
+                    updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
+                  }
+                  disabled={disabled}
+                  className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                {isSerialField(k) && equipo.serial_pendiente && (
+                  <button
+                    type="button"
+                    onClick={handleSaveSerial}
+                    disabled={disabled || serialSaving}
+                    className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {serialSaving ? "Guardando..." : "Guardar serial"}
+                  </button>
+                )}
+              </div>
+              {isSerialField(k) && serialMessage && <p className="text-xs text-green-600">{serialMessage}</p>}
+              {isSerialField(k) && serialError && <p className="text-xs text-red-500">{serialError}</p>}
+            </div>
           )}
           {isEquipmentField(k) && !equipmentLoading && equipmentOptions.length === 0 && (
             <p className="text-xs text-gray-500 mt-1">No hay equipos disponibles.</p>
@@ -370,7 +415,7 @@ const CreateRequestModal = ({
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
           newErrors.equipos = "Indica la cantidad de equipos a retirar.";
         }
-        if ((type === "inspection" || type === "retiro") && !eq.serial) {
+        if ((type === "inspection" || type === "retiro") && (eq.serial_pendiente || !eq.serial)) {
           newErrors.equipos = "Debes registrar el serial del equipo.";
         }
       });
@@ -406,10 +451,17 @@ const CreateRequestModal = ({
     const loadEquipmentOptions = async () => {
       if (!open || !requestTypes[type]?.equipos) return;
 
+      const needsClient = type === "inspection" || type === "retiro" || type === "mantenimiento";
+      if (needsClient && !selectedClientId) {
+        setEquipmentOptions([]);
+        return;
+      }
+
       setLoadingEquipment(true);
       setEquipmentError("");
       try {
-        const data = await getEquiposDisponibles();
+        const filters = needsClient ? { cliente_id: selectedClientId } : {};
+        const data = await getEquiposDisponibles(filters);
         setEquipmentOptions(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error cargando equipos", error);
@@ -421,7 +473,7 @@ const CreateRequestModal = ({
     };
 
     loadEquipmentOptions();
-  }, [open, type]);
+  }, [open, type, selectedClientId]);
 
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
@@ -492,7 +544,7 @@ const CreateRequestModal = ({
         const principal = equipos[0];
         payload.unidad_id = principal.unidad_id || principal.equipo_id;
         payload.serial = principal.serial;
-        payload.serial_pendiente = !principal.serial;
+        payload.serial_pendiente = principal.serial_pendiente || !principal.serial;
       }
 
       setProgressStep("preparing");
@@ -670,15 +722,16 @@ const CreateRequestModal = ({
                       key={i}
                       index={i}
                       equipo={eq}
-                      updateEquipo={updateEquipo}
-                      type={type}
-                      removeEquipo={removeEquipo}
-                      equipmentOptions={equipmentOptions}
-                      equipmentLoading={loadingEquipment}
-                      equipmentError={equipmentError}
-                      disabled={clientSelectionRequired && !hasSelectedClient}
-                    />
-                  ))}
+                        updateEquipo={updateEquipo}
+                        type={type}
+                        removeEquipo={removeEquipo}
+                        equipmentOptions={equipmentOptions}
+                        equipmentLoading={loadingEquipment}
+                        equipmentError={equipmentError}
+                        selectedClientId={selectedClientId}
+                        disabled={clientSelectionRequired && !hasSelectedClient}
+                      />
+                    ))}
                   {errors.equipos && (
                     <p className="text-red-500 text-xs mt-1 mb-2">{errors.equipos}</p>
                   )}

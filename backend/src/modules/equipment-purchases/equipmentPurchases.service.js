@@ -731,7 +731,7 @@ async function getEquipmentCatalog() {
     }));
   }
 
-  const items = await inventarioService.getAllInventario({});
+  const items = await inventarioService.getAllInventario({ cliente_id: null, estado: "no_asignado" });
   return items.map((item) => ({
     id: item.inventory_id || item.id,
     name: item.item_name,

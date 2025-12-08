@@ -35,17 +35,16 @@ exports.getInventario = asyncHandler(async (req, res) => {
    ============================================================ */
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
   const { estado, serial_pendiente, cliente_id } = req.query;
-  const clienteFilter = cliente_id !== undefined ? cliente_id : null;
-  const estadoFilter = estado || (cliente_id ? undefined : "disponible");
+  const hasCliente = cliente_id !== undefined && cliente_id !== null && `${cliente_id}`.length;
 
   const equipos = await getAllInventario({
-    estado: estadoFilter,
+    estado: hasCliente ? undefined : estado || "no_asignado",
     serial_pendiente,
-    cliente_id: clienteFilter,
+    cliente_id: hasCliente ? cliente_id : null,
   });
   const simplified = equipos
     .map((row) => ({
-      id: row.inventory_id || row.id || row.item_id || row.itemid,
+      id: row.unidad_id || row.inventory_id || row.id || row.item_id || row.itemid,
       nombre: row.item_name || row.nombre || row.name,
       tipo: row.tipo || row.type || row.category,
       marca: row.marca || row.brand,
@@ -53,7 +52,7 @@ exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
       estado: row.estado || row.status || row.estado_actual || row.item_status,
       ubicacion: row.ubicacion || row.location || row.ubicacion_actual,
       serial: row.serial || row.serial_number || row.serie || null,
-      serial_pendiente: typeof row.serial_pendiente === "boolean" ? row.serial_pendiente : undefined,
+      serial_pendiente: typeof row.serial_pendiente === "boolean" ? row.serial_pendiente : Boolean(row.serial_pendiente),
       unidad_id: row.unidad_id || row.id || null,
     }))
     .sort((a, b) => {
@@ -90,6 +89,11 @@ exports.captureSerial = asyncHandler(async (req, res) => {
     const status = error.status || (error.message?.includes("serial") ? 409 : 500);
     res.status(status).json({ ok: false, message: error.message || "No se pudo guardar el serial" });
   }
+});
+
+exports.getEquiposPorCliente = asyncHandler(async (req, res) => {
+  req.query.cliente_id = req.params?.cliente_id;
+  return exports.getEquiposDisponibles(req, res);
 });
 
 exports.assignUnidad = asyncHandler(async (req, res) => {
