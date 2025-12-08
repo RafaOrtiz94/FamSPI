@@ -127,9 +127,10 @@ const EquipoInput = ({
               </option>
               {equipmentOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
-                  {opt.nombre}
+                  {opt.nombre || opt.name}
                   {opt.modelo ? ` ${opt.modelo}` : ""}
                   {opt.serial ? ` | Serie ${opt.serial}` : " | Serial pendiente"}
+                  {opt.estado ? ` | ${opt.estado}` : ""}
                 </option>
               ))}
             </select>

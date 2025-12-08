@@ -4,7 +4,13 @@
  * Maneja solicitudes HTTP y valida parámetros
  */
 
-const { getAllInventario, registrarMovimiento, captureSerial } = require("./inventario.service");
+const {
+  getAllInventario,
+  registrarMovimiento,
+  captureSerial,
+  assignUnidad,
+  cambiarEstadoUnidad,
+} = require("./inventario.service");
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const logger = require("../../config/logger");
 
@@ -28,9 +34,15 @@ exports.getInventario = asyncHandler(async (req, res) => {
    📋 GET /api/v1/inventario/equipos-disponibles
    ============================================================ */
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
-  const { estado, serial_pendiente } = req.query;
+  const { estado, serial_pendiente, cliente_id } = req.query;
+  const clienteFilter = cliente_id !== undefined ? cliente_id : null;
+  const estadoFilter = estado || (cliente_id ? undefined : "disponible");
 
-  const equipos = await getAllInventario({ estado: estado || "disponible", serial_pendiente });
+  const equipos = await getAllInventario({
+    estado: estadoFilter,
+    serial_pendiente,
+    cliente_id: clienteFilter,
+  });
   const simplified = equipos
     .map((row) => ({
       id: row.inventory_id || row.id || row.item_id || row.itemid,
@@ -62,14 +74,50 @@ exports.captureSerial = asyncHandler(async (req, res) => {
   if (!serial || !String(serial).trim()) {
     return res.status(400).json({ ok: false, message: "El serial es obligatorio" });
   }
+  try {
+    const result = await captureSerial({
+      unidad_id: id,
+      serial: String(serial).trim(),
+      cliente_id,
+      sucursal_id,
+      request_id,
+      detalle,
+      user_id: userId,
+    });
 
-  const result = await captureSerial({
+    res.status(200).json({ ok: true, data: result });
+  } catch (error) {
+    const status = error.status || (error.message?.includes("serial") ? 409 : 500);
+    res.status(status).json({ ok: false, message: error.message || "No se pudo guardar el serial" });
+  }
+});
+
+exports.assignUnidad = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { cliente_id, sucursal_id = null, detalle = null } = req.body || {};
+  const userId = req.user?.id || null;
+
+  const result = await assignUnidad({
     unidad_id: id,
-    serial: String(serial).trim(),
     cliente_id,
     sucursal_id,
-    request_id,
     detalle,
+    user_id: userId,
+  });
+
+  res.status(200).json({ ok: true, data: result });
+});
+
+exports.cambiarEstadoUnidad = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { estado, detalle = null, request_id = null } = req.body || {};
+  const userId = req.user?.id || null;
+
+  const result = await cambiarEstadoUnidad({
+    unidad_id: id,
+    estado,
+    detalle,
+    request_id,
     user_id: userId,
   });
 

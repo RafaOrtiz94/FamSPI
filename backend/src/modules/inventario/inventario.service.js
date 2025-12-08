@@ -8,10 +8,25 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 
+const ALLOWED_STATES = new Set([
+  "disponible",
+  "reservado",
+  "asignado",
+  "en_transito",
+  "retirado",
+  "baja",
+  "mantenimiento_programado",
+  "en_mantenimiento",
+  "en_evaluacion",
+  "evaluado",
+  "proceso_retiro",
+  "no_asignado",
+]);
+
 /* ============================================================
    🧭 Obtener todo el inventario (vista completa)
    ============================================================ */
-async function getAllInventario({ search, tipo, request_id, estado, serial_pendiente }) {
+async function getAllInventario({ search, tipo, request_id, estado, serial_pendiente, cliente_id }) {
   try {
     let query = `SELECT * FROM public.v_inventario_completo WHERE 1=1`;
     const params = [];
@@ -29,6 +44,15 @@ async function getAllInventario({ search, tipo, request_id, estado, serial_pendi
     if (serial_pendiente !== undefined) {
       params.push(Boolean(serial_pendiente));
       query += ` AND serial_pendiente = $${params.length}`;
+    }
+
+    if (cliente_id !== undefined) {
+      if (cliente_id === null) {
+        query += ` AND cliente_id IS NULL`;
+      } else {
+        params.push(cliente_id);
+        query += ` AND cliente_id = $${params.length}`;
+      }
     }
 
     query += ` ORDER BY item_name ASC;`;
@@ -143,8 +167,97 @@ async function captureSerial({ unidad_id, serial, cliente_id = null, sucursal_id
   }
 }
 
+async function assignUnidad({ unidad_id, cliente_id, sucursal_id = null, detalle = null, user_id = null }) {
+  if (!cliente_id) {
+    const error = new Error("cliente_id es requerido para asignar la unidad");
+    error.status = 400;
+    throw error;
+  }
+
+  const client = await db.getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `UPDATE public.equipos_unidad
+          SET cliente_id = $1,
+              sucursal_id = COALESCE($2, sucursal_id),
+              estado = 'asignado',
+              updated_at = now()
+        WHERE id = $3
+        RETURNING id, serial, estado`,
+      [cliente_id, sucursal_id, unidad_id],
+    );
+
+    if (!rows.length) {
+      throw new Error("Unidad no encontrada");
+    }
+
+    await client.query(
+      `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, cliente_id, sucursal_id, created_by, created_at)
+       VALUES ($1, 'asignacion', $2, $3, $4, $5, now())`,
+      [unidad_id, detalle || "Unidad asignada", cliente_id, sucursal_id, user_id],
+    );
+
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error("❌ Error al asignar unidad: %o", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function cambiarEstadoUnidad({ unidad_id, estado, detalle = null, request_id = null, user_id = null }) {
+  const estadoNormalizado = estado ? String(estado).toLowerCase() : null;
+  if (!ALLOWED_STATES.has(estadoNormalizado)) {
+    const error = new Error("Estado no permitido");
+    error.status = 400;
+    throw error;
+  }
+
+  const client = await db.getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `UPDATE public.equipos_unidad
+          SET estado = $1,
+              updated_at = now()
+        WHERE id = $2
+        RETURNING id, serial, estado`,
+      [estadoNormalizado, unidad_id],
+    );
+
+    if (!rows.length) {
+      throw new Error("Unidad no encontrada");
+    }
+
+    await client.query(
+      `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, created_by, created_at)
+       VALUES ($1, 'estado_actualizado', $2, $3, $4, now())`,
+      [unidad_id, detalle || estadoNormalizado, request_id, user_id],
+    );
+
+    await client.query("COMMIT");
+    return rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error("❌ Error al cambiar estado de unidad: %o", error);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 module.exports = {
   getAllInventario,
   registrarMovimiento,
   captureSerial,
+  assignUnidad,
+  cambiarEstadoUnidad,
 };

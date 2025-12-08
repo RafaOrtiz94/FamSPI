@@ -20,10 +20,34 @@ export const getEquipos = async (filters = {}) => {
 /**
  * Obtener equipos disponibles (o por estado) en formato simplificado.
  */
-export const getEquiposDisponibles = async (estado) => {
+export const getEquiposDisponibles = async (filters = {}) => {
+  const params = {};
+  if (filters) {
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && `${value}`.length) {
+        params[key] = value;
+      }
+    });
+  }
+
   const { data } = await api.get("/inventario/equipos-disponibles", {
-    params: estado ? { estado } : undefined,
+    params: Object.keys(params).length ? params : undefined,
   });
 
   return data.data || [];
+};
+
+export const captureUnidadSerial = async (id, payload) => {
+  const { data } = await api.post(`/inventario/equipos-unidad/${id}/serial`, payload);
+  return data.data || data;
+};
+
+export const assignUnidad = async (id, payload) => {
+  const { data } = await api.post(`/inventario/equipos-unidad/${id}/asignar`, payload);
+  return data.data || data;
+};
+
+export const cambiarEstadoUnidad = async (id, payload) => {
+  const { data } = await api.post(`/inventario/equipos-unidad/${id}/cambiar-estado`, payload);
+  return data.data || data;
 };

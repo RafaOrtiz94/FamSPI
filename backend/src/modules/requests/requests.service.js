@@ -24,7 +24,7 @@ const { createClientFolder, moveClientFolderToApproved } = require("../../utils/
 const crypto = require("crypto");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
-const { captureSerial } = require("../inventario/inventario.service");
+const { captureSerial, cambiarEstadoUnidad } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
@@ -887,8 +887,8 @@ async function syncEquipmentFromRequest({ requestId, status, client = db }) {
 
   let estado = payload.estado_equipo || payload.estado || null;
   if (!estado) {
-    if (row.type_code === "F.ST-20") estado = "reservado";
-    if (row.type_code === "F.ST-21") estado = "retirado";
+    if (row.type_code === "F.ST-20") estado = "en_evaluacion";
+    if (row.type_code === "F.ST-21") estado = "proceso_retiro";
   }
 
   try {
@@ -905,16 +905,13 @@ async function syncEquipmentFromRequest({ requestId, status, client = db }) {
 
   if (estado) {
     try {
-      await client.query(
-        `UPDATE public.equipos_unidad SET estado = $1, updated_at = now() WHERE id = $2`,
-        [estado, unidad_id],
-      );
-
-      await client.query(
-        `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, created_at)
-         VALUES ($1, $2, $3, $4, now())`,
-        [unidad_id, row.type_code === "F.ST-21" ? "retiro_programado" : "inspeccion_solicitada", estado, requestId],
-      );
+      await cambiarEstadoUnidad({
+        unidad_id,
+        estado,
+        detalle: row.type_code === "F.ST-21" ? "retiro_programado" : "inspeccion_solicitada",
+        request_id: requestId,
+        user_id: null,
+      });
     } catch (err) {
       logger.warn({ err }, "No se pudo actualizar estado del equipo desde solicitud");
     }
