@@ -17,6 +17,20 @@ router.get("/", controller.getInventario);
 
 // 📋 Listar equipos disponibles para selección
 router.get("/equipos-disponibles", controller.getEquiposDisponibles);
+router.get("/equipos-cliente/:cliente_id", controller.getEquiposPorCliente);
+router.get("/modelos", controller.listModelos);
+
+// ➕ Crear unidad desde modelo
+router.post("/equipos-unidad", controller.createUnidad);
+
+// 🏷️ Capturar o confirmar serial de unidad
+router.post("/equipos-unidad/:id/serial", controller.captureSerial);
+
+// 🎯 Asignar unidad a cliente/sucursal
+router.post("/equipos-unidad/:id/asignar", controller.assignUnidad);
+
+// 🔄 Cambiar estado de unidad
+router.post("/equipos-unidad/:id/cambiar-estado", controller.cambiarEstadoUnidad);
 
 // ➕ Registrar entrada o salida
 router.post("/movimiento", controller.addMovimiento);

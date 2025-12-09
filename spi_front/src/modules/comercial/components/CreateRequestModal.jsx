@@ -8,7 +8,7 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
-import { getEquiposDisponibles } from "../../../core/api/inventarioApi";
+import { captureUnidadSerial, createUnidad, getEquiposDisponibles, getEquipmentModels } from "../../../core/api/inventarioApi";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -79,9 +79,9 @@ const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
     ⚙️ Componente para Input de Equipo con Select de Estado
 ============================================================ */
 const requestTypesForEquipments = {
-  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
-  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1 },
-  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo" },
+  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
+  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1, serial: "", unidad_id: "", serial_pendiente: false },
+  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
 };
 
 const EquipoInput = ({
@@ -94,23 +94,58 @@ const EquipoInput = ({
   equipmentLoading,
   equipmentError,
   disabled,
+  selectedClientId,
+  onViewUnassigned,
+  includeUnassigned,
+  needsClientEquipment,
 }) => {
   const keys = Object.keys(requestTypesForEquipments[type] || {});
+  const renderKeys = keys.filter((k) => k !== "unidad_id");
 
   const isStateField = (k) => k === "estado" && (type === "inspection" || type === "compra");
   const isQuantityField = (k) => k === "cantidad";
   const isEquipmentField = (k) => k === "equipo_id";
+  const isSerialField = (k) => k === "serial";
+  const [serialSaving, setSerialSaving] = useState(false);
+  const [serialMessage, setSerialMessage] = useState("");
+  const [serialError, setSerialError] = useState("");
 
   const handleEquipmentSelect = (e) => {
     const value = e.target.value;
     const selected = equipmentOptions.find((opt) => `${opt.id}` === `${value}`);
     updateEquipo(index, "equipo_id", value);
     updateEquipo(index, "nombre_equipo", selected?.nombre || "");
+    updateEquipo(index, "unidad_id", selected?.unidad_id || selected?.id || value);
+    updateEquipo(index, "serial", selected?.serial || "");
+    updateEquipo(index, "serial_pendiente", !!selected?.serial_pendiente);
+    if (selected?.estado) {
+      updateEquipo(index, "estado", selected.estado);
+    }
+  };
+
+  const handleSaveSerial = async () => {
+    if (!equipo.unidad_id || !equipo.serial) {
+      setSerialError("Debes seleccionar el equipo y escribir el serial.");
+      return;
+    }
+    setSerialSaving(true);
+    setSerialError("");
+    setSerialMessage("");
+    try {
+      await captureUnidadSerial(equipo.unidad_id, { serial: equipo.serial, cliente_id: selectedClientId || undefined });
+      updateEquipo(index, "serial_pendiente", false);
+      setSerialMessage("Serial guardado");
+    } catch (err) {
+      const message = err?.response?.data?.message || err.message || "No se pudo guardar el serial";
+      setSerialError(message);
+    } finally {
+      setSerialSaving(false);
+    }
   };
 
   return (
     <div className="flex items-start gap-2 mb-3 flex-wrap sm:flex-nowrap w-full">
-      {keys.map((k) => (
+      {renderKeys.map((k) => (
         <div key={k} className="flex-1 min-w-[160px]">
           {isEquipmentField(k) ? (
             <select
@@ -124,9 +159,10 @@ const EquipoInput = ({
               </option>
               {equipmentOptions.map((opt) => (
                 <option key={opt.id} value={opt.id}>
-                  {opt.nombre}
-                  {opt.marca ? ` - ${opt.marca}` : ""}
+                  {opt.nombre || opt.name}
                   {opt.modelo ? ` ${opt.modelo}` : ""}
+                  {opt.serial ? ` | Serie ${opt.serial}` : " | Serial pendiente"}
+                  {opt.estado ? ` | ${opt.estado}` : ""}
                 </option>
               ))}
             </select>
@@ -141,20 +177,48 @@ const EquipoInput = ({
               {type === "inspection" ? <option value="cu">CU</option> : <option value="usado">Usado</option>}
             </select>
           ) : (
-            <input
-              type={isQuantityField(k) ? "number" : "text"}
-              placeholder={k.replaceAll("_", " ")}
-              value={equipo[k]}
-              min={isQuantityField(k) ? 1 : null}
-              onChange={(e) =>
-                updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
-              }
-              disabled={disabled}
-              className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            />
+            <div className="flex flex-col gap-1 w-full">
+              <div className={`flex ${isSerialField(k) ? "gap-2" : ""}`}>
+                <input
+                  type={isQuantityField(k) ? "number" : "text"}
+                  placeholder={k.replaceAll("_", " ")}
+                  value={equipo[k]}
+                  min={isQuantityField(k) ? 1 : null}
+                  onChange={(e) =>
+                    updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
+                  }
+                  disabled={disabled}
+                  className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                {isSerialField(k) && equipo.serial_pendiente && (
+                  <button
+                    type="button"
+                    onClick={handleSaveSerial}
+                    disabled={disabled || serialSaving}
+                    className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60"
+                  >
+                    {serialSaving ? "Guardando..." : "Guardar serial"}
+                  </button>
+                )}
+              </div>
+              {isSerialField(k) && serialMessage && <p className="text-xs text-green-600">{serialMessage}</p>}
+              {isSerialField(k) && serialError && <p className="text-xs text-red-500">{serialError}</p>}
+            </div>
           )}
           {isEquipmentField(k) && !equipmentLoading && equipmentOptions.length === 0 && (
-            <p className="text-xs text-gray-500 mt-1">No hay equipos disponibles.</p>
+            <div className="text-xs text-gray-500 mt-1 space-y-1">
+              <p>No hay equipos disponibles.</p>
+              {needsClientEquipment && !includeUnassigned && (
+                <button
+                  type="button"
+                  onClick={onViewUnassigned}
+                  className="text-blue-600 hover:underline"
+                  disabled={disabled}
+                >
+                  Ver no asignados
+                </button>
+              )}
+            </div>
           )}
           {isEquipmentField(k) && equipmentError && (
             <p className="text-xs text-red-500 mt-1">{equipmentError}</p>
@@ -275,10 +339,19 @@ const CreateRequestModal = ({
   const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [loadingEquipment, setLoadingEquipment] = useState(false);
   const [equipmentError, setEquipmentError] = useState("");
+  const [includeUnassigned, setIncludeUnassigned] = useState(false);
+  const [creatingUnidad, setCreatingUnidad] = useState(false);
+  const [newUnidadModelId, setNewUnidadModelId] = useState("");
+  const [createUnidadMessage, setCreateUnidadMessage] = useState("");
+  const [createUnidadError, setCreateUnidadError] = useState("");
+  const [equipmentModels, setEquipmentModels] = useState([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [modelsError, setModelsError] = useState("");
 
   const todayDateString = useMemo(() => TODAY, []);
-  const clientSelectionRequired = type === "inspection" || type === "retiro";
+  const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
   const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
+  const needsClientEquipment = clientSelectionRequired;
 
   const submissionSteps = useMemo(
     () => [
@@ -300,27 +373,53 @@ const CreateRequestModal = ({
       setSelectedClientId("");
       setEquipmentOptions([]);
       setEquipmentError("");
+      setIncludeUnassigned(false);
+      setCreateUnidadError("");
+      setCreateUnidadMessage("");
+      setNewUnidadModelId("");
+      setEquipmentModels([]);
+      setModelsError("");
       return;
     }
 
     if (isEditing && initialData) {
       setType(presetType || (initialData.client_type ? "cliente" : null));
       if (presetType !== "cliente") {
-      setFormData(initialData);
+        setFormData(initialData);
+      }
+    } else if (presetType) {
+      setType(presetType);
+    } else {
+      setType(null);
     }
-  } else if (presetType) {
-    setType(presetType);
-  } else {
-    setType(null);
-  }
 
-  if (!isEditing) {
-    setFormData({});
-    setEquipos([]);
-    setErrors({});
-    setSelectedClientId("");
-  }
-}, [open, presetType, initialData, isEditing]);
+    if (!isEditing) {
+      setFormData({});
+      setEquipos([]);
+      setErrors({});
+      setSelectedClientId("");
+    }
+  }, [open, presetType, initialData, isEditing]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const fetchModels = async () => {
+      setLoadingModels(true);
+      setModelsError("");
+      try {
+        const models = await getEquipmentModels();
+        setEquipmentModels(models);
+      } catch (err) {
+        const message = err?.response?.data?.message || err.message || "No se pudieron cargar los modelos";
+        setModelsError(message);
+      } finally {
+        setLoadingModels(false);
+      }
+    };
+
+    fetchModels();
+  }, [open]);
 
   // ✅ Validar formulario
   const validateForm = () => {
@@ -356,15 +455,22 @@ const CreateRequestModal = ({
 
     // 4. Validar equipos seleccionados desde inventario
     if (requestTypes[type].equipos) {
-      equipos.forEach((eq) => {
-        if (!eq.equipo_id) {
-          newErrors.equipos = "Selecciona un equipo válido del inventario.";
+      if (!equipos.length) {
+        newErrors.equipos = "Agrega al menos un equipo";
+      }
+
+      equipos.forEach((eq, idx) => {
+        if (!eq.unidad_id && !eq.equipo_id) {
+          newErrors.equipos = newErrors.equipos || `Selecciona una unidad válida para el equipo #${idx + 1}`;
         }
         if (requestTypes[type].equipos.estado !== undefined && !eq.estado) {
-          newErrors.equipos = "Todos los equipos deben tener estado seleccionado.";
+          newErrors.equipos = newErrors.equipos || "Todos los equipos deben tener estado seleccionado.";
         }
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
-          newErrors.equipos = "Indica la cantidad de equipos a retirar.";
+          newErrors.equipos = newErrors.equipos || "Indica la cantidad de equipos a retirar.";
+        }
+        if (!eq.serial || !`${eq.serial}`.trim()) {
+          newErrors.equipos = newErrors.equipos || `Captura el serial del equipo #${idx + 1}`;
         }
       });
     }
@@ -396,13 +502,27 @@ const CreateRequestModal = ({
   }, [open, type]);
 
   useEffect(() => {
+    setIncludeUnassigned(false);
+  }, [type]);
+
+  useEffect(() => {
     const loadEquipmentOptions = async () => {
       if (!open || !requestTypes[type]?.equipos) return;
+
+      const needsClient = type === "inspection" || type === "retiro" || type === "mantenimiento";
+      if (needsClient && !selectedClientId) {
+        setEquipmentOptions([]);
+        return;
+      }
 
       setLoadingEquipment(true);
       setEquipmentError("");
       try {
-        const data = await getEquiposDisponibles();
+        const filters = needsClient ? { cliente_id: selectedClientId } : {};
+        if (includeUnassigned) {
+          filters.incluir_no_asignados = true;
+        }
+        const data = await getEquiposDisponibles(filters);
         setEquipmentOptions(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error cargando equipos", error);
@@ -414,7 +534,7 @@ const CreateRequestModal = ({
     };
 
     loadEquipmentOptions();
-  }, [open, type]);
+  }, [open, type, selectedClientId, includeUnassigned]);
 
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
@@ -447,6 +567,7 @@ const CreateRequestModal = ({
     if (!selected) return;
 
     setSelectedClientId(`${clientId}`);
+    setIncludeUnassigned(false);
 
     setFormData((prev) => ({
       ...prev,
@@ -467,8 +588,34 @@ const CreateRequestModal = ({
     }
   };
 
+  const handleViewUnassigned = () => {
+    setIncludeUnassigned(true);
+  };
+
   const removeEquipo = (index) => {
     setEquipos(equipos.filter((_, i) => i !== index));
+  };
+
+  const handleCreateUnidad = async () => {
+    setCreateUnidadError("");
+    setCreateUnidadMessage("");
+    const modeloId = Number(newUnidadModelId);
+    if (!modeloId) {
+      setCreateUnidadError("Selecciona el modelo del equipo a crear.");
+      return;
+    }
+    setCreatingUnidad(true);
+    try {
+      const created = await createUnidad({ modelo_id: modeloId });
+      setCreateUnidadMessage(`Unidad creada (#${created.id || created.unidad_id || created})`);
+      setNewUnidadModelId("");
+      setIncludeUnassigned(true);
+    } catch (error) {
+      const message = error?.response?.data?.message || error.message || "No se pudo crear la unidad";
+      setCreateUnidadError(message);
+    } finally {
+      setCreatingUnidad(false);
+    }
   };
 
   // ✅ Envío al backend (ya estructurado)
@@ -480,7 +627,13 @@ const CreateRequestModal = ({
     setProgressStep("validating");
     try {
       const payload = { ...formData };
-      if (equipos.length > 0) payload.equipos = equipos;
+      if (equipos.length > 0) {
+        payload.equipos = equipos;
+        const principal = equipos[0];
+        payload.unidad_id = principal.unidad_id || principal.equipo_id;
+        payload.serial = principal.serial;
+        payload.serial_pendiente = principal.serial_pendiente || !principal.serial;
+      }
 
       setProgressStep("preparing");
       setProgressStep("submitting");
@@ -657,15 +810,19 @@ const CreateRequestModal = ({
                       key={i}
                       index={i}
                       equipo={eq}
-                      updateEquipo={updateEquipo}
-                      type={type}
-                      removeEquipo={removeEquipo}
-                      equipmentOptions={equipmentOptions}
-                      equipmentLoading={loadingEquipment}
-                      equipmentError={equipmentError}
-                      disabled={clientSelectionRequired && !hasSelectedClient}
-                    />
-                  ))}
+                        updateEquipo={updateEquipo}
+                        type={type}
+                        removeEquipo={removeEquipo}
+                        equipmentOptions={equipmentOptions}
+                        equipmentLoading={loadingEquipment}
+                        equipmentError={equipmentError}
+                        selectedClientId={selectedClientId}
+                        disabled={clientSelectionRequired && !hasSelectedClient}
+                        onViewUnassigned={handleViewUnassigned}
+                        includeUnassigned={includeUnassigned}
+                        needsClientEquipment={needsClientEquipment}
+                      />
+                    ))}
                   {errors.equipos && (
                     <p className="text-red-500 text-xs mt-1 mb-2">{errors.equipos}</p>
                   )}
@@ -680,6 +837,38 @@ const CreateRequestModal = ({
                   {clientSelectionRequired && !hasSelectedClient && (
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
+                  <div className="mt-3 space-y-2">
+                    <p className="text-xs text-gray-600 dark:text-gray-300">Crear unidad rápida (selecciona el modelo)</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                      <select
+                        value={newUnidadModelId}
+                        onChange={(e) => setNewUnidadModelId(e.target.value)}
+                        className="flex-1 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                        disabled={loadingModels}
+                      >
+                        <option value="">{loadingModels ? "Cargando modelos..." : "Selecciona un modelo"}</option>
+                        {equipmentModels.map((model) => (
+                          <option key={model.id || model.equipment_id} value={model.id || model.equipment_id}>
+                            {model.nombre || model.modelo || model.name || "Modelo"}
+                            {model.modelo && model.modelo !== model.nombre ? ` ${model.modelo}` : ""}
+                            {model.fabricante || model.brand ? ` | ${model.fabricante || model.brand}` : ""}
+                            {model.sku ? ` | SKU ${model.sku}` : ""}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        onClick={handleCreateUnidad}
+                        disabled={creatingUnidad || loadingModels}
+                        className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-60"
+                      >
+                        {creatingUnidad ? "Creando..." : "Crear unidad"}
+                      </Button>
+                    </div>
+                    {modelsError && <p className="text-xs text-red-500">{modelsError}</p>}
+                    {createUnidadMessage && <p className="text-xs text-green-600">{createUnidadMessage}</p>}
+                    {createUnidadError && <p className="text-xs text-red-500">{createUnidadError}</p>}
+                  </div>
                 </div>
               )}
 

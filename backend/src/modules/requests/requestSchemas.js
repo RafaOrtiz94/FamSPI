@@ -10,6 +10,9 @@ module.exports = {
       fecha_instalacion: { type: "string" },
       fecha_tope_instalacion: { type: "string" },
       requiere_lis: { type: "boolean" },
+      unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      serial: { type: "string" },
+      serial_pendiente: { type: "boolean" },
       equipos: {
         type: "array",
         items: {
@@ -17,6 +20,8 @@ module.exports = {
           properties: {
             nombre_equipo: { type: "string" },
             estado: { type: "string" },
+            unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+            serial: { type: "string" },
           },
         },
       },
@@ -34,6 +39,9 @@ module.exports = {
       persona_contacto: { type: "string" },
       celular_contacto: { type: "string" },
       fecha_retiro: { type: "string" },
+      unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+      serial: { type: "string" },
+      serial_pendiente: { type: "boolean" },
       equipos: {
         type: "array",
         items: {
@@ -41,6 +49,8 @@ module.exports = {
           properties: {
             nombre_equipo: { type: "string" },
             cantidad: { type: "number" },
+            unidad_id: { anyOf: [{ type: "string" }, { type: "number" }] },
+            serial: { type: "string" },
           },
         },
       },

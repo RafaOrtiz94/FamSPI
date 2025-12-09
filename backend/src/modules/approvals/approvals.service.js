@@ -137,6 +137,10 @@ async function approve(request_id, approver_id) {
         );
         const requesterName =
           requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
+        const scheduleHint =
+          requestInfo?.request_code === "F.ST-20"
+            ? "<p><strong>Siguiente paso:</strong> agenda la visita de inspección y asigna técnico para coordinar con el cliente.</p>"
+            : "";
 
         sendMail({
           to: recipients.length ? recipients : process.env.SMTP_FROM,
@@ -145,6 +149,7 @@ async function approve(request_id, approver_id) {
             <h2>Solicitud aprobada</h2>
             <p><b>${requestTitle}</b> (#${request_id}) fue aprobada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
             <p>Solicitante: <b>${requesterName}</b></p>
+            ${scheduleHint}
             <p>Revisa el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
           `,
           from: approverEmail ? { email: approverEmail, name: approverName } : undefined,

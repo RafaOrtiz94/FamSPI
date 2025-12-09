@@ -271,6 +271,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
           name: eq.name,
           sku: eq.sku,
           serial: eq.serial,
+          status: eq.status,
           type: formEq.type
         };
       });
@@ -496,7 +497,9 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                     />
                     <div className="flex-1">
                       <p className="font-medium text-sm">{eq.name}</p>
-                      <p className="text-xs text-gray-500">SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""}</p>
+                      <p className="text-xs text-gray-500">
+                        SKU: {eq.sku} {eq.serial ? `| Serie ${eq.serial}` : ""} {eq.status ? `| ${eq.status}` : ""}
+                      </p>
                     </div>
                     {selected && (
                       <div className="flex gap-2">

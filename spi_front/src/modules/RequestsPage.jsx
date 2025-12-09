@@ -126,7 +126,9 @@ const RequestsPage = () => {
   const [formPayload, setFormPayload] = useState({
     // campos dinámicos según plantilla
     nombre_cliente: "",
+    direccion_cliente: "",
     persona_contacto: "",
+    fecha_instalacion: "",
     observacion: "",
     files: [],
   });
@@ -181,7 +183,14 @@ const RequestsPage = () => {
       showToast("Solo el Jefe Comercial puede crear solicitudes.", "error");
       return;
     }
-    setFormPayload({ nombre_cliente: "", persona_contacto: "", observacion: "", files: [] });
+    setFormPayload({
+      nombre_cliente: "",
+      direccion_cliente: "",
+      persona_contacto: "",
+      fecha_instalacion: "",
+      observacion: "",
+      files: [],
+    });
     setCreateModal({ open: true, type });
   };
   const handleCloseCreate = () => setCreateModal({ open: false, type: "inspection" });
@@ -205,22 +214,22 @@ const RequestsPage = () => {
     }
 
     // Mapeo request_type_id según tipo
-    let request_type_id = 1;
+    let request_type_id = "F.ST-20";
     switch (createModal.type) {
       case "inspection":
-        request_type_id = 1;
+        request_type_id = "F.ST-20";
         break;
       case "purchase":
-        request_type_id = 2;
+        request_type_id = "F.ST-19";
         break;
       case "retirement":
-        request_type_id = 3;
+        request_type_id = "F.ST-21";
         break;
       case "client":
-        request_type_id = 7;
+        request_type_id = "F.ST-22";
         break;
       default:
-        request_type_id = 1;
+        request_type_id = "F.ST-20";
     }
 
     try {
@@ -228,7 +237,14 @@ const RequestsPage = () => {
       showLoader();
 
       const { files = [], ...payload } = formPayload;
-      await createRequest({ request_type_id, payload, files });
+      const payloadToSend = {
+        ...payload,
+        observaciones: payload.observacion,
+      };
+
+      delete payloadToSend.observacion;
+
+      await createRequest({ request_type_id, payload: payloadToSend, files });
       showToast("Solicitud enviada correctamente ✅", "success");
       await fetchRequests(defaultRequestParams);
       handleCloseCreate();
@@ -510,10 +526,22 @@ const RequestsPage = () => {
                 placeholder="ACME S.A."
               />
               <Input
+                label="Dirección del Cliente"
+                value={formPayload.direccion_cliente}
+                onChange={(e) => setFormPayload((p) => ({ ...p, direccion_cliente: e.target.value }))}
+                placeholder="Av. Siempre Viva 123"
+              />
+              <Input
                 label="Persona de contacto"
                 value={formPayload.persona_contacto}
                 onChange={(e) => setFormPayload((p) => ({ ...p, persona_contacto: e.target.value }))}
                 placeholder="Juan Pérez"
+              />
+              <Input
+                label="Fecha tentantiva de instalación"
+                type="date"
+                value={formPayload.fecha_instalacion}
+                onChange={(e) => setFormPayload((p) => ({ ...p, fecha_instalacion: e.target.value }))}
               />
               <Input
                 label="Observación"

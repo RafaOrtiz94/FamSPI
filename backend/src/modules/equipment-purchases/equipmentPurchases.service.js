@@ -11,6 +11,7 @@ const {
   createRequest: createServiceRequest,
   generateActa,
   updateRequestStatus,
+  addDriveAttachment,
 } = require("../requests/requests.service");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
@@ -137,6 +138,7 @@ function mapRequestRow(row = {}) {
     contract_file_link: driveLink(row.contract_file_id),
     process_doc_link: row.process_doc_url || driveLink(row.process_doc_id),
     business_case_link: row.bc_spreadsheet_url || driveLink(row.bc_spreadsheet_id),
+    inspection_request_id: row.inspection_request_id || null,
   };
 }
 
@@ -272,6 +274,7 @@ async function ensureTables() {
       inspection_max_date DATE,
       includes_starter_kit BOOLEAN,
       inspection_recorded_at TIMESTAMPTZ,
+      inspection_request_id INTEGER,
       contract_file_id TEXT,
       contract_uploaded_at TIMESTAMPTZ,
       contract_reminder_event_id TEXT,
@@ -321,6 +324,9 @@ async function ensureTables() {
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS request_type TEXT DEFAULT 'purchase'`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_request_id INTEGER`,
   );
   await db.query(`
     CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
@@ -700,24 +706,32 @@ async function getAcpCommercialUsers() {
 
 async function getEquipmentCatalog() {
   const { rows } = await db.query(
-    `SELECT id_equipo AS id, nombre, modelo, fabricante, categoria, descripcion, serie
-       FROM servicio.equipos
-      ORDER BY nombre ASC`
+    `SELECT u.id      AS unidad_id,
+            u.serial,
+            u.estado,
+            m.nombre  AS modelo,
+            m.sku,
+            m.fabricante,
+            m.categoria
+       FROM public.equipos_unidad u
+       JOIN public.equipos_modelo m ON m.id = u.modelo_id
+      ORDER BY m.nombre ASC, u.id ASC`
   );
 
   if (rows.length) {
     return rows.map((row) => ({
-      id: row.id,
-      name: row.nombre,
-      model: row.modelo,
+      id: row.unidad_id,
+      name: row.modelo,
+      sku: row.sku,
       maker: row.fabricante,
+      model: row.modelo,
       category: row.categoria,
-      description: row.descripcion,
-      serial: row.serie,
+      serial: row.serial,
+      status: row.estado,
     }));
   }
 
-  const items = await inventarioService.getAllInventario({});
+  const items = await inventarioService.getAllInventario({ cliente_id: null, estado: "no_asignado" });
   return items.map((item) => ({
     id: item.inventory_id || item.id,
     name: item.item_name,
@@ -1342,6 +1356,23 @@ async function submitSignedProformaWithInspection({
     inspectionRequest,
     user,
   });
+
+  const inspectionId = inspectionWithActa?.request?.id || inspectionRequest?.request?.id;
+
+  if (inspectionId) {
+    await db.query(
+      `UPDATE equipment_purchase_requests SET inspection_request_id = $1, updated_at = now() WHERE id = $2`,
+      [inspectionId, id],
+    );
+
+    if (signedResult?.signed_proforma_file_id) {
+      await addDriveAttachment({
+        request_id: inspectionId,
+        drive_file_id: signedResult.signed_proforma_file_id,
+        title: "Proforma firmada",
+      });
+    }
+  }
 
   return { purchase_request: signedResult, inspection_request: inspectionWithActa };
 }

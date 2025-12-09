@@ -24,6 +24,7 @@ const { createClientFolder, moveClientFolderToApproved } = require("../../utils/
 const crypto = require("crypto");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
+const { captureSerial, cambiarEstadoUnidad } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
@@ -39,6 +40,13 @@ const REQUEST_TYPE_LABELS = {
   "F.ST-21": "Solicitud de retiro de equipo",
   "F.ST-22": "Registro de nuevo cliente",
 };
+
+const DEFAULT_REQUEST_TYPES = [
+  { code: "F.ST-19", title: "Proceso de compra" },
+  { code: "F.ST-20", title: "Solicitud de inspección de ambiente" },
+  { code: "F.ST-21", title: "Solicitud de retiro de equipo" },
+  { code: "F.ST-22", title: "Registro de nuevo cliente" },
+];
 
 // 🧩 Validación dinámica con logs extendidos
 // Nota: removeAdditional "all" elimina propiedades válidas cuando se usan
@@ -69,7 +77,7 @@ const parseRecipients = (value = "") =>
     .filter(Boolean);
 
 const REQUEST_NOTIFICATION_EMAILS = parseRecipients(
-  process.env.REQUEST_NOTIFICATION_EMAILS || process.env.BACKOFFICE_NOTIFICATION_EMAILS || "",
+  process.env.REQUEST_NOTIFICATION_EMAILS || process.env.BACKOFFICE_NOTIFICATION_EMAILS || process.env.SMTP_FROM || "",
 );
 
 const uniqueRecipients = (...emails) => {
@@ -359,10 +367,24 @@ async function getRequestType(id) {
   return rows[0];
 }
 
+async function ensureRequestTypes() {
+  const upserts = DEFAULT_REQUEST_TYPES.map(({ code, title }) =>
+    db.query(
+      `INSERT INTO request_types (code, title)
+       VALUES ($1, $2)
+       ON CONFLICT (code) DO UPDATE SET title = excluded.title`,
+      [code, title],
+    ),
+  );
+
+  await Promise.all(upserts);
+}
+
 // ================================================= ================
 // 🔎 Resolver request_type_id cuando viene como texto
 // ================================================= ================
 async function resolveRequestTypeId(input) {
+  await ensureRequestTypes();
   if (!isNaN(Number(input))) return Number(input);
   const raw = String(input).trim().toLowerCase();
   const aliasToCode = {
@@ -388,6 +410,65 @@ async function resolveRequestTypeId(input) {
   );
 }
 
+function resolveSchemaKey(code) {
+  const normalized = String(code || "").toUpperCase();
+  if (normalized === "F.ST-20") return "inspection";
+  if (normalized === "F.ST-21") return "retiro";
+  if (normalized === "F.ST-19") return "compra";
+  return "cliente";
+}
+
+function normalizePayload(schemaKey, payload) {
+  const schema = requestSchemas[schemaKey] || { properties: {} };
+  const normalizedPayload = { ...(payload || {}) };
+  for (const key of Object.keys(schema.properties || {})) {
+    if (key === "equipos") {
+      if (Array.isArray(payload?.equipos)) {
+        normalizedPayload.equipos = payload.equipos.map((e) => ({ ...e }));
+      } else {
+        normalizedPayload.equipos = [];
+      }
+    } else {
+      normalizedPayload[key] =
+        payload[key] !== undefined && payload[key] !== null ? payload[key] : "";
+    }
+  }
+  normalizedPayload.__form_variant = schemaKey;
+  return { normalizedPayload, schema };
+}
+
+function extractEquipmentInfo(payload = {}) {
+  const topLevelUnidad = payload.unidad_id || payload.equipo_id || null;
+  const topLevelSerial = payload.serial || null;
+  const topLevelEstado = payload.estado_equipo || payload.estado || null;
+  if (topLevelUnidad || topLevelSerial) {
+    return { unidad_id: topLevelUnidad, serial: topLevelSerial, estado: topLevelEstado };
+  }
+
+  if (Array.isArray(payload.equipos)) {
+    const found = payload.equipos.find((item) => item?.unidad_id || item?.serial);
+    if (found) {
+      return {
+        unidad_id: found.unidad_id || found.equipo_id || null,
+        serial: found.serial || null,
+        estado: found.estado || topLevelEstado || null,
+      };
+    }
+  }
+
+  return { unidad_id: null, serial: null, estado: topLevelEstado };
+}
+
+async function logEquipmentHistory({ unidad_id, request_id, evento, detalle = null, cliente_id = null, sucursal_id = null, user_id = null }) {
+  if (!unidad_id) return null;
+  await db.query(
+    `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, created_by, created_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
+    [unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, user_id],
+  );
+  return true;
+}
+
 // ================================================= ================
 // 🧾 Crear solicitud principal con validación AJV + logs
 // ================================================= ================
@@ -409,12 +490,9 @@ async function createRequest({
   if (!typeRow) throw new Error("Tipo de solicitud no válido");
 
   const code = String(typeRow.code || "").toUpperCase();
-  let schemaKey = "cliente";
-  if (code === "F.ST-20") schemaKey = "inspection";
-  else if (code === "F.ST-21") schemaKey = "retiro";
-  else if (code === "F.ST-19") schemaKey = "compra";
+  const schemaKey = resolveSchemaKey(code);
 
-  const schema = requestSchemas[schemaKey];
+  const { normalizedPayload, schema } = normalizePayload(schemaKey, payload);
   const validate = ajv.compile(schema);
   const valid = validate(payload || {});
 
@@ -443,21 +521,6 @@ async function createRequest({
   }
 
   const isJefeComercial = (requesterRole || "").toLowerCase() === "jefe_comercial";
-  const normalizedPayload = {};
-  for (const key of Object.keys(schema.properties || {})) {
-    if (key === "equipos") {
-      if (Array.isArray(payload?.equipos)) {
-        normalizedPayload.equipos = payload.equipos.map((e) => ({ ...e }));
-      } else {
-        normalizedPayload.equipos = [];
-      }
-    } else {
-      normalizedPayload[key] =
-        payload[key] !== undefined && payload[key] !== null ? payload[key] : "";
-    }
-  }
-  normalizedPayload.__form_variant = schemaKey;
-
   const insert = await db.query(
     `INSERT INTO requests(request_group_id, requester_id, request_type_id, payload, status, version_number)`
     + `VALUES($1, $2, $3, $4, 'pendiente', $5) RETURNING * `,
@@ -470,6 +533,14 @@ async function createRequest({
     + `VALUES($1, $2, $3)`,
     [request.id, version, JSON.stringify(normalizedPayload)]
   );
+
+  setImmediate(() => {
+    syncEquipmentOnCreate({
+      requestId: request.id,
+      typeCode: code,
+      payload: normalizedPayload,
+    }).catch((err) => logger.warn({ err }, "No se pudo registrar equipo desde creación de solicitud"));
+  });
 
   await logAction({
     user_id: requester_id,
@@ -758,6 +829,27 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
 }
 
+async function addDriveAttachment({ request_id, drive_file_id, title, mime_type = "application/pdf" }) {
+  if (!drive_file_id) return null;
+  const drive_link = buildDriveLink(drive_file_id);
+  const { rows } = await db.query(
+    `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)
+     VALUES ($1, $2, $3, $4, NULL, $5)
+     RETURNING *`,
+    [request_id, drive_file_id, drive_link, mime_type, title || "Documento adjunto"],
+  );
+
+  await logAction({
+    module: "requests",
+    action: "attach_existing_file",
+    entity: "requests",
+    entity_id: request_id,
+    details: { drive_file_id, title },
+  });
+
+  return rows[0];
+}
+
 async function getRequestFull(id) {
   const { rows } = await db.query(
     `SELECT r.*, u.email AS requester_email, rt.title AS type_title
@@ -812,12 +904,101 @@ async function listRequests({ page = 1, pageSize = 50, status, q }) {
   return { count: total, rows: mappedRows };
 }
 
+async function syncEquipmentOnCreate({ requestId, typeCode, payload }) {
+  const { unidad_id, serial, estado } = extractEquipmentInfo(payload || {});
+  if (!unidad_id && !serial) return null;
+
+  if (serial) {
+    try {
+      await captureSerial({
+        unidad_id: unidad_id || null,
+        serial,
+        request_id: requestId,
+        detalle: `Serial registrado desde solicitud ${typeCode || ""}`,
+        user_id: null,
+      });
+    } catch (error) {
+      logger.warn({ error }, "No se pudo guardar el serial al crear solicitud");
+    }
+  }
+
+  const evento = typeCode === "F.ST-21" ? "retiro_programado" : typeCode === "F.ST-20" ? "inspeccion_solicitada" : "solicitud_registrada";
+  const detalle = estado ? `${evento} (${estado})` : evento;
+  await logEquipmentHistory({
+    unidad_id,
+    request_id: requestId,
+    evento,
+    detalle,
+    user_id: null,
+  });
+  return true;
+}
+
+async function syncEquipmentFromRequest({ requestId, status, client = db }) {
+  const normalizedStatus = (status || "").toLowerCase();
+  if (!requestId || !normalizedStatus.includes("aprob")) return null;
+
+  const { rows } = await client.query(
+    `SELECT r.payload, rt.code AS type_code
+       FROM requests r
+       JOIN request_types rt ON rt.id = r.request_type_id
+      WHERE r.id = $1
+      LIMIT 1`,
+    [requestId],
+  );
+
+  const row = rows[0];
+  if (!row) return null;
+
+  const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload || {};
+  const { unidad_id, serial, estado: estadoPayload } = extractEquipmentInfo(payload);
+  if (!unidad_id || !serial) return null;
+
+  let estado = estadoPayload || null;
+  if (!estado) {
+    if (row.type_code === "F.ST-20") estado = "en_evaluacion";
+    if (row.type_code === "F.ST-21") estado = "proceso_retiro";
+  }
+
+  try {
+    await captureSerial({
+      unidad_id,
+      serial,
+      request_id: requestId,
+      detalle: `Actualizado por solicitud ${row.type_code || ""} aprobada`,
+      user_id: null,
+    });
+  } catch (error) {
+    logger.warn({ error }, "No se pudo registrar serial desde la solicitud");
+  }
+
+  if (estado) {
+    try {
+      await cambiarEstadoUnidad({
+        unidad_id,
+        estado,
+        detalle: row.type_code === "F.ST-21" ? "retiro_programado" : "inspeccion_solicitada",
+        request_id: requestId,
+        user_id: null,
+      });
+    } catch (err) {
+      logger.warn({ err }, "No se pudo actualizar estado del equipo desde solicitud");
+    }
+  }
+
+  return true;
+}
+
 async function updateRequestStatus(id, status, client = db) {
   const { rows } = await client.query(
     `UPDATE requests SET status=$1, updated_at=now() WHERE id=$2 RETURNING *`,
     [status, id]
   );
-  return rows[0];
+  const updated = rows[0];
+  if (updated) {
+    setImmediate(() => syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client }));
+  }
+  return updated;
 }
 
 async function resolveRequesterProfile({ requester_id, requester_email, requester_name }) {
@@ -883,6 +1064,109 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
     replyTo: requesterEmail || undefined,
     from: requesterEmail || undefined,
   });
+}
+
+async function cancelRequest({ id, user_id }) {
+  const { rows } = await db.query(
+    `SELECT id, status FROM requests WHERE id = $1 LIMIT 1`,
+    [id],
+  );
+
+  const request = rows[0];
+  if (!request) throw new Error("Solicitud no encontrada");
+
+  const currentStatus = (request.status || "").toLowerCase();
+  if (["aprobado", "approved", "cancelado", "cancelled"].includes(currentStatus)) {
+    throw new Error("La solicitud ya no puede cancelarse");
+  }
+
+  await db.query(
+    `UPDATE requests SET status = 'cancelado', updated_at = now() WHERE id = $1`,
+    [id],
+  );
+
+  await logAction({
+    user_id,
+    module: "requests",
+    action: "cancel",
+    entity: "requests",
+    entity_id: id,
+  });
+
+  return true;
+}
+
+async function resubmit({ id, user_id, payload }) {
+  const { rows } = await db.query(
+    `SELECT r.*, rt.code AS type_code
+       FROM requests r
+       LEFT JOIN request_types rt ON rt.id = r.request_type_id
+      WHERE r.id = $1
+      LIMIT 1`,
+    [id],
+  );
+
+  const request = rows[0];
+  if (!request) throw new Error("Solicitud no encontrada");
+
+  const status = (request.status || "").toLowerCase();
+  if (!status.includes("rechaz") && !status.includes("cancel")) {
+    throw new Error("Solo puedes reenviar solicitudes rechazadas o canceladas");
+  }
+
+  const schemaKey = resolveSchemaKey(request.type_code);
+  const { normalizedPayload, schema } = normalizePayload(schemaKey, payload || {});
+  const validate = ajv.compile(schema);
+  const valid = validate(payload || {});
+  if (!valid) {
+    const errors = validate.errors
+      .map((e) => `${e.instancePath || e.keyword} ${e.message} `)
+      .join(", ");
+    const err = new Error(`Datos de solicitud inválidos(${schemaKey}): ${errors} `);
+    err.validationErrors = validate.errors;
+    throw err;
+  }
+
+  const nextVersion = (request.version_number || 1) + 1;
+  const client = await db.getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    await client.query(
+      `UPDATE requests
+          SET status = 'pendiente',
+              payload = $1,
+              version_number = $2,
+              updated_at = now()
+        WHERE id = $3`,
+      [JSON.stringify(normalizedPayload), nextVersion, id],
+    );
+
+    await client.query(
+      `INSERT INTO request_versions(request_id, version_number, payload)
+       VALUES($1, $2, $3)`,
+      [id, nextVersion, JSON.stringify(normalizedPayload)],
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  await logAction({
+    user_id,
+    module: "requests",
+    action: "resubmit",
+    entity: "requests",
+    entity_id: id,
+    details: normalizedPayload,
+  });
+
+  return { id, status: "pendiente", version_number: nextVersion, payload: normalizedPayload };
 }
 
 /*
@@ -1420,9 +1704,12 @@ module.exports = {
   getRequestType,
   createRequest,
   saveAttachment,
+  addDriveAttachment,
   getRequestFull,
   generateActa,
   updateRequestStatus,
+  cancelRequest,
+  resubmit,
   createClientRequest,
   listClientRequests,
   getClientRequestById,
