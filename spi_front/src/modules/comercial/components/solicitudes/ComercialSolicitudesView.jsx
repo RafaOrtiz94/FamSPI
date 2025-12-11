@@ -1,35 +1,129 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { FiClipboard, FiSearch } from "react-icons/fi";
+import React, { useState } from "react";
+import { FiClipboard, FiCreditCard, FiUserPlus, FiTruck, FiUsers } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
-import { getRequests } from "../../../../core/api/requestsApi";
-import Card from "../../../../core/ui/components/Card";
-import Button from "../../../../core/ui/components/Button";
-import SolicitudesGrid from "../SolicitudesGrid";
+import { useAuth } from "../../../../core/auth/useAuth";
+import { createRequest, getClientRequests, getRequestById } from "../../../../core/api/requestsApi";
+import { getDocumentsByRequest } from "../../../../core/api/documentsApi";
+import { getFilesByRequest } from "../../../../core/api/filesApi";
 import CreateRequestModal from "../CreateRequestModal";
 import RequestDetailModal from "../RequestDetailModal";
 import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
-import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
+import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
+import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
+
+const statWidgets = [
+    {
+        id: 'clientes',
+        title: 'Solicitudes de Clientes',
+        icon: FiUserPlus,
+        color: 'emerald',
+        type: 'client_request',
+        fetcher: async (params) => {
+            const res = await getClientRequests(params);
+            return res;
+        }
+    },
+    {
+        id: 'inspecciones',
+        title: 'Inspecciones Técnicas',
+        icon: FiClipboard,
+        color: 'blue',
+        type: 'inspeccion'
+    },
+    {
+        id: 'retiros',
+        title: 'Retiros y Devoluciones',
+        icon: FiTruck,
+        color: 'amber',
+        type: 'retiro'
+    },
+    {
+        id: 'vacaciones',
+        title: 'Mis Permisos',
+        icon: FiUsers,
+        color: 'orange',
+        type: 'vacaciones',
+        initialFilters: { mine: true }
+    }
+];
 
 const ComercialSolicitudesView = () => {
-    const { showToast, confirm } = useUI();
-    const [query, setQuery] = useState("");
-    const [status, setStatus] = useState("all");
+    const { showToast, showLoader, hideLoader } = useUI();
+    const { user } = useAuth();
+    const normalizedRole = (user?.role || user?.role_name || "").toLowerCase();
+    const isBackofficeUser = normalizedRole.includes("backoffice");
+    const visibleStatWidgets = isBackofficeUser
+        ? statWidgets.filter(
+              (widget) => widget.id !== "inspecciones" && widget.id !== "retiros"
+          )
+        : statWidgets;
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
 
     // Grid data states
-    const [solicitudes, setSolicitudes] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [detail, setDetail] = useState({
         open: false,
         loading: false,
         data: null,
         error: null,
     });
+
+    const handleViewRequest = async (request) => {
+        setDetail({ open: true, loading: true, data: null, error: null });
+        try {
+            const requestData = await getRequestById(request.id);
+            let documents = [];
+            let files = [];
+            try {
+                documents = await getDocumentsByRequest(request.id);
+            } catch (err) {
+                console.warn("No se pudieron cargar los documentos:", err);
+            }
+            try {
+                files = await getFilesByRequest(request.id);
+            } catch (err) {
+                console.warn("No se pudieron cargar los archivos:", err);
+            }
+            const normalizedRequest =
+                requestData?.request || requestData || {};
+            let payload = normalizedRequest.payload;
+            if (typeof payload === "string") {
+                try {
+                    payload = JSON.parse(payload);
+                } catch {
+                    payload = {};
+                }
+            }
+            payload = payload || {};
+            setDetail({
+                open: true,
+                loading: false,
+                data: {
+                    request: { ...normalizedRequest, payload },
+                    documents: documents || [],
+                    files: files || [],
+                },
+                error: null,
+            });
+        } catch (error) {
+            console.error("No se pudo cargar el detalle de la solicitud:", error);
+            setDetail({
+                open: true,
+                loading: false,
+                data: null,
+                error: "No se pudo cargar el detalle de la solicitud",
+            });
+        }
+    };
+
+    // View Modal State
+    const [viewType, setViewType] = useState(null);
+    const [viewTitle, setViewTitle] = useState("");
+    const [viewCustomFetcher, setViewCustomFetcher] = useState(null);
 
     // Request action cards configuration
     const requestActionCards = [
@@ -51,47 +145,12 @@ const ComercialSolicitudesView = () => {
                 "Gestiona la logística inversa para equipos en campo y documenta las observaciones.",
             chips: ["Rutas"],
             color: "amber",
-            icon: FiClipboard,
+            icon: FiTruck,
         },
     ];
-
-    const load = useCallback(async () => {
-        try {
-            setLoading(true);
-            const filters = {};
-            if (status !== "all") filters.status = status;
-
-            // Aquí podrías agregar lógica de paginación real si la API lo soporta
-            const response = await getRequests({ page: 1, limit: 50, ...filters });
-            setSolicitudes(response.rows || []);
-        } catch (error) {
-            console.error("Error loading requests:", error);
-            showToast("Error al cargar las solicitudes", "error");
-        } finally {
-            setLoading(false);
-        }
-    }, [status, showToast]);
-
-    useEffect(() => {
-        load();
-    }, [load]);
-
-    const filteredSolicitudes = useMemo(() => {
-        if (!query) return solicitudes;
-        const q = query.toLowerCase();
-        return solicitudes.filter((s) => {
-            const textoBase = `${s.title || ""} ${s.tipo || ""} ${s.requester_name || ""} ${s.id || ""}`.toLowerCase();
-            return textoBase.includes(q);
-        });
-    }, [solicitudes, query]);
-
-    const stats = useMemo(() => {
-        const total = solicitudes.length;
-        const pending = solicitudes.filter((s) => s.status === "pending").length;
-        const inReview = solicitudes.filter((s) => s.status === "in_review").length;
-        const approved = solicitudes.filter((s) => s.status === "approved").length;
-        return { total, pending, inReview, approved };
-    }, [solicitudes]);
+    const visibleActionCards = isBackofficeUser
+        ? requestActionCards.filter((card) => card.id !== "inspection" && card.id !== "retiro")
+        : requestActionCards;
 
     const handlePurchaseHandoffOpen = () => {
         setShowPurchaseHandoff(true);
@@ -103,88 +162,38 @@ const ComercialSolicitudesView = () => {
     };
 
     const handleCreate = async (data) => {
+        showLoader();
         try {
-            setModalOpen(false);
+            await createRequest(data);
             showToast("Solicitud creada exitosamente", "success");
-            load(); // Recargar la lista
+            setModalOpen(false);
         } catch (error) {
             console.error("Error creando solicitud:", error);
             showToast("Error al crear la solicitud", "error");
+        } finally {
+            hideLoader();
         }
     };
 
-    const handleView = (item) => {
-        // Implementar lógica de ver detalle si es necesario
-        console.log("View item:", item);
+    const handleViewList = (type, title, fetcher = null) => {
+        setViewType(type);
+        setViewTitle(title);
+        setViewCustomFetcher(() => fetcher);
     };
 
-    const handleCancel = async (item) => {
-        const confirmed = await confirm(
-            "¿Estás seguro de cancelar esta solicitud?",
-            "Esta acción no se puede deshacer."
-        );
-        if (confirmed) {
-            showToast("Solicitud cancelada", "success");
-            load();
-        }
-    };
+
 
     return (
         <div className="space-y-8">
-            {/* Encabezado + resumen estilo Clientes */}
-            <section className="space-y-3">
-                <div>
-                    <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                        <FiClipboard className="text-blue-600" />
-                        Solicitudes comerciales
-                    </h1>
-                    <p className="text-sm text-gray-500">
-                        Crea y da seguimiento a las solicitudes vinculadas a tus clientes y operaciones.
-                    </p>
-                </div>
-
-                <Card className="relative overflow-hidden border-0 bg-gradient-to-r from-blue-600 via-indigo-600 to-sky-600 text-white">
-                    <div className="pointer-events-none absolute inset-0 opacity-30">
-                        <div className="absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/20 blur-3xl" />
-                        <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-emerald-400/30 blur-3xl" />
-                    </div>
-                    <div className="relative flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                        <div className="space-y-1">
-                            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold">
-                                Resumen de solicitudes
-                            </div>
-                            <p className="text-sm text-blue-50 max-w-md">
-                                Visualiza rápidamente cuántas solicitudes tienes en cada estado y utiliza el filtro para enfocarte en lo prioritario.
-                            </p>
-                        </div>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-gray-900 md:max-w-xl">
-                            <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
-                                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                                    Total
-                                </span>
-                                <span className="mt-1 text-2xl font-bold text-gray-900">{stats.total}</span>
-                            </div>
-                            <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
-                                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                                    Pendientes
-                                </span>
-                                <span className="mt-1 text-2xl font-bold text-amber-600">{stats.pending}</span>
-                            </div>
-                            <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
-                                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                                    En revisión
-                                </span>
-                                <span className="mt-1 text-2xl font-bold text-indigo-600">{stats.inReview}</span>
-                            </div>
-                            <div className="flex flex-col rounded-2xl bg-white/70 backdrop-blur px-4 py-3 border border-gray-100 shadow-sm">
-                                <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                                    Aprobadas
-                                </span>
-                                <span className="mt-1 text-2xl font-bold text-emerald-600">{stats.approved}</span>
-                            </div>
-                        </div>
-                    </div>
-                </Card>
+            {/* Encabezado */}
+            <section>
+                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                    <FiClipboard className="text-blue-600" />
+                    Solicitudes comerciales
+                </h1>
+                <p className="text-sm text-gray-500">
+                    Crea y da seguimiento a las solicitudes vinculadas a tus clientes y operaciones.
+                </p>
             </section>
 
             {/* CREAR NUEVA SOLICITUD - Grid completo */}
@@ -198,7 +207,7 @@ const ComercialSolicitudesView = () => {
                     </p>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                    {requestActionCards.map((card) => (
+                    {visibleActionCards.map((card) => (
                         <div key={card.id} className="flex">
                             <ActionCard
                                 icon={card.icon}
@@ -211,7 +220,7 @@ const ComercialSolicitudesView = () => {
                     ))}
                     <div className="flex">
                         <ActionCard
-                            icon={FiClipboard}
+                            icon={FiUserPlus}
                             subtitle="Nuevo Cliente"
                             title="Registrar Cliente"
                             color="emerald"
@@ -220,7 +229,7 @@ const ComercialSolicitudesView = () => {
                     </div>
                     <div className="flex">
                         <ActionCard
-                            icon={FiClipboard}
+                            icon={FiCreditCard}
                             subtitle="Compras"
                             title="Requerimientos"
                             color="indigo"
@@ -229,7 +238,7 @@ const ComercialSolicitudesView = () => {
                     </div>
                     <div className="flex">
                         <ActionCard
-                            icon={FiClipboard}
+                            icon={FiUsers}
                             subtitle="Talento Humano"
                             title="Permisos y Vacaciones"
                             color="orange"
@@ -239,72 +248,27 @@ const ComercialSolicitudesView = () => {
                 </div>
             </section>
 
-            {/* WIDGET DE SEGUIMIENTO DE COMPRAS */}
-            <div id="purchase-tracker">
-                <EquipmentPurchaseWidget showCreation={false} compactList />
-            </div>
-
-            {/* FILTROS + GRID DE SOLICITUDES */}
-            <section className="space-y-4">
-                <Card className="p-5">
-                    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div className="relative flex-1 max-w-lg">
-                            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-                            <input
-                                type="text"
-                                placeholder="Buscar por título, tipo o solicitante..."
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all text-sm"
-                            />
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                            <select
-                                value={status}
-                                onChange={(e) => setStatus(e.target.value)}
-                                className="px-3 py-2.5 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all bg-white text-sm"
-                            >
-                                <option value="all">Todos los estados</option>
-                                <option value="pending">Pendiente</option>
-                                <option value="in_review">En revisión</option>
-                                <option value="approved">Aprobado</option>
-                                <option value="rejected">Rechazado</option>
-                            </select>
-                            <Button
-                                variant="secondary"
-                                onClick={load}
-                                className="min-w-[140px] justify-center text-sm"
-                            >
-                                Actualizar lista
-                            </Button>
-                        </div>
-                    </div>
-                </Card>
-
-                <section>
-                    <div className="mb-3">
-                        <h2 className="text-lg font-semibold text-gray-900">
-                            Todas las solicitudes
-                        </h2>
-                        <p className="text-sm text-gray-500">
-                            Vista consolidada de las solicitudes que puedes gestionar.
-                        </p>
-                    </div>
-                    {loading ? (
-                        <Card className="p-12">
-                            <div className="text-center">
-                                <div className="inline-block animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600 mb-3"></div>
-                                <p className="text-gray-500">Cargando solicitudes...</p>
-                            </div>
-                        </Card>
-                    ) : (
-                        <SolicitudesGrid
-                            items={filteredSolicitudes}
-                            onView={handleView}
-                            onCancel={handleCancel}
+              {/* RESUMEN DE SOLICITUDES (NUEVO) */}
+            <section>
+                <div className="mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">
+                        Resumen de Solicitudes
+                    </h2>
+                    <p className="text-sm text-gray-600">
+                        Consulta el historial de solicitudes por tipo
+                    </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {visibleStatWidgets.map(widget => (
+                        <RequestStatWidget
+                            key={widget.id}
+                            title={widget.title}
+                            icon={widget.icon}
+                            color={widget.color}
+                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
                         />
-                    )}
-                </section>
+                    ))}
+                </div>
             </section>
 
             {/* PURCHASE HANDOFF MODAL */}
@@ -318,13 +282,20 @@ const ComercialSolicitudesView = () => {
             <PermisoVacacionModal
                 open={showPermisoModal}
                 onClose={() => setShowPermisoModal(false)}
-                onSuccess={() => {
-                    load();
-                    // Opcional: recargar otros widgets si es necesario
-                }}
+                onSuccess={() => { }}
             />
 
-            {/* MODALES */}
+            {/* MODAL LISTADO DE SOLICITUDES */}
+            <RequestsListModal
+                open={!!viewType}
+                onClose={() => setViewType(null)}
+                type={viewType}
+                title={viewTitle}
+                customFetcher={viewCustomFetcher}
+                onView={handleViewRequest}
+            />
+
+            {/* MODALES CREACION */}
             <CreateRequestModal
                 open={modalOpen}
                 onClose={() => {

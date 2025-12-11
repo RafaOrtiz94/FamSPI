@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
-import { FiX, FiCalendar, FiClock, FiAlertCircle, FiFileText } from "react-icons/fi";
+import { FiX, FiCalendar, FiClock, FiFileText } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
+import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
-import Card from "../../../../core/ui/components/Card";
 import { useUI } from "../../../../core/ui/UIContext";
 import { createSolicitud, getVacationSummary } from "../../../../core/api/permisosApi";
 
@@ -476,47 +476,51 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     if (!open) return null;
 
     return (
-        <AnimatePresence>
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+    <AnimatePresence>
+      {open && (
+        <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
+              <Dialog.Panel className="w-full max-w-3xl">
                 <motion.div
-                    initial={{ opacity: 0, scale: 0.95 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.95 }}
-                    className="w-full max-w-2xl"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="overflow-hidden rounded-2xl bg-white shadow-2xl"
                 >
-                    <Card className="relative">
-                        {/* Header */}
-                        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-indigo-100 rounded-lg">
-                                    <FiFileText className="w-6 h-6 text-indigo-600" />
-                                </div>
-                                <div>
-                                    <h2 className="text-xl font-bold text-gray-900">Nueva Solicitud</h2>
-                                    <p className="text-sm text-gray-500">Permisos y Vacaciones</p>
-                                </div>
-                            </div>
-                            <button
-                                onClick={handleClose}
-                                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                                disabled={loading}
-                            >
-                                <FiX className="w-5 h-5 text-gray-500" />
-                            </button>
-                        </div>
-
-                        {/* Body */}
-                        <div className="p-6">
-                            {renderStepIndicator()}
-                            {step === 1 && renderStep1()}
-                            {step === 2 && renderStep2()}
-                            {step === 3 && renderStep3()}
-                        </div>
-                    </Card>
+                  <div className="flex items-center justify-between gap-3 border-b px-6 py-5">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-indigo-100 rounded-lg">
+                        <FiFileText className="w-6 h-6 text-indigo-600" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-bold text-gray-900">Nueva Solicitud</h2>
+                        <p className="text-sm text-gray-500">Permisos y Vacaciones</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={handleClose}
+                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                      disabled={loading}
+                    >
+                      <FiX className="w-5 h-5 text-gray-500" />
+                    </button>
+                  </div>
+                  <div className="p-6">
+                    {renderStepIndicator()}
+                    {step === 1 && renderStep1()}
+                    {step === 2 && renderStep2()}
+                    {step === 3 && renderStep3()}
+                  </div>
                 </motion.div>
+              </Dialog.Panel>
             </div>
-        </AnimatePresence>
-    );
+          </div>
+        </Dialog>
+      )}
+    </AnimatePresence>
+);
 };
 
 export default PermisoVacacionModal;

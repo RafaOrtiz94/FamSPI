@@ -9,6 +9,9 @@ import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVaca
 import OrdenServicioModal from "./modals/OrdenServicioModal";
 import RequerimientoRepuestosModal from "./modals/RequerimientoRepuestosModal";
 import PrestamoEquiposModal from "./modals/PrestamoEquiposModal";
+import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
+import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
+import { FiTool, FiPackage, FiSettings, FiCalendar } from "react-icons/fi";
 
 /**
  * Vista de solicitudes para Técnico
@@ -17,6 +20,8 @@ import PrestamoEquiposModal from "./modals/PrestamoEquiposModal";
 const TecnicoSolicitudesView = () => {
     const { user } = useAuth();
     const [filters, setFilters] = useState({});
+    const [viewType, setViewType] = useState(null);
+    const [viewTitle, setViewTitle] = useState("");
 
     // Action cards permitidos para técnicos
     const allowedCardIds = ["orden-servicio", "repuestos", "prestamo", "vacaciones"];
@@ -36,19 +41,8 @@ const TecnicoSolicitudesView = () => {
         },
         parseResponse: (res) => res.rows || res.data || [],
         defaultFilters: {},
-        autoLoad: true
+        autoLoad: false
     });
-
-    // Filtrar solo las solicitudes del técnico
-    const misSolicitudes = useMemo(() => {
-        if (!user) return [];
-        return solicitudes.filter(s =>
-            s.assigned_to_name === user.fullname ||
-            s.assigned_to === user.fullname ||
-            s.assigned_to_id === user.id ||
-            s.created_by === user.id
-        );
-    }, [solicitudes, user]);
 
     const { openModal, closeModal, isOpen } = useModalManager();
 
@@ -64,6 +58,57 @@ const TecnicoSolicitudesView = () => {
         reload();
     };
 
+    const handleViewList = (type, title) => {
+        setViewType(type);
+        setViewTitle(title);
+    };
+
+    // Widgets disponibles para técnico
+    const statWidgets = [
+        {
+            id: 'orden-servicio',
+            title: 'Mis Mantenimientos',
+            icon: FiTool,
+            color: 'blue',
+            type: 'Orden de Servicio'
+        },
+        {
+            id: 'repuestos',
+            title: 'Mis Repuestos',
+            icon: FiPackage,
+            color: 'purple',
+            type: 'compra'
+        },
+        {
+            id: 'prestamo',
+            title: 'Mis Préstamos',
+            icon: FiSettings,
+            color: 'indigo',
+            type: 'Préstamo'
+        },
+        {
+            id: 'vacaciones',
+            title: 'Mis Vacaciones',
+            icon: FiCalendar,
+            color: 'orange',
+            type: 'Vacaciones'
+        }
+    ];
+
+    const statsSection = (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {statWidgets.map(widget => (
+                <RequestStatWidget
+                    key={widget.id}
+                    title={widget.title}
+                    icon={widget.icon}
+                    color={widget.color}
+                    onClick={() => handleViewList(widget.type, widget.title)}
+                />
+            ))}
+        </div>
+    );
+
     return (
         <>
             <BaseSolicitudesView
@@ -71,29 +116,32 @@ const TecnicoSolicitudesView = () => {
                 actionCards={allowedActionCards}
                 onActionCardClick={handleActionCardClick}
 
-                // Filtros simplificados (sin filtro de técnico)
-                enableFilters={true}
-                filterConfig={{
-                    ...servicioFilterConfig,
-                    customFilters: servicioFilterConfig.customFilters.filter(f => f.id !== 'technician')
-                }}
-                filters={filters}
-                onFilterChange={handleFilterChange}
-                onRefresh={reload}
+                // Desactivar filtros y grilla global
+                enableFilters={false}
+                enableGrid={false}
 
-                // Grid solo con mis solicitudes
-                enableGrid={true}
-                solicitudes={misSolicitudes}
-                loading={loading}
+                // Secciones personalizadas
+                customSections={[
+                    {
+                        id: "stats",
+                        title: "Resumen de Mis Solicitudes",
+                        subtitle: "Consulta tus solicitudes realizadas y asignadas",
+                        content: statsSection
+                    }
+                ]}
 
                 // Títulos personalizados
                 createSectionTitle="Crear Nueva Solicitud"
                 createSectionSubtitle="Selecciona el tipo de solicitud que deseas crear"
-                filtersSectionTitle="Buscar Mis Solicitudes"
-                filtersSectionSubtitle="Filtra y encuentra tus solicitudes"
-                gridSectionTitle="Mis Solicitudes"
-                gridSectionSubtitle="Listado de tus solicitudes asignadas y creadas"
-                emptyMessage="No tienes solicitudes registradas"
+            />
+
+            {/* Modal de Listado (con filtro automático de 'mine' en requestsApi probablemente, o el backend filtre por rol) */}
+            <RequestsListModal
+                open={!!viewType}
+                onClose={() => setViewType(null)}
+                type={viewType}
+                title={viewTitle}
+                initialFilters={{ mine: true }} // Forzar ver solo las mías
             />
 
             {/* Modales permitidos para técnicos */}

@@ -1,5 +1,5 @@
 // src/pages/modules/RequestsPage.jsx
-import React, { useEffect, useMemo, useState, useCallback, Fragment } from "react";
+import React, { useEffect, useMemo, useState, useCallback, Fragment, useRef } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { motion } from "framer-motion";
 import { FiFileText, FiLink, FiSearch, FiPlus } from "react-icons/fi";
@@ -23,7 +23,6 @@ import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
 import { AprobacionPermisosView } from "./shared/solicitudes";
 import PermisosStatusWidget from "./shared/solicitudes/components/PermisosStatusWidget";
 import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
-import EquipmentPurchaseWidget from "./comercial/components/EquipmentPurchaseWidget";
 import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
 
 // ======= Utilidades locales =======
@@ -105,11 +104,11 @@ const RequestsPage = () => {
   const [statusFilter, setStatusFilter] = useState("all");
 
   // Listado
-  const {
-    data: listData,
-    loading: loadingList,
-    execute: fetchRequests,
-  } = useApi(getRequests, {
+    const {
+      data: listData,
+      loading: loadingList,
+      execute: fetchRequests,
+    } = useApi(getRequests, {
     globalLoader: true,
     errorMsg: "Error al cargar las solicitudes.",
   });
@@ -134,24 +133,32 @@ const RequestsPage = () => {
   });
 
   // ======= Cargar inicialmente =======
-  const load = useCallback(async () => {
+  const fetchRef = useRef(fetchRequests);
+  useEffect(() => {
+    fetchRef.current = fetchRequests;
+  }, [fetchRequests]);
+
+  const reloadRequests = useCallback(async () => {
     try {
-      await fetchRequests(defaultRequestParams);
+      await fetchRef.current(defaultRequestParams);
     } catch (err) {
       if (err?.response?.status === 403) {
         showToast("Mostrando solo tus solicitudes por permisos de acceso.", "warning");
-        await fetchRequests({ ...defaultRequestParams, mine: true });
+        await fetchRef.current({ ...defaultRequestParams, mine: true });
       }
     }
-  }, [fetchRequests, defaultRequestParams, showToast]);
+  }, [defaultRequestParams, showToast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    reloadRequests();
+  }, [reloadRequests]);
 
   // ======= Filtro =======
   const debounced = useDebounce(query, 350);
-  const solicitudes = listData?.rows || listData?.result?.rows || listData || [];
+  const solicitudes = useMemo(
+    () => listData?.rows || listData?.result?.rows || listData || [],
+    [listData],
+  );
 
   const filtered = useMemo(() => {
     const q = (debounced || "").trim().toLowerCase();
@@ -400,10 +407,6 @@ const RequestsPage = () => {
         <PermisosStatusWidget />
       </div>
 
-      <div className="mb-6">
-        <EquipmentPurchaseWidget showCreation={false} />
-      </div>
-
       {canViewAllRequests && (
         <Card className="mb-6 p-4" id="permisos-aprobacion">
           <AprobacionPermisosView />
@@ -461,11 +464,11 @@ const RequestsPage = () => {
         </div>
       </Card>
 
-      <PermisoVacacionModal
-        open={vacationModal}
-        onClose={() => setVacationModal(false)}
-        onSuccess={load}
-      />
+          <PermisoVacacionModal
+            open={vacationModal}
+            onClose={() => setVacationModal(false)}
+            onSuccess={reloadRequests}
+          />
 
       <Card className="mb-6">
         <div className="mb-4 flex items-center justify-between">

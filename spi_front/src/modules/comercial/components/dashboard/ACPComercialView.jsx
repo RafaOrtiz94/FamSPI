@@ -2,7 +2,6 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { FiPhone, FiUserCheck, FiFileText, FiClipboard } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
-
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 
 const ACPComercialView = ({ onRefresh }) => {

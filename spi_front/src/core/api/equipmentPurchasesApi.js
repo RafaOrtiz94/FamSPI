@@ -16,6 +16,11 @@ export const getBusinessCaseOptions = async () => {
   return data.data || {};
 };
 
+export const getEquipmentPurchaseStats = async () => {
+  const { data } = await api.get("/equipment-purchases/stats");
+  return data.data || {};
+};
+
 export const createEquipmentPurchase = async (payload) => {
   const { data } = await api.post("/equipment-purchases", payload);
   return data.data;

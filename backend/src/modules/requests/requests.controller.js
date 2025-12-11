@@ -21,8 +21,9 @@ exports.listRequests = asyncHandler(async (req, res) => {
   const pageSize = parseInt(req.query.pageSize || "50", 10);
   const status = req.query.status || null;
   const q = req.query.q || null;
+  const type = req.query.type || null;
 
-  const result = await service.listRequests({ page, pageSize, status, q });
+  const result = await service.listRequests({ page, pageSize, status, q, type });
 
   await logAction({
     user_id: req.user?.id || null,
@@ -127,6 +128,15 @@ exports.createRequest = asyncHandler(async (req, res) => {
       ...(req.files?.["files[]"] || []),
     ];
 
+  logger.info(
+    {
+      user: user?.email,
+      request_type_id,
+      payload: payload?.nombre_cliente ? payload : null,
+    },
+    "✉️ Request POST /requests recibido"
+  );
+
   try {
     // 🧩 Crear solicitud base
     const result = await service.createRequest({
@@ -187,6 +197,13 @@ exports.createRequest = asyncHandler(async (req, res) => {
       logger.error("📋 Detalles de validación AJV:");
       logger.error(JSON.stringify(err.validationErrors, null, 2));
     }
+    logger.error(
+      {
+        request_type_id,
+        payload,
+      },
+      "⚠️ Request inválido desde frontend"
+    );
 
     await logAction({
       user_id: user?.id || null,
@@ -386,6 +403,28 @@ exports.listClientRequests = asyncHandler(async (req, res) => {
 // ============================================================
 // 🔍 Obtener Detalle de Solicitud de Nuevo Cliente
 // ============================================================
+
+// ============================================================
+// ? Obtener resumen de solicitudes de nuevos clientes
+// ============================================================
+exports.getClientRequestSummary = asyncHandler(async (req, res) => {
+  const summary = await service.getClientRequestSummary({});
+
+  await logAction({
+    user_id: req.user.id,
+    module: "client_requests",
+    action: "summary",
+    entity: "client_requests",
+    details: "Resumen de estados de solicitudes",
+  });
+
+  res.json({
+    ok: true,
+    message: "Resumen de solicitudes de clientes obtenido.",
+    data: summary,
+  });
+});
+
 exports.getClientRequestById = asyncHandler(async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const result = await service.getClientRequestById(id, req.user);

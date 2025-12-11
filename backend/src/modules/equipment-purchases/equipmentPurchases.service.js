@@ -36,6 +36,16 @@ const STATUS = {
   BUSINESS_CASE: "business_case",
 };
 
+const STATUS_STATS_ORDER = [
+  STATUS.PENDING_PROVIDER,
+  STATUS.WAITING_PROVIDER,
+  STATUS.WAITING_PROFORMA,
+  STATUS.PROFORMA_RECEIVED,
+  STATUS.WAITING_SIGNED_PROFORMA,
+  STATUS.PENDING_CONTRACT,
+  STATUS.COMPLETED,
+];
+
 const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
 const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
 const PURCHASE_PROCESS_TEMPLATE_ID =
@@ -153,8 +163,7 @@ function formatEquipmentList(items) {
   const list = (items || []).map((item) => {
     const label = item.available_type === "cu" ? "CU" : "Nuevo";
     const name = item.name || item.sku || item.id || "Equipo";
-    const serial = item.serial ? ` (Serie: ${item.serial})` : "";
-    return `<li>${name}${serial} (${label})</li>`;
+    return `<li>${name} (${label})</li>`;
   });
   return list.length ? `<ul>${list.join("")}</ul>` : "<p>Sin equipos disponibles</p>";
 }
@@ -905,15 +914,15 @@ async function createPurchaseRequest({
   if (!isBusinessCaseOnly) {
     const equipmentList = equipment
       .map((item) => {
-        const typeLabel = item.type === 'cu' ? ' (CU)' : ' (Nuevo)';
-        return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+        const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
+        const name = item.name || item.sku || item.id || "Equipo";
+        return `• ${name}${typeLabel}`;
       })
       .join("<br>");
 
     const html = `
       <h2>Solicitud de disponibilidad</h2>
-      <p>Cliente: <strong>${clientName}</strong></p>
-      <p>Equipos requeridos:</p>
+      <p>Equipos requeridos para la solicitud #${id}:</p>
       <p>${equipmentList}</p>
       ${notes ? `<p>Notas: ${notes}</p>` : ""}
     `;
@@ -931,7 +940,7 @@ async function createPurchaseRequest({
       emailFileId = await sendAndArchive({
         user,
         to: provider,
-        subject: `Disponibilidad de equipos - ${clientName}`,
+        subject: `Disponibilidad de equipos - Solicitud #${id}`,
         html,
         folderId,
         prefix: "disponibilidad",
@@ -1015,14 +1024,14 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes }) {
   const equipmentList = equipment
     .map((item) => {
       const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
-      return `• ${item.name || item.sku || item.id}${item.serial ? ` (Serie: ${item.serial})` : ""}${typeLabel}`;
+      const name = item.name || item.sku || item.id || "Equipo";
+      return `• ${name}${typeLabel}`;
     })
     .join("<br>");
 
   const html = `
     <h2>Solicitud de disponibilidad</h2>
-    <p>Cliente: <strong>${request.client_name}</strong></p>
-    <p>Equipos requeridos:</p>
+    <p>Equipos requeridos para la solicitud #${request.id}:</p>
     <p>${equipmentList}</p>
     ${notes ? `<p>Notas: ${notes}</p>` : request.notes ? `<p>Notas: ${request.notes}</p>` : ""}
   `;
@@ -1039,7 +1048,7 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes }) {
   const emailFileId = await sendAndArchive({
     user,
     to: providerEmail,
-    subject: `Disponibilidad de equipos - ${request.client_name}`,
+    subject: `Disponibilidad de equipos - Solicitud #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "disponibilidad",
@@ -1105,14 +1114,14 @@ async function requestProforma({ id, user }) {
 
   const html = `
     <p>Hola,</p>
-    <p>Por favor envíanos la proforma de los siguientes equipos para <strong>${request.client_name}</strong>:</p>
+    <p>Por favor envíanos la proforma de los siguientes equipos para la solicitud #${request.id}:</p>
     ${formatEquipmentList(acceptedItems)}
   `;
 
   const emailFileId = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Proforma requerida - ${request.client_name}`,
+    subject: `Proforma requerida - Solicitud #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "proforma",
@@ -1185,7 +1194,7 @@ async function reserveEquipment({ id, user }) {
   }
 
   const html = `
-    <p>Solicitamos reservar los equipos cotizados para <strong>${request.client_name}</strong>.</p>
+    <p>Solicitamos reservar los equipos cotizados para la solicitud #${request.id}.</p>
     <p>Adjuntamos la proforma recibida y confirmamos reserva para:</p>
     ${formatEquipmentList(acceptedItems)}
   `;
@@ -1193,7 +1202,7 @@ async function reserveEquipment({ id, user }) {
   const emailFileId = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Reserva de equipos - ${request.client_name}`,
+    subject: `Reserva de equipos - Solicitud #${request.id}`,
     html,
     folderId: request.drive_folder_id,
     prefix: "reserva",
@@ -1248,7 +1257,7 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
 
   const acceptedItems = getAcceptedItems(request);
   const arrivalHtml = `
-    <p>Hemos recibido la proforma firmada de <strong>${request.client_name}</strong>.</p>
+    <p>Hemos recibido la proforma firmada asociada a la solicitud #${request.id}.</p>
     <p>Por favor confirma el tiempo de llegada de los siguientes equipos:</p>
     ${formatEquipmentList(acceptedItems)}
   `;
@@ -1256,7 +1265,7 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
   const arrivalFileId = await sendAndArchive({
     user,
     to: request.provider_email,
-    subject: `Tiempo de llegada - ${request.client_name}`,
+    subject: `Tiempo de llegada - Solicitud #${request.id}`,
     html: arrivalHtml,
     folderId: request.drive_folder_id,
     prefix: "tiempo-llegada",
@@ -1536,6 +1545,29 @@ async function listBusinessCaseItems({ id, user }) {
   return rows;
 }
 
+async function getStats({ requestType = "purchase" } = {}) {
+  await ensureTables();
+  const { rows } = await db.query(
+    `SELECT status, COUNT(*)::INT AS count
+       FROM equipment_purchase_requests
+      WHERE request_type = $1
+      GROUP BY status`,
+    [requestType],
+  );
+  const summary = { total: 0 };
+  STATUS_STATS_ORDER.forEach((status) => {
+    summary[status] = 0;
+  });
+  rows.forEach(({ status, count }) => {
+    const value = Number(count) || 0;
+    if (STATUS_STATS_ORDER.includes(status)) {
+      summary[status] = value;
+    }
+    summary.total += value;
+  });
+  return summary;
+}
+
 module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
@@ -1555,5 +1587,6 @@ module.exports = {
   updateBusinessCaseFields,
   addBusinessCaseItem,
   listBusinessCaseItems,
+  getStats,
   STATUS,
 };

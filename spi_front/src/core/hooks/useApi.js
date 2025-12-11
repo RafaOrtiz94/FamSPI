@@ -14,6 +14,7 @@ export const useApi = (apiFunction, options = {}) => {
     globalLoader = false,
     successMsg = null,
     errorMsg = null,
+    transformResponse = null,
   } = options;
   const { showToast, showLoader, hideLoader } = useUI();
   const [data, setData] = useState(null);
@@ -29,19 +30,20 @@ export const useApi = (apiFunction, options = {}) => {
 
         const response = await apiFunction(...params);
 
-        // ⚡️ Asegura que siempre haya data válida
         const normalized =
-          response?.rows || response?.result?.rows
+          typeof transformResponse === "function"
+            ? transformResponse(response)
+            : response?.rows || response?.result?.rows
             ? response
             : Array.isArray(response)
             ? { rows: response }
-            : { rows: [] };
+            : { rows: response };
 
         setData(normalized);
         if (successMsg) showToast(successMsg, "success");
         return normalized;
       } catch (err) {
-        console.error("❌ API error:", err);
+        console.error("⚠️ API error:", err);
         setError(err);
         if (errorMsg) showToast(errorMsg, "error");
         throw err;
@@ -50,7 +52,7 @@ export const useApi = (apiFunction, options = {}) => {
         if (globalLoader) hideLoader();
       }
     },
-    [apiFunction, globalLoader, successMsg, errorMsg, showToast, showLoader, hideLoader]
+    [apiFunction, globalLoader, successMsg, errorMsg, transformResponse, showToast, showLoader, hideLoader],
   );
 
   return { data, error, loading, execute, setData };

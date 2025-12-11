@@ -22,6 +22,15 @@ const ALLOWED_STATES = new Set([
   "proceso_retiro",
 ]);
 
+const normalizeDetalleValue = (value) => {
+  if (value === null || value === undefined) return null;
+  try {
+    return JSON.stringify(value);
+  } catch (error) {
+    return JSON.stringify(String(value));
+  }
+};
+
 async function listModelos({ search } = {}) {
   try {
     const params = [];
@@ -171,11 +180,12 @@ async function createUnidad({ modelo_id, serial = null, cliente_id = null, sucur
     );
 
     const unidad = rows[0];
+    const creationDetail = serialPendiente ? "Unidad creada sin serial" : "Unidad creada con serial";
 
     await client.query(
       `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, cliente_id, sucursal_id, created_by, created_at)
        VALUES ($1, 'unidad_creada', $2, $3, $4, $5, now())`,
-      [unidad.id, serialPendiente ? "Unidad creada sin serial" : "Unidad creada con serial", cliente_id, sucursal_id, user_id],
+      [unidad.id, normalizeDetalleValue(creationDetail), cliente_id, sucursal_id, user_id],
     );
 
     await client.query("COMMIT");
@@ -233,7 +243,7 @@ async function captureSerial({ unidad_id, serial, cliente_id = null, sucursal_id
     await client.query(
       `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, created_by, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-      [unidad_id, evento, detalle || null, request_id, cliente_id, sucursal_id, user_id],
+      [unidad_id, evento, normalizeDetalleValue(detalle), request_id, cliente_id, sucursal_id, user_id],
     );
 
     await client.query("COMMIT");
@@ -277,7 +287,7 @@ async function assignUnidad({ unidad_id, cliente_id, sucursal_id = null, detalle
     await client.query(
       `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, cliente_id, sucursal_id, created_by, created_at)
        VALUES ($1, 'asignacion', $2, $3, $4, $5, now())`,
-      [unidad_id, detalle || "Unidad asignada", cliente_id, sucursal_id, user_id],
+      [unidad_id, normalizeDetalleValue(detalle || "Unidad asignada"), cliente_id, sucursal_id, user_id],
     );
 
     await client.query("COMMIT");
@@ -320,7 +330,7 @@ async function cambiarEstadoUnidad({ unidad_id, estado, detalle = null, request_
     await client.query(
       `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, created_by, created_at)
        VALUES ($1, 'estado_actualizado', $2, $3, $4, now())`,
-      [unidad_id, detalle || estadoNormalizado, request_id, user_id],
+      [unidad_id, normalizeDetalleValue(detalle || estadoNormalizado), request_id, user_id],
     );
 
     await client.query("COMMIT");
@@ -342,4 +352,5 @@ module.exports = {
   captureSerial,
   assignUnidad,
   cambiarEstadoUnidad,
+  normalizeDetalleValue,
 };

@@ -16,6 +16,7 @@ import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
 import { useAuth } from "../../../core/auth/AuthContext";
+import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import {
   FiPackage,
   FiMail,
@@ -146,11 +147,22 @@ const normalizeResponseItems = (request) => {
   }));
 };
 
+const dedupeEquipmentList = (list = []) => {
+  const seen = new Set();
+  return (list || []).filter((item) => {
+    const key = `${item.sku || item.name || item.label || item.id || ""}`.toLowerCase().trim();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
 const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) => {
   const { showToast } = useUI();
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].includes(role);
+  const canAccessAttachments = ["acp_comercial", "gerencia_general"].includes(role);
   const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
   const [requests, setRequests] = useState([]);
   const [listQuery, setListQuery] = useState("");
@@ -169,15 +181,21 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     includesKit: false
   });
   const [availabilityDrafts, setAvailabilityDrafts] = useState({});
-
-  const loadAll = async () => {
+  const [processingAction, setProcessingAction] = useState(null);
+  const [processingStep, setProcessingStep] = useState(null);
+  const [expandedRequestId, setExpandedRequestId] = useState(null);
+  const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
       const [metaRes, listRes] = await Promise.all([
         showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [] }),
         listEquipmentPurchases(),
       ]);
-      setMeta({ clients: metaRes.clients || [], equipment: metaRes.equipment || [], acpUsers: metaRes.acp_users || [] });
+      setMeta({
+        clients: metaRes.clients || [],
+        equipment: dedupeEquipmentList(metaRes.equipment || []),
+        acpUsers: metaRes.acp_users || [],
+      });
       setRequests(listRes || []);
     } catch (error) {
       console.error(error);
@@ -185,11 +203,11 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     } finally {
       setLoading(false);
     }
-  };
+  }, [showCreation, isManager, showToast]);
 
   useEffect(() => {
     loadAll();
-  }, []);
+  }, [loadAll]);
 
   useEffect(() => {
     setPage(1);
@@ -313,41 +331,66 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     items: normalizeResponseItems(request),
   });
 
-  const submitResponse = async () => {
+  const runWithOverlay = async (title, steps, asyncFn) => {
+    setProcessingAction({ title, steps });
+    setProcessingStep(steps?.[0]?.id || null);
+    await new Promise((resolve) => setTimeout(resolve, 10));
     try {
-      const responseItems = (responseDraft.items || []).map((item) => {
-        const availableType = item.available_type || "none";
-        const decision = availableType === "none" ? "reject" : item.decision || "reject";
-        return { ...item, available_type: availableType, decision };
-      });
-
-      const acceptedItems = responseItems.filter(
-        (item) => item.available_type !== "none" && item.decision !== "reject",
-      );
-      const normalizedOutcome = acceptedItems.length > 0 ? "new" : "none";
-      await saveProviderResponse(responseDraft.id, {
-        outcome: normalizedOutcome,
-        notes: responseDraft.notes,
-        items: responseItems,
-      });
-      showToast("Respuesta registrada", "success");
-      setResponseDraft({ open: false, id: null, outcome: "new", notes: "", items: [] });
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo guardar la respuesta", "error");
+      await asyncFn();
+    } finally {
+      setProcessingAction(null);
+      setProcessingStep(null);
     }
   };
 
+  const submitResponse = async () => {
+    await runWithOverlay(
+      "Enviando respuesta al proveedor",
+      [{ id: "response", label: "Registrando respuesta" }],
+      async () => {
+        try {
+          const responseItems = (responseDraft.items || []).map((item) => {
+            const availableType = item.available_type || "none";
+            const decision = availableType === "none" ? "reject" : item.decision || "reject";
+            return { ...item, available_type: availableType, decision };
+          });
+
+          const acceptedItems = responseItems.filter(
+            (item) => item.available_type !== "none" && item.decision !== "reject",
+          );
+          const normalizedOutcome = acceptedItems.length > 0 ? "new" : "none";
+          await saveProviderResponse(responseDraft.id, {
+            outcome: normalizedOutcome,
+            notes: responseDraft.notes,
+            items: responseItems,
+          });
+          showToast("Respuesta registrada", "success");
+          setResponseDraft({ open: false, id: null, outcome: "new", notes: "", items: [] });
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("No se pudo guardar la respuesta", "error");
+          throw error;
+        }
+      },
+    );
+  };
+
   const handleRequestProforma = async (id) => {
-    try {
-      await requestProforma(id);
-      showToast("Proforma solicitada", "success");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo solicitar la proforma", "error");
-    }
+    await runWithOverlay(
+      "Solicitando proforma",
+      [{ id: "proforma", label: "Solicitando proforma" }],
+      async () => {
+        try {
+          await requestProforma(id);
+          showToast("Proforma solicitada", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("No se pudo solicitar la proforma", "error");
+        }
+      },
+    );
   };
 
   const handleUpload = async (id, action, file, extra = {}) => {
@@ -355,27 +398,41 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       showToast("Selecciona un archivo", "warning");
       return;
     }
-    try {
-      if (action === "proforma") await uploadProforma(id, file);
-      if (action === "signed") await uploadSignedProforma(id, { file, ...extra });
-      if (action === "contract") await uploadContract(id, file);
-      showToast("Archivo cargado", "success");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo cargar el archivo", "error");
-    }
+    const label = action === "proforma" ? "subiendo proforma" : action === "signed" ? "subiendo proforma firmada" : "subiendo contrato";
+    await runWithOverlay(
+      `Enviando ${label}`,
+      [{ id: action, label: `Subiendo ${label}` }],
+      async () => {
+        try {
+          if (action === "proforma") await uploadProforma(id, file);
+          if (action === "signed") await uploadSignedProforma(id, { file, ...extra });
+          if (action === "contract") await uploadContract(id, file);
+          showToast("Archivo cargado", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("No se pudo cargar el archivo", "error");
+          throw error;
+        }
+      },
+    );
   };
 
   const handleReserve = async (id) => {
-    try {
-      await reserveEquipment(id);
-      showToast("Reserva enviada y recordatorio agendado", "success");
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo enviar la reserva", "error");
-    }
+    await runWithOverlay(
+      "Enviando reserva",
+      [{ id: "reserve", label: "Enviando reserva" }],
+      async () => {
+        try {
+          await reserveEquipment(id);
+          showToast("Reserva enviada y recordatorio agendado", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("No se pudo enviar la reserva", "error");
+        }
+      },
+    );
   };
 
   const handleStartAvailability = async (request) => {
@@ -388,15 +445,21 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       return;
     }
 
-    try {
-      await startAvailability(request.id, { provider_email: providerEmail, notes });
-      showToast("Correo de disponibilidad enviado", "success");
-      setAvailabilityDrafts((prev) => ({ ...prev, [request.id]: {} }));
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo enviar el correo de disponibilidad", "error");
-    }
+    await runWithOverlay(
+      "Enviando correo de disponibilidad",
+      [{ id: "availability", label: "Enviando correo de disponibilidad" }],
+      async () => {
+        try {
+          await startAvailability(request.id, { provider_email: providerEmail, notes });
+          showToast("Correo de disponibilidad enviado", "success");
+          setAvailabilityDrafts((prev) => ({ ...prev, [request.id]: {} }));
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("No se pudo enviar el correo de disponibilidad", "error");
+        }
+      },
+    );
   };
   const handleSubmitInspection = async () => {
     const { requestId, file, minDate, maxDate, includesKit } = inspectionModal;
@@ -406,25 +469,41 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       return;
     }
 
-    try {
-      await submitSignedProformaWithInspection(requestId, {
-        file,
-        inspection_min_date: minDate,
-        inspection_max_date: maxDate,
-        includes_starter_kit: includesKit
-      });
+    await runWithOverlay(
+      "Subiendo inspección",
+      [{ id: "inspection", label: "Enviando inspección" }],
+      async () => {
+        try {
+          await submitSignedProformaWithInspection(requestId, {
+            file,
+            inspection_min_date: minDate,
+            inspection_max_date: maxDate,
+            includes_starter_kit: includesKit,
+          });
 
-      showToast("Proforma subida e inspección creada exitosamente", "success");
-      setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false });
-      loadAll();
-    } catch (error) {
-      console.error(error);
-      showToast("Error al procesar la solicitud", "error");
-    }
+          showToast("Proforma subida e inspección creada exitosamente", "success");
+          setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false });
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          showToast("Error al procesar la solicitud", "error");
+          throw error;
+        }
+      },
+    );
   };
 
   return (
-    <div className="space-y-6">
+    <>
+      {processingAction && (
+        <ProcessingOverlay
+          className="z-[1010]"
+          title={processingAction.title}
+          steps={processingAction.steps}
+          activeStep={processingStep}
+        />
+      )}
+      <div className="space-y-6">
       {showCreation && (
         <Card className="p-5">
           <div className="flex items-center justify-between mb-4">
@@ -634,6 +713,27 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
               const availabilityDraft = availabilityDrafts[req.id] || {};
               const draftProviderEmail = availabilityDraft.provider_email ?? req.provider_email ?? "";
               const draftNotes = availabilityDraft.notes ?? req.notes ?? "";
+              const providerText = providerResponse
+                ? formatProviderOutcome(providerResponse.outcome)
+                : "Sin respuesta del proveedor";
+              const providerTimestamp =
+                providerResponse?.updated_at ||
+                req.provider_response_at ||
+                req.updated_at ||
+                req.created_at;
+              const formattedResponseDate = providerTimestamp
+                ? new Date(providerTimestamp).toLocaleString("es-ES", {
+                    day: "2-digit",
+                    month: "short",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : null;
+              const expanded = expandedRequestId === req.id;
+              const toggleExpanded = () => {
+                setExpandedRequestId((prev) => (prev === req.id ? null : req.id));
+              };
 
               return (
                 <Card
@@ -666,15 +766,23 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   </div>
 
                   {/* Badge de Estado */}
-                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${statusConfig.badgeBg} ${statusConfig.badgeText} shadow-sm mb-3`}>
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full ${statusConfig.cardBorder} ${statusConfig.badgeBg} ${statusConfig.badgeText} shadow-sm mb-3`}>
                     <StatusIcon size={14} />
                     <span className="text-xs font-semibold">{statusConfig.label}</span>
                   </div>
 
-                  {/* Provider */}
-                  <div className="mb-3 flex items-center gap-2 text-sm">
-                    <FiMail className="text-gray-500" size={14} />
-                    <span className="text-gray-700 font-medium">{req.provider_email || "Proveedor pendiente"}</span>
+                  <div className="mb-3 flex items-center justify-between gap-2 text-sm">
+                    <div className="flex items-center gap-2 text-gray-700">
+                      <FiMail className="text-gray-500" size={14} />
+                      <span className="font-medium">{req.provider_email || "Proveedor pendiente"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={toggleExpanded}
+                      className="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                    >
+                      {expanded ? "Mostrar menos" : "Mostrar más"}
+                    </button>
                   </div>
 
                   {(req.assigned_to_name || req.assigned_to_email) && (
@@ -684,136 +792,80 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                     </div>
                   )}
 
-                  {/* Provider Response */}
-                  {providerResponse && (
-                    <div className="mb-4 bg-white/60 border border-white/70 rounded-lg p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-xs font-semibold text-gray-600 mb-1 uppercase tracking-wide">Respuesta del proveedor</p>
-                          <p className="text-sm font-medium text-gray-800">{formatProviderOutcome(providerResponse.outcome)}</p>
-                          {providerResponse.notes && (
-                            <p className="text-sm text-gray-700 mt-1 whitespace-pre-line">{providerResponse.notes}</p>
-                          )}
-                        </div>
-                        {req.provider_response_at && (
-                          <div className="flex items-center gap-1 text-[11px] text-gray-500">
-                            <FiClock size={12} />
-                            <span>
-                              {new Date(req.provider_response_at).toLocaleDateString('es-ES', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </span>
-                          </div>
+                  {expanded && providerResponse && (
+                    <div className="mb-4 rounded-2xl border border-gray-200 bg-white/70 p-4 space-y-4 shadow-sm">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Respuesta del proveedor</p>
+                        <p className="text-sm font-semibold text-gray-900">{providerText}</p>
+                        {formattedResponseDate && (
+                          <p className="text-[10px] text-gray-500">{formattedResponseDate}</p>
                         )}
                       </div>
-                    </div>
-                  )}
-
-                  {/* Equipment List */}
-                  <div className="mb-4">
-                    <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">{equipmentTitle}</p>
-                    <div className="space-y-1">
-                        {equipmentList.map((eq, idx) => {
-                          const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
-                          const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
-                          const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
-                          const decision = typeof eq === "object" ? eq.decision : null;
-                          const hasMismatch = requestedType && availableType && requestedType !== availableType;
-
-                        const typeBadge = (type, label) => (
-                          <span
-                            className={`px-2 py-0.5 text-xs rounded-full font-semibold ${type === 'new'
-                              ? 'bg-green-100 text-green-700'
-                              : type === 'cu'
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'bg-gray-100 text-gray-600'
-                              }`}
-                          >
-                            {label}: {type === 'new' ? 'Nuevo' : type === 'cu' ? 'CU' : 'Sin stock'}
-                          </span>
-                        );
-
-                        return (
-                          <div key={idx} className="flex flex-col gap-1 text-sm bg-white/60 rounded px-2 py-1">
-                            <div className="flex items-center gap-2">
-                              <FiPackage size={14} className="text-gray-500" />
-                              <span className="font-medium text-gray-800">{eqName}</span>
-                            </div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                {requestedType && typeBadge(requestedType, "Solicitado")}
-                                {availableType && typeBadge(availableType, "Disponible")}
-                                {decision && (
-                                  <span
-                                    className={`px-2 py-0.5 text-xs rounded-full font-semibold ${decision === 'reject'
-                                      ? 'bg-red-100 text-red-700'
-                                      : 'bg-emerald-100 text-emerald-700'
-                                      }`}
-                                  >
-                                    {decision === "reject" ? "Rechazado" : "Aceptado"}
-                                  </span>
-                                )}
-                                {hasMismatch && (
-                                  <span className="text-[11px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full font-semibold">
-                                    Diferente a lo solicitado
-                                  </span>
-                                )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Files */}
-                  {(req.process_doc_link || req.proforma_file_link || req.signed_proforma_file_link || req.contract_file_link) && (
-                    <div className="mb-4 flex flex-wrap gap-2">
-                      {req.process_doc_link && (
-                        <a
-                          href={req.process_doc_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-sky-700 hover:bg-sky-50 transition-colors shadow-sm"
-                        >
-                          <FiFileText size={12} />
-                          Documento de proceso
-                        </a>
+                      {providerResponse.notes && (
+                        <p className="text-sm text-gray-700 whitespace-pre-line">{providerResponse.notes}</p>
                       )}
-                      {req.proforma_file_link && (
-                        <a
-                          href={req.proforma_file_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-blue-600 hover:bg-blue-50 transition-colors shadow-sm"
-                        >
-                          <FiDownload size={12} />
-                          Proforma
-                        </a>
-                      )}
-                      {req.signed_proforma_file_link && (
-                        <a
-                          href={req.signed_proforma_file_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors shadow-sm"
-                        >
-                          <FiDownload size={12} />
-                          Proforma firmada
-                        </a>
-                      )}
-                      {req.contract_file_link && (
-                        <a
-                          href={req.contract_file_link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-xs bg-white px-3 py-1 rounded-full text-green-600 hover:bg-green-50 transition-colors shadow-sm"
-                        >
-                          <FiDownload size={12} />
-                          Contrato
-                        </a>
+                      <div className="space-y-3">
+                        <p className="text-[10px] uppercase tracking-wide text-gray-500">{equipmentTitle}</p>
+                        <div className="space-y-2">
+                          {equipmentList.map((eq, idx) => {
+                            const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
+                            const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
+                            const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
+                            const decision = typeof eq === "object" ? eq.decision : null;
+                            const hasMismatch = requestedType && availableType && requestedType !== availableType;
+
+                            const typeBadge = (type, label) => (
+                              <span
+                                className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${type === 'new'
+                                  ? 'bg-green-100 text-green-700'
+                                  : type === 'cu'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-gray-100 text-gray-600'
+                                  }`}
+                              >
+                                {label}: {type === 'new' ? 'Nuevo' : type === 'cu' ? 'CU' : 'Sin stock'}
+                              </span>
+                            );
+
+                            return (
+                              <div key={`${req.id}-${idx}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                                <p className="font-medium text-gray-900">{eqName}</p>
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                  {requestedType && typeBadge(requestedType, "Solicitado")}
+                                  {availableType && typeBadge(availableType, "Disponible")}
+                                  {decision && (
+                                    <span
+                                      className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${decision === 'reject'
+                                        ? 'bg-red-100 text-red-700 border border-red-200'
+                                        : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                        }`}
+                                    >
+                                      {decision === "reject" ? "Rechazado" : "Aceptado"}
+                                    </span>
+                                  )}
+                                  {hasMismatch && (
+                                    <span className="text-[10px] text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                                      Diferente a lo solicitado
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      {canAccessAttachments && (
+                        <div className="flex flex-wrap gap-2 text-[10px] uppercase tracking-wide">
+                          {req.proforma_file_link && (
+                            <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-800">Proforma</span>
+                          )}
+                          {req.signed_proforma_file_link && (
+                            <span className="px-2 py-1 rounded-full bg-indigo-50 text-indigo-800">Proforma firmada</span>
+                          )}
+                          {req.contract_file_link && (
+                            <span className="px-2 py-1 rounded-full bg-green-50 text-green-800">Contrato</span>
+                          )}
+                        </div>
                       )}
                     </div>
                   )}
@@ -1100,7 +1152,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
         </div>
       )}
     </div>
-
+    </>
   );
 };
 

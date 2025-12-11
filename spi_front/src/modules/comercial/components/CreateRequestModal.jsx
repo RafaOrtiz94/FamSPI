@@ -1,6 +1,6 @@
 // src/modules/comercial/components/CreateRequestModal.jsx
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { Dialog } from "@headlessui/react";
 import { FiSend, FiX, FiPlus, FiTrash2, FiPhone } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
@@ -8,7 +8,8 @@ import FileUploader from "../../../core/ui/components/FileUploader";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import NewClientRequestForm from "./NewClientRequestForm";
 import { fetchClients } from "../../../core/api/clientsApi";
-import { captureUnidadSerial, createUnidad, getEquiposDisponibles, getEquipmentModels } from "../../../core/api/inventarioApi";
+import { createUnidad, getEquiposDisponibles, getEquipmentModels } from "../../../core/api/inventarioApi";
+import { useUI } from "../../../core/ui/useUI";
 
 /* ============================================================
     🌐 Códigos de País (Ejemplo)
@@ -79,9 +80,23 @@ const PhoneNumberInput = ({ name, value, onChange, error, disabled }) => {
     ⚙️ Componente para Input de Equipo con Select de Estado
 ============================================================ */
 const requestTypesForEquipments = {
-  inspection: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
-  retiro: { equipo_id: "", nombre_equipo: "", cantidad: 1, serial: "", unidad_id: "", serial_pendiente: false },
-  compra: { equipo_id: "", nombre_equipo: "", estado: "nuevo", serial: "", unidad_id: "", serial_pendiente: false },
+  inspection: {
+    equipo_id: "",
+    estado: "nuevo",
+    serial: "",
+    unidad_id: "",
+  },
+  retiro: {
+    equipo_id: "",
+    serial: "",
+    unidad_id: "",
+  },
+  compra: {
+    equipo_id: "",
+    estado: "nuevo",
+    serial: "",
+    unidad_id: "",
+  },
 };
 
 const EquipoInput = ({
@@ -94,142 +109,112 @@ const EquipoInput = ({
   equipmentLoading,
   equipmentError,
   disabled,
-  selectedClientId,
   onViewUnassigned,
   includeUnassigned,
   needsClientEquipment,
+  onRegisterNewEquipment,
 }) => {
-  const keys = Object.keys(requestTypesForEquipments[type] || {});
-  const renderKeys = keys.filter((k) => k !== "unidad_id");
-
-  const isStateField = (k) => k === "estado" && (type === "inspection" || type === "compra");
-  const isQuantityField = (k) => k === "cantidad";
-  const isEquipmentField = (k) => k === "equipo_id";
-  const isSerialField = (k) => k === "serial";
-  const [serialSaving, setSerialSaving] = useState(false);
-  const [serialMessage, setSerialMessage] = useState("");
-  const [serialError, setSerialError] = useState("");
+  const showStateField = type === "inspection" || type === "compra";
+  const defaultState = requestTypesForEquipments[type]?.estado || "nuevo";
 
   const handleEquipmentSelect = (e) => {
     const value = e.target.value;
-    const selected = equipmentOptions.find((opt) => `${opt.id}` === `${value}`);
+    const selected = equipmentOptions.find(
+      (opt) => `${opt.id}` === `${value}` || `${opt.unidad_id}` === `${value}`,
+    );
+    const unidadId = selected?.unidad_id || selected?.id || value;
     updateEquipo(index, "equipo_id", value);
-    updateEquipo(index, "nombre_equipo", selected?.nombre || "");
-    updateEquipo(index, "unidad_id", selected?.unidad_id || selected?.id || value);
+    updateEquipo(index, "unidad_id", unidadId);
     updateEquipo(index, "serial", selected?.serial || "");
-    updateEquipo(index, "serial_pendiente", !!selected?.serial_pendiente);
-    if (selected?.estado) {
-      updateEquipo(index, "estado", selected.estado);
-    }
+    const displayName = selected?.nombre || selected?.name || "";
+    updateEquipo(index, "nombre_equipo", displayName);
   };
 
-  const handleSaveSerial = async () => {
-    if (!equipo.unidad_id || !equipo.serial) {
-      setSerialError("Debes seleccionar el equipo y escribir el serial.");
-      return;
-    }
-    setSerialSaving(true);
-    setSerialError("");
-    setSerialMessage("");
-    try {
-      await captureUnidadSerial(equipo.unidad_id, { serial: equipo.serial, cliente_id: selectedClientId || undefined });
-      updateEquipo(index, "serial_pendiente", false);
-      setSerialMessage("Serial guardado");
-    } catch (err) {
-      const message = err?.response?.data?.message || err.message || "No se pudo guardar el serial";
-      setSerialError(message);
-    } finally {
-      setSerialSaving(false);
-    }
-  };
+  const stateOptions =
+    type === "inspection"
+      ? [
+          { value: "nuevo", label: "Nuevo" },
+          { value: "cu", label: "CU" },
+        ]
+      : [
+          { value: "nuevo", label: "Nuevo" },
+          { value: "usado", label: "Usado" },
+        ];
 
   return (
-    <div className="flex items-start gap-2 mb-3 flex-wrap sm:flex-nowrap w-full">
-      {renderKeys.map((k) => (
-        <div key={k} className="flex-1 min-w-[160px]">
-          {isEquipmentField(k) ? (
-            <select
-              value={equipo[k]}
-              onChange={handleEquipmentSelect}
-              disabled={disabled || equipmentLoading}
-              className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-            >
-              <option value="">
-                {equipmentLoading ? "Cargando equipos..." : "Selecciona un equipo"}
+    <div className="flex items-start gap-3 flex-wrap sm:flex-nowrap w-full">
+      <div className="flex-1 min-w-[180px] space-y-1">
+        <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+          Equipo
+        </label>
+        <select
+          value={equipo.equipo_id || ""}
+          onChange={handleEquipmentSelect}
+          disabled={disabled || equipmentLoading}
+          className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+        >
+          <option value="">{equipmentLoading ? "Cargando equipos..." : "Selecciona un equipo"}</option>
+          {equipmentOptions.map((opt) => (
+            <option key={opt.id || opt.unidad_id} value={opt.id || opt.unidad_id || ""}>
+              {opt.nombre || opt.name || "Equipo"}
+            </option>
+          ))}
+        </select>
+        {!equipo.unidad_id && onRegisterNewEquipment && (
+          <button
+            type="button"
+            onClick={() => onRegisterNewEquipment(index)}
+            className="text-xs font-semibold uppercase tracking-wide text-blue-600 dark:text-blue-300 hover:text-blue-800"
+          >
+            Registrar equipo nuevo
+          </button>
+        )}
+        {!equipmentLoading && equipmentOptions.length === 0 && (
+          <div className="text-xs text-gray-500 mt-1 space-y-1">
+            <p>No hay equipos disponibles.</p>
+            {needsClientEquipment && !includeUnassigned && (
+              <button
+                type="button"
+                onClick={onViewUnassigned}
+                className="text-blue-600 hover:underline"
+                disabled={disabled}
+              >
+                Ver no asignados
+              </button>
+            )}
+          </div>
+        )}
+        {equipmentError && (
+          <p className="text-xs text-red-500 mt-1">{equipmentError}</p>
+        )}
+      </div>
+
+      {showStateField && (
+        <div className="min-w-[140px] space-y-1">
+          <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+            Estado
+          </label>
+          <select
+            value={equipo.estado || defaultState}
+            onChange={(e) => updateEquipo(index, "estado", e.target.value)}
+            disabled={disabled}
+            className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white capitalize"
+          >
+            {stateOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
               </option>
-              {equipmentOptions.map((opt) => (
-                <option key={opt.id} value={opt.id}>
-                  {opt.nombre || opt.name}
-                  {opt.modelo ? ` ${opt.modelo}` : ""}
-                  {opt.serial ? ` | Serie ${opt.serial}` : " | Serial pendiente"}
-                  {opt.estado ? ` | ${opt.estado}` : ""}
-                </option>
-              ))}
-            </select>
-          ) : isStateField(k) ? (
-            <select
-              value={equipo[k]}
-              onChange={(e) => updateEquipo(index, k, e.target.value)}
-              disabled={disabled}
-              className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white capitalize"
-            >
-              <option value="nuevo">Nuevo</option>
-              {type === "inspection" ? <option value="cu">CU</option> : <option value="usado">Usado</option>}
-            </select>
-          ) : (
-            <div className="flex flex-col gap-1 w-full">
-              <div className={`flex ${isSerialField(k) ? "gap-2" : ""}`}>
-                <input
-                  type={isQuantityField(k) ? "number" : "text"}
-                  placeholder={k.replaceAll("_", " ")}
-                  value={equipo[k]}
-                  min={isQuantityField(k) ? 1 : null}
-                  onChange={(e) =>
-                    updateEquipo(index, k, isQuantityField(k) ? parseInt(e.target.value) || 1 : e.target.value)
-                  }
-                  disabled={disabled}
-                  className="w-full p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                />
-                {isSerialField(k) && equipo.serial_pendiente && (
-                  <button
-                    type="button"
-                    onClick={handleSaveSerial}
-                    disabled={disabled || serialSaving}
-                    className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold hover:bg-blue-700 disabled:opacity-60"
-                  >
-                    {serialSaving ? "Guardando..." : "Guardar serial"}
-                  </button>
-                )}
-              </div>
-              {isSerialField(k) && serialMessage && <p className="text-xs text-green-600">{serialMessage}</p>}
-              {isSerialField(k) && serialError && <p className="text-xs text-red-500">{serialError}</p>}
-            </div>
-          )}
-          {isEquipmentField(k) && !equipmentLoading && equipmentOptions.length === 0 && (
-            <div className="text-xs text-gray-500 mt-1 space-y-1">
-              <p>No hay equipos disponibles.</p>
-              {needsClientEquipment && !includeUnassigned && (
-                <button
-                  type="button"
-                  onClick={onViewUnassigned}
-                  className="text-blue-600 hover:underline"
-                  disabled={disabled}
-                >
-                  Ver no asignados
-                </button>
-              )}
-            </div>
-          )}
-          {isEquipmentField(k) && equipmentError && (
-            <p className="text-xs text-red-500 mt-1">{equipmentError}</p>
-          )}
+            ))}
+          </select>
         </div>
-      ))}
+      )}
+
       <button
         type="button"
         onClick={() => removeEquipo(index)}
-        className="text-red-500 hover:text-red-700 p-2"
+        className="text-red-500 hover:text-red-700 p-2 mt-1"
         disabled={disabled}
+        aria-label="Eliminar equipo"
       >
         <FiTrash2 />
       </button>
@@ -340,13 +325,17 @@ const CreateRequestModal = ({
   const [loadingEquipment, setLoadingEquipment] = useState(false);
   const [equipmentError, setEquipmentError] = useState("");
   const [includeUnassigned, setIncludeUnassigned] = useState(false);
-  const [creatingUnidad, setCreatingUnidad] = useState(false);
-  const [newUnidadModelId, setNewUnidadModelId] = useState("");
-  const [createUnidadMessage, setCreateUnidadMessage] = useState("");
-  const [createUnidadError, setCreateUnidadError] = useState("");
   const [equipmentModels, setEquipmentModels] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
   const [modelsError, setModelsError] = useState("");
+  const [registerModalOpen, setRegisterModalOpen] = useState(false);
+  const [registerModalIndex, setRegisterModalIndex] = useState(null);
+  const [registerModelId, setRegisterModelId] = useState("");
+  const [registerSerial, setRegisterSerial] = useState("");
+  const [registerLoading, setRegisterLoading] = useState(false);
+  const [registerError, setRegisterError] = useState("");
+  const [returnToType, setReturnToType] = useState(null);
+  const { showToast } = useUI();
 
   const todayDateString = useMemo(() => TODAY, []);
   const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
@@ -374,11 +363,14 @@ const CreateRequestModal = ({
       setEquipmentOptions([]);
       setEquipmentError("");
       setIncludeUnassigned(false);
-      setCreateUnidadError("");
-      setCreateUnidadMessage("");
-      setNewUnidadModelId("");
       setEquipmentModels([]);
       setModelsError("");
+      setRegisterModalOpen(false);
+      setRegisterModalIndex(null);
+      setRegisterModelId("");
+      setRegisterSerial("");
+      setRegisterError("");
+      setReturnToType(null);
       return;
     }
 
@@ -400,6 +392,12 @@ const CreateRequestModal = ({
       setSelectedClientId("");
     }
   }, [open, presetType, initialData, isEditing]);
+
+  useEffect(() => {
+    if (type !== "cliente" && returnToType) {
+      setReturnToType(null);
+    }
+  }, [type, returnToType]);
 
   useEffect(() => {
     if (!open) return;
@@ -479,27 +477,27 @@ const CreateRequestModal = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  useEffect(() => {
-    const loadClients = async () => {
-      if (!open || !type || type === "cliente") return;
-      setLoadingClients(true);
-      try {
-        const clients = await fetchClients();
-        if (Array.isArray(clients)) {
-          setAvailableClients(clients);
-        } else {
-          setAvailableClients(Array.isArray(clients?.clients) ? clients.clients : []);
-        }
-      } catch (error) {
-        console.error("Error cargando clientes", error);
-        setAvailableClients([]);
-      } finally {
-        setLoadingClients(false);
+  const loadClients = useCallback(async () => {
+    if (!open || !type || type === "cliente") return;
+    setLoadingClients(true);
+    try {
+      const clients = await fetchClients();
+      if (Array.isArray(clients)) {
+        setAvailableClients(clients);
+      } else {
+        setAvailableClients(Array.isArray(clients?.clients) ? clients.clients : []);
       }
-    };
-
-    loadClients();
+    } catch (error) {
+      console.error("Error cargando clientes", error);
+      setAvailableClients([]);
+    } finally {
+      setLoadingClients(false);
+    }
   }, [open, type]);
+
+  useEffect(() => {
+    loadClients();
+  }, [loadClients]);
 
   useEffect(() => {
     setIncludeUnassigned(false);
@@ -578,6 +576,11 @@ const CreateRequestModal = ({
     }));
   };
 
+  const handleGoToClientRegistration = () => {
+    setReturnToType(type);
+    setType("cliente");
+  };
+
   const updateEquipo = (index, key, value) => {
     const copy = [...equipos];
     copy[index][key] = value;
@@ -596,26 +599,72 @@ const CreateRequestModal = ({
     setEquipos(equipos.filter((_, i) => i !== index));
   };
 
-  const handleCreateUnidad = async () => {
-    setCreateUnidadError("");
-    setCreateUnidadMessage("");
-    const modeloId = Number(newUnidadModelId);
-    if (!modeloId) {
-      setCreateUnidadError("Selecciona el modelo del equipo a crear.");
+  const openRegisterEquipmentModal = (index) => {
+    if (!selectedClientId) {
+      setErrors((prev) => ({
+        ...prev,
+        equipos: "Selecciona un cliente antes de registrar un equipo nuevo.",
+      }));
       return;
     }
-    setCreatingUnidad(true);
-    try {
-      const created = await createUnidad({ modelo_id: modeloId });
-      setCreateUnidadMessage(`Unidad creada (#${created.id || created.unidad_id || created})`);
-      setNewUnidadModelId("");
-      setIncludeUnassigned(true);
-    } catch (error) {
-      const message = error?.response?.data?.message || error.message || "No se pudo crear la unidad";
-      setCreateUnidadError(message);
-    } finally {
-      setCreatingUnidad(false);
+    setRegisterModalIndex(index);
+    setRegisterModelId("");
+    setRegisterSerial("");
+    setRegisterError("");
+    setRegisterModalOpen(true);
+  };
+
+  const closeRegisterEquipmentModal = () => {
+    setRegisterModalOpen(false);
+    setRegisterModalIndex(null);
+    setRegisterModelId("");
+    setRegisterSerial("");
+    setRegisterError("");
+  };
+
+  const handleRegisterEquipment = async () => {
+    if (!registerModelId || !registerSerial) {
+      setRegisterError("Selecciona el modelo y escribe el serial del equipo.");
+      return;
     }
+    if (registerModalIndex === null) return;
+    setRegisterLoading(true);
+    try {
+      const created = await createUnidad({
+        modelo_id: Number(registerModelId),
+        serial: registerSerial,
+        cliente_id: selectedClientId || undefined,
+      });
+      const unidadId = created.id || created.unidad_id || created;
+      updateEquipo(registerModalIndex, "unidad_id", unidadId);
+      updateEquipo(registerModalIndex, "equipo_id", unidadId);
+      updateEquipo(registerModalIndex, "serial", registerSerial);
+      const selectedModel = equipmentModels.find(
+        (model) =>
+          `${model.id || model.equipment_id}` === `${registerModelId}`,
+      );
+      const modelName =
+        selectedModel?.nombre ||
+        selectedModel?.modelo ||
+        selectedModel?.name ||
+        "";
+      if (modelName) {
+        updateEquipo(registerModalIndex, "nombre_equipo", modelName);
+      }
+      closeRegisterEquipmentModal();
+    } catch (err) {
+      const message = err?.response?.data?.message || err.message || "No se pudo registrar el equipo";
+      setRegisterError(message);
+    } finally {
+      setRegisterLoading(false);
+    }
+  };
+
+  const handleNewClientSuccess = () => {
+    showToast("Cliente registrado. Puedes seleccionarlo en el listado.", "success");
+    const nextType = returnToType && returnToType !== "cliente" ? returnToType : "inspection";
+    setType(nextType);
+    setReturnToType(null);
   };
 
   // ✅ Envío al backend (ya estructurado)
@@ -627,12 +676,17 @@ const CreateRequestModal = ({
     setProgressStep("validating");
     try {
       const payload = { ...formData };
+      const parsedClientId = Number(selectedClientId);
+      if (Number.isFinite(parsedClientId) && parsedClientId > 0) {
+        payload.cliente_id = parsedClientId;
+        payload.client_id = parsedClientId;
+        payload.client_request_id = parsedClientId;
+      }
       if (equipos.length > 0) {
         payload.equipos = equipos;
         const principal = equipos[0];
         payload.unidad_id = principal.unidad_id || principal.equipo_id;
         payload.serial = principal.serial;
-        payload.serial_pendiente = principal.serial_pendiente || !principal.serial;
       }
 
       setProgressStep("preparing");
@@ -660,7 +714,8 @@ const CreateRequestModal = ({
   };
 
   return (
-    <Dialog open={open} onClose={onClose} className="relative z-50">
+    <>
+      <Dialog open={open} onClose={onClose} className="relative z-50">
       <div className="fixed inset-0 bg-black/30 backdrop-blur-sm" />
       <div className="fixed inset-0 overflow-y-auto">
         <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
@@ -700,7 +755,7 @@ const CreateRequestModal = ({
 
           {/* Campos dinámicos */}
           {type && type !== "cliente" && (
-            <form onSubmit={handleSubmit} className="space-y-3">
+              <form onSubmit={handleSubmit} className="space-y-3">
               {clientSelectionRequired && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 text-sm dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
                   <p className="font-semibold">Selecciona primero un cliente registrado.</p>
@@ -711,7 +766,7 @@ const CreateRequestModal = ({
                     type="button"
                     size="sm"
                     className="mt-2 bg-blue-600 text-white hover:bg-blue-700"
-                    onClick={() => setType("cliente")}
+                    onClick={handleGoToClientRegistration}
                   >
                     Ir a solicitud de registro de cliente
                   </Button>
@@ -805,23 +860,26 @@ const CreateRequestModal = ({
                   <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                     Equipos
                   </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Selecciona un equipo disponible y registra su estado/serial para dejarlo ligado al cliente.
+                  </p>
                   {equipos.map((eq, i) => (
                     <EquipoInput
                       key={i}
                       index={i}
                       equipo={eq}
-                        updateEquipo={updateEquipo}
-                        type={type}
-                        removeEquipo={removeEquipo}
-                        equipmentOptions={equipmentOptions}
-                        equipmentLoading={loadingEquipment}
-                        equipmentError={equipmentError}
-                        selectedClientId={selectedClientId}
-                        disabled={clientSelectionRequired && !hasSelectedClient}
-                        onViewUnassigned={handleViewUnassigned}
-                        includeUnassigned={includeUnassigned}
-                        needsClientEquipment={needsClientEquipment}
-                      />
+                      updateEquipo={updateEquipo}
+                      type={type}
+                      removeEquipo={removeEquipo}
+                      equipmentOptions={equipmentOptions}
+                      equipmentLoading={loadingEquipment}
+                      equipmentError={equipmentError}
+                      disabled={clientSelectionRequired && !hasSelectedClient}
+                      onViewUnassigned={handleViewUnassigned}
+                      includeUnassigned={includeUnassigned}
+                      needsClientEquipment={needsClientEquipment}
+                      onRegisterNewEquipment={openRegisterEquipmentModal}
+                    />
                     ))}
                   {errors.equipos && (
                     <p className="text-red-500 text-xs mt-1 mb-2">{errors.equipos}</p>
@@ -837,38 +895,6 @@ const CreateRequestModal = ({
                   {clientSelectionRequired && !hasSelectedClient && (
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
-                  <div className="mt-3 space-y-2">
-                    <p className="text-xs text-gray-600 dark:text-gray-300">Crear unidad rápida (selecciona el modelo)</p>
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                      <select
-                        value={newUnidadModelId}
-                        onChange={(e) => setNewUnidadModelId(e.target.value)}
-                        className="flex-1 p-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        disabled={loadingModels}
-                      >
-                        <option value="">{loadingModels ? "Cargando modelos..." : "Selecciona un modelo"}</option>
-                        {equipmentModels.map((model) => (
-                          <option key={model.id || model.equipment_id} value={model.id || model.equipment_id}>
-                            {model.nombre || model.modelo || model.name || "Modelo"}
-                            {model.modelo && model.modelo !== model.nombre ? ` ${model.modelo}` : ""}
-                            {model.fabricante || model.brand ? ` | ${model.fabricante || model.brand}` : ""}
-                            {model.sku ? ` | SKU ${model.sku}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                      <Button
-                        type="button"
-                        onClick={handleCreateUnidad}
-                        disabled={creatingUnidad || loadingModels}
-                        className="bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-60"
-                      >
-                        {creatingUnidad ? "Creando..." : "Crear unidad"}
-                      </Button>
-                    </div>
-                    {modelsError && <p className="text-xs text-red-500">{modelsError}</p>}
-                    {createUnidadMessage && <p className="text-xs text-green-600">{createUnidadMessage}</p>}
-                    {createUnidadError && <p className="text-xs text-red-500">{createUnidadError}</p>}
-                  </div>
                 </div>
               )}
 
@@ -932,9 +958,7 @@ const CreateRequestModal = ({
               className="mt-2"
               showIntro={false}
               onCancel={onClose}
-              onSuccess={() => {
-                onClose();
-              }}
+              onSuccess={handleNewClientSuccess}
               successMessage={isEditing ? "Solicitud actualizada correctamente." : "Solicitud registrada. El consentimiento quedó auditado o se envió al cliente automáticamente."}
               initialData={initialData}
               isEditing={isEditing}
@@ -943,7 +967,83 @@ const CreateRequestModal = ({
           </Dialog.Panel>
         </div>
       </div>
-    </Dialog>
+      </Dialog>
+      {registerModalOpen && (
+        <Dialog open={registerModalOpen} onClose={closeRegisterEquipmentModal} className="relative z-50">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+              <Dialog.Panel className="mx-4 w-full max-w-md rounded-2xl bg-white p-6 shadow-xl ring-1 ring-black/5 dark:bg-gray-900 dark:ring-white/10">
+                <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Registrar equipo nuevo
+                </Dialog.Title>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Selecciona el modelo que tiene el cliente y registra el serial entregado.
+                </p>
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                      Modelo
+                    </label>
+                    <select
+                      value={registerModelId}
+                      onChange={(e) => setRegisterModelId(e.target.value)}
+                      disabled={loadingModels}
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white disabled:opacity-60"
+                    >
+                      <option value="">
+                        {loadingModels ? "Cargando modelos..." : "Selecciona un modelo"}
+                      </option>
+                      {equipmentModels.map((model) => (
+                        <option key={model.id || model.equipment_id} value={model.id || model.equipment_id}>
+                          {model.nombre || model.modelo || model.name || "Modelo"}
+                          {model.modelo && model.modelo !== model.nombre ? ` ${model.modelo}` : ""}
+                          {model.fabricante ? ` | ${model.fabricante}` : ""}
+                        </option>
+                        ))} 
+                    </select>
+                    {modelsError && (
+                      <p className="text-[11px] text-red-500 mt-1">{modelsError}</p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-semibold uppercase text-gray-500 dark:text-gray-400">
+                      Serial
+                    </label>
+                    <input
+                      type="text"
+                      value={registerSerial}
+                      onChange={(e) => setRegisterSerial(e.target.value)}
+                      placeholder="ABCDEFGHIJKL"
+                      className="mt-1 w-full rounded-lg border border-gray-300 bg-white p-2 text-sm text-gray-900 dark:border-gray-700 dark:bg-gray-800 dark:text-white"
+                    />
+                  </div>
+                  {registerError && <p className="text-xs text-red-500">{registerError}</p>}
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    className="bg-gray-200 text-gray-800 hover:bg-gray-300"
+                    onClick={closeRegisterEquipmentModal}
+                    disabled={registerLoading}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    type="button"
+                    className="bg-blue-600 text-white hover:bg-blue-700"
+                    onClick={handleRegisterEquipment}
+                    disabled={registerLoading}
+                  >
+                    {registerLoading ? "Registrando..." : "Registrar equipo"}
+                  </Button>
+                </div>
+              </Dialog.Panel>
+            </div>
+          </div>
+        </Dialog>
+      )}
+    </>
   );
 };
 

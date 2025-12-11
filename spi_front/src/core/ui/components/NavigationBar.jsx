@@ -67,6 +67,9 @@ const planificacionLink = {
   path: "/dashboard/comercial/planificacion",
 };
 
+const comercialScopes = ["comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
+const planificacionRoles = new Set(["comercial", "jefe_comercial", "gerencia", "gerencia_general"]);
+
 const aprobacionesPlanLink = {
   name: "Aprobación de planes",
   icon: FiCheckCircle,
@@ -77,7 +80,7 @@ const acpLinks = [
   {
     name: "Compras de equipos",
     icon: FiShoppingCart,
-    path: "/dashboard/comercial/equipment-purchases",
+    path: "/dashboard/comercial/acp-compras",
   },
 ];
 
@@ -152,15 +155,19 @@ const servicioLinks = [
   },
 ];
 
-const buildLinks = (scope) => {
+const buildLinks = (scope, role) => {
   const links = [getHomeLink(scope), permisosLink];
 
   // Comercial links
-  if (["comercial", "acp_comercial", "backoffice", "backoffice_comercial"].includes(scope)) {
-    links.push(...comercialLinks, planificacionLink);
+  if (comercialScopes.includes(scope)) {
+    links.push(...comercialLinks);
   }
 
-  if (["acp_comercial"].includes(scope)) {
+  if (planificacionRoles.has(role)) {
+    links.push(planificacionLink);
+  }
+
+  if (scope.includes("acp") || role.includes("acp")) {
     links.push(...acpLinks);
   }
 
@@ -204,8 +211,9 @@ const buildLinks = (scope) => {
 
 const NavigationBar = () => {
   const { user } = useAuth();
-  const scope = (user?.scope || user?.role || "").toLowerCase();
-  const links = React.useMemo(() => buildLinks(scope), [scope]);
+  const role = (user?.role || "").toLowerCase();
+  const scope = (user?.scope || role || "").toLowerCase();
+  const links = React.useMemo(() => buildLinks(scope, role), [scope, role]);
 
   return (
     <nav className="border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">

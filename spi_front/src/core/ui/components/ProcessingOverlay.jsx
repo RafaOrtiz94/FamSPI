@@ -1,10 +1,11 @@
 import React from "react";
+import { createPortal } from "react-dom";
 import { FiLoader, FiCheckCircle } from "react-icons/fi";
 import clsx from "clsx";
 
-const ProcessingOverlay = ({ title, steps = [], activeStep }) => {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm">
+const ProcessingOverlay = ({ title, steps = [], activeStep, className = "" }) => {
+  const overlay = (
+    <div className={`fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm ${className}`}>
       <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl dark:bg-slate-900">
         <div className="flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -61,6 +62,12 @@ const ProcessingOverlay = ({ title, steps = [], activeStep }) => {
       </div>
     </div>
   );
+
+  if (typeof document !== "undefined") {
+    return createPortal(overlay, document.body);
+  }
+
+  return overlay;
 };
 
 export default ProcessingOverlay;

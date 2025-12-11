@@ -169,11 +169,36 @@ module.exports = {
 
       legal_person_business_name: { type: "string" },
       nationality: { type: "string" },
-      legal_rep_name: { type: "string", minLength: 3 },
-      legal_rep_position: { type: "string", minLength: 2 },
-      legal_rep_id_document: { type: "string", minLength: 6 },
-      legal_rep_cellphone: { type: "string", minLength: 6 },
-      legal_rep_email: { type: "string", format: "email" },
+      legal_rep_name: {
+        anyOf: [
+          { type: "string", minLength: 3 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
+      legal_rep_position: {
+        anyOf: [
+          { type: "string", minLength: 2 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
+      legal_rep_id_document: {
+        anyOf: [
+          { type: "string", minLength: 6 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
+      legal_rep_cellphone: {
+        anyOf: [
+          { type: "string", minLength: 6 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
+      legal_rep_email: {
+        anyOf: [
+          { type: "string", format: "email" },
+          { type: "string", maxLength: 0 },
+        ],
+      },
     },
     allOf: [
       {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiAlertTriangle,
   FiCheckCircle,
@@ -24,6 +24,8 @@ import {
   startClientVisit,
 } from "../../../core/api/clientsApi";
 import { getUsers } from "../../../core/api/usersApi";
+import ClientApprovalsWidget from "../../backoffice/components/ClientApprovalsWidget";
+import BackofficeClientRequestsKpiWidget from "../components/BackofficeClientRequestsKpiWidget";
 import MyClientRequestsWidget from "../components/MyClientRequestsWidget";
 
 const todayStr = new Date().toISOString().slice(0, 10);
@@ -33,10 +35,37 @@ const roleIsManager = (role) =>
 
 const advisorRoles = new Set(["comercial", "acp_comercial", "backoffice"]);
 
+const normalizeStatus = (status) => {
+  const value = (status || "").toLowerCase();
+  if (["visited", "visitado"].includes(value)) return "visitado";
+  if (["en_visita", "in_visit", "in_progress"].includes(value)) return "en_visita";
+  return "pendiente";
+};
+
+const STATUS_STYLES = {
+  pendiente: {
+    label: "Pendiente",
+    chip: "bg-gray-100 text-gray-700",
+    led: "bg-gray-300",
+  },
+  en_visita: {
+    label: "En visita",
+    chip: "bg-blue-50 text-blue-700",
+    led: "bg-blue-500",
+  },
+  visitado: {
+    label: "Visitado",
+    chip: "bg-green-50 text-green-700",
+    led: "bg-green-500",
+  },
+};
+
 const ClientesPage = () => {
   const { showToast } = useUI();
   const { role, user } = useAuth();
   const isManager = roleIsManager(role);
+  const roleName = (role || "").toLowerCase();
+  const isBackofficeUser = roleName.includes("backoffice");
   const currentEmail = user?.email?.toLowerCase?.() || "";
 
   const [clientes, setClientes] = useState([]);
@@ -60,34 +89,12 @@ const ClientesPage = () => {
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [summary, setSummary] = useState({});
 
-  const normalizeStatus = (status) => {
-    const value = (status || "").toLowerCase();
-    if (["visited", "visitado"].includes(value)) return "visitado";
-    if (["en_visita", "in_visit", "in_progress"].includes(value)) return "en_visita";
-    return "pendiente";
-  };
+  const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
 
-  const statusStyles = {
-    pendiente: {
-      label: "Pendiente",
-      chip: "bg-gray-100 text-gray-700",
-      led: "bg-gray-300",
-    },
-    en_visita: {
-      label: "En visita",
-      chip: "bg-blue-50 text-blue-700",
-      led: "bg-blue-500",
-    },
-    visitado: {
-      label: "Visitado",
-      chip: "bg-green-50 text-green-700",
-      led: "bg-green-500",
-    },
-  };
-
-  const getStatusMeta = (status) => statusStyles[normalizeStatus(status)] || statusStyles.pendiente;
-
-  const activeStatusMeta = useMemo(() => getStatusMeta(activeClient?.visit_status), [activeClient]);
+  const activeStatusMeta = useMemo(
+    () => getStatusMeta(activeClient?.visit_status),
+    [activeClient],
+  );
 
   const formatTime = (value) =>
     value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -175,7 +182,7 @@ const ClientesPage = () => {
     }
   };
 
-  const loadClientes = async () => {
+  const loadClientes = useCallback(async () => {
     setLoading(true);
     try {
       const result = await fetchClients({
@@ -204,11 +211,11 @@ const ClientesPage = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [filterBySchedule, selectedDate, showToast]);
 
   useEffect(() => {
     loadClientes();
-  }, [selectedDate, filterBySchedule]);
+  }, [filterBySchedule, loadClientes]);
 
   useEffect(() => {
     if (isManager) loadAdvisors();
@@ -225,9 +232,6 @@ const ClientesPage = () => {
     if (!Array.isArray(clientes)) return 0;
     return clientes.filter((c) => normalizeStatus(c.visit_status) !== "visitado").length;
   }, [clientes, summary]);
-
-  const plannedToday = summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0);
-  const progress = plannedToday > 0 ? Math.round((visitedCount / plannedToday) * 100) : 0;
 
   const filteredClientes = useMemo(() => {
     if (!Array.isArray(clientes)) return [];
@@ -561,77 +565,93 @@ const ClientesPage = () => {
           </div>
         </div>
 
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-center gap-2 text-sm">
-            <label className="text-gray-700">Fecha</label>
-            <input
-              type="date"
-              value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="rounded-lg border border-gray-300 px-3 py-2"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
-              <input
-                type="checkbox"
-                checked={filterBySchedule}
-                onChange={(e) => setFilterBySchedule(e.target.checked)}
-                className="rounded"
-              />
-              <span>Mostrar solo clientes planificados</span>
-            </label>
-          </div>
-        </div>
-
-        {summary?.has_approved_schedule && (
-          <Card className="p-4 bg-blue-50 border-blue-200">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="font-semibold text-blue-900 flex items-center gap-2">
-                  <FiCalendar /> Planificación de Hoy
-                </h4>
-                <p className="text-sm text-blue-700 mt-1">{(summary.cities_today || []).join(", ") || "Ciudades"}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-2xl font-bold text-blue-900">{summary.planned_today || 0}</p>
-                <p className="text-xs text-blue-600">clientes planificados</p>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-blue-700">Progreso</span>
-                <span className="font-semibold text-blue-900">
-                  {visitedCount} / {summary.planned_today || 0}
-                </span>
-              </div>
-              <div className="w-full bg-blue-200 rounded-full h-2 mt-1">
-                <div
-                  className="bg-blue-600 h-2 rounded-full transition-all"
-                  style={{ width: `${summary.planned_today ? Math.min(100, (visitedCount / summary.planned_today) * 100) : 0}%` }}
+        {isBackofficeUser ? (
+          <>
+            <BackofficeClientRequestsKpiWidget />
+            <ClientApprovalsWidget />
+          </>
+        ) : (
+          <>
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2 text-sm">
+                <label className="text-gray-700">Fecha</label>
+                <input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="rounded-lg border border-gray-300 px-3 py-2"
                 />
               </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={filterBySchedule}
+                    onChange={(e) => setFilterBySchedule(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span>Mostrar solo clientes planificados</span>
+                </label>
+              </div>
             </div>
-          </Card>
-        )}
 
-        {/* Widget de check‑in / check‑out en cabecera */}
-        <MyClientRequestsWidget
-          total={summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
-          visited={visitedCount}
-          pending={pendingCount}
-          onFilterChange={setStatusFilter}
-        />
+            {summary?.has_approved_schedule && (
+              <Card className="p-4 bg-blue-50 border-blue-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-semibold text-blue-900 flex items-center gap-2">
+                      <FiCalendar /> Planificación de Hoy
+                    </h4>
+                    <p className="text-sm text-blue-700 mt-1">
+                      {(summary.cities_today || []).join(", ") || "Ciudades"}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-blue-900">{summary.planned_today || 0}</p>
+                    <p className="text-xs text-blue-600">clientes planificados</p>
+                  </div>
+                </div>
+
+                <div className="mt-3">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-blue-700">Progreso</span>
+                    <span className="font-semibold text-blue-900">
+                      {visitedCount} / {summary.planned_today || 0}
+                    </span>
+                  </div>
+                  <div className="w-full bg-blue-200 rounded-full h-2 mt-1">
+                    <div
+                      className="bg-blue-600 h-2 rounded-full transition-all"
+                      style={{
+                        width: `${summary.planned_today
+                          ? Math.min(100, (visitedCount / summary.planned_today) * 100)
+                          : 0}%`,
+                      }}
+                    />
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            <MyClientRequestsWidget
+              total={summary?.planned_today ?? (Array.isArray(clientes) ? clientes.length : 0)}
+              visited={visitedCount}
+              pending={pendingCount}
+              onFilterChange={setStatusFilter}
+            />
+          </>
+        )}
       </header>
 
-      <Card className="p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check‑in/check‑out</h2>
-            <p className="text-sm text-gray-500">
-              Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
-            </p>
+      {!isBackofficeUser && (
+        <>
+          <Card className="p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check‑in/check‑out</h2>
+                <p className="text-sm text-gray-500">
+                  Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
+                </p>
           </div>
         </div>
 
@@ -644,14 +664,14 @@ const ClientesPage = () => {
             {loading ? "Cargando clientes..." : "No se encontraron clientes"}
           </div>
         )}
-      </Card>
+          </Card>
 
-      {/* Widget: Clientes asignados / registrados por mí */}
-      <Card className="p-5 space-y-4">
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900">
-              Mis clientes de gestión diaria
+          {/* Widget: Clientes asignados / registrados por mí */}
+          <Card className="p-5 space-y-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  Mis clientes de gestión diaria
             </h2>
             <p className="text-sm text-gray-500">
               Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
@@ -768,7 +788,9 @@ const ClientesPage = () => {
               : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
           </p>
         )}
-      </Card>
+          </Card>
+        </>
+      )}
 
       <Modal
         open={modalType === "start" || modalType === "end"}

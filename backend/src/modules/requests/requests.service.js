@@ -8,7 +8,9 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
-const { drive } = require("../../config/google");
+const { drive, docs } = require("../../config/google");
+const QRCode = require("qrcode");
+const { Readable } = require("stream");
 const {
   copyTemplate,
   replaceTags,
@@ -24,14 +26,14 @@ const { createClientFolder, moveClientFolderToApproved } = require("../../utils/
 const crypto = require("crypto");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
-const { captureSerial, cambiarEstadoUnidad } = require("../inventario/inventario.service");
+const { captureSerial, cambiarEstadoUnidad, assignUnidad, normalizeDetalleValue } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
   /\$\/$/, ""
 );
 const CONSENT_EMAIL_TOKEN_TTL_MINUTES = parseInt(
-  process.env.CONSENT_EMAIL_TOKEN_TTL_MINUTES || "15",
+  process.env.CONSENT_EMAIL_TOKEN_TTL_MINUTES || "30",
   10
 );
 const CONSENT_EMAIL_TOKEN_TTL_MS = Math.max(5, CONSENT_EMAIL_TOKEN_TTL_MINUTES || 15) * 60 * 1000;
@@ -41,12 +43,26 @@ const REQUEST_TYPE_LABELS = {
   "F.ST-22": "Registro de nuevo cliente",
 };
 
+const CLIENT_APPROVAL_TEMPLATE_ID = process.env.DOC_TEMPLATE_CLIENT_APPROVAL;
+const DEFAULT_SOLICITUD_TEMPLATE = process.env.DOC_TEMPLATE_SOLICITUD || null;
+
 const DEFAULT_REQUEST_TYPES = [
   { code: "F.ST-19", title: "Proceso de compra" },
   { code: "F.ST-20", title: "Solicitud de inspección de ambiente" },
   { code: "F.ST-21", title: "Solicitud de retiro de equipo" },
   { code: "F.ST-22", title: "Registro de nuevo cliente" },
 ];
+
+const SOLICITUD_TEMPLATE_MAP = {
+  "F.ST-19": process.env.DOC_TEMPLATE_SOLICITUD_1 || null,
+  "F.ST-20": process.env.DOC_TEMPLATE_SOLICITUD_2 || null,
+  "F.ST-21": process.env.DOC_TEMPLATE_SOLICITUD_3 || null,
+};
+
+function getSolicitudTemplateId(typeCode) {
+  const normalized = String(typeCode || "").toUpperCase();
+  return SOLICITUD_TEMPLATE_MAP[normalized] || DEFAULT_SOLICITUD_TEMPLATE;
+}
 
 // 🧩 Validación dinámica con logs extendidos
 // Nota: removeAdditional "all" elimina propiedades válidas cuando se usan
@@ -68,6 +84,7 @@ const CLIENT_FILE_LABELS = {
   legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
   operating_permit_file: "Permiso de funcionamiento (PDF)",
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
+  approval_letter: "Oficio de aprobación",
 };
 
 const parseRecipients = (value = "") =>
@@ -100,6 +117,8 @@ function getClientRequestAttachments(request = {}) {
     },
     { key: "operating_permit_file", field: "operating_permit_file_id", label: CLIENT_FILE_LABELS.operating_permit_file },
     { key: "consent_evidence_file", field: "consent_evidence_file_id", label: CLIENT_FILE_LABELS.consent_evidence_file },
+    { key: "approval_letter", field: "approval_letter_file_id", label: CLIENT_FILE_LABELS.approval_letter },
+    { key: "consent_record", field: "consent_record_file_id", label: "Registro de consentimiento" },
   ];
 
   return attachments
@@ -113,6 +132,224 @@ function getClientRequestAttachments(request = {}) {
       };
     })
     .filter(Boolean);
+}
+
+function buildConsentDeclarationText({ request, token }) {
+  const clientName = request.commercial_name || request.legal_person_business_name || "Cliente";
+  const cedula = request.ruc_cedula || "N/A";
+  const purpose = request.client_type === "persona_juridica" ? "registro administrativo y cumplimiento contractual" : "gestión administrativa del cliente";
+  const today = new Date();
+  const formattedDate = formatDate(today);
+  const formattedTime = today.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
+  const tokenId = token?.id || token?.token_id || "N/A";
+  const codeMasked = token?.code_last_four ? `****${token.code_last_four}` : "****";
+  const sealCode =
+    tokenId && request?.id
+      ? crypto
+          .createHash("sha256")
+          .update(`${tokenId}:${request.id}:${formattedDate}`)
+          .digest("hex")
+          .slice(0, 16)
+          .toUpperCase()
+      : "N/A";
+
+  return `
+DECLARACIÓN DE CONSENTIMIENTO INFORMADO PARA TRATAMIENTO DE DATOS PERSONALES
+
+Yo, ${clientName}, portador(a) de la cédula ${cedula}, declaro que he sido informado(a) de forma clara, precisa, suficiente y accesible, conforme a los artículos 11 y 12 de la LOPDP, sobre los siguientes aspectos relacionados con el tratamiento de mis datos personales por parte de FAMPROJECT CIA. LTDA.:
+
+Finalidades del tratamiento:
+Mis datos personales serán tratados exclusivamente para los fines relacionados con ${purpose}, gestión administrativa, cumplimiento de obligaciones contractuales y/o prestación de servicios solicitados.
+
+Responsable del tratamiento:
+FAMPROJECT CIA. LTDA., RUC 0591760730001.
+Delegado de Protección de Datos: Ing. Rafael Ortiz
+Correo oficial para ejercer derechos: soporte-ti@fam-project.com
+
+Datos que serán tratados:
+Los datos proporcionados voluntariamente y necesarios para los fines mencionados, tales como identificación, contacto, información contractual o técnica estrictamente vinculada al trámite o servicio requerido.
+
+Derechos del titular (ARCO-P):
+Conforme a los arts. 18 al 25 de la LOPDP, conozco que puedo ejercer mis derechos de acceso, rectificación, actualización, eliminación, oposición, portabilidad y suspensión, dirigiendo una solicitud al correo arriba indicado.
+
+Tiempo de conservación:
+Mis datos serán conservados únicamente por el tiempo necesario para cumplir la finalidad declarada y obligaciones legales aplicables.
+
+Seguridad y confidencialidad:
+Soy informado(a) de que FAMPROJECT implementa medidas de seguridad técnicas, organizativas y administrativas conforme a los arts. 31 y 32, garantizando la protección y confidencialidad de mis datos.
+
+Carácter libre del consentimiento:
+Declaro que otorgo este consentimiento de forma libre, voluntaria, específica, inequívoca e informada, sin presión ni condicionamiento alguno, y que puedo revocarlo en cualquier momento, sin efectos retroactivos, conforme lo establece la ley.
+
+Firma digital:
+Este documento se firma digitalmente mediante el token de validación ${tokenId} (código verificado ${codeMasked}) y se encuentra registrado con fecha ${formattedDate} a las ${formattedTime}.
+
+Finalmente, AUTORIZO el tratamiento de mis datos personales bajo las condiciones detalladas en este documento, en cumplimiento de la Ley Orgánica de Protección de Datos Personales del Ecuador.
+
+Firma del titular: ________________________
+Nombre: ${clientName}
+Cédula: ${cedula}
+Fecha: ${formattedDate}
+Sello oficial de validación: ${sealCode}
+Rubrica digital (token auditado): ${tokenId || "N/A"}
+`;
+}
+
+function buildConsentQrPayload({ request, token }) {
+  if (!token?.id) return null;
+  const clientName = request.commercial_name || request.legal_person_business_name || "cliente";
+  const info = {
+    token: token.id,
+    request: request.id,
+    client: clientName,
+  };
+  return JSON.stringify(info);
+}
+
+async function shareDriveFilePublic(fileId) {
+  if (!fileId) return;
+  try {
+    await drive.permissions.create({
+      fileId,
+      supportsAllDrives: true,
+      requestBody: {
+        role: "reader",
+        type: "anyone",
+      },
+    });
+  } catch (error) {
+    if (error.code && error.code === 409) {
+      return;
+    }
+    logger.warn({ err: error, fileId }, "No se pudo compartir el QR públicamente");
+  }
+}
+
+function bufferToStream(buffer) {
+  const readable = new Readable();
+  readable._read = () => {};
+  readable.push(buffer);
+  readable.push(null);
+  return readable;
+}
+
+async function generateConsentDeclarationDocument({ request, token }) {
+  if (!request?.drive_folder_id || !docs) return null;
+  const docName = `Registro consentimiento - ${request.commercial_name || "Cliente"} - ${padId(request.id)}`;
+  let created;
+  try {
+    ({ data: created } = await drive.files.create({
+      requestBody: {
+        name: docName,
+        mimeType: "application/vnd.google-apps.document",
+        parents: [request.drive_folder_id],
+      },
+      supportsAllDrives: true,
+      supportsTeamDrives: true,
+      fields: "id, webViewLink",
+    }));
+    logger.info(
+      { requestId: request.id, folderId: request.drive_folder_id, documentId: created.id },
+      "Documento de consentimiento generado"
+    );
+  } catch (error) {
+    logger.warn(
+      { err: error, requestId: request.id, folderId: request.drive_folder_id },
+      "No se pudo crear el documento de consentimiento (carpeta no encontrada o acceso denegado)"
+    );
+    return null;
+  }
+
+  const text = buildConsentDeclarationText({ request, token });
+  await docs.documents.batchUpdate({
+    documentId: created.id,
+    requestBody: {
+      requests: [
+        {
+          insertText: {
+            text,
+            location: { index: 1 },
+          },
+        },
+      ],
+    },
+  }).catch((error) => {
+    logger.error(
+      { err: error, requestId: request.id, documentId: created.id },
+      "No se pudo insertar el texto del consentimiento",
+    );
+  });
+
+  const qrPayload = buildConsentQrPayload({ request, token });
+  if (qrPayload) {
+    try {
+      const qrBuffer = await QRCode.toBuffer(qrPayload, { type: "png", width: 150 });
+      const qrFileName = `QR - ${request.commercial_name || request.legal_person_business_name || "Cliente"} - ${padId(
+        request.id,
+      )}`;
+      const qrFile = await uploadBase64File(
+        qrFileName,
+        qrBuffer.toString("base64"),
+        "image/png",
+        request.drive_folder_id,
+      );
+      await shareDriveFilePublic(qrFile.id);
+      const qrUri =
+        qrFile?.webContentLink ||
+        qrFile?.webViewLink ||
+        (qrFile?.id ? buildDriveLink(qrFile.id) : null);
+      if (qrUri) {
+        await docs.documents
+          .batchUpdate({
+            documentId: created.id,
+            requestBody: {
+              requests: [
+                {
+                  insertInlineImage: {
+                    uri: qrUri,
+                    location: { index: text.length + 1 },
+                    objectSize: {
+                      height: { magnitude: 100, unit: "PT" },
+                      width: { magnitude: 100, unit: "PT" },
+                    },
+                  },
+                },
+              ],
+            },
+          })
+          .catch((error) => {
+            logger.error(
+              { err: error, requestId: request.id, documentId: created.id },
+              "No se pudo insertar el QR de consentimiento",
+            );
+          });
+        logger.info(
+          { requestId: request.id, qrFileId: qrFile.id, qrUri },
+          "QR de consentimiento generado y almacenado",
+        );
+      }
+    } catch (error) {
+      logger.warn({ err: error, requestId: request.id }, "No se pudo generar el QR de consentimiento");
+    }
+  }
+
+  const pdf = await exportPdf(created.id, request.drive_folder_id, `${docName}.pdf`);
+  logger.info(
+    { requestId: request.id, pdfFileId: pdf?.id, folderId: request.drive_folder_id },
+    "Registro de consentimiento exportado a PDF",
+  );
+  await drive.files.delete({ fileId: created.id, supportsAllDrives: true });
+
+  await logAction({
+    user_id: null,
+    module: "client_requests",
+    action: "generate_consent_record",
+    entity: "client_requests",
+    entity_id: request.id,
+    details: { file_id: pdf?.id || null },
+  });
+
+  return pdf;
 }
 
 const FORM_VARIANT_META = {
@@ -198,7 +435,7 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
     await gmailService.sendEmail({
       userId: user.id,
       to: normalizedEmail,
-      subject: "Código de autorización para tratamiento de datos",
+      subject: "Codigo de autorizacion para tratamiento de datos",
       html,
       replyTo: user?.email
     });
@@ -207,7 +444,7 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
     // Fallback a SMTP si falla la API
     await sendMail({
       to: normalizedEmail,
-      subject: "Código de autorización para tratamiento de datos",
+      subject: "Codigo de autorizacion para tratamiento de datos",
       html,
       senderName: user?.fullname || user?.name || user?.email || "SPI",
       replyTo: user?.email || undefined,
@@ -437,34 +674,74 @@ function normalizePayload(schemaKey, payload) {
   return { normalizedPayload, schema };
 }
 
-function extractEquipmentInfo(payload = {}) {
-  const topLevelUnidad = payload.unidad_id || payload.equipo_id || null;
-  const topLevelSerial = payload.serial || null;
-  const topLevelEstado = payload.estado_equipo || payload.estado || null;
-  if (topLevelUnidad || topLevelSerial) {
-    return { unidad_id: topLevelUnidad, serial: topLevelSerial, estado: topLevelEstado };
+function getEquipmentEventLabel(typeCode) {
+  if (typeCode === "F.ST-21") return "retiro_programado";
+  if (typeCode === "F.ST-20") return "inspeccion_solicitada";
+  return "solicitud_registrada";
+}
+
+function getEquipmentDefaultState(typeCode) {
+  if (typeCode === "F.ST-20") return "en_evaluacion";
+  if (typeCode === "F.ST-21") return "proceso_retiro";
+  return null;
+}
+
+function buildEquipmentEntries(payload = {}) {
+  const sourceEntries = Array.isArray(payload.equipos) ? payload.equipos : [];
+  const normalized = sourceEntries
+    .map((item) => ({
+      unidad_id: item?.unidad_id || item?.equipo_id || null,
+      serial: item?.serial ? String(item.serial).trim() : null,
+      estado: item?.estado || item?.estado_equipo || null,
+      cantidad: Number.isFinite(Number(item?.cantidad)) ? Number(item.cantidad) : item?.cantidad ?? null,
+      serial_pendiente: item?.serial_pendiente ?? false,
+    }))
+    .filter((entry) => entry.unidad_id || entry.serial);
+
+  if (normalized.length) return normalized;
+
+  const fallback = {
+    unidad_id: payload.unidad_id || payload.equipo_id || null,
+    serial: payload.serial ? String(payload.serial).trim() : null,
+    estado: payload.estado_equipo || payload.estado || null,
+    cantidad: Number.isFinite(Number(payload.cantidad)) ? Number(payload.cantidad) : payload.cantidad ?? null,
+    serial_pendiente: payload.serial_pendiente ?? false,
+  };
+
+  if (fallback.unidad_id || fallback.serial) {
+    return [fallback];
   }
 
-  if (Array.isArray(payload.equipos)) {
-    const found = payload.equipos.find((item) => item?.unidad_id || item?.serial);
-    if (found) {
-      return {
-        unidad_id: found.unidad_id || found.equipo_id || null,
-        serial: found.serial || null,
-        estado: found.estado || topLevelEstado || null,
-      };
-    }
-  }
+  return [];
+}
 
-  return { unidad_id: null, serial: null, estado: topLevelEstado };
+function resolveClientIdFromPayload(payload = {}) {
+  const candidate =
+    payload.cliente_id ??
+    payload.client_id ??
+    payload.client_request_id ??
+    payload.clientRequestId ??
+    payload.client_request_uuid;
+  if (candidate === undefined || candidate === null || candidate === "") return null;
+  const normalized = Number(candidate);
+  return Number.isFinite(normalized) ? Math.trunc(normalized) : null;
+}
+
+function buildEquipmentDetail(entry, baseEvent) {
+  const parts = [];
+  if (entry.estado) parts.push(`estado: ${entry.estado}`);
+  if (entry.cantidad || entry.cantidad === 0) parts.push(`cantidad: ${entry.cantidad}`);
+  if (entry.serial) parts.push(`serie: ${entry.serial}`);
+  return parts.length ? `${baseEvent} (${parts.join("; ")})` : baseEvent;
 }
 
 async function logEquipmentHistory({ unidad_id, request_id, evento, detalle = null, cliente_id = null, sucursal_id = null, user_id = null }) {
   if (!unidad_id) return null;
+  const normalizedDetalle = normalizeDetalleValue(detalle);
   await db.query(
     `INSERT INTO public.equipos_historial (unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, created_by, created_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-    [unidad_id, evento, detalle, request_id, cliente_id, sucursal_id, user_id],
+    [unidad_id, evento, normalizedDetalle, request_id, cliente_id, sucursal_id, user_id],
   );
   return true;
 }
@@ -500,8 +777,18 @@ async function createRequest({
     const errors = validate.errors
       .map((e) => `${e.instancePath || e.keyword} ${e.message} `)
       .join(", ");
+    const validationDetails = {
+      request_type_id,
+      schemaKey,
+      payload: normalizedPayload,
+      originalPayload: payload,
+      errors: validate.errors,
+    };
+    logger.warn(validationDetails, "⚠️ Validación AJV fallida al crear solicitud");
     const err = new Error(`Datos de solicitud inválidos(${schemaKey}): ${errors} `);
     err.validationErrors = validate.errors;
+    err.schemaKey = schemaKey;
+    err.normalizedPayload = normalizedPayload;
     throw err;
   }
 
@@ -521,6 +808,16 @@ async function createRequest({
   }
 
   const isJefeComercial = (requesterRole || "").toLowerCase() === "jefe_comercial";
+
+  logger.info(
+    {
+      requester_id,
+      requester_email,
+      request_type: code,
+      cliente: normalizedPayload?.nombre_cliente,
+    },
+    "📄 Creando solicitud comercial"
+  );
   const insert = await db.query(
     `INSERT INTO requests(request_group_id, requester_id, request_type_id, payload, status, version_number)`
     + `VALUES($1, $2, $3, $4, 'pendiente', $5) RETURNING * `,
@@ -558,7 +855,7 @@ async function createRequest({
     });
   }
 
-  const shouldGenerateActa = isJefeComercial || code === "F.ST-20";
+  const shouldGenerateActa = isJefeComercial || ["F.ST-20", "F.ST-21"].includes(code);
 
   let doc = null;
   if (shouldGenerateActa) {
@@ -680,21 +977,33 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
 
   const uploadedFiles = [];
   for (const f of files || []) {
-    const rawBase64 = f?.buffer?.toString("base64") || f?.base64;
-    const base64 = typeof rawBase64 === "string" ? rawBase64.split(",").pop()?.trim() : "";
+    const rawBuffer = f?.buffer;
+    const existingBase64 = typeof f?.base64 === "string" ? f.base64 : null;
+    let contentBuffer = null;
 
-    if (!base64) {
+    if (rawBuffer && Buffer.isBuffer(rawBuffer)) {
+      contentBuffer = rawBuffer;
+    } else if (typeof rawBuffer === "object" && rawBuffer?.bytes && ArrayBuffer.isView(rawBuffer?.buffer)) {
+      contentBuffer = Buffer.from(rawBuffer.buffer);
+    }
+
+    if (!contentBuffer && existingBase64) {
+      contentBuffer = Buffer.from(existingBase64.split(",").pop()?.trim() || "", "base64");
+    }
+
+    if (!contentBuffer || !contentBuffer.length) {
       logger.warn(
         {
           file: f?.name || f?.originalname,
-          hasBuffer: !!f?.buffer,
-          hasBase64: !!f?.base64,
-          skippedBase64: rawBase64 === undefined,
+          hasBuffer: !!rawBuffer,
+          hasBase64: !!existingBase64,
         },
         "Ignorando archivo sin contenido para adjuntar"
       );
       continue;
     }
+
+    const base64 = contentBuffer.toString("base64");
     const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
     const { id, webViewLink } = await uploadBase64File(name, base64, mime, parentFolder);
@@ -716,6 +1025,51 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
   });
 
   return uploadedFiles;
+}
+
+async function resolveEquipmentDisplayData(equipos = []) {
+  const normalizedEquipos = Array.isArray(equipos) ? equipos.slice(0, 4) : [];
+  const unidadIds = [
+    ...new Set(
+      normalizedEquipos
+        .map((entry) => Number(entry?.unidad_id))
+        .filter((id) => Number.isFinite(id)),
+    ),
+  ];
+  const details = {};
+
+  if (unidadIds.length) {
+    const { rows } = await db.query(
+      `SELECT eu.id, eu.estado, eu.serial,
+              em.nombre AS modelo_nombre, em.modelo, em.fabricante
+         FROM public.equipos_unidad eu
+         LEFT JOIN public.equipos_modelo em ON em.id = eu.modelo_id
+        WHERE eu.id = ANY($1::int[])`,
+      [unidadIds],
+    );
+    rows.forEach((row) => {
+      details[row.id] = row;
+    });
+  }
+
+  return normalizedEquipos.map((entry) => {
+    const detail = details[Number(entry.unidad_id)] || {};
+    const rawState = String(entry.estado || detail.estado || "").toLowerCase();
+    const displayState = rawState === "cu" ? "CU" : "Nuevo";
+    const displayName =
+      entry.nombre_equipo ||
+      detail.modelo_nombre ||
+      detail.modelo ||
+      detail.nombre ||
+      entry.nombre ||
+      entry.equipo_nombre ||
+      "Equipo";
+    return {
+      ...entry,
+      displayName,
+      displayState,
+    };
+  });
 }
 
 async function generateActa(request_id, uploaded_by, options = {}) {
@@ -746,20 +1100,15 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const normalizedCode = typeCode || "ACTA";
   const pdfBaseName = `${normalizedCode} -${paddedId} `;
   const docLabel = variantMeta.label || req.type_title || "Acta";
-  const templateId =
-    typeCode === "F.ST-21"
-      ? process.env.DOC_TEMPLATE_SOLICITUD_1
-      : typeCode === "F.ST-20"
-        ? process.env.DOC_TEMPLATE_SOLICITUD_2
-        : process.env.DOC_TEMPLATE_SOLICITUD_3;
+  const templateId = getSolicitudTemplateId(typeCode);
   if (!templateId) {
     throw new Error(`No se encontró plantilla para el tipo de solicitud ${typeCode || "desconocido"}`);
   }
   const docName = `${docLabel} - ${pdfBaseName} `;
   const doc = await copyTemplate(templateId, docName, folderId);
   const payload = payloadRaw || {};
-
-  const equipos = Array.isArray(payload.equipos) ? payload.equipos.slice(0, 4) : [];
+  const resolvedEquipments = await resolveEquipmentDisplayData(payload.equipos);
+  const equipos = resolvedEquipments || [];
   const equipmentTags = {};
   for (let i = 0; i < 4; i += 1) {
     const equipo = equipos[i];
@@ -767,8 +1116,8 @@ async function generateActa(request_id, uploaded_by, options = {}) {
     const stateTag = `<<E_Equipo${i + 1}>>`;
 
     if (equipo) {
-      equipmentTags[nameTag] = asText(equipo.nombre_equipo);
-      equipmentTags[stateTag] = equipo.estado != null ? asText(equipo.estado) : equipo.cantidad != null ? asText(equipo.cantidad) : "";
+      equipmentTags[nameTag] = asText(equipo.displayName);
+      equipmentTags[stateTag] = asText(equipo.displayState);
     } else {
       equipmentTags[nameTag] = "";
       equipmentTags[stateTag] = "";
@@ -783,7 +1132,7 @@ async function generateActa(request_id, uploaded_by, options = {}) {
     PERSONA_CONTACTO: asText(payload.persona_contacto),
     CELULAR_CONTACTO: asText(payload.celular_contacto),
     FECHA_INSTALACION: asText(fechaInstalacionRaw),
-    EQUIPOS: (payload.equipos || []).map((e) => `${asText(e.nombre_equipo)} (${asText(e.estado ?? e.cantidad)})`).join(", "),
+    EQUIPOS: equipos.map((e) => `${asText(e.displayName)} (${asText(e.displayState)})`).join(", "),
     ACCESORIOS: asText(payload.accesorios),
     ANOTACIONES: asText(payload.anotaciones),
     OBSERVACIONES: asText(payload.observaciones),
@@ -826,7 +1175,61 @@ async function generateActa(request_id, uploaded_by, options = {}) {
 
   await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta", entity: "requests", entity_id: request_id });
 
+  logger.info(
+    {
+      request_id,
+      template: templateId,
+      doc_id: doc.id,
+      pdf_id: pdf?.id || null,
+    },
+    "📄 Acta generada en Drive"
+  );
+
   return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
+}
+
+async function generateClientApprovalLetter({ request, approvedBy }) {
+  if (!CLIENT_APPROVAL_TEMPLATE_ID) return null;
+  if (!request?.drive_folder_id) return null;
+
+  const paddedId = padId(request.id);
+  const clientName = request.commercial_name || request.legal_person_business_name || "Cliente";
+  const docBaseName = `Oficio de aprobación - ${clientName} - ${paddedId}`;
+
+  try {
+    const doc = await copyTemplate(CLIENT_APPROVAL_TEMPLATE_ID, docBaseName, request.drive_folder_id);
+    const approvedAt = request.approved_at ? new Date(request.approved_at) : new Date();
+    const approverName = approvedBy?.fullname || approvedBy?.name || approvedBy?.email || "Equipo de SPI";
+
+    await replaceTags(doc.id, {
+      CLIENTE: clientName,
+      RUC: request.ruc_cedula || "",
+      SOLICITUD: String(request.id),
+      FECHA: formatDate(approvedAt),
+      HORA: approvedAt.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" }),
+      APROBADOR: approverName,
+      CORREO_APROBADOR: approvedBy?.email || "",
+      ESTADO: "Aprobada",
+      FECHA_SOLICITUD: formatDate(request.created_at),
+    });
+
+    const pdf = await exportPdf(doc.id, request.drive_folder_id, `${docBaseName}.pdf`);
+    await drive.files.delete({ fileId: doc.id, supportsAllDrives: true });
+
+    await logAction({
+      user_id: approvedBy?.id || null,
+      module: "client_requests",
+      action: "generate_approval_letter",
+      entity: "client_requests",
+      entity_id: request.id,
+      details: { file_id: pdf?.id || null },
+    });
+
+    return pdf;
+  } catch (error) {
+    logger.error({ err: error }, "Error generando oficio de aprobación");
+    return null;
+  }
 }
 
 async function addDriveAttachment({ request_id, drive_file_id, title, mime_type = "application/pdf" }) {
@@ -867,7 +1270,7 @@ async function getRequestFull(id) {
   return { request, attachments, documents };
 }
 
-async function listRequests({ page = 1, pageSize = 50, status, q }) {
+async function listRequests({ page = 1, pageSize = 50, status, q, type }) {
   const offset = (page - 1) * pageSize;
   const fromAndJoins = `
     FROM requests r
@@ -877,6 +1280,19 @@ async function listRequests({ page = 1, pageSize = 50, status, q }) {
   let whereClauses = "WHERE 1=1";
   const params = [];
   let paramIndex = 1;
+
+  if (type) {
+    try {
+      const typeId = await resolveRequestTypeId(type);
+      whereClauses += ` AND r.request_type_id = $${paramIndex++}`;
+      params.push(typeId);
+    } catch (e) {
+      // Si el tipo no existe, retornamos lista vacía o ignoramos. 
+      // Retornar vacío es más correcto para un filtro fallido.
+      return { rows: [], total: 0 };
+    }
+  }
+
   if (status) {
     whereClauses += ` AND r.status = $${paramIndex++}`;
     params.push(status);
@@ -905,32 +1321,59 @@ async function listRequests({ page = 1, pageSize = 50, status, q }) {
 }
 
 async function syncEquipmentOnCreate({ requestId, typeCode, payload }) {
-  const { unidad_id, serial, estado } = extractEquipmentInfo(payload || {});
-  if (!unidad_id && !serial) return null;
+  const entries = buildEquipmentEntries(payload || {});
+  if (!entries.length) return null;
+  const clientesId = resolveClientIdFromPayload(payload);
+  const evento = getEquipmentEventLabel(typeCode);
 
-  if (serial) {
-    try {
-      await captureSerial({
-        unidad_id: unidad_id || null,
-        serial,
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (!entry.unidad_id) return null;
+
+      if (entry.serial) {
+        try {
+          await captureSerial({
+            unidad_id: entry.unidad_id,
+            serial: entry.serial,
+            request_id: requestId,
+            cliente_id: clientesId,
+            detalle: `Serial registrado desde solicitud ${typeCode || ""}`,
+            user_id: null,
+          });
+        } catch (error) {
+          logger.warn({ error, unit: entry.unidad_id }, "No se pudo guardar el serial al crear solicitud");
+        }
+      }
+
+      if (clientesId) {
+        try {
+          await assignUnidad({
+            unidad_id: entry.unidad_id,
+            cliente_id: clientesId,
+            detalle: `Asignacion por solicitud ${REQUEST_TYPE_LABELS[typeCode] || "solicitud"}`,
+            user_id: null,
+          });
+        } catch (error) {
+          logger.warn(
+            { error, unidad_id: entry.unidad_id, cliente_id: clientesId },
+            "No se pudo asignar la unidad al cliente desde la solicitud"
+          );
+        }
+      }
+
+      const detalle = buildEquipmentDetail(entry, evento);
+      await logEquipmentHistory({
+        unidad_id: entry.unidad_id,
         request_id: requestId,
-        detalle: `Serial registrado desde solicitud ${typeCode || ""}`,
+        evento,
+        detalle,
+        cliente_id: clientesId,
         user_id: null,
       });
-    } catch (error) {
-      logger.warn({ error }, "No se pudo guardar el serial al crear solicitud");
-    }
-  }
+      return true;
+    }),
+  );
 
-  const evento = typeCode === "F.ST-21" ? "retiro_programado" : typeCode === "F.ST-20" ? "inspeccion_solicitada" : "solicitud_registrada";
-  const detalle = estado ? `${evento} (${estado})` : evento;
-  await logEquipmentHistory({
-    unidad_id,
-    request_id: requestId,
-    evento,
-    detalle,
-    user_id: null,
-  });
   return true;
 }
 
@@ -951,40 +1394,51 @@ async function syncEquipmentFromRequest({ requestId, status, client = db }) {
   if (!row) return null;
 
   const payload = typeof row.payload === "string" ? JSON.parse(row.payload) : row.payload || {};
-  const { unidad_id, serial, estado: estadoPayload } = extractEquipmentInfo(payload);
-  if (!unidad_id || !serial) return null;
+  const entries = buildEquipmentEntries(payload);
+  if (!entries.length) return null;
 
-  let estado = estadoPayload || null;
-  if (!estado) {
-    if (row.type_code === "F.ST-20") estado = "en_evaluacion";
-    if (row.type_code === "F.ST-21") estado = "proceso_retiro";
-  }
+  const evento = getEquipmentEventLabel(row.type_code);
+  const estadoFinal = getEquipmentDefaultState(row.type_code);
 
-  try {
-    await captureSerial({
-      unidad_id,
-      serial,
-      request_id: requestId,
-      detalle: `Actualizado por solicitud ${row.type_code || ""} aprobada`,
-      user_id: null,
-    });
-  } catch (error) {
-    logger.warn({ error }, "No se pudo registrar serial desde la solicitud");
-  }
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (!entry.unidad_id) return null;
 
-  if (estado) {
-    try {
-      await cambiarEstadoUnidad({
-        unidad_id,
-        estado,
-        detalle: row.type_code === "F.ST-21" ? "retiro_programado" : "inspeccion_solicitada",
-        request_id: requestId,
-        user_id: null,
-      });
-    } catch (err) {
-      logger.warn({ err }, "No se pudo actualizar estado del equipo desde solicitud");
-    }
-  }
+      if (entry.serial) {
+        try {
+          await captureSerial({
+            unidad_id: entry.unidad_id,
+            serial: entry.serial,
+            request_id: requestId,
+            detalle: `Actualizado por solicitud ${row.type_code || ""} aprobada`,
+            user_id: null,
+          });
+        } catch (error) {
+          logger.warn({ error, unidad_id: entry.unidad_id }, "No se pudo registrar serial desde la solicitud aprobada");
+        }
+      }
+
+      const estado = entry.estado || estadoFinal;
+      if (!estado) return null;
+
+      try {
+        await cambiarEstadoUnidad({
+          unidad_id: entry.unidad_id,
+          estado,
+          detalle: buildEquipmentDetail(entry, evento),
+          request_id: requestId,
+          user_id: null,
+        });
+      } catch (err) {
+        logger.warn(
+          { err, unidad_id: entry.unidad_id },
+          "No se pudo actualizar estado del equipo desde solicitud",
+        );
+      }
+
+      return true;
+    }),
+  );
 
   return true;
 }
@@ -1183,6 +1637,12 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     ]),
   );
 
+  const booleanFields = ["data_processing_consent"];
+  booleanFields.forEach((field) => {
+    if (data[field] === "true") data[field] = true;
+    if (data[field] === "false") data[field] = false;
+  });
+
   const validate = ajv.getSchema('newClient');
   if (!validate(data)) {
     const error = new Error("Datos de solicitud inválidos.");
@@ -1356,6 +1816,20 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       });
     }
 
+    if (consentCaptureMethod === "email_link" && hasVerifiedToken) {
+      const consentRecord = await generateConsentDeclarationDocument({
+        request: newRequest,
+        token: verifiedConsentToken,
+      });
+      if (consentRecord?.id) {
+        await dbClient.query(
+          "UPDATE client_requests SET consent_record_file_id = $1 WHERE id = $2",
+          [consentRecord.id, newRequest.id],
+        );
+        newRequest.consent_record_file_id = consentRecord.id;
+      }
+    }
+
     const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, user.email);
     const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${newRequest.id}`;
     await sendMail({
@@ -1407,6 +1881,33 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q, createdB
   const dataQuery = `SELECT id, commercial_name, ruc_cedula, created_by, status, created_at, rejection_reason FROM client_requests ${whereClause} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
   const { rows } = await db.query(dataQuery, [...params, pageSize, offset]);
   return { count: total, rows, page, pageSize };
+}
+
+async function getClientRequestSummary({ createdBy } = {}) {
+  const params = [];
+  let whereClause = "WHERE 1=1";
+  if (createdBy) {
+    params.push(createdBy);
+    whereClause += ` AND created_by = $${params.length}`;
+  }
+
+  const query = `
+    SELECT status, COUNT(*)::int AS count
+    FROM client_requests
+    ${whereClause}
+    GROUP BY status
+  `;
+
+  const { rows } = await db.query(query, params);
+  const summary = { total: 0 };
+  rows.forEach((row) => {
+    const statusKey = (row.status || "sin_estado").toString();
+    const count = parseInt(row.count, 10) || 0;
+    summary[statusKey] = count;
+    summary.total += count;
+  });
+
+  return summary;
 }
 
 async function getClientRequestById(id, user) {
@@ -1466,15 +1967,49 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     error.status = 400;
     throw error;
   }
+  const approvalStatus = newStatus === 'approved' ? 'aprobado' : 'rechazado';
+  const approvedBy = newStatus === 'approved' ? user?.id || null : null;
+  const approvedAt = newStatus === 'approved' ? new Date() : null;
   const { rows: updatedRows } = await db.query(
-    "UPDATE client_requests SET status = $1, rejection_reason = $2, updated_at = now() WHERE id = $3 RETURNING *",
-    [newStatus, newStatus === 'rejected' ? rejection_reason : null, id]
+    `
+      UPDATE client_requests
+         SET status = $1,
+             approval_status = $2,
+             rejection_reason = $3,
+             approved_by = $4,
+             approved_at = $5,
+             updated_at = now()
+       WHERE id = $6
+       RETURNING *
+    `,
+    [
+      newStatus,
+      approvalStatus,
+      newStatus === 'rejected' ? rejection_reason : null,
+      approvedBy,
+      approvedAt,
+      id,
+    ]
   );
   const updatedRequest = updatedRows[0];
+  let approvalLetter = null;
   if (newStatus === 'approved') {
     await moveClientFolderToApproved(request.drive_folder_id);
+    approvalLetter = await generateClientApprovalLetter({
+      request: updatedRequest,
+      approvedBy: user,
+    });
+    if (approvalLetter?.id) {
+      await db.query(
+        "UPDATE client_requests SET approval_letter_file_id = $1 WHERE id = $2",
+        [approvalLetter.id, id],
+      );
+      updatedRequest.approval_letter_file_id = approvalLetter.id;
+    }
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
+  const approvalLetterLink =
+    approvalLetter?.webViewLink || (approvalLetter?.id ? buildDriveLink(approvalLetter.id) : null);
   const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, request.created_by, request.client_email);
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${request.id}`;
   await sendMail({
@@ -1486,9 +2021,10 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
       <p><strong>Estado:</strong> ${outcome}</p>
       <p><strong>Procesado por:</strong> ${user.email}</p>
       ${newStatus === 'rejected' && rejection_reason ? `<p><strong>Motivo:</strong> ${rejection_reason}</p>` : ''}
+      ${approvalLetterLink ? `<p><strong>Oficio de aprobación:</strong> <a href="${approvalLetterLink}" target="_blank" rel="noopener">${approvalLetterLink}</a></p>` : ''}
       <p>Consulta el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
     `,
-    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name} (#${request.id})\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}\nDetalle: ${detailLink}`,
+    text: `Solicitud ${outcome}\nCliente: ${request.commercial_name} (#${request.id})\nEstado: ${outcome}\nProcesado por: ${user.email}${newStatus === 'rejected' && rejection_reason ? `\nMotivo: ${rejection_reason}` : ''}${approvalLetterLink ? `\nOficio de aprobación: ${approvalLetterLink}` : ''}\nDetalle: ${detailLink}`,
     gmailUserId: user?.id || null,
     replyTo: user?.email || undefined,
     from: user?.email || undefined,
@@ -1707,11 +2243,13 @@ module.exports = {
   addDriveAttachment,
   getRequestFull,
   generateActa,
+  generateClientApprovalLetter,
   updateRequestStatus,
   cancelRequest,
   resubmit,
   createClientRequest,
   listClientRequests,
+  getClientRequestSummary,
   getClientRequestById,
   processClientRequest,
   grantConsent,

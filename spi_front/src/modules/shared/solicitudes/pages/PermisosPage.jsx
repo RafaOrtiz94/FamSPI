@@ -1,10 +1,17 @@
-import React from "react";
-import { useAuth } from "../../../../core/auth/AuthContext";
+import React, { useState } from "react";
 import PermisosStatusWidget from "../components/PermisosStatusWidget";
-import { FiCalendar, FiClock, FiCheckCircle } from "react-icons/fi";
+import { FiCalendar, FiClock } from "react-icons/fi";
+import Card from "../../../../core/ui/components/Card";
+import Button from "../../../../core/ui/components/Button";
+import PermisoVacacionModal from "../modals/PermisoVacacionModal";
 
 const PermisosPage = () => {
-    const { user } = useAuth();
+    const [openModal, setOpenModal] = useState(false);
+    const [submitted, setSubmitted] = useState(false);
+
+    const handleSuccess = () => {
+        setSubmitted(true);
+    };
 
     return (
         <div className="p-6 max-w-7xl mx-auto space-y-6">
@@ -20,16 +27,37 @@ const PermisosPage = () => {
                 </div>
             </div>
 
+            <Card className="border border-gray-200 shadow-sm">
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
+                            <FiCalendar size={20} />
+                        </div>
+                        <div>
+                            <p className="text-lg font-semibold text-gray-900">
+                                Solicita un permiso o vacaciones
+                            </p>
+                            <p className="text-sm text-gray-500">
+                                Abre el flujo guiado y completa tu solicitud en unos pasos.
+                            </p>
+                        </div>
+                    </div>
+                    <Button
+                        variant="primary"
+                        onClick={() => setOpenModal(true)}
+                        className="ml-auto"
+                    >
+                        {submitted ? "Crear otra solicitud" : "Nueva solicitud"}
+                    </Button>
+                </div>
+            </Card>
+
             {/* Widgets */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                {/* Columna Principal: Status Widget (ocupa 2 columnas en pantallas grandes) */}
                 <div className="lg:col-span-2 space-y-6">
                     <PermisosStatusWidget />
                 </div>
-
-                {/* Columna Lateral: Información / Resumen (Opcional, por ahora placeholder o widgets futuros) */}
                 <div className="space-y-6">
-                    {/* Aquí podríamos poner un resumen de días de vacaciones disponibles, etc. */}
                     <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
                         <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
                             <FiCalendar className="w-5 h-5 text-blue-500" />
@@ -60,6 +88,12 @@ const PermisosPage = () => {
                     </div>
                 </div>
             </div>
+
+            <PermisoVacacionModal
+                open={openModal}
+                onClose={() => setOpenModal(false)}
+                onSuccess={handleSuccess}
+            />
         </div>
     );
 };

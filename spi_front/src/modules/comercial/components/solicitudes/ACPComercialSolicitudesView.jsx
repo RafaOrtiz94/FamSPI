@@ -1,18 +1,25 @@
 import React, { useState } from "react";
-import { FiClipboard, FiCreditCard, FiUserPlus } from "react-icons/fi";
+import { FiClipboard, FiCreditCard, FiUserPlus, FiUsers } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
+import { createRequest, getClientRequests } from "../../../../core/api/requestsApi";
 import CreateRequestModal from "../CreateRequestModal";
 import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
-import EquipmentPurchaseWidget from "../EquipmentPurchaseWidget";
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
+import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
+import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
 
 const ACPComercialSolicitudesView = () => {
-    const { showToast } = useUI();
+const { showToast, showLoader, hideLoader } = useUI();
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
+
+    // View Modal State
+    const [viewType, setViewType] = useState(null);
+    const [viewTitle, setViewTitle] = useState("");
+    const [viewCustomFetcher, setViewCustomFetcher] = useState(null);
 
     const openRequestModal = (type) => {
         setPresetRequestType(type);
@@ -20,20 +27,58 @@ const ACPComercialSolicitudesView = () => {
     };
 
     const handleCreate = async (data) => {
+        showLoader();
         try {
-            setModalOpen(false);
+            await createRequest(data);
             showToast("Solicitud creada exitosamente", "success");
-            // Aquí podrías recargar el widget de mis solicitudes si fuera necesario
-            // pero el widget se recarga solo al montar o cambiar usuario
+            setModalOpen(false);
         } catch (error) {
             console.error("Error creando solicitud:", error);
             showToast("Error al crear la solicitud", "error");
+        } finally {
+            hideLoader();
         }
     };
 
     const handlePurchaseHandoffOpen = () => {
         setShowPurchaseHandoff(true);
     };
+
+    const handleViewList = (type, title, fetcher = null) => {
+        setViewType(type);
+        setViewTitle(title);
+        setViewCustomFetcher(() => fetcher);
+    };
+
+    const statWidgets = [
+        {
+            id: 'clientes',
+            title: 'Solicitudes de Clientes',
+            icon: FiUserPlus,
+            color: 'emerald',
+            type: 'client_request',
+            fetcher: async (params) => {
+                const res = await getClientRequests(params);
+                return res;
+            }
+        },
+        {
+            id: 'compras',
+            title: 'Mis Requerimientos',
+            icon: FiCreditCard,
+            color: 'indigo',
+            type: 'compra',
+            initialFilters: { mine: true }
+        },
+        {
+            id: 'vacaciones',
+            title: 'Mis Permisos',
+            icon: FiUsers,
+            color: 'orange',
+            type: 'vacaciones',
+            initialFilters: { mine: true }
+        }
+    ];
 
     return (
         <div className="space-y-8">
@@ -78,10 +123,28 @@ const ACPComercialSolicitudesView = () => {
                 </div>
             </section>
 
-            {/* WIDGET DE SEGUIMIENTO DE COMPRAS */}
-            <div id="purchase-tracker">
-                <EquipmentPurchaseWidget showCreation={false} compactList />
-            </div>
+            {/* RESUMEN DE SOLICITUDES (NUEVO) */}
+            <section>
+                <div className="mb-4">
+                    <h2 className="text-lg font-semibold text-gray-900">
+                        Historial de Solicitudes
+                    </h2>
+                    <p className="text-sm text-gray-600">
+                        Consulta el estado de tus gestiones
+                    </p>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {statWidgets.map(widget => (
+                        <RequestStatWidget
+                            key={widget.id}
+                            title={widget.title}
+                            icon={widget.icon}
+                            color={widget.color}
+                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
+                        />
+                    ))}
+                </div>
+            </section>
 
             {/* PURCHASE HANDOFF MODAL */}
             <PurchaseHandoffWidget
@@ -94,6 +157,15 @@ const ACPComercialSolicitudesView = () => {
             <PermisoVacacionModal
                 open={showPermisoModal}
                 onClose={() => setShowPermisoModal(false)}
+            />
+
+            {/* MODAL LISTADO DE SOLICITUDES */}
+            <RequestsListModal
+                open={!!viewType}
+                onClose={() => setViewType(null)}
+                type={viewType}
+                title={viewTitle}
+                customFetcher={viewCustomFetcher}
             />
 
             {/* MODALES */}
