@@ -118,8 +118,8 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
       <div className="flex items-center gap-2">
         <FiTrendingUp className="text-blue-600" />
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Resumen de cálculos</h2>
-          <p className="text-sm text-gray-500">Consulta métricas clave y gráficos resumidos.</p>
+          <h2 className="text-lg font-semibold text-gray-900">Resumen de Rentabilidad</h2>
+          <p className="text-sm text-gray-500">Consulta métricas de ROI, margen y período de recuperación.</p>
         </div>
         <div className="ml-auto flex gap-2">
           <button
@@ -145,15 +145,85 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
         <p className="text-sm text-gray-500">Calculando...</p>
       ) : (
         <>
+          {/* Métricas de Rentabilidad */}
+          <div className="p-4 rounded-lg border-2 border-green-200 bg-green-50">
+            <h3 className="text-sm font-semibold text-green-900 mb-3">Métricas de Rentabilidad</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white p-3 rounded-lg">
+                <p className="text-xs uppercase text-gray-500">ROI</p>
+                <p className="text-2xl font-bold text-green-600">
+                  {totals.roi_percentage ? `${totals.roi_percentage.toFixed(1)}%` : "-"}
+                </p>
+              </div>
+              <div className="bg-white p-3 rounded-lg">
+                <p className="text-xs uppercase text-gray-500">Payback</p>
+                <p className="text-2xl font-bold text-blue-600">
+                  {totals.payback_months ? `${totals.payback_months} meses` : "-"}
+                </p>
+              </div>
+              <div className="bg-white p-3 rounded-lg">
+                <p className="text-xs uppercase text-gray-500">Margen Mensual</p>
+                <p className="text-2xl font-bold text-purple-600">
+                  {totals.monthly_margin ? `$${totals.monthly_margin.toFixed(2)}` : "-"}
+                </p>
+              </div>
+              <div className="bg-white p-3 rounded-lg">
+                <p className="text-xs uppercase text-gray-500">Margen Anual</p>
+                <p className="text-2xl font-bold text-purple-600">
+                  {totals.annual_margin ? `$${totals.annual_margin.toFixed(2)}` : "-"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Inversión y Costos */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="p-4 rounded-lg border border-gray-200 bg-white">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Inversión</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Equipo:</span>
+                  <span className="text-sm font-semibold">
+                    ${totals.equipment_investment?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Inversión Total:</span>
+                  <span className="text-sm font-semibold">
+                    ${totals.total_investment?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <div className="p-4 rounded-lg border border-gray-200 bg-white">
+              <h3 className="text-sm font-semibold text-gray-900 mb-3">Ingresos Proyectados</h3>
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Mensual:</span>
+                  <span className="text-sm font-semibold">
+                    ${totals.monthly_revenue?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Anual:</span>
+                  <span className="text-sm font-semibold">
+                    ${totals.annual_revenue?.toFixed(2) || "0.00"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Métricas Operativas */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <SummaryCard label="Costo mensual" value={`$${totals.monthlyCost ?? "-"}`} />
-            <SummaryCard label="Costo anual" value={`$${totals.annualCost ?? "-"}`} />
-            <SummaryCard label="Consumo" value={totals.totalConsumption ?? "-"} />
-            <SummaryCard label="Pruebas" value={totals.totalTests ?? "-"} />
+            <SummaryCard label="Pruebas Anuales" value={totals.total_annual_tests || "-"} />
+            <SummaryCard label="Costo Anual" value={`$${totals.total_annual_cost?.toFixed(2) || "-"}`} />
+            <SummaryCard label="Costo Mensual" value={`$${totals.total_monthly_cost?.toFixed(2) || "-"}`} />
+            <SummaryCard label="Costo por Prueba" value={`$${totals.cost_per_test?.toFixed(2) || "-"}`} />
           </div>
 
           <div className="p-4 rounded-lg border border-gray-200 bg-white shadow-sm">
-            <Gauge utilization={totals.utilization || 0} />
+            <Gauge utilization={totals.equipment_utilization_percentage || 0} />
             <p className="text-xs text-gray-500 mt-2">Gauge basado en capacidad del equipo seleccionado.</p>
           </div>
 

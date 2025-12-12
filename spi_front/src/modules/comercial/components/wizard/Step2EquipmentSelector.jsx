@@ -46,6 +46,7 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
   const [items, setItems] = useState([]);
   const [filters, setFilters] = useState({ search: "", category: "" });
   const [loading, setLoading] = useState(false);
+  const [equipmentCost, setEquipmentCost] = useState(state.equipmentCost || 0);
 
   const normalizeItem = (item) => {
     const id =
@@ -121,11 +122,17 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
         return;
       }
 
-      await api.post(`/business-case/${state.businessCaseId}/equipment`, {
-        equipmentId,
-        isPrimary: true,
+      // Update bc_economic_data with equipment info
+      await api.put(`/business-case/${state.businessCaseId}/economic-data`, {
+        equipment_id: equipmentId,
+        equipment_name: item.name,
+        equipment_cost: equipmentCost || 0
       });
-      updateState({ selectedEquipment: item });
+
+      updateState({
+        selectedEquipment: item,
+        equipmentCost: equipmentCost
+      });
       showToast("Equipo seleccionado", "success");
       if (onNext) onNext();
     } catch (err) {
@@ -189,7 +196,31 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
       )}
 
       {state.selectedEquipment && (
-        <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm">Equipo seleccionado: {state.selectedEquipment.name}</div>
+        <div className="space-y-3">
+          <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm">
+            Equipo seleccionado: {state.selectedEquipment.name}
+          </div>
+
+          <div className="p-4 rounded-lg border-2 border-blue-200 bg-blue-50">
+            <label className="flex flex-col gap-2">
+              <span className="text-sm font-semibold text-blue-900">
+                Costo del Equipo (para cálculo de ROI)
+              </span>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={equipmentCost}
+                onChange={(e) => setEquipmentCost(parseFloat(e.target.value) || 0)}
+                className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                placeholder="Ej: 50000.00"
+              />
+              <p className="text-xs text-blue-700">
+                Este costo se usará para calcular el ROI y período de recuperación del comodato
+              </p>
+            </label>
+          </div>
+        </div>
       )}
 
       <div className="flex justify-between pt-2">

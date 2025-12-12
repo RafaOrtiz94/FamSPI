@@ -63,9 +63,10 @@ const STATUS_STYLES = {
 const ClientesPage = () => {
   const { showToast } = useUI();
   const { role, user } = useAuth();
-  const isManager = roleIsManager(role);
-  const roleName = (role || "").toLowerCase();
-  const isBackofficeUser = roleName.includes("backoffice");
+  const normalizedRole =
+    (role || user?.role || user?.role_name || user?.scope || "").toLowerCase();
+  const isManager = roleIsManager(normalizedRole);
+  const isBackofficeUser = normalizedRole.includes("backoffice");
   const currentEmail = user?.email?.toLowerCase?.() || "";
 
   const [clientes, setClientes] = useState([]);

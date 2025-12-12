@@ -13,13 +13,19 @@ const STORAGE_KEY = "business_case_wizard_draft";
 
 const defaultState = {
   businessCaseId: null,
+  bcType: 'comodato_publico', // 'comodato_publico' | 'comodato_privado'
+  calculationMode: 'annual', // Ambos usan cálculo anual
   generalData: {
     client: "",
     businessType: "",
     notes: "",
     date: new Date().toISOString().slice(0, 10),
+    // Campos para comodatos (ambos tipos)
+    durationYears: 3,
+    targetMargin: 25,
   },
   selectedEquipment: null,
+  equipmentCost: 0, // Requerido para cálculo de ROI
   determinations: [],
   calculations: null,
   investments: [],
@@ -85,13 +91,12 @@ const Stepper = ({ currentStep }) => (
       return (
         <div key={step.id} className="flex items-center gap-2">
           <div
-            className={`h-10 w-10 flex items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${
-              completed
-                ? "bg-green-500 text-white border-green-500"
-                : active
+            className={`h-10 w-10 flex items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${completed
+              ? "bg-green-500 text-white border-green-500"
+              : active
                 ? "bg-blue-600 text-white border-blue-600"
                 : "border-gray-300 text-gray-500"
-            }`}
+              }`}
           >
             {idx + 1}
           </div>

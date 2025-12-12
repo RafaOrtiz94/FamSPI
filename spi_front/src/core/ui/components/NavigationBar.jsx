@@ -13,6 +13,7 @@ import {
   FiCpu,
   FiCheckCircle,
   FiCalendar,
+  FiLayers,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -83,6 +84,12 @@ const acpLinks = [
     path: "/dashboard/comercial/acp-compras",
   },
 ];
+
+const privatePurchasesLink = {
+  name: "Compras Privadas",
+  icon: FiLayers,
+  path: "/dashboard/backoffice/private-purchases",
+};
 
 const businessCaseLink = {
   name: "Business Case",
@@ -161,6 +168,19 @@ const buildLinks = (scope, role) => {
   // Comercial links
   if (comercialScopes.includes(scope)) {
     links.push(...comercialLinks);
+  }
+
+  const privatePurchaseScopes = new Set([
+    "comercial",
+    "jefe_comercial",
+    "acp_comercial",
+    "backoffice",
+    "backoffice_comercial",
+    "gerencia",
+    "gerencia_general",
+  ]);
+  if (privatePurchaseScopes.has(scope) || role.includes("backoffice")) {
+    links.push(privatePurchasesLink);
   }
 
   if (planificacionRoles.has(role)) {

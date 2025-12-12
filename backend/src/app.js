@@ -185,6 +185,7 @@ const permisosRoutes = require("./modules/permisos/permisos.routes");
 const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
 const clientsRoutes = require("./modules/clients/clients.routes");
 const schedulesRoutes = require("./modules/schedules/schedules.routes");
+const privatePurchasesRoutes = require("./modules/private-purchases/privatePurchases.routes");
 const {
   businessCaseRoutes,
   equipmentCatalogRoutes,
@@ -254,6 +255,7 @@ app.use("/api/v1/inventario", inventarioRoutes);
 app.use("/api/v1/attendance", attendanceRoutes);
 app.use("/api/v1/gmail", gmailRoutes);
 app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
+app.use("/api/v1/private-purchases", privatePurchasesRoutes);
 app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
 app.use("/api/v1/permisos", permisosRoutes);
 app.use("/api/v1/vacaciones", vacacionesRoutes);

@@ -48,8 +48,16 @@ async function createBusinessCase(data, user) {
   const {
     client_name,
     client_id,
+    bc_purchase_type = 'comodato_publico', // Default: comodato público
+    bc_duration_years = 3,
+    bc_equipment_cost = null,
+    bc_target_margin_percentage = 25,
+    bc_amortization_months = null,
+    bc_calculation_mode = 'annual', // Ambos tipos usan cálculo anual
+    bc_show_roi = true,
+    bc_show_margin = true,
     status = "draft",
-    bc_stage = "pending_comercial",
+    bc_stage = null,
     bc_progress = {},
     assigned_to_email = null,
     assigned_to_name = null,
@@ -57,10 +65,22 @@ async function createBusinessCase(data, user) {
     modern_bc_metadata = {},
   } = data;
 
+  // Auto-determine bc_stage based on comodato type if not provided
+  const defaultStage = bc_purchase_type === 'comodato_publico' ? 'pending_comercial' : 'pending_backoffice';
+  const finalStage = bc_stage || defaultStage;
+
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
       client_name,
       client_id,
+      bc_purchase_type,
+      bc_duration_years,
+      bc_equipment_cost,
+      bc_target_margin_percentage,
+      bc_amortization_months,
+      bc_calculation_mode,
+      bc_show_roi,
+      bc_show_margin,
       status,
       bc_stage,
       bc_progress,
@@ -74,15 +94,23 @@ async function createBusinessCase(data, user) {
       bc_system_type,
       request_type
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), true, 'modern', 'business_case'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), true, 'modern', 'business_case'
     ) RETURNING id;
   `;
 
   const { rows } = await db.query(insertQuery, [
     client_name,
     client_id,
+    bc_purchase_type,
+    bc_duration_years,
+    bc_equipment_cost,
+    bc_target_margin_percentage,
+    bc_amortization_months,
+    bc_calculation_mode,
+    bc_show_roi,
+    bc_show_margin,
     status,
-    bc_stage,
+    finalStage,
     JSON.stringify(bc_progress || {}),
     assigned_to_email,
     assigned_to_name,
@@ -194,6 +222,14 @@ async function updateBusinessCase(id, data) {
   const allowedFields = [
     "client_name",
     "client_id",
+    "bc_purchase_type",
+    "bc_duration_years",
+    "bc_equipment_cost",
+    "bc_target_margin_percentage",
+    "bc_amortization_months",
+    "bc_calculation_mode",
+    "bc_show_roi",
+    "bc_show_margin",
     "status",
     "bc_stage",
     "bc_progress",
@@ -248,6 +284,24 @@ async function recalculateBusinessCase(businessCaseId) {
   return businessCaseCalculator.calculateBusinessCase(businessCaseId);
 }
 
+// Helper functions for BC type detection
+function getBusinessCaseType(businessCase) {
+  return businessCase.bc_purchase_type || 'comodato_publico';
+}
+
+function isPublicComodato(businessCase) {
+  return getBusinessCaseType(businessCase) === 'comodato_publico';
+}
+
+function isPrivateComodato(businessCase) {
+  return getBusinessCaseType(businessCase) === 'comodato_privado';
+}
+
+function isComodato(businessCase) {
+  // Ambos son comodatos
+  return true;
+}
+
 module.exports = {
   createBusinessCase,
   getBusinessCaseById,
@@ -257,4 +311,8 @@ module.exports = {
   getCalculations,
   recalculateBusinessCase,
   assertModernBusinessCase,
+  getBusinessCaseType,
+  isPublicComodato,
+  isPrivateComodato,
+  isComodato,
 };

@@ -11,12 +11,18 @@ const Step1GeneralData = ({ onNext }) => {
   const [loadingClients, setLoadingClients] = useState(false);
   const { showToast, showLoader, hideLoader } = useUI();
 
-  const defaultValues = useMemo(() => state.generalData, [state.generalData]);
+  const defaultValues = useMemo(() => ({
+    ...state.generalData,
+    bcType: state.bcType,
+  }), [state.generalData, state.bcType]);
   const {
     register,
     handleSubmit,
+    watch,
     formState: { errors },
   } = useForm({ defaultValues });
+
+  const watchBcType = watch('bcType');
 
   useEffect(() => {
     const fetchClients = async () => {
@@ -27,12 +33,12 @@ const Step1GeneralData = ({ onNext }) => {
         const parsedClients = Array.isArray(payload?.items)
           ? payload.items
           : Array.isArray(payload?.clients)
-          ? payload.clients
-          : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload)
-          ? payload
-          : [];
+            ? payload.clients
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : Array.isArray(payload)
+                ? payload
+                : [];
         setClients(parsedClients);
       } catch (err) {
         console.warn("No se pudieron cargar clientes", err.message);
@@ -65,10 +71,16 @@ const Step1GeneralData = ({ onNext }) => {
     const client_id = selected?.id && Number.isFinite(Number(selected.id)) ? Number(selected.id) : undefined;
 
     const payload = {
-      client_name,
       client_id,
-      status: "draft",
-      bc_stage: "pending_comercial",
+      client_name,
+      bc_type: formData.bcType || 'comodato_publico',
+      duration_years: parseInt(formData.durationYears) || 3,
+      target_margin_percentage: parseFloat(formData.targetMargin) || 25,
+      process_code: formData.processCode || null,
+      contract_object: formData.contractObject || null,
+      equipment_id: null,
+      equipment_cost: 0,
+      created_by: 'system',
       modern_bc_metadata: {
         businessType: formData.businessType,
         notes: formData.notes,
@@ -78,18 +90,22 @@ const Step1GeneralData = ({ onNext }) => {
 
     showLoader();
     try {
-      const res = await api.post("/business-case", payload);
+      const res = await api.post("/business-case/orchestrator/create-economic", payload);
       const bcId =
+        res.data?.data?.id ||
         res.data?.id ||
         res.data?.businessCaseId ||
-        res.data?.data?.id ||
         res.data?.data?.businessCaseId ||
         res.data?.data?.business_case_id;
       if (!bcId) {
         throw new Error("No se recibió el identificador del Business Case");
       }
 
-      updateState({ generalData: formData, businessCaseId: bcId });
+      updateState({
+        generalData: formData,
+        businessCaseId: bcId,
+        bcType: formData.bcType || 'comodato_publico'
+      });
       showToast("Datos guardados correctamente", "success");
       if (onNext) onNext();
     } catch (err) {
@@ -144,7 +160,20 @@ const Step1GeneralData = ({ onNext }) => {
         </label>
 
         <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-gray-700">Tipo de Business Case</span>
+          <span className="text-sm font-medium text-gray-700">Tipo de Comodato</span>
+          <select
+            className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            {...register("bcType", { required: "Selecciona un tipo" })}
+          >
+            <option value="">Selecciona...</option>
+            <option value="comodato_publico">Comodato Público (Licitación)</option>
+            <option value="comodato_privado">Comodato Privado</option>
+          </select>
+          {errors.bcType && <p className="text-xs text-red-500">{errors.bcType.message}</p>}
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">Tipo de Negocio</span>
           <select
             className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
             {...register("businessType", { required: "Selecciona un tipo" })}
@@ -155,6 +184,40 @@ const Step1GeneralData = ({ onNext }) => {
             <option value="ampliacion">Ampliación</option>
           </select>
           {errors.businessType && <p className="text-xs text-red-500">{errors.businessType.message}</p>}
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">Duración del Comodato (años)</span>
+          <input
+            type="number"
+            min="1"
+            max="10"
+            className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            {...register("durationYears", {
+              required: "Especifica la duración",
+              min: { value: 1, message: "Mínimo 1 año" },
+              max: { value: 10, message: "Máximo 10 años" }
+            })}
+          />
+          {errors.durationYears && <p className="text-xs text-red-500">{errors.durationYears.message}</p>}
+        </label>
+
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-gray-700">Margen Objetivo (%)</span>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            {...register("targetMargin", {
+              required: "Especifica el margen objetivo",
+              min: { value: 0, message: "Mínimo 0%" },
+              max: { value: 100, message: "Máximo 100%" }
+            })}
+          />
+          <p className="text-xs text-gray-500">Margen de utilidad esperado para el comodato</p>
+          {errors.targetMargin && <p className="text-xs text-red-500">{errors.targetMargin.message}</p>}
         </label>
 
         <label className="flex flex-col gap-1">

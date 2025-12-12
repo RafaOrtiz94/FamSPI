@@ -42,6 +42,7 @@ import DashboardOperaciones from "../modules/operaciones/Dashboard";
 import DashboardCalidad from "../modules/calidad/Dashboard";
 import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
+import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
 
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
@@ -177,9 +178,22 @@ const AppRoutes = () => {
           <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
           {/* Subrutas Backoffice */}
-          <Route element={<ProtectedRoute allowedRoles={["backoffice_comercial", "gerencia"]} />}>
+          <Route
+            element={(
+              <ProtectedRoute
+                allowedRoles={[
+                  "backoffice_comercial",
+                  "gerencia",
+                  "comercial",
+                  "jefe_comercial",
+                  "acp_comercial",
+                ]}
+              />
+            )}
+          >
             <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
             <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
+            <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
           </Route>
         </Route>
 

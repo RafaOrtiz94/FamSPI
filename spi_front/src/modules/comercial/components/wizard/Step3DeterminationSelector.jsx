@@ -61,7 +61,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     try {
       await api.post(`/business-case/${bcId}/determinations`, {
         detId: determinationId,
-        monthlyQty: qty,
+        annualQty: qty, // Cambio a cantidad anual
       });
       const refreshed = await api.get(`/business-case/${bcId}/determinations`);
       updateState({ determinations: refreshed.data?.data || [] });
@@ -84,7 +84,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     const totalCost = (state.determinations || []).reduce((acc, det) => acc + (Number(det.cost) || 0), 0);
     return {
       totalCost,
-      totalQty: (state.determinations || []).reduce((acc, det) => acc + (Number(det.monthly_qty || det.monthlyQty) || 0), 0),
+      totalQty: (state.determinations || []).reduce((acc, det) => acc + (Number(det.annual_qty || det.annualQty) || 0), 0),
     };
   }, [state.determinations]);
 
@@ -94,7 +94,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
         <FiActivity className="text-blue-600" />
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Determinaciones</h2>
-          <p className="text-sm text-gray-500">Actualiza cantidades mensuales. Se recalcula automáticamente.</p>
+          <p className="text-sm text-gray-500">Actualiza cantidades anuales. Se recalcula automáticamente.</p>
         </div>
       </div>
 
@@ -107,7 +107,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
               <tr className="text-left text-gray-500 border-b">
                 <th className="py-2">Nombre</th>
                 <th className="py-2">Categoría</th>
-                <th className="py-2">Cantidad mensual</th>
+                <th className="py-2">Cantidad anual</th>
                 <th className="py-2">Consumo</th>
                 <th className="py-2">Costo</th>
               </tr>
@@ -123,9 +123,10 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
                       <input
                         type="number"
                         min={0}
-                        defaultValue={saved?.monthly_qty || saved?.monthlyQty || 0}
+                        defaultValue={saved?.annual_qty || saved?.annualQty || 0}
                         onChange={(e) => handleQtyChange(det.id, e.target.value)}
                         className="w-24 border rounded-lg px-2 py-1"
+                        placeholder="Ej: 6000"
                       />
                     </td>
                     <td className="py-2 text-gray-700">{saved?.consumption ?? "-"}</td>
