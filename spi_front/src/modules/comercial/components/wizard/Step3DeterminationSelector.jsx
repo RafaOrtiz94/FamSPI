@@ -166,9 +166,45 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
         >
           Regresar
         </button>
-        <button type="button" onClick={onNext} className="px-4 py-2 rounded-lg bg-blue-600 text-white">
-          Continuar
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!bcId) {
+                showToast("No hay Business Case para calcular", "warning");
+                return;
+              }
+              try {
+                // 1. Calculate ROI
+                const roiRes = await api.post(`/business-case/${bcId}/orchestrator/calculate-roi`);
+                updateState({ calculations: roiRes.data.data });
+
+                // 2. Evaluate approval
+                const approvalRes = await api.post(`/business-case/${bcId}/orchestrator/evaluate-approval`);
+
+                if (approvalRes.data.data.approved) {
+                  showToast(
+                    `BC aprobado económicamente (ROI: ${approvalRes.data.data.roi}%)`,
+                    'success'
+                  );
+                } else {
+                  showToast(
+                    `ROI insuficiente (${approvalRes.data.data.roi}% < ${approvalRes.data.data.target}%)`,
+                    'warning'
+                  );
+                }
+
+                // Advance to next step
+                if (onNext) onNext();
+              } catch (error) {
+                showToast('Error calculando BC: ' + error.message, 'error');
+              }
+            }}
+            className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700"
+          >
+            Calcular y Continuar
+          </button>
+        </div>
       </div>
     </div>
   );

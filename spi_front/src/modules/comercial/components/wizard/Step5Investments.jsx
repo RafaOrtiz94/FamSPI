@@ -43,6 +43,14 @@ const Step5Investments = ({ onPrev, onNext }) => {
     showLoader();
     try {
       await api.post(`/business-case/${state.businessCaseId}/investments`, newInvestment);
+
+      // Recalculate ROI with new investment
+      await api.post(`/business-case/${state.businessCaseId}/orchestrator/calculate-roi`);
+
+      // Reload calculations
+      const res = await api.get(`/business-case/${state.businessCaseId}/orchestrator/complete`);
+      const bc = res.data.data;
+
       setNewInvestment({
         concept: "",
         amount: 0,
@@ -51,7 +59,7 @@ const Step5Investments = ({ onPrev, onNext }) => {
         notes: ""
       });
       await loadInvestments();
-      showToast("Inversión registrada", "success");
+      showToast(`Inversión agregada y BC recalculado (ROI: ${bc.calculated_roi_percentage?.toFixed(1)}%)`, "success");
     } catch (err) {
       showToast(err.response?.data?.message || "No se pudo agregar la inversión", "error");
     } finally {

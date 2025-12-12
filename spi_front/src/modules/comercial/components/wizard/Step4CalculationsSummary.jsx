@@ -43,8 +43,32 @@ const Step4CalculationsSummary = ({ onPrev, onNext }) => {
     if (!state.businessCaseId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/business-case/${state.businessCaseId}/calculations`);
-      updateState({ calculations: res.data });
+      const res = await api.get(`/business-case/${state.businessCaseId}/orchestrator/complete`);
+      const bc = res.data.data;
+
+      // Map bc_master fields to calculations
+      updateState({
+        calculations: {
+          roi_percentage: bc.calculated_roi_percentage,
+          payback_months: bc.calculated_payback_months,
+          monthly_margin: bc.calculated_monthly_margin,
+          annual_margin: bc.calculated_annual_margin,
+          monthly_revenue: bc.calculated_monthly_revenue,
+          annual_revenue: bc.calculated_annual_revenue,
+          monthly_cost: bc.calculated_monthly_cost,
+          annual_cost: bc.calculated_annual_cost,
+          total_investment: bc.total_investment,
+          equipment_investment: bc.equipment_investment,
+          total_annual_tests: bc.economicData?.total_annual_tests,
+          total_annual_cost: bc.economicData?.total_annual_cost,
+          total_monthly_cost: bc.economicData?.total_monthly_cost,
+          cost_per_test: bc.economicData?.cost_per_test,
+          equipment_utilization_percentage: bc.operationalData?.equipment_utilization_percentage,
+          topDeterminations: bc.determinations?.slice(0, 5) || [],
+          categoryDistribution: bc.categoryDistribution || [],
+          warnings: bc.validations?.filter(v => v.severity === 'warning').map(v => v.message) || []
+        }
+      });
     } catch (err) {
       showToast("No se pudieron cargar los cálculos", "error");
     } finally {

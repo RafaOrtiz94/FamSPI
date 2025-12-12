@@ -26,6 +26,9 @@ import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import ACPEquipmentPurchasesPage from "../modules/comercial/pages/ACPEquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
+import UnifiedBCView from "../modules/comercial/pages/UnifiedBCView";
+import BusinessCaseWizard from "../modules/comercial/pages/BusinessCaseWizard";
+import ManualBCForm from "../modules/comercial/pages/ManualBCForm";
 import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
 import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
@@ -145,6 +148,9 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
             <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
+            <Route path="/dashboard/business-case/:id/view" element={<UnifiedBCView />} />
+            <Route path="/dashboard/business-case/wizard" element={<BusinessCaseWizard />} />
+            <Route path="/dashboard/business-case/:id/manual-form" element={<ManualBCForm />} />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />

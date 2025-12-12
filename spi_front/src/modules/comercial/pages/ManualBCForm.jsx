@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { FiSave, FiCheckCircle } from 'react-icons/fi';
 import api from '../../../core/api';
 import { useUI } from '../../../core/ui/UIContext';
@@ -11,6 +11,7 @@ import Section5Requirements from '../components/manual-bc/Section5Requirements';
 import Section6Deliveries from '../components/manual-bc/Section6Deliveries';
 
 const ManualBCForm = () => {
+    const { id: bcId } = useParams();
     const navigate = useNavigate();
     const { showToast, showLoader, hideLoader } = useUI();
 
@@ -74,8 +75,80 @@ const ManualBCForm = () => {
         }
     });
 
-    const [businessCaseId, setBusinessCaseId] = useState(null);
+    const [businessCaseId, setBusinessCaseId] = useState(bcId || null);
     const [currentSection, setCurrentSection] = useState(1);
+
+    // Load existing BC data
+    useEffect(() => {
+        const loadExistingBC = async () => {
+            if (bcId) {
+                try {
+                    const res = await api.get(`/business-case/${bcId}/orchestrator/complete`);
+                    const bc = res.data.data;
+
+                    // Pre-fill form with existing data
+                    setFormData({
+                        clientId: bc.client_id,
+                        clientName: bc.client_name,
+                        bcType: bc.bc_type,
+                        processCode: bc.process_code || '',
+                        contractObject: bc.contract_object || '',
+
+                        labEnvironment: {
+                            work_days_per_week: bc.operationalData?.work_days_per_week || 5,
+                            shifts_per_day: bc.operationalData?.shifts_per_day || 1,
+                            hours_per_shift: bc.operationalData?.hours_per_shift || 8,
+                            quality_controls_per_shift: bc.operationalData?.quality_controls_per_shift || 0,
+                            control_levels: bc.operationalData?.control_levels || 0,
+                            routine_qc_frequency: bc.operationalData?.routine_qc_frequency || '',
+                            special_tests: bc.operationalData?.special_tests || '',
+                            special_qc_frequency: bc.operationalData?.special_qc_frequency || ''
+                        },
+
+                        equipmentDetails: {
+                            equipmentId: bc.economicData?.equipment_id,
+                            equipment_status: bc.operationalData?.equipment_status || 'new',
+                            ownership_status: bc.operationalData?.ownership_status || 'owned',
+                            reservation_image_url: bc.operationalData?.reservation_image_url || '',
+                            backup_equipment_name: bc.operationalData?.backup_equipment_name || '',
+                            backup_status: bc.operationalData?.backup_status || '',
+                            backup_manufacture_year: bc.operationalData?.backup_manufacture_year || null,
+                            install_with_primary: bc.operationalData?.install_with_primary || false,
+                            installation_location: bc.operationalData?.installation_location || '',
+                            allows_provisional: bc.operationalData?.allows_provisional || false,
+                            requires_complementary: bc.operationalData?.requires_complementary || false,
+                            complementary_test_purpose: bc.operationalData?.complementary_test_purpose || ''
+                        },
+
+                        lisIntegration: {
+                            includes_lis: bc.lisData?.includes_lis || false,
+                            lis_provider: bc.lisData?.lis_provider || 'orion',
+                            includes_hardware: bc.lisData?.includes_hardware || false,
+                            monthly_patients: bc.lisData?.monthly_patients || 0,
+                            current_system_name: bc.lisData?.current_system_name || '',
+                            current_system_provider: bc.lisData?.current_system_provider || '',
+                            current_system_hardware: bc.lisData?.current_system_hardware || false,
+                            equipmentInterfaces: bc.lisData?.equipmentInterfaces || []
+                        },
+
+                        requirements: {
+                            deadline_months: bc.operationalData?.deadline_months || 12,
+                            projected_deadline_months: bc.operationalData?.projected_deadline_months || 12
+                        },
+
+                        deliveries: {
+                            delivery_type: bc.operationalData?.delivery_type || 'total',
+                            effective_determination: bc.operationalData?.effective_determination || false
+                        }
+                    });
+                } catch (error) {
+                    showToast('Error cargando BC: ' + error.message, 'error');
+                }
+            }
+        };
+
+        loadExistingBC();
+    }, [bcId]);
 
     const updateFormData = (section, data) => {
         setFormData(prev => ({
@@ -85,50 +158,69 @@ const ManualBCForm = () => {
     };
 
     const handleSaveComplete = async () => {
+        if (!bcId) {
+            showToast('No hay Business Case para guardar', 'error');
+            return;
+        }
+
         showLoader();
         try {
-            // 1. Create BC base
-            const bcPayload = {
-                client_name: formData.clientName || 'Cliente',
-                client_id: formData.clientId,
-                bc_purchase_type: formData.bcType,
-                process_code: formData.processCode,
-                contract_object: formData.contractObject,
-                bc_duration_years: 3,
-                bc_target_margin_percentage: 25,
-                bc_calculation_mode: 'annual',
-                bc_show_roi: true,
-                bc_show_margin: true,
-                status: 'draft'
-            };
+            // 1. Guardar datos operativos
+            await api.post(`/business-case/${bcId}/orchestrator/attach-operational`, {
+                work_days_per_week: formData.labEnvironment.work_days_per_week,
+                shifts_per_day: formData.labEnvironment.shifts_per_day,
+                hours_per_shift: formData.labEnvironment.hours_per_shift,
+                quality_controls_per_shift: formData.labEnvironment.quality_controls_per_shift,
+                control_levels: formData.labEnvironment.control_levels,
+                routine_qc_frequency: formData.labEnvironment.routine_qc_frequency,
+                special_tests: formData.labEnvironment.special_tests,
+                special_qc_frequency: formData.labEnvironment.special_qc_frequency,
+                equipment_status: formData.equipmentDetails.equipment_status,
+                ownership_status: formData.equipmentDetails.ownership_status,
+                reservation_image_url: formData.equipmentDetails.reservation_image_url,
+                backup_equipment_name: formData.equipmentDetails.backup_equipment_name,
+                backup_status: formData.equipmentDetails.backup_status,
+                backup_manufacture_year: formData.equipmentDetails.backup_manufacture_year,
+                install_with_primary: formData.equipmentDetails.install_with_primary,
+                installation_location: formData.equipmentDetails.installation_location,
+                allows_provisional: formData.equipmentDetails.allows_provisional,
+                requires_complementary: formData.equipmentDetails.requires_complementary,
+                complementary_test_purpose: formData.equipmentDetails.complementary_test_purpose,
+                deadline_months: formData.requirements.deadline_months,
+                projected_deadline_months: formData.requirements.projected_deadline_months,
+                delivery_type: formData.deliveries.delivery_type,
+                effective_determination: formData.deliveries.effective_determination
+            });
 
-            const bcRes = await api.post('/business-case', bcPayload);
-            const bcId = bcRes.data?.id || bcRes.data?.data?.id;
-
-            if (!bcId) {
-                throw new Error('No se recibió el ID del Business Case');
+            // 2. Guardar datos LIS (si aplica)
+            if (formData.lisIntegration.includes_lis) {
+                await api.post(`/business-case/${bcId}/orchestrator/attach-lis`, {
+                    includes_lis: true,
+                    lis_provider: formData.lisIntegration.lis_provider,
+                    includes_hardware: formData.lisIntegration.includes_hardware,
+                    monthly_patients: formData.lisIntegration.monthly_patients,
+                    current_system_name: formData.lisIntegration.current_system_name,
+                    current_system_provider: formData.lisIntegration.current_system_provider,
+                    current_system_hardware: formData.lisIntegration.current_system_hardware,
+                    equipment_interfaces: formData.lisIntegration.equipmentInterfaces
+                });
             }
 
-            setBusinessCaseId(bcId);
+            // 3. Recalcular con datos operativos reales
+            const recalcRes = await api.post(`/business-case/${bcId}/orchestrator/recalculate`);
+            const { newROI, validations } = recalcRes.data.data;
 
-            // 2. Save all sections
-            await Promise.all([
-                api.post(`/business-case/${bcId}/lab-environment`, formData.labEnvironment),
-                api.post(`/business-case/${bcId}/equipment-details`, formData.equipmentDetails),
-                api.post(`/business-case/${bcId}/lis-integration`, formData.lisIntegration),
-                api.post(`/business-case/${bcId}/requirements`, formData.requirements),
-                api.post(`/business-case/${bcId}/deliveries`, formData.deliveries)
-            ]);
-
-            // 3. Save LIS equipment interfaces if any
-            if (formData.lisIntegration.equipmentInterfaces.length > 0) {
-                for (const iface of formData.lisIntegration.equipmentInterfaces) {
-                    await api.post(`/business-case/${bcId}/lis-integration/equipment-interfaces`, iface);
-                }
+            // 4. Mostrar resultados
+            if (validations?.hasErrors) {
+                showToast('BC guardado pero tiene errores - requiere revisión técnica', 'error');
+            } else if (validations?.hasWarnings) {
+                showToast('BC guardado con advertencias - enviado a gerencia para aprobación', 'warning');
+            } else {
+                showToast('BC guardado y validado correctamente - enviado a gerencia', 'success');
             }
 
-            showToast('Business Case creado exitosamente', 'success');
-            navigate('/comercial/business-cases');
+            // 5. Redirigir a vista unificada
+            navigate(`/dashboard/business-case/${bcId}/view`);
         } catch (error) {
             console.error('Error saving BC:', error);
             showToast(error.response?.data?.message || 'Error al guardar el Business Case', 'error');
@@ -166,8 +258,8 @@ const ManualBCForm = () => {
                         >
                             <div
                                 className={`w-10 h-10 rounded-full flex items-center justify-center border-2 mb-2 ${currentSection === section.id
-                                        ? 'bg-blue-600 text-white border-blue-600'
-                                        : 'bg-white border-gray-300'
+                                    ? 'bg-blue-600 text-white border-blue-600'
+                                    : 'bg-white border-gray-300'
                                     }`}
                             >
                                 {section.id}
