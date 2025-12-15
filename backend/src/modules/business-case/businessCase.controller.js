@@ -44,8 +44,9 @@ const equipmentSchema = Joi.object({
 
 const determinationSchema = Joi.object({
   determinationId: Joi.number().integer().required(),
-  monthlyQty: Joi.number().integer().positive().required(),
-});
+  monthlyQty: Joi.number().integer().positive(),
+  annualQty: Joi.number().integer().positive(),
+}).or("monthlyQty", "annualQty");
 
 async function list(req, res) {
   try {
@@ -130,7 +131,7 @@ async function addDetermination(req, res) {
     const determination = await determinationsService.addDetermination(
       req.params.id,
       value.determinationId,
-      value.monthlyQty,
+      { monthlyQty: value.monthlyQty, annualQty: value.annualQty },
       req.user,
     );
     res.status(201).json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
@@ -142,13 +143,16 @@ async function addDetermination(req, res) {
 
 async function updateDetermination(req, res) {
   try {
-    const { error, value } = Joi.object({ monthlyQty: Joi.number().integer().positive().required() }).validate(req.body);
+  const { error, value } = Joi.object({
+    monthlyQty: Joi.number().integer().positive(),
+    annualQty: Joi.number().integer().positive(),
+  }).or("monthlyQty", "annualQty").validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
     const determination = await determinationsService.updateDeterminationQuantity(
       req.params.id,
       req.params.detId,
-      value.monthlyQty,
+      { monthlyQty: value.monthlyQty, annualQty: value.annualQty },
     );
     res.json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
   } catch (err) {
@@ -225,6 +229,27 @@ async function exportExcel(req, res) {
     res
       .status(err.status || 500)
       .json({ ok: false, message: err.message || "No se pudo generar el Excel del Business Case" });
+  }
+}
+
+async function updateEconomicData(req, res) {
+  try {
+    const schema = Joi.object({
+      equipment_id: Joi.number().integer().required(),
+      equipment_name: Joi.string().trim().required(),
+      equipment_cost: Joi.number().min(0).required(),
+    });
+
+    const { error, value } = schema.validate(req.body);
+    if (error) {
+      return res.status(400).json({ ok: false, message: error.message });
+    }
+
+    const bc = await businessCaseService.updateEconomicData(req.params.id, value);
+    res.json({ ok: true, data: bc });
+  } catch (err) {
+    logger.error(err);
+    res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando datos económicos" });
   }
 }
 
@@ -643,6 +668,7 @@ module.exports = {
   recalculate,
   exportPdf,
   exportExcel,
+  updateEconomicData,
   addInvestment,
   getInvestments,
   updateInvestment,

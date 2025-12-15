@@ -46,6 +46,7 @@ import DashboardCalidad from "../modules/calidad/Dashboard";
 import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
 import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
+import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
 
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
@@ -166,6 +167,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
+          <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
 
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />

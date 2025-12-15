@@ -40,7 +40,9 @@ const FinalStep = ({ onPrev }) => {
 
       <div className="border border-gray-200 rounded-lg p-4 bg-white">
         <p className="text-sm text-gray-700">ID de Business Case: {state.businessCaseId || "Sin generar"}</p>
-        <p className="text-sm text-gray-700">Equipo seleccionado: {state.selectedEquipment?.name || "Sin equipo"}</p>
+        <p className="text-sm text-gray-700">
+          Equipo seleccionado: {state.equipmentConfig?.primary?.name || "Sin equipo"}
+        </p>
         <p className="text-sm text-gray-700">Determinaciones: {state.determinations?.length || 0}</p>
       </div>
 

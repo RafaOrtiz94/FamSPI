@@ -66,6 +66,28 @@ class BusinessCaseOrchestrator {
             // 3. Registrar en workflow history
             await this._addWorkflowHistory(client, bc.id, null, 'draft', data.created_by, 'BC creado');
 
+            // 1.5 Registrar Business Case moderno en equipment_purchase_requests
+            await client.query(`
+        INSERT INTO equipment_purchase_requests (
+          id, client_name, client_id, status, bc_stage, bc_progress,
+          extra, modern_bc_metadata, assigned_to_email, assigned_to_name,
+          request_type, uses_modern_system, bc_system_type, created_at, updated_at,
+          bc_purchase_type, bc_calculation_mode
+        ) VALUES (
+          $1, $2, $3, 'draft', 'pending_comercial', '{}'::jsonb,
+          '{}'::jsonb, '{}'::jsonb, NULL, NULL,
+          'business_case', true, 'modern', NOW(), NOW(),
+          $4, $5
+        )
+        ON CONFLICT (id) DO NOTHING
+      `, [
+                bc.id,
+                bc.client_name,
+                bc.client_id,
+                this._mapToPurchaseType(bc.bc_type),
+                data.calculation_mode || 'annual'
+            ]);
+
             await client.query('COMMIT');
 
             logger.info({ bcId: bc.id }, 'BC económico creado');
@@ -647,6 +669,15 @@ class BusinessCaseOrchestrator {
     async getInvestments(bcId) {
         const { rows } = await db.query('SELECT * FROM bc_investments WHERE bc_master_id = $1', [bcId]);
         return rows;
+    }
+
+    _mapToPurchaseType(bcType) {
+        const map = {
+            comodato_publico: 'public',
+            comodato_privado: 'private_comodato',
+            venta_privada: 'private_sale',
+        };
+        return map[bcType] || 'public';
     }
 }
 

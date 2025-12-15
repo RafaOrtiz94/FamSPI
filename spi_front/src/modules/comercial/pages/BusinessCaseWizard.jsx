@@ -7,25 +7,51 @@ import Step4CalculationsSummary from "../components/wizard/Step4CalculationsSumm
 import Step5Investments from "../components/wizard/Step5Investments";
 import FinalStep from "../components/wizard/FinalStep";
 import { useUI } from "../../../core/ui/UIContext";
+import Step4RentabilitySummary from "../components/wizard/Step4RentabilitySummary";
 
 const WizardContext = createContext();
 const STORAGE_KEY = "business_case_wizard_draft";
 
-const defaultState = {
+  const defaultState = {
   businessCaseId: null,
-  bcType: 'comodato_publico', // 'comodato_publico' | 'comodato_privado'
-  calculationMode: 'annual', // Ambos usan cálculo anual
+  bcType: 'comodato_publico',
+  calculationMode: 'annual',
   generalData: {
     client: "",
-    businessType: "",
+    clientType: "",
+    contractingEntity: "",
+    processCode: "",
+    contractObject: "",
+    provinceCity: "",
     notes: "",
-    date: new Date().toISOString().slice(0, 10),
-    // Campos para comodatos (ambos tipos)
     durationYears: 3,
     targetMargin: 25,
+    labWorkDaysPerWeek: "",
+    labShiftsPerDay: "",
+    labHoursPerShift: "",
+    labQualityControlsPerShift: "",
+    labControlLevels: "",
+    labRoutineQCFrequency: "",
+    labSpecialTests: "",
+    labSpecialQCFrequency: "",
+    lisIncludes: false,
+    lisProvider: "",
+    lisIncludesHardware: false,
+    lisMonthlyPatients: "",
+    lisInterfaceSystem: "",
+    lisInterfaceProvider: "",
+    lisInterfaceHardware: "",
+    requirementsDeadlineMonths: "",
+    requirementsProjectedDeadlineMonths: "",
+    deliveryType: "total",
+    effectiveDetermination: false,
   },
-  selectedEquipment: null,
-  equipmentCost: 0, // Requerido para cálculo de ROI
+  lisInterfaces: [],
+  equipmentConfig: {
+    primary: null,
+    backup: null,
+    secondary: [],
+  },
   determinations: [],
   calculations: null,
   investments: [],
@@ -33,14 +59,29 @@ const defaultState = {
 
 export const useBusinessCaseWizard = () => useContext(WizardContext);
 
-const steps = [
-  { id: "general", title: "Datos Generales" },
-  { id: "equipment", title: "Equipo" },
-  { id: "determinations", title: "Determinaciones" },
-  { id: "calculations", title: "Resumen" },
-  { id: "investments", title: "Inversiones" },
-  { id: "final", title: "Finalizar" },
-];
+const getStepsForType = (type) => {
+  const base = [
+    { id: "general", title: "Datos Generales" },
+    { id: "equipment", title: "Equipo" },
+    { id: "determinations", title: "Determinaciones" },
+  ];
+
+  if (type === "public" || type === "comodato_publico") {
+    return [
+      ...base,
+      { id: "calculations", title: "Resumen técnico" },
+      { id: "investments", title: "Inversiones" },
+      { id: "final", title: "Finalizar" },
+    ];
+  }
+
+  return [
+    ...base,
+    { id: "rentability", title: "Rentabilidad y ROI" },
+    { id: "investments", title: "Inversiones" },
+    { id: "final", title: "Finalizar" },
+  ];
+};
 
 const WizardProvider = ({ children }) => {
   const [state, setState] = useState(() => {
@@ -75,15 +116,15 @@ const WizardProvider = ({ children }) => {
     setState((prev) => ({ ...prev, ...updater }));
   }, []);
 
-  const value = useMemo(
-    () => ({ state, updateState, currentStep, setCurrentStep, steps, clearDraft }),
-    [state, currentStep, clearDraft]
-  );
+const value = useMemo(
+  () => ({ state, updateState, currentStep, setCurrentStep, clearDraft }),
+  [state, currentStep, clearDraft, updateState]
+);
 
   return <WizardContext.Provider value={value}>{children}</WizardContext.Provider>;
 };
 
-const Stepper = ({ currentStep }) => (
+const Stepper = ({ currentStep, steps }) => (
   <div className="flex items-center gap-4 overflow-x-auto pb-2">
     {steps.map((step, idx) => {
       const active = idx === currentStep;
@@ -140,12 +181,20 @@ const Navigation = ({ onPrev, onNext, disablePrev, disableNext, nextLabel = "Sig
 
 const BusinessCaseWizard = () => {
   const { currentStep, setCurrentStep, state, clearDraft } = useBusinessCaseWizard();
-  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
+  const stepsForType = useMemo(() => getStepsForType(state.bcType), [state.bcType]);
+  const progress = Math.round(((currentStep + 1) / stepsForType.length) * 100);
   const goPrev = () => setCurrentStep((prev) => Math.max(0, prev - 1));
-  const goNext = () => setCurrentStep((prev) => Math.min(steps.length - 1, prev + 1));
+  const goNext = () => setCurrentStep((prev) => Math.min(stepsForType.length - 1, prev + 1));
+
+  useEffect(() => {
+    if (currentStep >= stepsForType.length) {
+      setCurrentStep(stepsForType.length - 1);
+    }
+  }, [stepsForType, currentStep, setCurrentStep]);
 
   const renderStep = () => {
-    switch (steps[currentStep].id) {
+    const stepId = stepsForType[currentStep]?.id;
+    switch (stepId) {
       case "general":
         return <Step1GeneralData onNext={goNext} />;
       case "equipment":
@@ -154,6 +203,8 @@ const BusinessCaseWizard = () => {
         return <Step3DeterminationSelector onPrev={goPrev} onNext={goNext} />;
       case "calculations":
         return <Step4CalculationsSummary onPrev={goPrev} onNext={goNext} />;
+      case "rentability":
+        return <Step4RentabilitySummary onPrev={goPrev} onNext={goNext} />;
       case "investments":
         return <Step5Investments onPrev={goPrev} onNext={goNext} />;
       case "final":
@@ -188,7 +239,7 @@ const BusinessCaseWizard = () => {
       </div>
 
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 space-y-4 shadow-sm">
-        <Stepper currentStep={currentStep} />
+        <Stepper currentStep={currentStep} steps={stepsForType} />
         <ProgressBar value={progress} />
         <div className="border border-dashed border-gray-200 dark:border-gray-800 rounded-xl p-4 bg-gray-50 dark:bg-gray-800/40">
           {renderStep()}
@@ -197,8 +248,8 @@ const BusinessCaseWizard = () => {
           onPrev={goPrev}
           onNext={goNext}
           disablePrev={currentStep === 0}
-          disableNext={currentStep === steps.length - 1}
-          nextLabel={currentStep === steps.length - 1 ? "" : "Siguiente"}
+          disableNext={currentStep === stepsForType.length - 1}
+          nextLabel={currentStep === stepsForType.length - 1 ? "" : "Siguiente"}
         />
       </div>
 

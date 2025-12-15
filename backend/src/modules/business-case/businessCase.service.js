@@ -48,14 +48,14 @@ async function createBusinessCase(data, user) {
   const {
     client_name,
     client_id,
-    bc_purchase_type = 'comodato_publico', // Default: comodato público
-    bc_duration_years = 3,
+    bc_purchase_type = 'public',
+    bc_duration_years = null,
     bc_equipment_cost = null,
-    bc_target_margin_percentage = 25,
+    bc_target_margin_percentage = null,
     bc_amortization_months = null,
-    bc_calculation_mode = 'annual', // Ambos tipos usan cálculo anual
-    bc_show_roi = true,
-    bc_show_margin = true,
+    bc_calculation_mode = 'monthly',
+    bc_show_roi = false,
+    bc_show_margin = false,
     status = "draft",
     bc_stage = null,
     bc_progress = {},
@@ -284,6 +284,54 @@ async function recalculateBusinessCase(businessCaseId) {
   return businessCaseCalculator.calculateBusinessCase(businessCaseId);
 }
 
+async function updateEconomicData(id, data) {
+  const { equipment_id, equipment_name, equipment_cost } = data;
+  const payload = {
+    equipment_id,
+    equipment_name,
+    equipment_cost,
+    updated_at: new Date().toISOString(),
+  };
+
+  let bcRow;
+  try {
+    bcRow = await assertModernBusinessCase(id);
+  } catch (error) {
+    if (error.status === 404) {
+      bcRow = await insertEquipmentPurchaseRequestFromBcMaster(id);
+    } else {
+      throw error;
+    }
+  }
+
+  const query = `
+    UPDATE equipment_purchase_requests
+    SET extra = jsonb_set(
+          COALESCE(extra, '{}'::jsonb),
+          '{economic_data}',
+          $1::jsonb,
+          true
+        ),
+        updated_at = now()
+    WHERE id = $2
+    RETURNING *
+  `;
+
+  const { rows } = await db.query(query, [JSON.stringify(payload), id]);
+
+  if (!rows.length) {
+    const error = new Error("Business Case no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const updatedRow = rows[0];
+  const calculationMode = updatedRow.bc_calculation_mode || bcRow?.bc_calculation_mode || "monthly";
+  await upsertBCEconomicData(id, { equipment_id, equipment_name, equipment_cost }, calculationMode);
+
+  return mapBusinessCase(rows[0]);
+}
+
 // Helper functions for BC type detection
 function getBusinessCaseType(businessCase) {
   return businessCase.bc_purchase_type || 'comodato_publico';
@@ -302,6 +350,95 @@ function isComodato(businessCase) {
   return true;
 }
 
+async function insertEquipmentPurchaseRequestFromBcMaster(id) {
+  const { rows } = await db.query(
+    "SELECT client_name, client_id, bc_type FROM bc_master WHERE id = $1",
+    [id],
+  );
+
+  if (!rows.length) {
+    const error = new Error("Business Case no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const bc = rows[0];
+  const bcPurchaseType = mapBcMasterTypeToPurchaseType(bc.bc_type);
+  const bcCalculationMode = mapBcMasterTypeToCalculationMode(bc.bc_type);
+  const insertQuery = `
+    INSERT INTO equipment_purchase_requests (
+      id, client_name, client_id,
+      status, bc_stage, bc_progress,
+      extra, modern_bc_metadata,
+      request_type, uses_modern_system, bc_system_type,
+      created_at, updated_at,
+      bc_purchase_type, bc_calculation_mode,
+      bc_created_at, created_by
+    ) VALUES (
+      $1, $2, $3,
+      'draft', 'pending_comercial', '{}'::jsonb,
+      '{}'::jsonb, '{}'::jsonb,
+      'business_case', true, 'modern',
+      NOW(), NOW(),
+      $4, $5,
+      NOW(), NULL
+    )
+    RETURNING *;
+  `;
+
+  const { rows: inserted } = await db.query(insertQuery, [
+    id,
+    bc.client_name || "Cliente",
+    bc.client_id,
+    bcPurchaseType,
+    bcCalculationMode,
+  ]);
+
+  logger.info({ bcId: id }, "Registro moderno de Business Case creado en equipment_purchase_requests");
+  return inserted[0];
+}
+
+function mapBcMasterTypeToPurchaseType(bcType) {
+  const mapping = {
+    comodato_publico: "public",
+    comodato_privado: "private_comodato",
+    venta_privada: "private_sale",
+  };
+  return mapping[bcType] || "public";
+}
+
+function mapBcMasterTypeToCalculationMode(bcType) {
+  if (bcType === "comodato_publico") return "monthly";
+  return "annual";
+}
+
+async function upsertBCEconomicData(bcId, { equipment_id, equipment_name, equipment_cost }, calculationMode) {
+  const updateResult = await db.query(
+    `
+      UPDATE bc_economic_data
+      SET equipment_id = $1,
+          equipment_name = $2,
+          equipment_cost = $3,
+          calculation_mode = $4,
+          updated_at = now()
+      WHERE bc_master_id = $5
+    `,
+    [equipment_id, equipment_name, equipment_cost, calculationMode, bcId],
+  );
+
+  if (updateResult.rowCount === 0) {
+    await db.query(
+      `
+        INSERT INTO bc_economic_data (
+          bc_master_id, equipment_id, equipment_name, equipment_cost,
+          calculation_mode, show_roi, show_margin, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, true, true, now(), now())
+      `,
+      [bcId, equipment_id, equipment_name, equipment_cost, calculationMode],
+    );
+  }
+}
+
 module.exports = {
   createBusinessCase,
   getBusinessCaseById,
@@ -310,6 +447,7 @@ module.exports = {
   deleteBusinessCase,
   getCalculations,
   recalculateBusinessCase,
+  updateEconomicData,
   assertModernBusinessCase,
   getBusinessCaseType,
   isPublicComodato,

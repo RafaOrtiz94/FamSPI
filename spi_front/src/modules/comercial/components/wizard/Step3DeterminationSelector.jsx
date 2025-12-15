@@ -13,7 +13,7 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
   const debounceRefs = useRef({});
 
   const bcId = state.businessCaseId;
-  const equipmentId = state.selectedEquipment?.id;
+  const equipmentId = state.equipmentConfig?.primary?.equipment_id;
 
   const loadOptions = async () => {
     if (!equipmentId) return;
@@ -59,10 +59,11 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     }
     setSaving(true);
     try {
-      await api.post(`/business-case/${bcId}/determinations`, {
-        detId: determinationId,
-        annualQty: qty, // Cambio a cantidad anual
-      });
+      const payload =
+        state.calculationMode === "annual"
+          ? { detId: determinationId, annualQty: qty }
+          : { detId: determinationId, monthlyQty: qty };
+      await api.post(`/business-case/${bcId}/determinations`, payload);
       const refreshed = await api.get(`/business-case/${bcId}/determinations`);
       updateState({ determinations: refreshed.data?.data || [] });
     } catch (err) {
@@ -80,13 +81,21 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
     }, 500);
   };
 
+  const mode = state.calculationMode === "monthly" ? "monthly" : "annual";
+  const quantityField = mode === "annual" ? "annual_quantity" : "monthly_quantity";
+
   const subtotal = useMemo(() => {
     const totalCost = (state.determinations || []).reduce((acc, det) => acc + (Number(det.cost) || 0), 0);
+    const totalQty = (state.determinations || []).reduce(
+      (acc, det) =>
+        acc + (Number(det[quantityField] || det[quantityField.replace("_", "")]) || 0),
+      0,
+    );
     return {
       totalCost,
-      totalQty: (state.determinations || []).reduce((acc, det) => acc + (Number(det.annual_qty || det.annualQty) || 0), 0),
+      totalQty,
     };
-  }, [state.determinations]);
+  }, [state.determinations, quantityField]);
 
   return (
     <div className="space-y-4">
@@ -94,7 +103,9 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
         <FiActivity className="text-blue-600" />
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Determinaciones</h2>
-          <p className="text-sm text-gray-500">Actualiza cantidades anuales. Se recalcula automáticamente.</p>
+          <p className="text-sm text-gray-500">
+            Actualiza cantidades por {mode === "annual" ? "año" : "mes"}. Se recalcula automáticamente.
+          </p>
         </div>
       </div>
 
@@ -104,13 +115,13 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
         <div className="overflow-x-auto">
           <table className="min-w-full text-sm">
             <thead>
-              <tr className="text-left text-gray-500 border-b">
-                <th className="py-2">Nombre</th>
-                <th className="py-2">Categoría</th>
-                <th className="py-2">Cantidad anual</th>
-                <th className="py-2">Consumo</th>
-                <th className="py-2">Costo</th>
-              </tr>
+                <tr className="text-left text-gray-500 border-b">
+                  <th className="py-2">Nombre</th>
+                  <th className="py-2">Categoría</th>
+                  <th className="py-2">{mode === "annual" ? "Cantidad anual" : "Cantidad mensual"}</th>
+                  <th className="py-2">Consumo</th>
+                  <th className="py-2">Costo</th>
+                </tr>
             </thead>
             <tbody>
               {options.map((det) => {
@@ -123,10 +134,14 @@ const Step3DeterminationSelector = ({ onPrev, onNext }) => {
                       <input
                         type="number"
                         min={0}
-                        defaultValue={saved?.annual_qty || saved?.annualQty || 0}
+                        defaultValue={
+                          mode === "annual"
+                            ? saved?.annual_quantity || saved?.annualQty || 0
+                            : saved?.monthly_quantity || saved?.monthlyQty || 0
+                        }
                         onChange={(e) => handleQtyChange(det.id, e.target.value)}
                         className="w-24 border rounded-lg px-2 py-1"
-                        placeholder="Ej: 6000"
+                        placeholder={mode === "annual" ? "Ej: 6000" : "Ej: 500"}
                       />
                     </td>
                     <td className="py-2 text-gray-700">{saved?.consumption ?? "-"}</td>

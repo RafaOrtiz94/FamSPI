@@ -11,7 +11,15 @@ async function getPrimaryEquipmentId(businessCaseId) {
   return rows[0]?.equipment_id || null;
 }
 
-async function addDetermination(businessCaseId, determinationId, monthlyQty, user) {
+function normalizeQuantities(monthlyQty, annualQty) {
+  const parsedMonthly = Number.isFinite(Number(monthlyQty)) ? Number(monthlyQty) : null;
+  const parsedAnnual = Number.isFinite(Number(annualQty)) ? Number(annualQty) : null;
+  const monthly = parsedMonthly ?? (parsedAnnual ? Math.ceil(parsedAnnual / 12) : 0);
+  const annual = parsedAnnual ?? (parsedMonthly ? parsedMonthly * 12 : 0);
+  return { monthly, annual };
+}
+
+async function addDetermination(businessCaseId, determinationId, { monthlyQty, annualQty }, user) {
   await assertModernBusinessCase(businessCaseId);
   const equipmentId = await getPrimaryEquipmentId(businessCaseId);
 
@@ -21,24 +29,27 @@ async function addDetermination(businessCaseId, determinationId, monthlyQty, use
     throw error;
   }
 
+  const { monthly, annual } = normalizeQuantities(monthlyQty, annualQty);
+
   const consumption = await businessCaseCalculator.calculateDeterminationConsumption({
     determinationId,
     equipmentId,
-    monthlyQuantity: monthlyQty,
+    monthlyQuantity: monthly,
   });
 
   const cost = await businessCaseCalculator.calculateDeterminationCost({
     determinationId,
     equipmentId,
-    monthlyQuantity: monthlyQty,
+    monthlyQuantity: monthly,
   });
 
   const insertQuery = `
     INSERT INTO bc_determinations (
-      business_case_id, determination_id, monthly_quantity, calculated_consumption, calculated_cost, calculation_details, added_by
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      business_case_id, determination_id, monthly_quantity, annual_quantity, calculated_consumption, calculated_cost, calculation_details, added_by
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
     ON CONFLICT (business_case_id, determination_id) DO UPDATE
     SET monthly_quantity = EXCLUDED.monthly_quantity,
+        annual_quantity = EXCLUDED.annual_quantity,
         calculated_consumption = EXCLUDED.calculated_consumption,
         calculated_cost = EXCLUDED.calculated_cost,
         calculation_details = EXCLUDED.calculation_details,
@@ -49,7 +60,8 @@ async function addDetermination(businessCaseId, determinationId, monthlyQty, use
   const { rows } = await db.query(insertQuery, [
     businessCaseId,
     determinationId,
-    monthlyQty,
+    monthly,
+    annual,
     consumption.value,
     cost.value,
     JSON.stringify({ consumption, cost }),
@@ -65,7 +77,7 @@ async function addDetermination(businessCaseId, determinationId, monthlyQty, use
   return rows[0];
 }
 
-async function updateDeterminationQuantity(businessCaseId, determinationId, monthlyQty) {
+async function updateDeterminationQuantity(businessCaseId, determinationId, { monthlyQty, annualQty }) {
   await assertModernBusinessCase(businessCaseId);
   const equipmentId = await getPrimaryEquipmentId(businessCaseId);
 
@@ -75,28 +87,39 @@ async function updateDeterminationQuantity(businessCaseId, determinationId, mont
     throw error;
   }
 
+  const { monthly, annual } = normalizeQuantities(monthlyQty, annualQty);
+
   const consumption = await businessCaseCalculator.calculateDeterminationConsumption({
     determinationId,
     equipmentId,
-    monthlyQuantity: monthlyQty,
+    monthlyQuantity: monthly,
   });
 
   const cost = await businessCaseCalculator.calculateDeterminationCost({
     determinationId,
     equipmentId,
-    monthlyQuantity: monthlyQty,
+    monthlyQuantity: monthly,
   });
 
   const { rows } = await db.query(
     `UPDATE bc_determinations
      SET monthly_quantity = $1,
-         calculated_consumption = $2,
-         calculated_cost = $3,
-         calculation_details = $4,
+         annual_quantity = $2,
+         calculated_consumption = $3,
+         calculated_cost = $4,
+         calculation_details = $5,
          updated_at = now()
-     WHERE business_case_id = $5 AND determination_id = $6
+     WHERE business_case_id = $6 AND determination_id = $7
      RETURNING *`,
-    [monthlyQty, consumption.value, cost.value, JSON.stringify({ consumption, cost }), businessCaseId, determinationId],
+    [
+      monthly,
+      annual,
+      consumption.value,
+      cost.value,
+      JSON.stringify({ consumption, cost }),
+      businessCaseId,
+      determinationId,
+    ],
   );
 
   try {

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiEdit, FiFilter, FiPlus, FiSettings, FiTrash2, FiX } from "react-icons/fi";
 import api from "../../../core/api";
 import { useUI } from "../../../core/ui/UIContext";
@@ -23,14 +23,14 @@ const DeterminationsCatalog = () => {
   const [formulaTarget, setFormulaTarget] = useState(null);
   const [equipmentOptions, setEquipmentOptions] = useState([]);
 
-  const loadItems = async () => {
+  const loadItems = useCallback(async () => {
     try {
       const res = await api.get("/determinations-catalog", { params: filters });
       setItems(res.data?.data || res.data?.items || []);
     } catch (err) {
       showToast("No se pudo cargar el catálogo", "error");
     }
-  };
+  }, [filters, showToast]);
 
   const loadEquipment = async () => {
     try {
@@ -43,7 +43,7 @@ const DeterminationsCatalog = () => {
 
   useEffect(() => {
     loadItems();
-  }, [filters]);
+  }, [loadItems]);
 
   useEffect(() => {
     loadEquipment();
@@ -58,7 +58,12 @@ const DeterminationsCatalog = () => {
   const saveItem = async () => {
     showLoader();
     try {
-      const payload = { ...form, equipment_id: form.equipment_id || null };
+      if (!form.equipment_id) {
+        showToast("Debes seleccionar un equipo asociado", "warning");
+        hideLoader();
+        return;
+      }
+      const payload = { ...form };
       if (editing?.id) {
         await api.put(`/determinations-catalog/${editing.id}`, payload);
       } else {
@@ -97,12 +102,12 @@ const DeterminationsCatalog = () => {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Catálogo de determinaciones</h1>
-          <p className="text-sm text-gray-500">Configura determinaciones y fórmulas personalizadas.</p>
+          <h1 className="text-2xl font-bold text-gray-900">Catálogo de Determinaciones</h1>
+          <p className="text-sm text-gray-500">Administra las determinaciones y sus IDs de producto por equipo.</p>
         </div>
         <button
           type="button"
-          onClick={() => openModal(null)}
+          onClick={() => openModal({ equipment_id: filters.equipmentId })}
           className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white"
         >
           <FiPlus /> Nueva determinación
@@ -140,7 +145,7 @@ const DeterminationsCatalog = () => {
               <th className="py-2 px-3 text-left">Nombre</th>
               <th className="py-2 px-3 text-left">Categoría</th>
               <th className="py-2 px-3 text-left">Equipo</th>
-              <th className="py-2 px-3 text-left">Código</th>
+              <th className="py-2 px-3 text-left">ID de Producto (Proveedor)</th>
               <th className="py-2 px-3 text-left">Acciones</th>
             </tr>
           </thead>
@@ -207,11 +212,12 @@ const DeterminationsCatalog = () => {
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-sm text-gray-700">Código Roche</span>
+                <span className="text-sm text-gray-700">ID de Producto (Proveedor)</span>
                 <input
                   value={form.roche_code}
                   onChange={(e) => setForm((prev) => ({ ...prev, roche_code: e.target.value }))}
                   className="border rounded-lg px-3 py-2"
+                  placeholder="Ej: 04469658190"
                 />
               </label>
               <label className="flex flex-col gap-1">

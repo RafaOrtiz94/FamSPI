@@ -160,7 +160,7 @@ const FormulaEditor = ({
           value={formulaText}
           onChange={(e) => setFormulaText(e.target.value)}
           className="border rounded-lg px-3 py-2 font-mono text-sm"
-          placeholder="{ \"expression\": \"return monthly_quantity * 1.2\" }"
+          placeholder='{"expression": "return monthly_quantity * 1.2"}'
         />
       </label>
 
