@@ -151,7 +151,7 @@ async function calculateEquipmentUtilization({ equipmentId, totalMonthlyTests })
 
     // Obtener capacidades del equipo
     const eqData = await db.query(
-        `SELECT capacity_per_hour, max_daily_capacity FROM servicio.equipos WHERE id_equipo = $1`,
+        `SELECT capacity_per_hour, max_daily_capacity FROM public.equipment_models WHERE id = $1`,
         [equipmentId]
     );
 
@@ -549,7 +549,7 @@ async function calculateBusinessCase(businessCaseId) {
         values
     );
 
-    logger.info({ businessCaseId, isAnnual, isComodatoBC }, 'Business Case calculado exitosamente');
+    logger.info({ businessCaseId, isAnnual }, 'Business Case calculado exitosamente');
 
     // 9. Retornar resultado completo
     return {

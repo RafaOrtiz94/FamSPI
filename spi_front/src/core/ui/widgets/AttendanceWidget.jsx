@@ -1,269 +1,210 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiLogOut, FiCheckCircle, FiSun, FiMoon } from "react-icons/fi";
+import {
+    FiClock,
+    FiCoffee,
+    FiLogOut,
+    FiCheckCircle,
+    FiSun,
+    FiMoon,
+    FiAlertTriangle,
+} from "react-icons/fi";
 import confetti from "canvas-confetti";
+
 import Button from "../components/Button";
 import Card from "../components/Card";
+import Modal from "../components/Modal";
 import { useUI } from "../useUI";
+
 import {
     clockOutLunch,
     clockInLunch,
     clockOut,
+    registerException,
     getTodayAttendance,
 } from "../../api/attendanceApi";
 
-/**
- * AttendanceWidget Component - Enhanced Interactive Version
- * ----------------------------------------------------------
- * 🎮 Gamified attendance tracking with:
- * - Auto clock-in on login
- * - Interactive buttons with animations
- * - Progress bar showing work day completion
- * - Celebration effects on milestones
- * - Time tracking with visual feedback
- */
 const AttendanceWidget = () => {
     const { showToast } = useUI();
+
     const [attendance, setAttendance] = useState(null);
     const [loading, setLoading] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [showCelebration, setShowCelebration] = useState(false);
 
-    // Update current time every second
-    useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrentTime(new Date());
-        }, 1000);
+    const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
+    const [exceptionType, setExceptionType] = useState("");
+    const [exceptionDescription, setExceptionDescription] = useState("");
+    const [exceptionLoading, setExceptionLoading] = useState(false);
 
+    /* -------------------------------------------------------------------------- */
+    /*                               EFFECTS                                      */
+    /* -------------------------------------------------------------------------- */
+
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Load today's attendance on mount
     useEffect(() => {
         loadAttendance();
     }, []);
 
+    /* -------------------------------------------------------------------------- */
+    /*                               HELPERS                                      */
+    /* -------------------------------------------------------------------------- */
+
     const loadAttendance = async () => {
         try {
-            const data = await getTodayAttendance();
-            setAttendance(data.data);
+            const res = await getTodayAttendance();
+            setAttendance(res.data);
         } catch (err) {
-            console.error("Error loading attendance:", err);
+            console.error(err);
         }
     };
+
+    const getLocation = () =>
+        new Promise((resolve) => {
+            if (!navigator.geolocation) return resolve(null);
+            navigator.geolocation.getCurrentPosition(
+                (pos) => resolve(`${pos.coords.latitude},${pos.coords.longitude}`),
+                () => resolve(null),
+                { enableHighAccuracy: true, timeout: 5000 }
+            );
+        });
+
+    const formatTime = (ts) =>
+        ts
+            ? new Date(ts).toLocaleTimeString("es-EC", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            })
+            : "--:--";
 
     const celebrate = () => {
         confetti({
-            particleCount: 100,
-            spread: 70,
+            particleCount: 120,
+            spread: 80,
             origin: { y: 0.6 },
-            colors: ["#10b981", "#3b82f6", "#f59e0b"],
+            colors: ["#3b82f6", "#22c55e", "#6366f1"],
         });
         setShowCelebration(true);
-        setTimeout(() => setShowCelebration(false), 3000);
-    };
-
-    const handleClockOutLunch = async () => {
-        setLoading(true);
-        try {
-            const result = await clockOutLunch();
-            if (result.ok) {
-                showToast("¡Buen provecho! 🍽️", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando salida a almuerzo", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleClockInLunch = async () => {
-        setLoading(true);
-        try {
-            const result = await clockInLunch();
-            if (result.ok) {
-                showToast("¡De vuelta al trabajo! 💪", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando regreso de almuerzo", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleClockOut = async () => {
-        setLoading(true);
-        try {
-            const result = await clockOut();
-            if (result.ok) {
-                celebrate();
-                showToast("¡Excelente día de trabajo! 🎉", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando salida", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const formatTime = (timestamp) => {
-        if (!timestamp) return "---";
-        return new Date(timestamp).toLocaleTimeString("es-EC", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-        });
+        setTimeout(() => setShowCelebration(false), 2500);
     };
 
     const calculateProgress = () => {
         if (!attendance?.entry_time) return 0;
 
-        const entry = new Date(attendance.entry_time);
         const now = new Date();
-        const workDayHours = 8; // 8 hour work day
-        const elapsedMs = now - entry;
-        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+        const entry = new Date(attendance.entry_time);
+        let workedMs = now - entry;
 
-        // Subtract lunch time if applicable
-        let lunchMs = 0;
-        if (attendance.lunch_start_time && attendance.lunch_end_time) {
-            lunchMs = new Date(attendance.lunch_end_time) - new Date(attendance.lunch_start_time);
-        } else if (attendance.lunch_start_time && !attendance.lunch_end_time) {
-            lunchMs = now - new Date(attendance.lunch_start_time);
+        if (attendance.lunch_start_time) {
+            const lunchStart = new Date(attendance.lunch_start_time);
+            const lunchEnd = attendance.lunch_end_time
+                ? new Date(attendance.lunch_end_time)
+                : now;
+            workedMs -= lunchEnd - lunchStart;
         }
 
-        const workHours = (elapsedMs - lunchMs) / (1000 * 60 * 60);
-        const progress = Math.min((workHours / workDayHours) * 100, 100);
-
-        return Math.round(progress);
+        const hours = workedMs / (1000 * 60 * 60);
+        return Math.min(Math.round((hours / 8) * 100), 100);
     };
 
     const getStatusInfo = () => {
-        if (!attendance?.entry_time) {
+        if (!attendance?.entry_time)
             return {
-                message: "¡Bienvenido! Tu entrada se registró automáticamente 🎉",
-                color: "text-blue-600",
-                icon: <FiSun className="text-yellow-500" size={24} />,
+                text: "Entrada registrada automáticamente",
+                icon: <FiSun className="text-yellow-500" />,
             };
-        }
-        if (attendance.exit_time) {
+
+        if (attendance.exit_time)
             return {
-                message: "¡Día completado! Descansa bien 🌙",
-                color: "text-green-600",
-                icon: <FiMoon className="text-indigo-500" size={24} />,
+                text: "Jornada completada",
+                icon: <FiMoon className="text-indigo-500" />,
             };
-        }
-        if (attendance.lunch_start_time && !attendance.lunch_end_time) {
+
+        if (attendance.lunch_start_time && !attendance.lunch_end_time)
             return {
-                message: "En almuerzo 🍽️",
-                color: "text-orange-500",
-                icon: <FiCoffee className="text-orange-500" size={24} />,
+                text: "En almuerzo",
+                icon: <FiCoffee className="text-orange-500" />,
             };
-        }
-        if (attendance.lunch_end_time) {
-            return {
-                message: "¡Sigue así! 💪",
-                color: "text-blue-600",
-                icon: <FiCheckCircle className="text-blue-500" size={24} />,
-            };
-        }
+
         return {
-            message: "Jornada en progreso ⚡",
-            color: "text-blue-600",
-            icon: <FiClock className="text-blue-500" size={24} />,
+            text: "Jornada en progreso",
+            icon: <FiClock className="text-blue-500" />,
         };
     };
 
-    const getNextAction = () => {
-        if (!attendance?.entry_time) {
-            return (
-                <div className="text-center p-4 bg-green-50 rounded-lg border-2 border-green-200">
-                    <p className="text-sm text-green-700 font-medium">
-                        ✅ Tu entrada fue registrada automáticamente al iniciar sesión
-                    </p>
-                    <p className="text-xs text-green-600 mt-1">
-                        {formatTime(attendance?.entry_time || new Date())}
-                    </p>
-                </div>
-            );
-        }
+    /* -------------------------------------------------------------------------- */
+    /*                               ACTIONS                                      */
+    /* -------------------------------------------------------------------------- */
 
-        if (attendance.exit_time) {
-            return (
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-center p-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-xl border-2 border-green-200"
-                >
-                    <FiCheckCircle className="text-green-500 text-4xl mx-auto mb-2" />
-                    <p className="text-lg font-bold text-gray-800">¡Jornada completada!</p>
-                    <p className="text-sm text-gray-600 mt-1">Hasta mañana 👋</p>
-                </motion.div>
-            );
+    const handle = async (fn, successMsg, celebrateDay = false) => {
+        setLoading(true);
+        try {
+            const loc = await getLocation();
+            const res = await fn(loc);
+            if (res.ok) {
+                if (celebrateDay) celebrate();
+                showToast(successMsg, "success");
+                await loadAttendance();
+            }
+        } catch (err) {
+            showToast(err.message || "Error", "error");
+        } finally {
+            setLoading(false);
         }
-
-        if (attendance.lunch_end_time) {
-            return (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button
-                        variant="danger"
-                        icon={FiLogOut}
-                        onClick={handleClockOut}
-                        disabled={loading}
-                        className="w-full py-3 text-base font-semibold bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600"
-                    >
-                        🏁 Marcar Salida
-                    </Button>
-                </motion.div>
-            );
-        }
-
-        if (attendance.lunch_start_time) {
-            return (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button
-                        variant="success"
-                        icon={FiCheckCircle}
-                        onClick={handleClockInLunch}
-                        disabled={loading}
-                        className="w-full py-3 text-base font-semibold bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
-                    >
-                        🔙 Regresar de Almuerzo
-                    </Button>
-                </motion.div>
-            );
-        }
-
-        return (
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button
-                    variant="warning"
-                    icon={FiCoffee}
-                    onClick={handleClockOutLunch}
-                    disabled={loading}
-                    className="w-full py-3 text-base font-semibold bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
-                >
-                    🍽️ Salir a Almuerzo
-                </Button>
-            </motion.div>
-        );
     };
 
-    const statusInfo = getStatusInfo();
+    const handleRegisterException = async () => {
+        if (!exceptionType || !exceptionDescription)
+            return showToast("Completa todos los campos", "warning");
+
+        setExceptionLoading(true);
+        try {
+            const loc = await getLocation();
+            const res = await registerException(
+                exceptionType,
+                exceptionDescription,
+                loc
+            );
+            if (res.ok) {
+                showToast("Excepción registrada", "success");
+                setExceptionModalOpen(false);
+                setExceptionType("");
+                setExceptionDescription("");
+            }
+        } catch (err) {
+            showToast(err.message || "Error", "error");
+        } finally {
+            setExceptionLoading(false);
+        }
+    };
+
     const progress = calculateProgress();
+    const status = getStatusInfo();
+
+    /* -------------------------------------------------------------------------- */
+    /*                               RENDER                                       */
+    /* -------------------------------------------------------------------------- */
 
     return (
-        <Card className="p-3 sm:p-4 bg-gradient-to-br from-white to-blue-50 shadow-sm">
+        <Card className="relative overflow-hidden rounded-2xl bg bg-white/70 backdrop-blur-xl shadow-lg shadow-blue-500/5 p-5">
             {/* Header */}
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                    {statusInfo.icon}
-                    <h3 className="text-base font-bold text-gray-900">Mi Asistencia</h3>
+            <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-blue-500/10">{status.icon}</div>
+                    <div>
+                        <h3 className="text-sm font-semibold text-gray-900">
+                            Asistencia de Hoy
+                        </h3>
+                        <p className="text-xs text-gray-500">{status.text}</p>
+                    </div>
                 </div>
-                <div className="text-lg font-mono font-bold text-blue-600">
+
+                <div className="text-sm font-mono font-semibold text-blue-600">
                     {currentTime.toLocaleTimeString("es-EC", {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -273,92 +214,136 @@ const AttendanceWidget = () => {
                 </div>
             </div>
 
-            {/* Status Message */}
-            <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`text-center text-sm font-semibold mb-3 ${statusInfo.color}`}
-            >
-                {statusInfo.message}
-            </motion.div>
-
-            {/* Progress Bar */}
+            {/* Progress */}
             {attendance?.entry_time && !attendance?.exit_time && (
-                <div className="mb-4">
-                    <div className="flex justify-between text-[10px] text-gray-600 mb-1">
+                <div className="mb-5">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
                         <span>Progreso del día</span>
-                        <span className="font-bold">{progress}%</span>
+                        <span className="font-semibold">{progress}%</span>
                     </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-3 bg-gray-200/60 rounded-full overflow-hidden">
                         <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${progress}%` }}
-                            transition={{ duration: 0.5 }}
-                            className="h-full bg-gradient-to-r from-blue-500 to-green-500"
+                            transition={{ type: "spring", stiffness: 120 }}
+                            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400"
                         />
                     </div>
                 </div>
             )}
 
             {/* Time Grid */}
-            <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-green-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">✅ Entrada</div>
-                    <div className="font-bold text-sm text-green-600">
-                        {formatTime(attendance?.entry_time)}
-                    </div>
-                </motion.div>
-
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-orange-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🍽️ Almuerzo</div>
-                    <div className="font-bold text-sm text-orange-600">
-                        {formatTime(attendance?.lunch_start_time)}
-                    </div>
-                </motion.div>
-
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-blue-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🔙 Regreso</div>
-                    <div className="font-bold text-sm text-blue-600">
-                        {formatTime(attendance?.lunch_end_time)}
-                    </div>
-                </motion.div>
-
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-red-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🏁 Salida</div>
-                    <div className="font-bold text-sm text-red-600">
-                        {formatTime(attendance?.exit_time)}
-                    </div>
-                </motion.div>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+                {[
+                    ["Entrada", attendance?.entry_time, "✅"],
+                    ["Almuerzo", attendance?.lunch_start_time, "🍽️"],
+                    ["Regreso", attendance?.lunch_end_time, "🔙"],
+                    ["Salida", attendance?.exit_time, "🏁"],
+                ].map(([label, time, icon]) => (
+                    <motion.div
+                        key={label}
+                        whileHover={{ y: -2 }}
+                        className="rounded-xl bg-white/60 p-3 shadow-sm"
+                    >
+                        <div className="text-xs text-gray-500 flex items-center gap-1">
+                            <span>{icon}</span>
+                            {label}
+                        </div>
+                        <div className="text-sm font-semibold text-gray-800">
+                            {formatTime(time)}
+                        </div>
+                    </motion.div>
+                ))}
             </div>
 
-            {/* Action Button */}
-            {getNextAction()}
+            {/* Main Action */}
+            {!attendance?.exit_time && (
+                <Button
+                    onClick={() =>
+                        attendance?.lunch_start_time && !attendance?.lunch_end_time
+                            ? handle(clockInLunch, "Regresaste del almuerzo")
+                            : attendance?.lunch_end_time
+                                ? handle(clockOut, "¡Buen trabajo!", true)
+                                : handle(clockOutLunch, "Buen provecho")
+                    }
+                    disabled={loading}
+                    className="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/20"
+                >
+                    {attendance?.lunch_start_time && !attendance?.lunch_end_time
+                        ? "Regresar de Almuerzo"
+                        : attendance?.lunch_end_time
+                            ? "Finalizar Jornada"
+                            : "Salir a Almuerzo"}
+                </Button>
+            )}
 
-            {/* Celebration Animation */}
+            {/* Exception */}
+            {attendance?.entry_time && !attendance?.exit_time && (
+                <button
+                    onClick={() => setExceptionModalOpen(true)}
+                    className="mt-4 mx-auto flex items-center gap-1 text-xs text-gray-500 hover:text-amber-600 transition"
+                >
+                    <FiAlertTriangle size={12} />
+                    Registrar salida inesperada
+                </button>
+            )}
+
+            {/* Celebration */}
             <AnimatePresence>
                 {showCelebration && (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.5, opacity: 0 }}
                         className="fixed inset-0 flex items-center justify-center pointer-events-none z-50"
                     >
                         <div className="text-6xl">🎉</div>
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            {/* Exception Modal */}
+            <Modal
+                isOpen={exceptionModalOpen}
+                onClose={() => setExceptionModalOpen(false)}
+                title="Registrar salida inesperada"
+            >
+                <div className="space-y-4">
+                    <select
+                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                        value={exceptionType}
+                        onChange={(e) => setExceptionType(e.target.value)}
+                    >
+                        <option value="">Motivo</option>
+                        <option value="permiso">Permiso</option>
+                        <option value="medico">Cita médica</option>
+                        <option value="proveedor">Proveedor</option>
+                        <option value="otro">Otro</option>
+                    </select>
+
+                    <textarea
+                        className="w-full border rounded-lg px-3 py-2 text-sm h-24"
+                        placeholder="Describe la salida..."
+                        value={exceptionDescription}
+                        onChange={(e) => setExceptionDescription(e.target.value)}
+                    />
+
+                    <div className="flex justify-end gap-2">
+                        <button
+                            onClick={() => setExceptionModalOpen(false)}
+                            className="text-sm text-gray-500 hover:text-gray-700"
+                        >
+                            Cancelar
+                        </button>
+                        <Button
+                            onClick={handleRegisterException}
+                            disabled={exceptionLoading}
+                        >
+                            Registrar
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </Card>
     );
 };

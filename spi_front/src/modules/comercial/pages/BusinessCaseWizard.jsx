@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { FiChevronLeft, FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi";
-import Step1GeneralData from "../components/wizard/Step1GeneralData";
+import Step1ClientData from "../components/wizard/Step1ClientData";
+import Step2LabData from "../components/wizard/Step2LabData";
+import Step3EquipmentAndLis from "../components/wizard/Step3EquipmentAndLis";
 import Step2EquipmentSelector from "../components/wizard/Step2EquipmentSelector";
 import Step3DeterminationSelector from "../components/wizard/Step3DeterminationSelector";
 import Step4CalculationsSummary from "../components/wizard/Step4CalculationsSummary";
@@ -8,11 +10,12 @@ import Step5Investments from "../components/wizard/Step5Investments";
 import FinalStep from "../components/wizard/FinalStep";
 import { useUI } from "../../../core/ui/UIContext";
 import Step4RentabilitySummary from "../components/wizard/Step4RentabilitySummary";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const WizardContext = createContext();
 const STORAGE_KEY = "business_case_wizard_draft";
 
-  const defaultState = {
+const defaultState = {
   businessCaseId: null,
   bcType: 'comodato_publico',
   calculationMode: 'annual',
@@ -59,24 +62,25 @@ const STORAGE_KEY = "business_case_wizard_draft";
 
 export const useBusinessCaseWizard = () => useContext(WizardContext);
 
-const getStepsForType = (type) => {
-  const base = [
-    { id: "general", title: "Datos Generales" },
-    { id: "equipment", title: "Equipo" },
-    { id: "determinations", title: "Determinaciones" },
-  ];
+const getStepsForRole = (role) => {
+  const isJefe = ["jefe_comercial", "gerencia", "gerencia_general", "admin"].includes(role);
 
-  if (type === "public" || type === "comodato_publico") {
+  if (!isJefe) {
+    // Commercial User Workflow
     return [
-      ...base,
-      { id: "calculations", title: "Resumen técnico" },
-      { id: "investments", title: "Inversiones" },
-      { id: "final", title: "Finalizar" },
+      { id: "client_data", title: "Datos del Cliente" },
+      { id: "lab_data", title: "Datos Laboratorio" },
+      { id: "equipment_lis", title: "Equipamiento y LIS" },
     ];
   }
 
+  // Manager Workflow (Full)
   return [
-    ...base,
+    { id: "client_data", title: "Datos del Cliente" },
+    { id: "lab_data", title: "Datos Laboratorio" },
+    { id: "equipment", title: "Equipamiento" },
+    { id: "determinations", title: "Determinaciones" },
+    { id: "calculations", title: "Resumen técnico" },
     { id: "rentability", title: "Rentabilidad y ROI" },
     { id: "investments", title: "Inversiones" },
     { id: "final", title: "Finalizar" },
@@ -116,10 +120,10 @@ const WizardProvider = ({ children }) => {
     setState((prev) => ({ ...prev, ...updater }));
   }, []);
 
-const value = useMemo(
-  () => ({ state, updateState, currentStep, setCurrentStep, clearDraft }),
-  [state, currentStep, clearDraft, updateState]
-);
+  const value = useMemo(
+    () => ({ state, updateState, currentStep, setCurrentStep, clearDraft }),
+    [state, currentStep, clearDraft, updateState]
+  );
 
   return <WizardContext.Provider value={value}>{children}</WizardContext.Provider>;
 };
@@ -181,22 +185,39 @@ const Navigation = ({ onPrev, onNext, disablePrev, disableNext, nextLabel = "Sig
 
 const BusinessCaseWizard = () => {
   const { currentStep, setCurrentStep, state, clearDraft } = useBusinessCaseWizard();
-  const stepsForType = useMemo(() => getStepsForType(state.bcType), [state.bcType]);
-  const progress = Math.round(((currentStep + 1) / stepsForType.length) * 100);
+  const { user } = useAuth(); // Get current user role
+  const steps = useMemo(() => getStepsForRole(user?.role), [user?.role]);
+  const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const goPrev = () => setCurrentStep((prev) => Math.max(0, prev - 1));
-  const goNext = () => setCurrentStep((prev) => Math.min(stepsForType.length - 1, prev + 1));
+  const goNext = () => setCurrentStep((prev) => Math.min(steps.length - 1, prev + 1));
+  const { showToast } = useUI();
 
   useEffect(() => {
-    if (currentStep >= stepsForType.length) {
-      setCurrentStep(stepsForType.length - 1);
+    if (currentStep >= steps.length) {
+      setCurrentStep(steps.length - 1);
     }
-  }, [stepsForType, currentStep, setCurrentStep]);
+  }, [steps, currentStep, setCurrentStep]);
+
+  const handleCommercialFinish = async () => {
+    try {
+      // Logic handled inside Step3EquipmentAndLis, just need to redirect here or show success
+      showToast("Proceso finalizado. Pendiente de revisión.", "success");
+      clearDraft();
+      // Redirect to list ideally
+    } catch (e) { console.error(e) }
+  };
 
   const renderStep = () => {
-    const stepId = stepsForType[currentStep]?.id;
+    const stepId = steps[currentStep]?.id;
     switch (stepId) {
-      case "general":
-        return <Step1GeneralData onNext={goNext} />;
+      case "client_data":
+        return <Step1ClientData onNext={goNext} />;
+      case "lab_data":
+        return <Step2LabData onPrev={goPrev} onNext={goNext} />;
+      case "equipment_lis":
+        return <Step3EquipmentAndLis onPrev={goPrev} onComplete={handleCommercialFinish} />;
+
+      // Manager Steps
       case "equipment":
         return <Step2EquipmentSelector onPrev={goPrev} onNext={goNext} />;
       case "determinations":
@@ -239,7 +260,7 @@ const BusinessCaseWizard = () => {
       </div>
 
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 space-y-4 shadow-sm">
-        <Stepper currentStep={currentStep} steps={stepsForType} />
+        <Stepper currentStep={currentStep} steps={steps} />
         <ProgressBar value={progress} />
         <div className="border border-dashed border-gray-200 dark:border-gray-800 rounded-xl p-4 bg-gray-50 dark:bg-gray-800/40">
           {renderStep()}
@@ -248,8 +269,8 @@ const BusinessCaseWizard = () => {
           onPrev={goPrev}
           onNext={goNext}
           disablePrev={currentStep === 0}
-          disableNext={currentStep === stepsForType.length - 1}
-          nextLabel={currentStep === stepsForType.length - 1 ? "" : "Siguiente"}
+          disableNext={currentStep === steps.length - 1}
+          nextLabel={currentStep === steps.length - 1 ? "" : "Siguiente"}
         />
       </div>
 

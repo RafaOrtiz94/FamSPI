@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { FiCalendar, FiCheckCircle, FiChevronDown, FiPlus, FiTrash2, FiUsers } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
@@ -32,7 +32,6 @@ const SECTION_FIELDS = {
     "labRoutineQCFrequency",
     "labSpecialTests",
     "labSpecialQCFrequency",
-    "lisMonthlyPatients",
   ],
   lis: [
     "lisIncludes",
@@ -50,6 +49,12 @@ const SECTION_FIELDS = {
     "effectiveDetermination",
   ],
 };
+
+
+const LIS_PROVIDERS = [
+  { value: "orion", label: "Orion" },
+  { value: "cobas_infiniti", label: "Cobas Infinity" },
+];
 
 const SECTION_ORDER = ["general", "lab", "lis", "requirements"];
 
@@ -113,6 +118,7 @@ const Step1GeneralData = ({ onNext }) => {
     register,
     handleSubmit,
     watch,
+    control,
     reset,
     setValue,
     formState: { errors },
@@ -120,6 +126,9 @@ const Step1GeneralData = ({ onNext }) => {
 
   const [naFields, setNaFields] = useState({});
   const watchClient = watch("client");
+  const watchLisIncludes = useWatch({ control, name: "lisIncludes", defaultValue: false });
+  const watchLisIncludesHardware = watch("lisIncludesHardware");
+  const watchLisInterfaceHardware = watch("lisInterfaceHardware");
   const [openSections, setOpenSections] = useState(() =>
     SECTION_ORDER.reduce((acc, id) => {
       acc[id] = id === "general";
@@ -297,14 +306,15 @@ const Step1GeneralData = ({ onNext }) => {
       special_qc_frequency: formData.labSpecialQCFrequency || null,
     };
 
+    const hasLis = Boolean(formData.lisIncludes);
     const lisPayload = {
-      includes_lis: Boolean(formData.lisIncludes),
+      includes_lis: hasLis,
       lis_provider: formData.lisProvider || null,
       includes_hardware: Boolean(formData.lisIncludesHardware),
       monthly_patients: numberOrNull(formData.lisMonthlyPatients),
       current_system_name: formData.lisInterfaceSystem || null,
       current_system_provider: formData.lisInterfaceProvider || null,
-      current_system_hardware: formData.lisInterfaceHardware || null,
+      current_system_hardware: Boolean(formData.lisInterfaceHardware),
     };
 
     const requirementsPayload = {
@@ -326,16 +336,18 @@ const Step1GeneralData = ({ onNext }) => {
 
     await Promise.all(calls);
 
-    const validInterfaces = interfaces.filter((item) => item.model || item.provider);
-    if (validInterfaces.length) {
-      await Promise.all(
-        validInterfaces.map((iface) =>
-          api.post(`/business-case/${bcId}/lis-integration/equipment-interfaces`, {
-            model: iface.model,
-            provider: iface.provider,
-          }),
-        ),
-      );
+    if (hasLis) {
+      const validInterfaces = interfaces.filter((item) => item.model || item.provider);
+      if (validInterfaces.length) {
+        await Promise.all(
+          validInterfaces.map((iface) =>
+            api.post(`/business-case/${bcId}/lis-integration/equipment-interfaces`, {
+              model: iface.model,
+              provider: iface.provider,
+            }),
+          ),
+        );
+      }
     }
   };
 
@@ -578,7 +590,7 @@ const Step1GeneralData = ({ onNext }) => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Días/semana</span>
+                <span className="text-xs font-semibold text-gray-700">Dï¿½as/semana</span>
                 <input
                   type="number"
                   min="0"
@@ -587,7 +599,7 @@ const Step1GeneralData = ({ onNext }) => {
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Turnos/día</span>
+                <span className="text-xs font-semibold text-gray-700">Turnos/dï¿½a</span>
                 <input
                   type="number"
                   min="0"
@@ -650,23 +662,12 @@ const Step1GeneralData = ({ onNext }) => {
                 />
               </label>
             </div>
-            <div className="grid grid-cols-1 gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Pacientes mensuales</span>
-                <input
-                  type="number"
-                  min="0"
-                  {...register("lisMonthlyPatients")}
-                  className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-            </div>
-          </div>
+            
         </AccordionSection>
         <AccordionSection
           id="lis"
           title="LIS e interfaces"
-          description="Integra la tecnologÃ­a LIS y sus interfaces asociadas."
+          description="Integra la tecnolog?a LIS y sus interfaces asociadas."
           isOpen={openSections.lis}
           onToggle={toggleSection}
           statusBadge={renderStatusBadge("lis")}
@@ -679,92 +680,128 @@ const Step1GeneralData = ({ onNext }) => {
               </div>
               <div>
                 <p className="text-xs uppercase text-gray-500">LIS e interfaces</p>
-                <h3 className="text-sm font-semibold text-gray-900">IntegraciÃ³n tecnolÃ³gica</h3>
+                <h3 className="text-sm font-semibold text-gray-900">Integraci?n tecnol?gica</h3>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Incluye LIS</span>
-                <input type="checkbox" {...register("lisIncludes")} />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Proveedor del sistema</span>
-                <input
-                  type="text"
-                  {...register("lisProvider")}
-                  className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Incluye hardware?</span>
-                <input type="checkbox" {...register("lisIncludesHardware")} />
-              </label>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Sistema actual</span>
-                <input
-                  type="text"
-                  {...register("lisInterfaceSystem")}
-                  className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Proveedor del sistema actual</span>
-                <input
-                  type="text"
-                  {...register("lisInterfaceProvider")}
-                  className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Incluye hardware</span>
-                <input
-                  type="text"
-                  {...register("lisInterfaceHardware")}
-                  className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                />
-              </label>
-            </div>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs font-semibold text-gray-700">Interfaces de equipos (modelo / proveedor)</p>
-                <button
-                  type="button"
-                  onClick={addInterfaceRow}
-                  className="inline-flex items-center gap-1 text-xs text-blue-600"
-                >
-                  <FiPlus /> Agregar
-                </button>
-              </div>
-              <div className="space-y-2">
-                {interfaces.map((iface, index) => (
-                  <div key={`${iface.model}-${iface.provider}-${index}`} className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <input
-                      type="text"
-                      value={iface.model}
-                      onChange={(e) => handleInterfaceChange(index, "model", e.target.value)}
-                      placeholder="Modelo / Serie"
-                      className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                    />
-                    <input
-                      type="text"
-                      value={iface.provider}
-                      onChange={(e) => handleInterfaceChange(index, "provider", e.target.value)}
-                      placeholder="Proveedor"
-                      className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeInterfaceRow(index)}
-                      className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-xs text-rose-500"
-                    >
-                      <FiTrash2 />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <label className="flex flex-col gap-1">
+                            <span className="text-xs font-semibold text-gray-700">Incluye LIS</span>
+                            <input type="checkbox" {...register("lisIncludes")} />
+                          </label>
+                          <p className="text-xs text-gray-500">
+                            Activa esta opcion para capturar el proveedor (solo Orion o Cobas Infinity), hardware y las interfaces necesarias.
+                          </p>
+                        </div>
+                        {watchLisIncludes ? (
+                          <>
+                            <div className="space-y-3 border-b border-gray-200 pb-4">
+                              <h4 className="text-xs font-semibold text-gray-500 uppercase">Datos del LIS</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Proveedor del sistema</span>
+                                  <select
+                                    {...register("lisProvider")}
+                                    className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                  >
+                                    <option value="">Selecciona un proveedor</option>
+                                    {LIS_PROVIDERS.map((provider) => (
+                                      <option key={provider.value} value={provider.value}>
+                                        {provider.label}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Incluye hardware (Si/No)</span>
+                                  <div className="flex items-center gap-2">
+                                    <input type="checkbox" {...register("lisIncludesHardware")} />
+                                    <span className="text-xs text-gray-500">{watchLisIncludesHardware ? "Si" : "No"}</span>
+                                  </div>
+                                </label>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Numero de pacientes mensual</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    {...register("lisMonthlyPatients")}
+                                    className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </label>
+                              </div>
+                            </div>
+                            <div className="space-y-3 border-b border-gray-200 pb-4">
+                              <h4 className="text-sm font-semibold text-gray-700">Interfaz a sistema actual</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Nombre del sistema</span>
+                                  <input
+                                    type="text"
+                                    {...register("lisInterfaceSystem")}
+                                    className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Proveedor</span>
+                                  <input
+                                    type="text"
+                                    {...register("lisInterfaceProvider")}
+                                    className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                  />
+                                </label>
+                                <label className="flex flex-col gap-1">
+                                  <span className="text-xs font-semibold text-gray-700">Incluye hardware (Si/No)</span>
+                                  <div className="flex items-center gap-2">
+                                    <input type="checkbox" {...register("lisInterfaceHardware")} />
+                                    <span className="text-xs text-gray-500">{watchLisInterfaceHardware ? "Si" : "No"}</span>
+                                  </div>
+                                </label>
+                              </div>
+                            </div>
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs font-semibold text-gray-700">Interfaz de equipos (modelo / proveedor)</p>
+                                <button
+                                  type="button"
+                                  onClick={addInterfaceRow}
+                                  className="inline-flex items-center gap-1 text-xs text-blue-600"
+                                >
+                                  <FiPlus /> Agregar
+                                </button>
+                              </div>
+                              <div className="space-y-2">
+                                {interfaces.map((iface, index) => (
+                                  <div key={`${iface.model}-${iface.provider}-${index}`} className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                    <input
+                                      type="text"
+                                      value={iface.model}
+                                      onChange={(e) => handleInterfaceChange(index, "model", e.target.value)}
+                                      placeholder="Modelo / Serie"
+                                      className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <input
+                                      type="text"
+                                      value={iface.provider}
+                                      onChange={(e) => handleInterfaceChange(index, "provider", e.target.value)}
+                                      placeholder="Proveedor"
+                                      className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => removeInterfaceRow(index)}
+                                      className="inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-xs text-rose-500"
+                                    >
+                                      <FiTrash2 />
+                                    </button>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+              <p className="text-xs text-gray-500">
+                Activa LIS para capturar proveedor, pacientes y detalles de interfaces.
+              </p>
+            )}
           </div>
         </AccordionSection>
         <AccordionSection

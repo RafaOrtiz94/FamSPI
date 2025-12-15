@@ -69,8 +69,12 @@ async function createBusinessCase(data, user) {
   const defaultStage = bc_purchase_type === 'comodato_publico' ? 'pending_comercial' : 'pending_backoffice';
   const finalStage = bc_stage || defaultStage;
 
+  // Manual ID generation: Column is UUID and has no default, so we generate one.
+  const nextId = require('crypto').randomUUID();
+
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
+      id,
       client_name,
       client_id,
       bc_purchase_type,
@@ -94,11 +98,12 @@ async function createBusinessCase(data, user) {
       bc_system_type,
       request_type
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, NOW(), true, 'modern', 'business_case'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, NOW(), true, 'modern', 'business_case'
     ) RETURNING id;
   `;
 
   const { rows } = await db.query(insertQuery, [
+    nextId,
     client_name,
     client_id,
     bc_purchase_type,
@@ -427,15 +432,25 @@ async function upsertBCEconomicData(bcId, { equipment_id, equipment_name, equipm
   );
 
   if (updateResult.rowCount === 0) {
-    await db.query(
-      `
-        INSERT INTO bc_economic_data (
-          bc_master_id, equipment_id, equipment_name, equipment_cost,
-          calculation_mode, show_roi, show_margin, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, true, true, now(), now())
-      `,
-      [bcId, equipment_id, equipment_name, equipment_cost, calculationMode],
-    );
+    // Only insert if bc_master exists (legacy support).
+    // Modern BCs don't use bc_master, so we skip this to avoid FK violation.
+    try {
+      await db.query(
+        `
+          INSERT INTO bc_economic_data (
+            bc_master_id, equipment_id, equipment_name, equipment_cost,
+            calculation_mode, show_roi, show_margin, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, true, true, now(), now())
+        `,
+        [bcId, equipment_id, equipment_name, equipment_cost, calculationMode],
+      );
+    } catch (error) {
+      if (error.code === '23503') { // Foreign key violation
+        logger.warn({ bcId }, 'Skipping bc_economic_data insert for modern BC (no bc_master)');
+      } else {
+        throw error;
+      }
+    }
   }
 }
 

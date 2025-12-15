@@ -14,10 +14,13 @@ const logger = require("../../config/logger");
 /**
  * 🕐 Clock In - Record entry time
  * POST /api/attendance/clock-in
+ * Body: { location: "lat,lng" }
  */
 const clockIn = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
@@ -40,18 +43,20 @@ const clockIn = async (req, res) => {
     }
 
     // Insert or update record
+    // We use a safe query that works even if columns don't exist yet (if migration failed), 
+    // but ideally migration is run. Assuming migration ran:
     const result = await db.query(
       `
-      INSERT INTO user_attendance_records (user_id, date, entry_time)
-      VALUES ($1, $2, $3)
+      INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
+      VALUES ($1, $2, $3, $4)
       ON CONFLICT (user_id, date) 
-      DO UPDATE SET entry_time = $3, updated_at = NOW()
+      DO UPDATE SET entry_time = $3, entry_location = $4, updated_at = NOW()
       RETURNING *;
       `,
-      [userId, today, now]
+      [userId, today, now, location || null]
     );
 
-    logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()}`);
+    logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${location}`);
 
     return res.status(200).json({
       ok: true,
@@ -70,11 +75,13 @@ const clockIn = async (req, res) => {
 /**
  * 🍽️ Clock Out for Lunch - Record lunch start time
  * POST /api/attendance/clock-out-lunch
- * Body: { signature_base64 } (optional for now, signature already stored)
+ * Body: { location }
  */
 const clockOutLunch = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
@@ -103,18 +110,18 @@ const clockOutLunch = async (req, res) => {
       });
     }
 
-    // Update lunch start time
+    // Update lunch start time and location
     const result = await db.query(
       `
       UPDATE user_attendance_records
-      SET lunch_start_time = $1, updated_at = NOW()
+      SET lunch_start_time = $1, lunch_start_location = $4, updated_at = NOW()
       WHERE user_id = $2 AND date = $3
       RETURNING *;
       `,
-      [now, userId, today]
+      [now, userId, today, location || null]
     );
 
-    logger.info(`[ATTENDANCE] Lunch start: ${email} at ${now.toISOString()}`);
+    logger.info(`[ATTENDANCE] Lunch start: ${email} at ${now.toISOString()} loc: ${location}`);
 
     return res.status(200).json({
       ok: true,
@@ -133,10 +140,13 @@ const clockOutLunch = async (req, res) => {
 /**
  * 🍽️ Clock In from Lunch - Record lunch end time
  * POST /api/attendance/clock-in-lunch
+ * Body: { location }
  */
 const clockInLunch = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
@@ -165,18 +175,18 @@ const clockInLunch = async (req, res) => {
       });
     }
 
-    // Update lunch end time
+    // Update lunch end time and location
     const result = await db.query(
       `
       UPDATE user_attendance_records
-      SET lunch_end_time = $1, updated_at = NOW()
+      SET lunch_end_time = $1, lunch_end_location = $4, updated_at = NOW()
       WHERE user_id = $2 AND date = $3
       RETURNING *;
       `,
-      [now, userId, today]
+      [now, userId, today, location || null]
     );
 
-    logger.info(`[ATTENDANCE] Lunch end: ${email} at ${now.toISOString()}`);
+    logger.info(`[ATTENDANCE] Lunch end: ${email} at ${now.toISOString()} loc: ${location}`);
 
     return res.status(200).json({
       ok: true,
@@ -195,11 +205,13 @@ const clockInLunch = async (req, res) => {
 /**
  * 🏁 Clock Out - Record exit time
  * POST /api/attendance/clock-out
- * Body: { signature_base64 } (optional for now, signature already stored)
+ * Body: { location }
  */
 const clockOut = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
@@ -228,18 +240,18 @@ const clockOut = async (req, res) => {
       });
     }
 
-    // Update exit time
+    // Update exit time and location
     const result = await db.query(
       `
       UPDATE user_attendance_records
-      SET exit_time = $1, updated_at = NOW()
+      SET exit_time = $1, exit_location = $4, updated_at = NOW()
       WHERE user_id = $2 AND date = $3
       RETURNING *;
       `,
-      [now, userId, today]
+      [now, userId, today, location || null]
     );
 
-    logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()}`);
+    logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()} loc: ${location}`);
 
     return res.status(200).json({
       ok: true,
@@ -251,6 +263,48 @@ const clockOut = async (req, res) => {
     return res.status(500).json({
       ok: false,
       message: "Error registrando salida",
+    });
+  }
+};
+
+/**
+ * ⚠️ Register Exception (Salida Inesperada)
+ * POST /api/attendance/exception
+ * Body: { type, description, location }
+ */
+const registerException = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { type, description, location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+    if (!type || !description) {
+      return res.status(400).json({ ok: false, message: "Tipo y descripción requeridos" });
+    }
+
+    const result = await db.query(
+      `
+      INSERT INTO attendance_exceptions (user_id, date, type, description, location, timestamp)
+      VALUES ($1, CURRENT_DATE, $2, $3, $4, NOW())
+      RETURNING *;
+      `,
+      [userId, type, description, location || null]
+    );
+
+    logger.info(`[ATTENDANCE] Exception: ${email} - ${type}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: "Excepción registrada correctamente",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en register-exception");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando excepción",
     });
   }
 };
@@ -387,6 +441,7 @@ module.exports = {
   clockOutLunch,
   clockInLunch,
   clockOut,
+  registerException,
   getToday,
   getUserAttendance,
   getRange,

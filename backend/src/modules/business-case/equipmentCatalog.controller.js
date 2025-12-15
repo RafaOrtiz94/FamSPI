@@ -21,6 +21,23 @@ const equipmentFormulaSchema = Joi.object({
   exampleContext: Joi.object().default({}),
 });
 
+const mapEquipmentModelRecord = (row) => ({
+  equipment_id: row.id,
+  equipment_code: row.code,
+  equipment_name: row.name,
+  manufacturer: row.manufacturer,
+  model: row.model,
+  category: row.category,
+  category_type: row.category_type,
+  capacity_per_hour: row.capacity_per_hour,
+  max_daily_capacity: row.max_daily_capacity,
+  base_price: row.base_price,
+  status: row.status,
+  technical_specs: row.technical_specs,
+  default_calculation_formula: row.default_calculation_formula,
+  metadata: row.metadata,
+});
+
 async function list(req, res) {
   try {
     const { category, q } = req.query;
@@ -77,7 +94,8 @@ async function create(req, res) {
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
     const insert = await db.query(
-      `INSERT INTO servicio.equipos (code, nombre, fabricante, modelo, category_type, capacity_per_hour, max_daily_capacity, base_price, estado)
+      `INSERT INTO public.equipment_models
+       (code, name, manufacturer, model, category_type, capacity_per_hour, max_daily_capacity, base_price, status)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
       [
         value.code,
@@ -92,7 +110,7 @@ async function create(req, res) {
       ],
     );
 
-    res.status(201).json({ ok: true, data: insert.rows[0] });
+    res.status(201).json({ ok: true, data: mapEquipmentModelRecord(insert.rows[0]) });
   } catch (error) {
     logger.error(error);
     res.status(500).json({ ok: false, message: "Error creando equipo" });
@@ -105,10 +123,10 @@ async function update(req, res) {
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
     const updateQuery = `
-      UPDATE servicio.equipos
-      SET code=$1, nombre=$2, fabricante=$3, modelo=$4, category_type=$5, capacity_per_hour=$6,
-          max_daily_capacity=$7, base_price=$8, estado=$9, updated_at = now()
-      WHERE id_equipo=$10 RETURNING *
+      UPDATE public.equipment_models
+      SET code=$1, name=$2, manufacturer=$3, model=$4, category_type=$5, capacity_per_hour=$6,
+          max_daily_capacity=$7, base_price=$8, status=$9, updated_at = now()
+      WHERE id=$10 RETURNING *
     `;
 
     const { rows } = await db.query(updateQuery, [
@@ -125,7 +143,7 @@ async function update(req, res) {
     ]);
 
     if (!rows.length) return res.status(404).json({ ok: false, message: "Equipo no encontrado" });
-    res.json({ ok: true, data: rows[0] });
+    res.json({ ok: true, data: mapEquipmentModelRecord(rows[0]) });
   } catch (error) {
     logger.error(error);
     res.status(500).json({ ok: false, message: "Error actualizando equipo" });
@@ -143,7 +161,7 @@ async function updateFormula(req, res) {
     }
 
     const existing = await db.query(
-      `SELECT id_equipo, default_calculation_formula FROM servicio.equipos WHERE id_equipo = $1`,
+      `SELECT id, default_calculation_formula FROM public.equipment_models WHERE id = $1`,
       [req.params.id],
     );
     if (!existing.rows.length) return res.status(404).json({ ok: false, message: "Equipo no encontrado" });
@@ -152,11 +170,11 @@ async function updateFormula(req, res) {
     const updatedFormula = { ...currentFormula, [value.calculationType]: value.formula };
 
     const { rows } = await db.query(
-      `UPDATE servicio.equipos SET default_calculation_formula = $1, updated_at = now() WHERE id_equipo = $2 RETURNING *`,
+      `UPDATE public.equipment_models SET default_calculation_formula = $1, updated_at = now() WHERE id = $2 RETURNING *`,
       [JSON.stringify(updatedFormula), req.params.id],
     );
 
-    res.json({ ok: true, data: rows[0], validation });
+    res.json({ ok: true, data: mapEquipmentModelRecord(rows[0]), validation });
   } catch (error) {
     logger.error(error);
     res.status(500).json({ ok: false, message: "Error actualizando fórmula del equipo" });

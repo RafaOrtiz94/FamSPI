@@ -191,12 +191,34 @@ const updateDisponibilidadTecnico = async (req, res) => {
 // ===============================================================
 // ⚙️ EQUIPOS
 // ===============================================================
+const mapEquipmentRow = (row) => ({
+  id_equipo: row.id ?? row.id_equipo,
+  code: row.code,
+  nombre: row.name ?? row.nombre,
+  fabricante: row.manufacturer ?? row.fabricante,
+  modelo: row.model ?? row.modelo,
+  categoria: row.category ?? row.categoria,
+  category_type: row.category_type,
+  descripcion: row.description ?? row.descripcion,
+  estado: row.status ?? row.estado,
+  ubicacion_actual: row.default_location ?? row.ubicacion_actual,
+  capacity_per_hour: row.capacity_per_hour,
+  max_daily_capacity: row.max_daily_capacity,
+  base_price: row.base_price,
+  maintenance_cost: row.maintenance_cost,
+  technical_specs: row.technical_specs,
+  default_calculation_formula: row.default_calculation_formula,
+  metadata: row.metadata,
+  created_at: row.created_at,
+  updated_at: row.updated_at,
+});
+
 const getEquipos = async (req, res) => {
   try {
     const { rows } = await db.query(`
-      SELECT * FROM servicio.equipos ORDER BY nombre ASC;
+      SELECT * FROM public.equipment_models ORDER BY name ASC;
     `);
-    res.json(rows);
+    res.json(rows.map(mapEquipmentRow));
   } catch (err) {
     console.error("❌ Error al listar equipos:", err);
     res.status(500).json({ error: "Error al listar equipos" });
@@ -206,24 +228,51 @@ const getEquipos = async (req, res) => {
 const createEquipo = async (req, res) => {
   try {
     const {
+      code,
       nombre,
       modelo,
       fabricante,
       categoria,
+      description,
       descripcion,
       serie,
       ubicacion_actual,
       fecha_instalacion,
       estado,
+      capacity_per_hour,
+      max_daily_capacity,
+      base_price,
     } = req.body;
 
-    const { rows } = await db.query(
-      `INSERT INTO servicio.equipos 
-       (nombre, modelo, fabricante, categoria, descripcion, serie, ubicacion_actual, fecha_instalacion, estado)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *;`,
-      [nombre, modelo, fabricante, categoria, descripcion, serie, ubicacion_actual, fecha_instalacion, estado]
+    const metadata = {};
+    if (serie) metadata.serie = serie;
+    if (fecha_instalacion) metadata.fecha_instalacion = fecha_instalacion;
+    if (categoria) metadata.categoria = categoria;
+
+    const { rows } = await db.query(`
+      INSERT INTO public.equipment_models
+       (code, name, model, manufacturer, category, category_type, description, status, default_location,
+        capacity_per_hour, max_daily_capacity, base_price, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING *;
+    `,
+      [
+        code ?? null,
+        nombre,
+        modelo,
+        fabricante,
+        categoria ?? null,
+        req.body.category_type ?? null,
+        description ?? descripcion ?? null,
+        estado ?? "operativo",
+        ubicacion_actual ?? null,
+        capacity_per_hour ?? null,
+        max_daily_capacity ?? null,
+        base_price ?? null,
+        Object.keys(metadata).length ? metadata : null,
+      ]
     );
-    res.status(201).json(rows[0]);
+    res.status(201).json(mapEquipmentRow(rows[0]));
   } catch (err) {
     console.error("❌ Error creando equipo:", err);
     res.status(500).json({ error: "Error al crear equipo" });
@@ -238,11 +287,11 @@ const getMantenimientos = async (req, res) => {
     const { rows } = await db.query(`
       SELECT 
         m.*, 
-        e.nombre AS equipo_nombre,
-        e.fabricante,
-        e.categoria
+        e.name AS equipo_nombre,
+        e.manufacturer AS fabricante,
+        e.category AS categoria
       FROM servicio.cronograma_mantenimientos m
-      JOIN servicio.equipos e ON e.id_equipo = m.id_equipo
+      JOIN public.equipment_models e ON e.id = m.id_equipo
       ORDER BY fecha_programada DESC;
     `);
     res.json(rows);
@@ -260,10 +309,10 @@ const getMantenimientosAnuales = async (req, res) => {
     const { rows } = await db.query(`
       SELECT 
         ma.*, 
-        e.nombre AS equipo_nombre,
-        e.fabricante
+        e.name AS equipo_nombre,
+        e.manufacturer AS fabricante
       FROM servicio.cronograma_mantenimientos_anuales ma
-      JOIN servicio.equipos e ON e.id_equipo = ma.id_equipo
+      JOIN public.equipment_models e ON e.id = ma.id_equipo
       ORDER BY fecha_programada;
     `);
     res.json(rows);
