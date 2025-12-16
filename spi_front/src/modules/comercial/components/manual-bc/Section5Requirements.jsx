@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { FiClock, FiCalendar } from 'react-icons/fi';
 
 const Section5Requirements = ({ data, updateData }) => {
@@ -34,7 +34,7 @@ const Section5Requirements = ({ data, updateData }) => {
 
                 <label className="flex flex-col gap-1">
                     <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                        <FiCalendar /> Proyección de Plazo (meses) *
+                        <FiCalendar /> ProyecciÃ³n de Plazo (meses) *
                     </span>
                     <input
                         type="number"
@@ -44,14 +44,14 @@ const Section5Requirements = ({ data, updateData }) => {
                         className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                         placeholder="12"
                     />
-                    <p className="text-xs text-gray-500">Proyección estimada del plazo real</p>
+                    <p className="text-xs text-gray-500">ProyecciÃ³n estimada del plazo real</p>
                 </label>
             </div>
 
             <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
                 <p className="text-sm text-blue-900">
-                    <strong>Nota:</strong> El plazo se refiere al tiempo estimado para la implementación completa del Business Case,
-                    desde la aprobación hasta la puesta en marcha del equipo.
+                    <strong>Nota:</strong> El plazo se refiere al tiempo estimado para la implementaciÃ³n completa del Business Case,
+                    desde la aprobaciÃ³n hasta la puesta en marcha del equipo.
                 </p>
             </div>
         </div>
@@ -59,3 +59,4 @@ const Section5Requirements = ({ data, updateData }) => {
 };
 
 export default Section5Requirements;
+

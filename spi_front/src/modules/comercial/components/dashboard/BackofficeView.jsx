@@ -99,6 +99,8 @@ const BackofficeView = ({ onRefresh }) => {
         }
       />
 
+      {/* Permisos y vacaciones se gestionan desde la seccion dedicada en la barra de navegacion */}
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {cards.map((card) => (
           <Card

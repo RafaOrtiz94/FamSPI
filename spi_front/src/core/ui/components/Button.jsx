@@ -46,10 +46,12 @@ const Button = ({
   rightIcon,
   size = "md",
   loading = false,
+  isLoading = false,
   disabled = false,
   ...rest
 }) => {
-  const isDisabled = disabled || loading;
+  const effectiveLoading = loading || isLoading;
+  const isDisabled = disabled || effectiveLoading;
   const leading = leftIcon || icon;
   const trailing = rightIcon || trailingIcon;
 
@@ -58,7 +60,7 @@ const Button = ({
       type={type}
       onClick={onClick}
       disabled={isDisabled}
-      aria-busy={loading}
+      aria-busy={effectiveLoading}
       className={clsx(
         "inline-flex items-center gap-2 font-semibold tracking-tight transition focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent disabled:opacity-60 disabled:cursor-not-allowed",
         sizeClasses[size] || sizeClasses.md,
@@ -68,7 +70,7 @@ const Button = ({
       {...rest}
     >
       {leading ? <span className="text-base">{renderIcon(leading)}</span> : null}
-      <span>{loading ? "Procesando..." : children}</span>
+      <span>{effectiveLoading ? "Procesando..." : children}</span>
       {trailing ? <span className="text-base">{renderIcon(trailing)}</span> : null}
     </button>
   );

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi";
 import Step1ClientData from "../components/wizard/Step1ClientData";
 import Step2LabData from "../components/wizard/Step2LabData";
@@ -186,6 +187,7 @@ const Navigation = ({ onPrev, onNext, disablePrev, disableNext, nextLabel = "Sig
 const BusinessCaseWizard = () => {
   const { currentStep, setCurrentStep, state, clearDraft } = useBusinessCaseWizard();
   const { user } = useAuth(); // Get current user role
+  const navigate = useNavigate();
   const steps = useMemo(() => getStepsForRole(user?.role), [user?.role]);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const goPrev = () => setCurrentStep((prev) => Math.max(0, prev - 1));
@@ -199,11 +201,15 @@ const BusinessCaseWizard = () => {
   }, [steps, currentStep, setCurrentStep]);
 
   const handleCommercialFinish = async () => {
+    const bcId = state.businessCaseId;
     try {
-      // Logic handled inside Step3EquipmentAndLis, just need to redirect here or show success
       showToast("Proceso finalizado. Pendiente de revisión.", "success");
       clearDraft();
-      // Redirect to list ideally
+      if (bcId) {
+        navigate(`/dashboard/business-case/${bcId}/view`, { replace: true });
+      } else {
+        navigate("/dashboard/business-case", { replace: true });
+      }
     } catch (e) { console.error(e) }
   };
 

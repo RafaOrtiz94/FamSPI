@@ -25,6 +25,8 @@ import {
 const STATUS_DEFINITIONS = [
   { value: "pending_commercial", label: "Pendiente comercial", accent: "bg-blue-50 text-blue-700" },
   { value: "pending_backoffice", label: "Pendiente backoffice", accent: "bg-yellow-50 text-yellow-700" },
+  { value: "pending_manager_signature", label: "Pendiente firma jefe", accent: "bg-indigo-50 text-indigo-700" },
+  { value: "pending_client_signature", label: "Pendiente firma cliente", accent: "bg-teal-50 text-teal-700" },
   { value: "offer_sent", label: "Oferta enviada", accent: "bg-indigo-50 text-indigo-700" },
   { value: "offer_signed", label: "Oferta firmada", accent: "bg-green-50 text-green-700" },
   { value: "client_registered", label: "Cliente registrado", accent: "bg-teal-50 text-teal-700" },
@@ -55,12 +57,7 @@ const PrivatePurchasesPage = () => {
   const [offerModal, setOfferModal] = useState({
     open: false,
     loading: false,
-  });
-  const [offerForm, setOfferForm] = useState({
-    template_id: "",
-    folder_id: "",
-    document_id: "",
-    data: "",
+    file: null,
   });
   const [signedModal, setSignedModal] = useState({
     open: false,
@@ -70,7 +67,19 @@ const PrivatePurchasesPage = () => {
   const [processingAction, setProcessingAction] = useState(null);
   const { role, user } = useAuth();
   const normalizedRole = (role || user?.role || user?.role_name || user?.scope || "").toLowerCase();
+  const normalizedScope = (user?.scope || "").toLowerCase();
   const isBackofficeUser = normalizedRole.includes("backoffice");
+  const isAcpUser = normalizedRole.includes("acp_comercial");
+  const isManagerUser =
+    normalizedRole.includes("gerencia") ||
+    normalizedRole.includes("jefe_comercial");
+  const isPureCommercial =
+    !isBackofficeUser &&
+    !isManagerUser &&
+    !isAcpUser &&
+    (normalizedRole.startsWith("comercial") || normalizedScope.startsWith("comercial"));
+  const canManageRequests = isBackofficeUser || isManagerUser || isAcpUser;
+  const canViewRequests = canManageRequests || isPureCommercial;
 
   const privatePurchasesFetcher = useCallback(
     (params) => listPrivatePurchases(params),
@@ -82,7 +91,7 @@ const PrivatePurchasesPage = () => {
     { errorMsg: "No se pudo cargar las solicitudes privadas" },
   );
 
-  const requests = isBackofficeUser ? data?.rows || data || [] : [];
+  const requests = canViewRequests ? data?.rows || data || [] : [];
 
   const selectedRequest = useMemo(
     () => requests.find((req) => req.id === selectedId) || null,
@@ -98,11 +107,11 @@ const PrivatePurchasesPage = () => {
   const handleDetailClose = () => setDetailModalRequest(null);
 
   useEffect(() => {
-    if (!isBackofficeUser) return;
+    if (!canViewRequests) return;
     fetchPrivatePurchases({
       status: statusFilter !== "all" ? statusFilter : undefined,
     });
-  }, [fetchPrivatePurchases, statusFilter, isBackofficeUser]);
+  }, [fetchPrivatePurchases, statusFilter, canViewRequests]);
 
   useEffect(() => {
     if (!requests.length) {
@@ -126,35 +135,44 @@ const PrivatePurchasesPage = () => {
     return counts;
   }, [requests]);
 
+  const buildUnsignedFolderPath = () => {
+    const commercial =
+      selectedRequest?.created_by_email ||
+      selectedRequest?.created_by ||
+      user?.email ||
+      "comercial";
+    const client = selectedRequest?.client_snapshot?.commercial_name || "cliente";
+    return `/Ofertas Sin Firmar/${commercial}/${client}`;
+  };
+
   const handleOfferSubmit = async () => {
     if (!selectedRequest) return;
-    if (!offerForm.template_id && !offerForm.document_id) {
-      showToast("Ingresa un Template ID o Document ID", "warning");
+    if (!offerModal.file) {
+      showToast("Selecciona un archivo de oferta", "warning");
       return;
-    }
-
-    let payload = {
-      template_id: offerForm.template_id || undefined,
-      folder_id: offerForm.folder_id || undefined,
-      document_id: offerForm.document_id || undefined,
-      data: undefined,
-    };
-
-    if (offerForm.data.trim()) {
-      try {
-        payload.data = JSON.parse(offerForm.data);
-      } catch (error) {
-        showToast("El JSON de datos no es válido", "error");
-        return;
-      }
     }
 
     setOfferModal((prev) => ({ ...prev, loading: true }));
     try {
-      await sendPrivatePurchaseOffer(selectedRequest.id, payload);
-      showToast("Oferta registrada", "success");
-      setOfferModal({ open: false, loading: false });
-      setOfferForm({ template_id: "", folder_id: "", document_id: "", data: "" });
+      const base64 = await fileToBase64(offerModal.file);
+      if (!base64 || !base64.includes(",")) {
+        showToast("No se pudo leer el archivo, intenta nuevamente", "error");
+        setOfferModal((prev) => ({ ...prev, loading: false }));
+        return;
+      }
+      const base64payload = base64.split(",")[1];
+      if (!base64payload || !base64payload.trim()) {
+        showToast("El archivo de oferta estヌ vacヌo o no se pudo procesar", "error");
+        setOfferModal((prev) => ({ ...prev, loading: false }));
+        return;
+      }
+      await sendPrivatePurchaseOffer(selectedRequest.id, {
+        offer_base64: base64payload,
+        file_name: offerModal.file.name,
+        folder_path: buildUnsignedFolderPath(),
+      });
+      showToast("Oferta registrada y enviada", "success");
+      setOfferModal({ open: false, loading: false, file: null });
       fetchPrivatePurchases({
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
@@ -166,11 +184,24 @@ const PrivatePurchasesPage = () => {
   };
 
   const handleSignedUpload = async () => {
-    if (!selectedRequest || !signedModal.file) return;
+    if (!selectedRequest || !signedModal.file) {
+      showToast("Selecciona un archivo firmado", "warning");
+      return;
+    }
     setSignedModal((prev) => ({ ...prev, loading: true }));
     try {
       const base64 = await fileToBase64(signedModal.file);
+      if (!base64 || !base64.includes(",")) {
+        showToast("No se pudo leer el archivo, intenta nuevamente", "error");
+        setSignedModal((prev) => ({ ...prev, loading: false }));
+        return;
+      }
       const base64payload = base64.split(",")[1];
+      if (!base64payload || !base64payload.trim()) {
+        showToast("El archivo estヌ vacヌo o no se pudo procesar", "error");
+        setSignedModal((prev) => ({ ...prev, loading: false }));
+        return;
+      }
       await uploadPrivateSignedOffer(selectedRequest.id, {
         signed_offer_base64: base64payload,
         file_name: signedModal.file.name,
@@ -199,6 +230,23 @@ const PrivatePurchasesPage = () => {
     } catch (error) {
       console.error(error);
       showToast("No se pudo registrar el cliente", "error");
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleManagerReject = async () => {
+    if (!selectedRequest) return;
+    setProcessingAction({ id: selectedRequest.id, type: "reject" });
+    try {
+      await uploadPrivateSignedOffer(selectedRequest.id, { decision: "reject" });
+      showToast("Oferta rechazada", "success");
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo rechazar la oferta", "error");
     } finally {
       setProcessingAction(null);
     }
@@ -417,7 +465,7 @@ const PrivatePurchasesPage = () => {
                     <FiSend /> Enviar oferta
                   </Button>
                 )}
-                {selectedRequest.status === "offer_sent" && (
+                {(selectedRequest.status === "offer_sent" || selectedRequest.status === "pending_manager_signature") && (
                   <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
                     <FiUpload /> Registrar oferta firmada
                   </Button>
@@ -441,9 +489,43 @@ const PrivatePurchasesPage = () => {
                   </Button>
                 )}
               </div>
+            ) : isManagerUser ? (
+              <div className="flex flex-wrap gap-2">
+                {(selectedRequest.status === "pending_manager_signature" ||
+                  selectedRequest.status === "pending_client_signature") && (
+                  <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
+                    <FiUpload /> Aprobar y firmar
+                  </Button>
+                )}
+                {selectedRequest.status === "pending_manager_signature" && (
+                  <Button
+                    variant="danger"
+                    onClick={handleManagerReject}
+                    loading={processingAction?.type === "reject" && processingAction?.id === selectedRequest.id}
+                  >
+                    Rechazar
+                  </Button>
+                )}
+                {selectedRequest.status === "pending_client_signature" && (
+                  <p className="text-xs text-gray-500">Pendiente de firma de cliente.</p>
+                )}
+              </div>
+            ) : isPureCommercial ? (
+              <div className="flex flex-wrap gap-2">
+                {selectedRequest.status === "pending_client_signature" && (
+                  <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
+                    <FiUpload /> Subir firma del cliente
+                  </Button>
+                )}
+                {selectedRequest.status !== "pending_client_signature" && (
+                  <p className="text-xs text-gray-500">
+                    Espera la aprobaci&oacute;n de backoffice y jefe comercial antes de subir la firma del cliente.
+                  </p>
+                )}
+              </div>
             ) : (
               <p className="text-xs text-gray-500">
-                Este panel solo muestra el estado de la solicitud; Backoffice completará los siguientes pasos.
+                Este panel solo muestra el estado de la solicitud; Backoffice completar&aacute; los siguientes pasos.
               </p>
             )}
           </div>
@@ -454,66 +536,41 @@ const PrivatePurchasesPage = () => {
 
       <Modal
         open={offerModal.open}
-        onClose={() => setOfferModal({ open: false, loading: false })}
+        onClose={() => setOfferModal({ open: false, loading: false, file: null })}
         title="Enviar oferta"
         maxWidth="max-w-2xl"
       >
         <div className="space-y-3">
           <p className="text-xs text-gray-500">
-            Puedes usar una plantilla existente (template_id) o enlazar un documento creado (document_id).
+            Sube el documento de oferta sin firma de cliente. Se guardará en Drive en{" "}
+            <span className="font-semibold">/Ofertas Sin Firmar/&lt;comercial&gt;/&lt;cliente&gt;</span> y se notificará a comercial/jefe.
           </p>
-          <div className="grid gap-3 md:grid-cols-2">
-            <label className="text-sm font-semibold text-gray-700">
-              Template ID
-              <input
-                value={offerForm.template_id}
-                onChange={(event) =>
-                  setOfferForm((prev) => ({ ...prev, template_id: event.target.value }))
-                }
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
-            <label className="text-sm font-semibold text-gray-700">
-              Document ID existente
-              <input
-                value={offerForm.document_id}
-                onChange={(event) =>
-                  setOfferForm((prev) => ({ ...prev, document_id: event.target.value }))
-                }
-                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
-            </label>
+          <div className="text-[11px] text-gray-500">
+            Ruta destino: <span className="font-mono">{buildUnsignedFolderPath()}</span>
           </div>
-          <label className="text-sm font-semibold text-gray-700">
-            Folder ID (opcional)
+          <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
+            Archivo de oferta (PDF, PNG o JPG)
             <input
-              value={offerForm.folder_id}
+              type="file"
+              accept=".pdf,.png,.jpg,.jpeg"
               onChange={(event) =>
-                setOfferForm((prev) => ({ ...prev, folder_id: event.target.value }))
+                setOfferModal((prev) => ({
+                  ...prev,
+                  file: event.target.files?.[0] || null,
+                }))
               }
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-            />
-          </label>
-          <label className="text-sm font-semibold text-gray-700">
-            Datos (JSON) para reemplazar etiquetas en el documento
-            <textarea
-              value={offerForm.data}
-              onChange={(event) =>
-                setOfferForm((prev) => ({ ...prev, data: event.target.value }))
-              }
-              placeholder='{"cliente":"ACME","fecha":"2025-10-01"}'
-              rows={4}
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              className="mt-1 cursor-pointer rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-xs text-gray-600"
             />
           </label>
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setOfferModal({ open: false, loading: false })}>
+            <Button variant="secondary" onClick={() => setOfferModal({ open: false, loading: false, file: null })}>
               Cancelar
             </Button>
             <Button
               variant="primary"
               onClick={handleOfferSubmit}
               loading={offerModal.loading}
+              disabled={!offerModal.file}
             >
               Guardar oferta
             </Button>
@@ -528,9 +585,11 @@ const PrivatePurchasesPage = () => {
         maxWidth="max-w-lg"
       >
         <div className="space-y-4 text-sm text-gray-700">
-          <p className="text-xs text-gray-500">
-            Adjunta el documento firmado para adjuntarlo a la solicitud y notificará automáticamente.
-          </p>
+            <p className="text-xs text-gray-500">
+              {isManagerUser
+                ? "Adjunta el documento firmado por jefe comercial para pasar a la firma del cliente."
+                : "Adjunta el documento firmado por el cliente para cerrar el flujo interno."}
+            </p>
           <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
             Selecciona archivo (PDF, PNG o JPG)
             <input
@@ -684,9 +743,10 @@ const PrivatePurchasesPage = () => {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              {(detailModalRequest.status === "pending_commercial" ||
-                detailModalRequest.status === "pending_backoffice" ||
-                detailModalRequest.status === "rejected") && (
+              {isBackofficeUser &&
+                (detailModalRequest.status === "pending_commercial" ||
+                  detailModalRequest.status === "pending_backoffice" ||
+                  detailModalRequest.status === "rejected") && (
                 <Button
                   variant="primary"
                   size="sm"
@@ -695,16 +755,28 @@ const PrivatePurchasesPage = () => {
                   <FiSend /> Enviar oferta
                 </Button>
               )}
-              {detailModalRequest.status === "offer_sent" && (
-                <Button
-                  variant="success"
-                  size="sm"
-                  onClick={() => setSignedModal({ open: true, loading: false, file: null })}
-                >
-                  <FiUpload /> Registrar oferta firmada
-                </Button>
+              {isManagerUser &&
+                (detailModalRequest.status === "pending_manager_signature" ||
+                  detailModalRequest.status === "pending_client_signature") && (
+                <>
+                  <Button
+                    variant="success"
+                    size="sm"
+                    onClick={() => setSignedModal({ open: true, loading: false, file: null })}
+                  >
+                    <FiUpload /> Aprobar y firmar
+                  </Button>
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={handleManagerReject}
+                    loading={processingAction?.type === "reject" && processingAction?.id === detailModalRequest.id}
+                  >
+                    Rechazar
+                  </Button>
+                </>
               )}
-              {detailModalRequest.status === "offer_signed" && (
+              {isBackofficeUser && detailModalRequest.status === "offer_signed" && (
                 <Button
                   variant="secondary"
                   size="sm"
@@ -714,7 +786,7 @@ const PrivatePurchasesPage = () => {
                   <FiUsers /> Registrar cliente
                 </Button>
               )}
-              {detailModalRequest.status === "client_registered" && (
+              {isBackofficeUser && detailModalRequest.status === "client_registered" && (
                 <Button
                   variant="outline"
                   size="sm"

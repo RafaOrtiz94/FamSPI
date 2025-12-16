@@ -1,11 +1,11 @@
-import React, { useState } from "react";
+﻿import React, { useState } from "react";
 import Card from "../../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
 import PersonnelRequestForm from "../../../../core/ui/widgets/PersonnelRequestForm";
 
 const JefeComercialView = ({ onRefresh }) => {
-    const [showPersonnelForm, setShowPersonnelForm] = useState(false);
+  const [showPersonnelForm, setShowPersonnelForm] = useState(false);
 
     return (
         <>
@@ -14,7 +14,7 @@ const JefeComercialView = ({ onRefresh }) => {
             =============================== */}
             <DashboardHeader
                 title="Dashboard Gerencia Comercial"
-                subtitle="Gestión y seguimiento del talento humano en el área comercial."
+                subtitle="GestiÃ³n y seguimiento del talento humano en el Ã¡rea comercial."
                 actions={
                     <button
                         onClick={onRefresh}
@@ -23,11 +23,11 @@ const JefeComercialView = ({ onRefresh }) => {
                         Actualizar
                     </button>
                 }
-            />
+      />
 
-            {/* ==============================
-                SOLICITUDES DE PERSONAL
-            =============================== */}
+      {/* ==============================
+          SOLICITUDES DE PERSONAL
+      =============================== */}
             <section className="mt-6">
                 <Card className="p-6">
                     <PersonnelRequestWidget
@@ -36,20 +36,21 @@ const JefeComercialView = ({ onRefresh }) => {
                 </Card>
             </section>
 
-            {/* ==============================
-                MODAL: FORMULARIO SOLICITUD PERSONAL
-            =============================== */}
-            {showPersonnelForm && (
-                <PersonnelRequestForm
+      {/* ==============================
+          MODAL: FORMULARIO SOLICITUD PERSONAL
+      =============================== */}
+      {showPersonnelForm && (
+        <PersonnelRequestForm
                     onClose={() => setShowPersonnelForm(false)}
                     onSuccess={() => {
                         setShowPersonnelForm(false);
                         onRefresh?.();
                     }}
-                />
-            )}
-        </>
-    );
+        />
+      )}
+
+    </>
+  );
 };
 
 export default JefeComercialView;

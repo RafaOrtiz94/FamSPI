@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { FiCpu, FiImage, FiMapPin } from 'react-icons/fi';
 import api from '../../../../core/api';
 
@@ -20,7 +20,7 @@ const Section3Equipment = ({ data, updateData }) => {
                         : [];
                 setEquipment(parsedEquipment);
             } catch (err) {
-                console.warn('No se pudo cargar el catálogo', err.message);
+                console.warn('No se pudo cargar el catÃ¡logo', err.message);
             } finally {
                 setLoadingEquipment(false);
             }
@@ -131,7 +131,7 @@ const Section3Equipment = ({ data, updateData }) => {
                     </label>
 
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium text-purple-900">Año de Fabricación</span>
+                        <span className="text-sm font-medium text-purple-900">AÃ±o de FabricaciÃ³n</span>
                         <input
                             type="number"
                             min="1900"
@@ -155,18 +155,18 @@ const Section3Equipment = ({ data, updateData }) => {
                 </div>
             </div>
 
-            {/* Ubicación y Opciones */}
+            {/* UbicaciÃ³n y Opciones */}
             <div className="space-y-4">
                 <label className="flex flex-col gap-1">
                     <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                        <FiMapPin /> Ubicación de Instalación
+                        <FiMapPin /> UbicaciÃ³n de InstalaciÃ³n
                     </span>
                     <textarea
                         rows={2}
                         value={equipData.installation_location}
                         onChange={(e) => handleChange('installation_location', e.target.value)}
                         className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                        placeholder="Dirección o ubicación específica..."
+                        placeholder="DirecciÃ³n o ubicaciÃ³n especÃ­fica..."
                     />
                 </label>
 
@@ -194,7 +194,7 @@ const Section3Equipment = ({ data, updateData }) => {
 
                 {equipData.requires_complementary && (
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium text-gray-700">¿Para qué prueba?</span>
+                        <span className="text-sm font-medium text-gray-700">Â¿Para quÃ© prueba?</span>
                         <input
                             type="text"
                             value={equipData.complementary_test_purpose}
@@ -210,3 +210,4 @@ const Section3Equipment = ({ data, updateData }) => {
 };
 
 export default Section3Equipment;
+

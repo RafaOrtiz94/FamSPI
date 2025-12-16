@@ -268,7 +268,7 @@ const clockOut = async (req, res) => {
 };
 
 /**
- * ⚠️ Register Exception (Salida Inesperada)
+ * ⚠️ Register Exception (Salida Inesperada - Step 1/4)
  * POST /api/attendance/exception
  * Body: { type, description, location }
  */
@@ -284,20 +284,38 @@ const registerException = async (req, res) => {
       return res.status(400).json({ ok: false, message: "Tipo y descripción requeridos" });
     }
 
+    // Check if there is already an active exception
+    const active = await db.query(
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
+      [userId]
+    );
+
+    if (active.rows.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya tienes una salida en curso. Complétala antes de iniciar otra."
+      });
+    }
+
+    // Step 1: Start (Exit Office)
     const result = await db.query(
       `
-      INSERT INTO attendance_exceptions (user_id, date, type, description, location, timestamp)
-      VALUES ($1, CURRENT_DATE, $2, $3, $4, NOW())
+      INSERT INTO attendance_exceptions (
+        user_id, date, type, description, 
+        start_time, start_location, 
+        status
+      )
+      VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $4, 'ACTIVE')
       RETURNING *;
       `,
       [userId, type, description, location || null]
     );
 
-    logger.info(`[ATTENDANCE] Exception: ${email} - ${type}`);
+    logger.info(`[ATTENDANCE] Exception Start: ${email} - ${type}`);
 
     return res.status(200).json({
       ok: true,
-      message: "Excepción registrada correctamente",
+      message: "Salida registrada. Notifica cuando llegues a tu destino.",
       data: result.rows[0],
     });
   } catch (err) {
@@ -306,6 +324,96 @@ const registerException = async (req, res) => {
       ok: false,
       message: "Error registrando excepción",
     });
+  }
+};
+
+/**
+ * 🔄 Update Exception Status (Steps 2, 3, 4)
+ * POST /api/attendance/exception/status
+ * Body: { status, location }
+ * Status: 'ON_SITE' (Llegada), 'RETURNING' (Salida Destino), 'COMPLETED' (Regreso Oficina)
+ */
+const updateExceptionStatus = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { status, location } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    // Get active exception
+    const active = await db.query(
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+
+    if (active.rows.length === 0) {
+      return res.status(404).json({ ok: false, message: "No tieens ninguna salida en curso" });
+    }
+
+    const exceptionId = active.rows[0].id;
+    let updateQuery = "";
+    let params = [];
+    let message = "";
+
+    if (status === 'ON_SITE') {
+      // Step 2: Arrival at Destination
+      updateQuery = "UPDATE attendance_exceptions SET status = 'ON_SITE', arrival_time = NOW(), arrival_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Llegada registrada. Notifica cuando salgas del destino.";
+    } else if (status === 'RETURNING') {
+      // Step 3: Leaving Destination
+      updateQuery = "UPDATE attendance_exceptions SET status = 'RETURNING', departure_time = NOW(), departure_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Salida de destino registrada. Notifica cuando regreses a la oficina.";
+    } else if (status === 'COMPLETED') {
+      // Step 4: Back at Office
+      updateQuery = "UPDATE attendance_exceptions SET status = 'COMPLETED', return_time = NOW(), return_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Regreso a oficina registrado. Ciclo completado.";
+    } else {
+      return res.status(400).json({ ok: false, message: "Estado inválido" });
+    }
+
+    await db.query(updateQuery, params);
+
+    // Fetch updated record
+    const updated = await db.query("SELECT * FROM attendance_exceptions WHERE id = $1", [exceptionId]);
+
+    logger.info(`[ATTENDANCE] Exception Update: ${email} - ${status}`);
+
+    return res.status(200).json({
+      ok: true,
+      message,
+      data: updated.rows[0]
+    });
+
+  } catch (err) {
+    logger.error({ err }, "❌ Error en update-exception");
+    return res.status(500).json({ ok: false, message: "Error actualizando estado de excepción" });
+  }
+};
+
+/**
+ * 🔍 Get Active Exception
+ * GET /api/attendance/exception/active
+ */
+const getActiveException = async (req, res) => {
+  try {
+    const { id: userId } = req.user || {};
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const result = await db.query(
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows[0] || null
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error getting active exception");
+    return res.status(500).json({ ok: false, message: "Error" });
   }
 };
 
@@ -442,6 +550,8 @@ module.exports = {
   clockInLunch,
   clockOut,
   registerException,
+  updateExceptionStatus,
+  getActiveException,
   getToday,
   getUserAttendance,
   getRange,

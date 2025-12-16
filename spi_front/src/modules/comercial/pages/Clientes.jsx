@@ -22,6 +22,7 @@ import {
   endClientVisit,
   fetchClients,
   startClientVisit,
+  registerProspectVisit
 } from "../../../core/api/clientsApi";
 import { getUsers } from "../../../core/api/usersApi";
 import ClientApprovalsWidget from "../../backoffice/components/ClientApprovalsWidget";
@@ -150,24 +151,41 @@ const ClientesPage = () => {
         return [];
       }
     }
-    // Si es número, null, undefined, objeto, etc., devolver array vacío
     return [];
   };
 
   const captureLocation = () =>
     new Promise((resolve, reject) => {
       if (typeof navigator === "undefined" || !navigator.geolocation) {
+        console.error("DEBUG: Navigator o geolocation no existen");
+        showToast("Geolocalización no soportada", "error");
         reject(new Error("La geolocalización no está disponible"));
         return;
       }
 
+      console.log("DEBUG: Iniciando captureLocation...");
+      console.log("DEBUG: Configuración -> Timeout: 30000ms, MaxAge: 300000ms, HighAccuracy: true");
+      showToast("Obteniendo ubicación...", "info");
+
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          const { latitude, longitude } = pos.coords;
+          const { latitude, longitude, accuracy } = pos.coords;
+          console.log(`DEBUG: Ubicación obtenida! Lat: ${latitude}, Lng: ${longitude}, Acc: ${accuracy}m`);
           resolve({ latitude, longitude });
         },
-        (err) => reject(err),
-        { enableHighAccuracy: true, timeout: 10000 },
+        (err) => {
+          console.error("DEBUG: Error en getCurrentPosition:", err);
+          console.error(`DEBUG: Error Code: ${err.code}, Message: ${err.message}`);
+
+          let msg = "No se pudo obtener la ubicación.";
+          if (err.code === 1) msg = "Permiso denegado. Habilita la ubicación.";
+          if (err.code === 2) msg = "Señal GPS débil o no disponible.";
+          if (err.code === 3) msg = "Tiempo de espera agotado (30s). Intenta en exteriores.";
+
+          showToast(msg, "warning");
+          reject(new Error(msg));
+        },
+        { enableHighAccuracy: true, timeout: 30000, maximumAge: 300000 }
       );
     });
 
@@ -191,19 +209,52 @@ const ClientesPage = () => {
         include_schedule_info: true,
         filter_by_schedule: filterBySchedule,
       });
+
+      let loadedClients = [];
+      let loadedProspects = [];
+      let loadedSummary = {};
+
       if (Array.isArray(result)) {
-        setClientes(result);
-        setSummary({});
+        loadedClients = result;
       } else {
-        setClientes(Array.isArray(result?.clients) ? result.clients : []);
-        setSummary(result?.summary || {});
-        if (filterBySchedule && !result?.summary?.has_approved_schedule) {
-          showToast(
-            "No tienes un cronograma aprobado para este mes. Mostrando todos los clientes.",
-            "info",
-          );
-        }
+        loadedClients = Array.isArray(result?.clients) ? result.clients : [];
+        // Map prospects to client-like structure
+        loadedProspects = (Array.isArray(result?.prospects) ? result.prospects : []).map(p => ({
+          ...p,
+          id: p.id, // Keep original ID, handled by different API call
+          nombre: p.prospect_name,
+          visit_status: p.status, // 'in_visit' | 'visited'
+          identificador: "PROSPECTO",
+          shipping_address: "Ubicación registrada en visita",
+          shipping_city: "—",
+          shipping_province: "—",
+          client_type: "Prospecto",
+          is_prospect: true,
+          // Map timestamps for standard display
+          hora_entrada: p.check_in_time,
+          hora_salida: p.check_out_time,
+          lat_entrada: p.check_in_lat,
+          lng_entrada: p.check_in_lng,
+          lat_salida: p.check_out_lat,
+          lng_salida: p.check_out_lng,
+          duracion_minutos: null, // Calculate on fly or add to DB if needed
+          // Ensure they show in "assigned" and "created" filters
+          created_by: currentEmail,
+          asignados: [currentEmail]
+        }));
+        loadedSummary = result?.summary || {};
       }
+
+      setClientes([...loadedProspects, ...loadedClients]);
+      setSummary(loadedSummary);
+
+      if (filterBySchedule && !loadedSummary?.has_approved_schedule) {
+        showToast(
+          "No tienes un cronograma aprobado para este mes. Mostrando todos los clientes.",
+          "info",
+        );
+      }
+
     } catch (error) {
       console.error(error);
       showToast("No pudimos cargar tus clientes", "error");
@@ -212,7 +263,7 @@ const ClientesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterBySchedule, selectedDate, showToast]);
+  }, [filterBySchedule, selectedDate, showToast, currentEmail]);
 
   useEffect(() => {
     loadClientes();
@@ -351,22 +402,38 @@ const ClientesPage = () => {
     const payload =
       modalType === "start"
         ? {
-            hora_entrada: timestamp.toISOString(),
-            lat_entrada: coords?.latitude,
-            lng_entrada: coords?.longitude,
-            observaciones: visitModal.note,
-          }
+          hora_entrada: timestamp.toISOString(),
+          lat_entrada: coords?.latitude,
+          lng_entrada: coords?.longitude,
+          observaciones: visitModal.note,
+        }
         : {
-            hora_salida: timestamp.toISOString(),
-            lat_salida: coords?.latitude,
-            lng_salida: coords?.longitude,
-            observaciones: visitModal.note,
-          };
+          hora_salida: timestamp.toISOString(),
+          lat_salida: coords?.latitude,
+          lng_salida: coords?.longitude,
+          observaciones: visitModal.note,
+        };
 
     setSubmittingVisit(true);
     try {
-      const apiCall = modalType === "start" ? startClientVisit : endClientVisit;
-      const response = await apiCall(activeClient.id, payload);
+      let response;
+      if (activeClient.is_prospect) {
+        // Lógica para prospectos (solo checkout o update)
+        const prospectPayload = {
+          visit_id: activeClient.id,
+          check_out_time: payload.hora_salida,
+          check_out_lat: payload.lat_salida,
+          check_out_lng: payload.lng_salida,
+          observations: payload.observaciones
+        };
+        // Para prospectos, registerProspectVisit maneja upsert.
+        // Si es "start" (re-checkin?), se manejaría igual, pero asumimos "end".
+        response = await registerProspectVisit(prospectPayload);
+      } else {
+        const apiCall = modalType === "start" ? startClientVisit : endClientVisit;
+        response = await apiCall(activeClient.id, payload);
+      }
+
       const durationFromApi = response?.duracion_minutos ?? response?.data?.duracion_minutos;
 
       const updated = {
@@ -574,14 +641,19 @@ const ClientesPage = () => {
         ) : (
           <>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2 text-sm">
-                <label className="text-gray-700">Fecha</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="rounded-lg border border-gray-300 px-3 py-2"
-                />
+              <div className="flex items-center gap-2">
+                <Button variant="secondary" onClick={() => setModalType("prospect")}>
+                  Visita a Prospecto
+                </Button>
+                <div className="flex items-center gap-2 text-sm">
+                  <label className="text-gray-700">Fecha</label>
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="rounded-lg border border-gray-300 px-3 py-2"
+                  />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
@@ -644,320 +716,398 @@ const ClientesPage = () => {
         )}
       </header>
 
-      {!isBackofficeUser && (
-        <>
-          <Card className="p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check‑in/check‑out</h2>
-                <p className="text-sm text-gray-500">
-                  Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
-                </p>
-          </div>
-        </div>
-
-        {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
-            {filteredClientes.map((cliente) => renderCard(cliente))}
-          </div>
-        ) : (
-          <div className="py-10 text-center text-gray-500">
-            {loading ? "Cargando clientes..." : "No se encontraron clientes"}
-          </div>
-        )}
-          </Card>
-
-          {/* Widget: Clientes asignados / registrados por mí */}
-          <Card className="p-5 space-y-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div>
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Mis clientes de gestión diaria
-            </h2>
-            <p className="text-sm text-gray-500">
-              Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
-            </p>
-          </div>
-          <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
-            Vista solo para tu usuario
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="inline-flex rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700">
-            <button
-              type="button"
-              onClick={() => setAssignedViewFilter("assigned")}
-              className={`px-3 py-1 rounded-full transition ${
-                assignedViewFilter === "assigned"
-                  ? "bg-white shadow-sm text-gray-900"
-                  : "text-gray-500"
-              }`}
-            >
-              Asignados a mí ({Array.isArray(assignedToMe) ? assignedToMe.length : 0})
-            </button>
-            <button
-              type="button"
-              onClick={() => setAssignedViewFilter("created")}
-              className={`px-3 py-1 rounded-full transition ${
-                assignedViewFilter === "created"
-                  ? "bg-white shadow-sm text-gray-900"
-                  : "text-gray-500"
-              }`}
-            >
-              Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
-            </button>
-            <button
-              type="button"
-              onClick={() => setAssignedViewFilter("all")}
-              className={`px-3 py-1 rounded-full transition ${
-                assignedViewFilter === "all"
-                  ? "bg-white shadow-sm text-gray-900"
-                  : "text-gray-500"
-              }`}
-            >
-              Todos mis clientes ({Array.isArray(allMine) ? allMine.length : 0})
-            </button>
-          </div>
-
-          <div className="relative w-full md:max-w-xs">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <input
-              type="text"
-              placeholder="Buscar por nombre, RUC o ciudad..."
-              value={assignedSearch}
-              onChange={(e) => setAssignedSearch(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            />
-          </div>
-        </div>
-
-        {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {filteredAssignedList.map((cliente) => {
-              const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
-              const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
-              const clienteEmail = cliente.client_email || "Correo no disponible";
-              const clientTypeLabel = formatClientType(cliente.client_type);
-              const status = normalizeStatus(cliente.visit_status);
-              const meta = getStatusMeta(status);
-              return (
-                <div
-                  key={`mini-${cliente.id}`}
-                  className="flex flex-col rounded-xl border border-gray-100 bg-white/80 p-3 shadow-sm hover:shadow-md transition cursor-pointer"
-                  onClick={() => openReportModal(cliente)}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-semibold text-gray-900 line-clamp-1">
-                        {cliente.nombre}
-                      </p>
-                    </div>
-                    <span className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}>
-                      {meta.label}
-                    </span>
-                  </div>
-
-                  <div className="mt-2 space-y-1 text-[11px] text-gray-600">
-                    <p className="flex items-center gap-1">
-                      <FiMail className="h-3 w-3 text-gray-400" />
-                      <span className="truncate">{clienteEmail}</span>
-                    </p>
-                    <p className="flex items-center gap-1">
-                      <FiUser className="h-3 w-3 text-gray-400" />
-                      {clientTypeLabel}
-                    </p>
-                    <p className="flex items-center gap-1">
-                      <FiMapPin className="h-3 w-3 text-gray-400" />
-                      {provincia || "Provincia no especificada"}
-                    </p>
-                    <p className="flex items-center gap-1">
-                      <FiMapPin className="h-3 w-3 text-gray-400" />
-                      {ciudad || "Ciudad no especificada"}
-                    </p>
-                  </div>
+      {
+        !isBackofficeUser && (
+          <>
+            <Card className="p-5 space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check‑in/check‑out</h2>
+                  <p className="text-sm text-gray-500">
+                    Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            {assignedViewFilter === "assigned"
-              ? "No tienes clientes asignados que coincidan con el filtro."
-              : assignedViewFilter === "created"
-              ? "No tienes clientes registrados por ti que coincidan con el filtro."
-              : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
-          </p>
-        )}
-          </Card>
-        </>
-      )}
-
-      <Modal
-        open={modalType === "start" || modalType === "end"}
-        onClose={closeModal}
-        title={modalType === "start" ? "Confirmar inicio de visita" : "Confirmar cierre de visita"}
-        maxWidth="max-w-xl"
-      >
-        {activeClient && (
-          <div className="space-y-4 text-sm text-gray-700">
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs text-gray-500">Cliente</p>
-                <p className="text-base font-semibold text-gray-900">{activeClient.nombre}</p>
-                <p className="text-xs text-gray-500">{activeClient.shipping_contact_name}</p>
               </div>
-              <span
-                className={`px-3 py-[4px] text-xs font-semibold rounded-full ${
-                  activeStatusMeta.chip
-                }`}
-              >
-                {activeStatusMeta.label}
-              </span>
-            </div>
 
-            <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-              <p className="text-xs text-gray-500">Hora</p>
-              <p className="text-lg font-semibold text-gray-900">
-                {formatTime(visitModal.timestamp || new Date())}
-              </p>
-              <p className="mt-1 flex items-center gap-2 text-xs text-gray-600">
-                <FiNavigation className="text-blue-600" />
-                {visitModal.loadingLocation
-                  ? "Obteniendo GPS..."
-                  : visitModal.coords
-                  ? `Ubicación: ${visitModal.coords.latitude?.toFixed(5)}, ${visitModal.coords.longitude?.toFixed(5)}`
-                  : "Ubicación no disponible"}
-              </p>
-              {visitModal.error && (
-                <p className="mt-1 flex items-center gap-2 text-xs text-amber-700">
-                  <FiAlertTriangle /> {visitModal.error}
+              {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                  {filteredClientes.map((cliente) => renderCard(cliente))}
+                </div>
+              ) : (
+                <div className="py-10 text-center text-gray-500">
+                  {loading ? "Cargando clientes..." : "No se encontraron clientes"}
+                </div>
+              )}
+            </Card>
+
+            {/* Widget: Clientes asignados / registrados por mí */}
+            <Card className="p-5 space-y-4">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Mis clientes de gestión diaria
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Revisa rápidamente los clientes que tienes asignados, que tú mismo registraste o el conjunto de todos.
+                  </p>
+                </div>
+                <div className="inline-flex rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
+                  Vista solo para tu usuario
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="inline-flex rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700">
+                  <button
+                    type="button"
+                    onClick={() => setAssignedViewFilter("assigned")}
+                    className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "assigned"
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-500"
+                      }`}
+                  >
+                    Asignados a mí ({Array.isArray(assignedToMe) ? assignedToMe.length : 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignedViewFilter("created")}
+                    className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "created"
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-500"
+                      }`}
+                  >
+                    Registrados por mí ({Array.isArray(createdByMe) ? createdByMe.length : 0})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAssignedViewFilter("all")}
+                    className={`px-3 py-1 rounded-full transition ${assignedViewFilter === "all"
+                      ? "bg-white shadow-sm text-gray-900"
+                      : "text-gray-500"
+                      }`}
+                  >
+                    Todos mis clientes ({Array.isArray(allMine) ? allMine.length : 0})
+                  </button>
+                </div>
+
+                <div className="relative w-full md:max-w-xs">
+                  <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por nombre, RUC o ciudad..."
+                    value={assignedSearch}
+                    onChange={(e) => setAssignedSearch(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+
+              {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {filteredAssignedList.map((cliente) => {
+                    const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
+                    const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
+                    const clienteEmail = cliente.client_email || "Correo no disponible";
+                    const clientTypeLabel = formatClientType(cliente.client_type);
+                    const status = normalizeStatus(cliente.visit_status);
+                    const meta = getStatusMeta(status);
+                    return (
+                      <div
+                        key={`mini-${cliente.id}`}
+                        className="flex flex-col rounded-xl border border-gray-100 bg-white/80 p-3 shadow-sm hover:shadow-md transition cursor-pointer"
+                        onClick={() => openReportModal(cliente)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-0.5">
+                            <p className="text-sm font-semibold text-gray-900 line-clamp-1">
+                              {cliente.nombre}
+                            </p>
+                          </div>
+                          <span className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}>
+                            {meta.label}
+                          </span>
+                        </div>
+
+                        <div className="mt-2 space-y-1 text-[11px] text-gray-600">
+                          <p className="flex items-center gap-1">
+                            <FiMail className="h-3 w-3 text-gray-400" />
+                            <span className="truncate">{clienteEmail}</span>
+                          </p>
+                          <p className="flex items-center gap-1">
+                            <FiUser className="h-3 w-3 text-gray-400" />
+                            {clientTypeLabel}
+                          </p>
+                          <p className="flex items-center gap-1">
+                            <FiMapPin className="h-3 w-3 text-gray-400" />
+                            {provincia || "Provincia no especificada"}
+                          </p>
+                          <p className="flex items-center gap-1">
+                            <FiMapPin className="h-3 w-3 text-gray-400" />
+                            {ciudad || "Ciudad no especificada"}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">
+                  {assignedViewFilter === "assigned"
+                    ? "No tienes clientes asignados que coincidan con el filtro."
+                    : assignedViewFilter === "created"
+                      ? "No tienes clientes registrados por ti que coincidan con el filtro."
+                      : "No tienes clientes asignados o registrados por ti que coincidan con el filtro."}
                 </p>
               )}
-            </div>
+            </Card>
+          </>
+        )
+      }
 
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-700">Observaciones (opcional)</label>
-              <textarea
-                value={visitModal.note}
-                onChange={(e) => setVisitModal((prev) => ({ ...prev, note: e.target.value }))}
-                className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
-                rows={3}
-                placeholder="Comentario rápido, evidencia o notas internas"
-              />
-            </div>
+      {/* Modal de visita normal (usuario registrado) */}
+      <Modal
+        isOpen={!!activeClient && (modalType === "start" || modalType === "end")}
+        onClose={submittingVisit ? undefined : closeModal}
+        title={modalType === "start" ? "Iniciar visita a cliente" : "Finalizar visita y reportar"}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600">
+            {modalType === "start"
+              ? `Estás a punto de iniciar la visita a ${activeClient?.nombre}. Se registrará tu ubicación y hora de entrada.`
+              : `Finaliza la visita a ${activeClient?.nombre}. Puedes agregar observaciones finales.`}
+          </p>
 
-            <div className="flex justify-end gap-3 pt-2">
-              <Button variant="ghost" onClick={closeModal}>
-                Cancelar
-              </Button>
-              <Button
-                icon={modalType === "start" ? FiMapPin : FiCheckCircle}
-                onClick={handleConfirmVisit}
-                className="min-w-[140px] justify-center"
-              >
-                {submittingVisit ? "Guardando..." : modalType === "start" ? "Confirmar inicio" : "Confirmar salida"}
-              </Button>
+          <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-500 space-y-1">
+            <div className="flex justify-between">
+              <span>Fecha:</span>
+              <span className="font-medium text-gray-900">
+                {visitModal.timestamp?.toLocaleDateString()}
+              </span>
             </div>
+            <div className="flex justify-between">
+              <span>Hora:</span>
+              <span className="font-medium text-gray-900">
+                {formatTime(visitModal.timestamp)}
+              </span>
+            </div>
+            {visitModal.loadingLocation ? (
+              <div className="flex items-center gap-2 text-blue-600">
+                <FiNavigation className="animate-spin" /> Obteniendo ubicación...
+              </div>
+            ) : visitModal.coords ? (
+              <div className="flex items-center gap-2 text-green-600">
+                <FiMapPin />{" "}
+                {`${visitModal.coords.latitude.toFixed(5)}, ${visitModal.coords.longitude.toFixed(5)}`}
+              </div>
+            ) : (
+              <div className="text-red-500">Ubicación no disponible</div>
+            )}
           </div>
-        )}
+
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Observaciones (opcional)</label>
+            <textarea
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              rows={3}
+              placeholder="Escribe aquí notas sobre la visita..."
+              value={visitModal.note}
+              onChange={(e) => setVisitModal((prev) => ({ ...prev, note: e.target.value }))}
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <Button
+              variant="secondary"
+              onClick={closeModal}
+              disabled={submittingVisit}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmVisit}
+              disabled={submittingVisit || visitModal.loadingLocation || !visitModal.coords}
+              isLoading={submittingVisit}
+            >
+              {modalType === "start" ? "Confirmar inicio" : "Confirmar finalización"}
+            </Button>
+          </div>
+        </div>
       </Modal>
 
+      {/* Modal de visita a PROSPECTO */}
       <Modal
-        open={modalType === "report"}
-        onClose={closeModal}
-        title="Reporte de visita"
-        maxWidth="max-w-3xl"
+        isOpen={modalType === "prospect"}
+        onClose={submittingVisit ? undefined : closeModal}
+        title="Visita a Prospecto (No registrado)"
+        maxWidth="max-w-md"
       >
-        {activeClient && (
-          <div className="space-y-4 text-sm text-gray-700">
-            <div className="flex items-start justify-between">
-              <div>
-                <p className="text-xs text-gray-500">Cliente</p>
-                <p className="text-lg font-semibold text-gray-900">{activeClient.nombre}</p>
-                <p className="text-xs text-gray-500">{activeClient.shipping_address}</p>
-              </div>
-              <div className="text-right">
-                <span
-                  className={`px-3 py-[4px] text-xs font-semibold rounded-full ${
-                    activeStatusMeta.chip
-                  }`}
-                >
-                  {activeStatusMeta.label}
-                </span>
-                <p className="mt-1 text-[11px] text-gray-500">ID #{activeClient.id}</p>
+        <ProspectVisitForm
+          onClose={closeModal}
+          onSuccess={() => {
+            showToast("Visita a prospecto registrada", "success");
+            closeModal();
+            loadClientes(); // Reload to perhaps show prospects in a future list
+          }}
+          captureLocation={captureLocation}
+        />
+      </Modal>
+
+      {/* Modal de reporte final */}
+      <Modal
+        isOpen={modalType === "report" && !!activeClient}
+        onClose={closeModal}
+        title={`Reporte de visita: ${activeClient?.nombre}`}
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Cliente</label>
+              <p className="text-sm font-medium text-gray-900">{activeClient?.nombre}</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Identificación</label>
+              <p className="text-sm text-gray-900">{activeClient?.identificador || "N/A"}</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Visita</label>
+              <div className="flex items-center gap-2">
+                <span className={`h-2 w-2 rounded-full ${getStatusMeta(activeClient?.visit_status).led}`} />
+                <span className="text-sm text-gray-900">{getStatusMeta(activeClient?.visit_status).label}</span>
               </div>
             </div>
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-gray-500 uppercase">Duración</label>
+              <p className="text-sm text-gray-900">
+                {formatDuration(activeClient?.duracion_minutos ?? calculateDuration(activeClient))}
+              </p>
+            </div>
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="rounded-lg border border-gray-100 bg-white p-3 shadow-sm">
-                <p className="text-xs text-gray-500">Hora de entrada</p>
-                <p className="text-base font-semibold text-gray-900">{formatTime(activeClient.hora_entrada)}</p>
-                {activeClient.lat_entrada && activeClient.lng_entrada && (
+          <div className="rounded-xl bg-gray-50 p-4 border border-gray-100">
+            <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Tiempos y Ubicación</h4>
+            <div className="space-y-3">
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600">Entrada:</span>
+                <span className="font-medium text-gray-900">{formatTime(activeClient?.hora_entrada)}</span>
+              </div>
+              {activeClient?.lat_entrada && (
+                <div className="flex justify-end">
                   <a
                     href={`https://www.google.com/maps?q=${activeClient.lat_entrada},${activeClient.lng_entrada}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                   >
                     <FiMapPin /> Ver ubicación
                   </a>
-                )}
+                </div>
+              )}
+              <div className="border-t border-gray-200 my-2" />
+              <div className="flex justify-between items-center text-sm">
+                <span className="text-gray-600">Salida:</span>
+                <span className="font-medium text-gray-900">{formatTime(activeClient?.hora_salida)}</span>
               </div>
-              <div className="rounded-lg border border-gray-100 bg-white p-3 shadow-sm">
-                <p className="text-xs text-gray-500">Hora de salida</p>
-                <p className="text-base font-semibold text-gray-900">{formatTime(activeClient.hora_salida)}</p>
-                {activeClient.lat_salida && activeClient.lng_salida && (
+              {activeClient?.lat_salida && (
+                <div className="flex justify-end">
                   <a
                     href={`https://www.google.com/maps?q=${activeClient.lat_salida},${activeClient.lng_salida}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    className="text-xs text-blue-600 hover:underline flex items-center gap-1"
                   >
                     <FiMapPin /> Ver ubicación
                   </a>
-                )}
-              </div>
-              <div className="rounded-lg border border-gray-100 bg-white p-3 shadow-sm">
-                <p className="text-xs text-gray-500">Duración</p>
-                <p className="text-base font-semibold text-gray-900">
-                  {formatDuration(activeClient.duracion_minutos ?? calculateDuration(activeClient))}
-                </p>
-                <p className="text-[11px] text-gray-500">Calculada automáticamente</p>
-              </div>
-            </div>
-
-            <div className="rounded-lg border border-gray-100 bg-gray-50 p-4">
-              <p className="text-xs font-semibold text-gray-700">Asignado a</p>
-              <p className="text-sm text-gray-800">
-                {(() => {
-                  const asignadosArray = normalizeAsignados(activeClient.asignados);
-                  return asignadosArray.length > 0 ? asignadosArray.join(", ") : "Sin asignar";
-                })()}
-              </p>
-              <p className="mt-2 text-xs font-semibold text-gray-700">Contacto</p>
-              <p className="text-sm text-gray-800">{activeClient.shipping_contact_name || "Sin contacto"}</p>
-              <p className="text-xs text-gray-600">{activeClient.shipping_phone || "Sin teléfono"}</p>
-            </div>
-
-            {activeClient.observaciones && (
-              <div className="rounded-lg border border-gray-100 bg-white p-4 shadow-sm">
-                <p className="text-xs font-semibold text-gray-700">Observaciones</p>
-                <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">{activeClient.observaciones}</p>
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              {normalizeStatus(activeClient.visit_status) === "en_visita" && (
-                <Button icon={FiCheckCircle} onClick={() => openVisitFlow(activeClient, "end")}>
-                  Finalizar visita
-                </Button>
+                </div>
               )}
             </div>
           </div>
-        )}
+
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-gray-500 uppercase">Observaciones</label>
+            <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 min-h-[80px]">
+              {activeClient?.observaciones || "Sin observaciones registradas."}
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button variant="secondary" onClick={closeModal}>
+              Cerrar
+            </Button>
+          </div>
+        </div>
       </Modal>
-    </div>
+    </div >
+  );
+};
+
+const ProspectVisitForm = ({ onClose, onSuccess, captureLocation }) => {
+  const [name, setName] = useState("");
+  const [note, setNote] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+
+    setLoading(true);
+    setLocating(true);
+    try {
+      const coords = await captureLocation();
+      setLocating(false);
+
+      await registerProspectVisit({
+        prospect_name: name,
+        check_in_time: new Date().toISOString(),
+        check_in_lat: coords.latitude,
+        check_in_lng: coords.longitude,
+        observations: note,
+      });
+
+      onSuccess();
+    } catch (error) {
+      console.error(error);
+      setLocating(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      <div>
+        <label className="block text-sm font-medium text-gray-700">Nombre del Laboratorio / Prospecto</label>
+        <input
+          autoFocus
+          type="text"
+          value={name}
+          onChange={e => setName(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+          placeholder="Ej. Laboratorio Clínico Central"
+          required
+        />
+      </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700">Observaciones</label>
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2"
+          placeholder="Contactos, dirección, interés..."
+          rows={3}
+        />
+      </div>
+      <div className="flex justify-end gap-3 pt-2">
+        <Button variant="secondary" onClick={onClose} disabled={loading}>
+          Cancelar
+        </Button>
+        <Button type="submit" isLoading={loading} disabled={!name.trim()}>
+          {locating ? "Obteniendo ubicación..." : "Registrar Visita"}
+        </Button>
+      </div>
+    </form>
   );
 };
 

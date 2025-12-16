@@ -13,13 +13,21 @@ router.post(
 router.get(
   "/",
   verifyToken,
-  requireRole(["backoffice_comercial", "gerencia"]),
+  requireRole([
+    "backoffice_comercial",
+    "gerencia",
+    "gerencia_general",
+    "jefe_comercial",
+    "comercial",
+    "asesor_comercial",
+    "acp_comercial",
+  ]),
   ctrl.listPrivatePurchases,
 );
 router.get(
   "/:id",
   verifyToken,
-  requireRole(["backoffice_comercial", "comercial", "gerencia"]),
+  requireRole(["backoffice_comercial", "comercial", "gerencia", "gerencia_general", "jefe_comercial"]),
   ctrl.getPrivatePurchase,
 );
 router.post(
@@ -31,7 +39,7 @@ router.post(
 router.post(
   "/:id/offer/signed",
   verifyToken,
-  requireRole(["comercial"]),
+  requireRole(["comercial", "gerencia", "jefe_comercial", "gerencia_general"]),
   ctrl.uploadSignedOffer,
 );
 router.post(

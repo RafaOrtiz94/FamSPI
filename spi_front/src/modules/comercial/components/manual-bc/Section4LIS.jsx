@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { FiServer, FiPlus, FiTrash2 } from 'react-icons/fi';
 
 const Section4LIS = ({ data, updateData }) => {
@@ -28,7 +28,7 @@ const Section4LIS = ({ data, updateData }) => {
         <div className="space-y-6">
             <div className="flex items-center gap-2 mb-4">
                 <FiServer className="text-blue-600" />
-                <h3 className="text-lg font-semibold text-gray-900">LIS (Sistema de Información de Laboratorio)</h3>
+                <h3 className="text-lg font-semibold text-gray-900">LIS (Sistema de InformaciÃ³n de Laboratorio)</h3>
             </div>
 
             {/* Incluye LIS */}
@@ -44,7 +44,7 @@ const Section4LIS = ({ data, updateData }) => {
 
             {lisData.includes_lis && (
                 <div className="space-y-6">
-                    {/* Configuración LIS */}
+                    {/* ConfiguraciÃ³n LIS */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <label className="flex flex-col gap-1">
                             <span className="text-sm font-medium text-gray-700">Proveedor del Sistema</span>
@@ -70,7 +70,7 @@ const Section4LIS = ({ data, updateData }) => {
                         </label>
 
                         <label className="flex flex-col gap-1">
-                            <span className="text-sm font-medium text-gray-700">Número de Pacientes Mensual</span>
+                            <span className="text-sm font-medium text-gray-700">NÃºmero de Pacientes Mensual</span>
                             <input
                                 type="number"
                                 min="0"
@@ -162,7 +162,7 @@ const Section4LIS = ({ data, updateData }) => {
 
                         {lisData.equipmentInterfaces.length === 0 && (
                             <p className="text-sm text-gray-500 text-center py-4">
-                                No hay interfaces agregadas. Click en "Agregar Interfaz" para añadir.
+                                No hay interfaces agregadas. Click en "Agregar Interfaz" para aÃ±adir.
                             </p>
                         )}
                     </div>
@@ -173,3 +173,4 @@ const Section4LIS = ({ data, updateData }) => {
 };
 
 export default Section4LIS;
+

@@ -19,6 +19,8 @@ const PRIVATE_PURCHASE_STATUSES = [
   "pending_commercial",
   "pending_backoffice",
   "offer_sent",
+  "pending_manager_signature",
+  "pending_client_signature",
   "offer_signed",
   "client_registered",
   "sent_to_acp",
@@ -44,6 +46,18 @@ async function ensureRequestFolder(request, forceRecreate = false) {
   const name = `${DRIVE_FOLDER_PREFIX}-${request.id}`;
   const folder = await ensureFolder(name, DRIVE_BASE_FOLDER);
   return folder?.id || null;
+}
+
+async function ensurePathFolder(pathStr) {
+  if (!pathStr) return null;
+  if (!DRIVE_BASE_FOLDER) return null;
+  const parts = pathStr.split("/").filter(Boolean);
+  let currentParent = DRIVE_BASE_FOLDER;
+  for (const segment of parts) {
+    const folder = await ensureFolder(segment, currentParent);
+    currentParent = folder?.id || currentParent;
+  }
+  return currentParent;
 }
 
 async function uploadComodatoDocument(folderId, { base64, name, mime }) {
@@ -145,9 +159,36 @@ async function listPrivatePurchases({ user, status }) {
   const params = [];
   let filters = [];
 
+  const normalizedRole = (user?.role || user?.role_name || user?.scope || "").toLowerCase();
+  const isPrivileged =
+    normalizedRole.includes("backoffice") ||
+    normalizedRole.includes("gerencia") ||
+    normalizedRole.includes("jefe_comercial") ||
+    normalizedRole.includes("gerencia_general") ||
+    normalizedRole.includes("acp_comercial");
+  const userId = user?.id || null;
+  const userEmail = user?.email || user?.mail || null;
+
   if (typeof status === "string" && PRIVATE_PURCHASE_STATUSES.includes(status)) {
     params.push(status);
     filters.push(`status = $${params.length}`);
+  }
+
+  if (!isPrivileged) {
+    const clauses = [];
+    if (userId) {
+      params.push(userId);
+      clauses.push(`created_by = $${params.length}`);
+    }
+    if (userEmail) {
+      params.push(userEmail);
+      clauses.push(`created_by_email = $${params.length}`);
+    }
+    if (clauses.length) {
+      filters.push(`(${clauses.join(" OR ")})`);
+    } else {
+      filters.push("1 = 0");
+    }
   }
 
   const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
@@ -202,13 +243,58 @@ async function createOfferDocument(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
 
+  const folderId =
+    payload.folder_id ||
+    payload.folderId ||
+    (payload.folder_path ? await ensurePathFolder(payload.folder_path) : null) ||
+    (await ensureRequestFolder(request));
+
+  // Caso 1: se entrega un archivo ya preparado (base64)
+  if (payload.offer_base64) {
+    const cleaned = payload.offer_base64.startsWith("data:")
+      ? payload.offer_base64.split(",")[1]
+      : payload.offer_base64;
+    if (!cleaned || !String(cleaned).trim()) {
+      const err = Object.assign(new Error("Archivo de oferta vacío"), { status: 400 });
+      throw err;
+    }
+    const name =
+      payload.file_name ||
+      `Oferta-${request.client_snapshot?.commercial_name || "cliente"}-${id.slice(0, 8)}.pdf`;
+
+    const uploaded = await uploadBase64File(
+      name,
+      cleaned,
+      payload.mime_type || "application/pdf",
+      folderId || undefined
+    );
+
+    const updated = await updatePrivatePurchaseStatus(id, "pending_manager_signature", {
+      offer_document_id: uploaded.id,
+      backoffice_approved_at: new Date(),
+      drive_folder_id: folderId || null,
+    });
+
+    await logAction({
+      user_id: user.id || null,
+      module: "private_purchase",
+      action: "send_offer",
+      entity: "private_purchase_requests",
+      entity_id: id,
+    });
+
+    return {
+      ...updated,
+      offer_document_link: driveViewLink(uploaded.id),
+      offer_document_name: uploaded.name,
+    };
+  }
+
+  // Caso 2: se usa plantilla + data
   const templateId = payload.template_id || payload.templateId;
   if (!templateId) {
     throw Object.assign(new Error("template_id es requerido"), { status: 400 });
   }
-
-  const folderId =
-    payload.folder_id || payload.folderId || (await ensureRequestFolder(request));
 
   const documentNameParts = [
     "Oferta Compras Privado",
@@ -254,10 +340,27 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
   if (!request) throw new Error("Solicitud privada no encontrada");
 
   const { document_id, signed_offer_base64, file_name, mime_type } = payload;
+  const decision = (payload.decision || payload.status || "").toString().toLowerCase();
 
   let documentId = document_id;
   const folderId =
     request.drive_folder_id || (await ensureRequestFolder(request));
+
+  if (decision === "reject") {
+    const updated = await updatePrivatePurchaseStatus(id, "rejected", {
+      drive_folder_id: folderId || request.drive_folder_id || null,
+      updated_at: new Date(),
+    });
+    await logAction({
+      user_id: user.id || null,
+      module: "private_purchase",
+      action: "offer_rejected",
+      entity: "private_purchase_requests",
+      entity_id: id,
+      details: "Oferta rechazada por jefe/comercial",
+    });
+    return updated;
+  }
 
   if (!documentId && signed_offer_base64) {
     if (!folderId) throw new Error("No se pudo obtener carpeta de Drive");
@@ -275,6 +378,10 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
     throw new Error("Documento firmado no especificado");
   }
 
+  const isManagerStage =
+    request.status === "pending_manager_signature" || request.status === "offer_sent";
+  const nextStatus = isManagerStage ? "pending_client_signature" : "offer_signed";
+
   const extras = {
     offer_signed_document_id: documentId,
     signed_offer_received_at: new Date(),
@@ -287,7 +394,8 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
     entity: "private_purchase_requests",
     entity_id: id,
   });
-  return updatePrivatePurchaseStatus(id, "offer_signed", extras);
+  // Luego de la firma del jefe comercial, queda pendiente la firma del cliente; en la segunda carga queda como firmada.
+  return updatePrivatePurchaseStatus(id, nextStatus, extras);
 }
 
 async function markClientRegistered(id) {

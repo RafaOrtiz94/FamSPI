@@ -94,6 +94,36 @@ export const registerException = async (type, description, location = null) => {
 };
 
 /**
+ * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
+ */
+export const updateExceptionStatus = async (status, location = null) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/exception/status",
+        { status, location },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Get active exception for current user
+ */
+export const getActiveException = async () => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.get("/attendance/exception/active", {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+
+    return data;
+};
+
+/**
  * Get Today's Attendance - For current user
  */
 export const getTodayAttendance = async () => {
@@ -167,4 +197,3 @@ export const downloadAttendancePDF = async (userId, startDate, endDate) => {
 
     return true;
 };
-

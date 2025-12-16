@@ -69,6 +69,25 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS lng_salida DOUBLE PRECISION,
       ADD COLUMN IF NOT EXISTS observaciones TEXT,
       ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER;
+    `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS prospect_visits (
+      id SERIAL PRIMARY KEY,
+      user_email TEXT NOT NULL,
+      prospect_name TEXT NOT NULL,
+      visit_date DATE NOT NULL DEFAULT CURRENT_DATE,
+      status TEXT NOT NULL CHECK (status IN ('in_visit', 'visited')),
+      check_in_time TIMESTAMPTZ,
+      check_out_time TIMESTAMPTZ,
+      check_in_lat DOUBLE PRECISION,
+      check_in_lng DOUBLE PRECISION,
+      check_out_lat DOUBLE PRECISION,
+      check_out_lng DOUBLE PRECISION,
+      observations TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    );
   `);
 }
 
@@ -132,6 +151,25 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     );
   }
 
+  const prospectsQuery = `
+    SELECT
+      id,
+      prospect_name,
+      status,
+      check_in_time,
+      check_out_time,
+      check_in_lat,
+      check_in_lng,
+      check_out_lat,
+      check_out_lng,
+      observations
+    FROM prospect_visits
+    WHERE user_email = $1 AND visit_date = $2
+    ORDER BY created_at DESC
+  `;
+
+  const prospects = await db.query(prospectsQuery, [user.email, dateParam]);
+
   if (filterBySchedule && approvedSchedule) {
     params.push(plannedVisits.map((v) => v.client_request_id));
     clauses.push(`cr.id = ANY($${params.length})`);
@@ -140,6 +178,7 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
   if (filterBySchedule && !approvedSchedule) {
     return {
       clients: [],
+      prospects: prospects.rows,
       scheduleMeta: {
         total: 0,
         visited: 0,
@@ -235,8 +274,8 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     }
     const scheduled_info = includeScheduleInfo
       ? {
-          ...(plannedByClient[row.id] || { is_planned: false, schedule_id: approvedSchedule?.id || null }),
-        }
+        ...(plannedByClient[row.id] || { is_planned: false, schedule_id: approvedSchedule?.id || null }),
+      }
       : undefined;
 
     return {
@@ -247,11 +286,13 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     };
   });
 
+  // Also fetch prospect visits for this user and date
   const visitedCount = clients.filter((c) => (c.visit_status || "").toLowerCase() === "visited").length;
   const citiesToday = [...new Set(plannedVisits.map((v) => v.city).filter(Boolean))];
 
   return {
     clients,
+    prospects: prospects.rows, // Return prospects too
     scheduleMeta: {
       total: clients.length,
       visited: visitedCount,
@@ -426,8 +467,58 @@ async function upsertVisitStatus({
   return rows[0];
 }
 
+async function upsertProspectVisit({
+  user,
+  prospectName,
+  checkInTime,
+  checkOutTime,
+  checkInLat,
+  checkInLng,
+  checkOutLat,
+  checkOutLng,
+  observations,
+  visitDate,
+  visitId // Optional, if updating
+}) {
+  await ensureTables();
+  const dateValue = visitDate || new Date().toISOString().slice(0, 10);
+  let status = 'in_visit';
+  if (checkOutTime) status = 'visited';
+
+  let result;
+
+  if (visitId) {
+    // Update existing
+    const query = `
+      UPDATE prospect_visits
+      SET 
+        status = $1, 
+        check_out_time = COALESCE($2, check_out_time),
+        check_out_lat = COALESCE($3, check_out_lat),
+        check_out_lng = COALESCE($4, check_out_lng),
+        observations = COALESCE($5, observations),
+        updated_at = NOW()
+      WHERE id = $6 AND user_email = $7
+      RETURNING *
+    `;
+    result = await db.query(query, [status, checkOutTime, checkOutLat, checkOutLng, observations, visitId, user.email]);
+  } else {
+    // Insert new
+    const query = `
+      INSERT INTO prospect_visits 
+        (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng, observations)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `;
+    result = await db.query(query, [user.email, prospectName, dateValue, status, checkInTime, checkInLat, checkInLng, observations]);
+  }
+
+  return result.rows[0];
+}
+
 module.exports = {
   listAccessibleClients,
   assignClient,
   upsertVisitStatus,
+  upsertProspectVisit
 };

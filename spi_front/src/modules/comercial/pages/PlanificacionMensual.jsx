@@ -11,8 +11,19 @@ import EditWarningModal from "../components/schedules/EditWarningModal";
 const PlanificacionMensual = () => {
   const { role } = useAuth();
   const isManager = ["jefe_comercial", "gerencia", "gerencia_general"].includes(role);
-  const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, remove, loading, error } =
-    useSchedules({ skipLoad: isManager });
+  const {
+    schedules,
+    activeSchedule,
+    loadScheduleDetail,
+    create,
+    addVisit,
+    updateVisit,
+    removeVisit,
+    submit,
+    remove,
+    loading,
+    error,
+  } = useSchedules({ skipLoad: isManager });
   const [editingLocked, setEditingLocked] = useState(false);
   const [unlockedScheduleId, setUnlockedScheduleId] = useState(null);
   const [showEditWarning, setShowEditWarning] = useState(false);
@@ -173,6 +184,8 @@ const PlanificacionMensual = () => {
               onRequestEdit={() => handleEditSchedule(activeSchedule)}
               onCreate={create}
               onAddVisit={addVisit}
+               onUpdateVisit={updateVisit}
+               onRemoveVisit={removeVisit}
               onSubmit={submit}
               onDelete={remove}
             />

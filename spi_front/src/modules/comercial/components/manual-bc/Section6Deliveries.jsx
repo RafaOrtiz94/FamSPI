@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { FiTruck, FiCheckSquare } from 'react-icons/fi';
 
 const Section6Deliveries = ({ data, updateData }) => {
@@ -13,7 +13,7 @@ const Section6Deliveries = ({ data, updateData }) => {
             <div className="flex items-center gap-2 mb-4">
                 <FiTruck className="text-blue-600" />
                 <h3 className="text-lg font-semibold text-gray-900">Entregas</h3>
-                <p className="text-sm text-gray-500 ml-auto">Modalidad de entrega y determinación</p>
+                <p className="text-sm text-gray-500 ml-auto">Modalidad de entrega y determinaciÃ³n</p>
             </div>
 
             <div className="space-y-4">
@@ -48,7 +48,7 @@ const Section6Deliveries = ({ data, updateData }) => {
                             />
                             <div>
                                 <p className="font-medium text-gray-900">Parcial - Tiempo</p>
-                                <p className="text-xs text-gray-500">Entregas parciales según cronograma definido</p>
+                                <p className="text-xs text-gray-500">Entregas parciales segÃºn cronograma definido</p>
                             </div>
                         </label>
 
@@ -63,13 +63,13 @@ const Section6Deliveries = ({ data, updateData }) => {
                             />
                             <div>
                                 <p className="font-medium text-gray-900">Parcial - A Necesidad</p>
-                                <p className="text-xs text-gray-500">Entregas parciales según necesidad del laboratorio</p>
+                                <p className="text-xs text-gray-500">Entregas parciales segÃºn necesidad del laboratorio</p>
                             </div>
                         </label>
                     </div>
                 </div>
 
-                {/* Determinación Efectiva */}
+                {/* DeterminaciÃ³n Efectiva */}
                 <div className="p-4 rounded-lg bg-green-50 border border-green-200">
                     <label className="flex items-center gap-3 cursor-pointer">
                         <input
@@ -80,10 +80,10 @@ const Section6Deliveries = ({ data, updateData }) => {
                         />
                         <div>
                             <p className="font-medium text-green-900 flex items-center gap-2">
-                                <FiCheckSquare /> Determinación Efectiva
+                                <FiCheckSquare /> DeterminaciÃ³n Efectiva
                             </p>
                             <p className="text-sm text-green-700">
-                                Marcar si se requiere determinación efectiva para este Business Case
+                                Marcar si se requiere determinaciÃ³n efectiva para este Business Case
                             </p>
                         </div>
                     </label>
@@ -92,7 +92,7 @@ const Section6Deliveries = ({ data, updateData }) => {
 
             {/* Resumen */}
             <div className="p-4 rounded-lg bg-blue-50 border border-blue-200">
-                <h4 className="font-semibold text-blue-900 mb-2">Resumen de Configuración</h4>
+                <h4 className="font-semibold text-blue-900 mb-2">Resumen de ConfiguraciÃ³n</h4>
                 <div className="space-y-1 text-sm text-blue-800">
                     <p>
                         <strong>Tipo de Entrega:</strong>{' '}
@@ -103,7 +103,7 @@ const Section6Deliveries = ({ data, updateData }) => {
                                 : 'Parcial - A Necesidad'}
                     </p>
                     <p>
-                        <strong>Determinación Efectiva:</strong> {delData.effective_determination ? 'Sí' : 'No'}
+                        <strong>DeterminaciÃ³n Efectiva:</strong> {delData.effective_determination ? 'SÃ­' : 'No'}
                     </p>
                 </div>
             </div>
@@ -112,3 +112,4 @@ const Section6Deliveries = ({ data, updateData }) => {
 };
 
 export default Section6Deliveries;
+

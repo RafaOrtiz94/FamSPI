@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { FiClock, FiActivity } from 'react-icons/fi';
 
 const Section2LabEnvironment = ({ data, updateData }) => {
@@ -13,13 +13,13 @@ const Section2LabEnvironment = ({ data, updateData }) => {
             <div className="flex items-center gap-2 mb-4">
                 <FiActivity className="text-blue-600" />
                 <h3 className="text-lg font-semibold text-gray-900">Ambiente de Laboratorio</h3>
-                <p className="text-sm text-gray-500 ml-auto">Información operativa del laboratorio del cliente</p>
+                <p className="text-sm text-gray-500 ml-auto">InformaciÃ³n operativa del laboratorio del cliente</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Días por semana */}
+                {/* DÃ­as por semana */}
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-gray-700">Días por semana *</span>
+                    <span className="text-sm font-medium text-gray-700">DÃ­as por semana *</span>
                     <input
                         type="number"
                         min="1"
@@ -30,9 +30,9 @@ const Section2LabEnvironment = ({ data, updateData }) => {
                     />
                 </label>
 
-                {/* Turnos por día */}
+                {/* Turnos por dÃ­a */}
                 <label className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-gray-700">Turnos por día *</span>
+                    <span className="text-sm font-medium text-gray-700">Turnos por dÃ­a *</span>
                     <input
                         type="number"
                         min="1"
@@ -114,7 +114,7 @@ const Section2LabEnvironment = ({ data, updateData }) => {
                             value={labData.special_tests}
                             onChange={(e) => handleChange('special_tests', e.target.value)}
                             className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-green-500"
-                            placeholder="Descripción de pruebas especiales..."
+                            placeholder="DescripciÃ³n de pruebas especiales..."
                         />
                     </label>
                 </div>
@@ -124,3 +124,4 @@ const Section2LabEnvironment = ({ data, updateData }) => {
 };
 
 export default Section2LabEnvironment;
+
