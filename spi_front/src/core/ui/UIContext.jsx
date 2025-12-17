@@ -48,6 +48,11 @@ export const UIProvider = ({ children }) => {
   const toggleTheme = () =>
     setTheme((prev) => (prev === "dark" ? "light" : "dark"));
 
+  const applyTheme = useCallback((nextTheme) => {
+    if (!nextTheme) return;
+    setTheme(nextTheme === "dark" ? "dark" : "light");
+  }, []);
+
   // ======= Toasts =======
   const showToast = useCallback((message, type = "info") => {
     setToast({ message, type });
@@ -82,6 +87,7 @@ export const UIProvider = ({ children }) => {
     hideLoader,
     askConfirm,
     toggleTheme,
+    setTheme: applyTheme,
     theme,
   };
 

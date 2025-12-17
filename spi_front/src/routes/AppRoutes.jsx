@@ -59,6 +59,8 @@ import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
 import ConfigurationPage from "../pages/ConfigurationPage";
+import MyProfilePage from "../modules/profile/MyProfilePage";
+import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 
 const AppRoutes = () => {
   return (
@@ -179,11 +181,35 @@ const AppRoutes = () => {
             <Route path="/dashboard/auditoria" element={<Auditoria />} />
           </Route>
 
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "admin_ti",
+                  "jefe_ti",
+                  "ti",
+                  "gerencia",
+                  "gerencia_general",
+                  "calidad",
+                  "finanzas",
+                  "financiero",
+                  "comercial",
+                  "jefe_comercial",
+                  "talento_humano",
+                  "operaciones",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/auditoria/preparacion" element={<AuditPrepPage />} />
+          </Route>
+
           {/* Rutas compartidas */}
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
+          <Route path="/dashboard/mi-perfil" element={<MyProfilePage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
           {/* Subrutas Backoffice */}
           <Route
