@@ -6,10 +6,10 @@ import {
   FiSun,
   FiMoon,
   FiLogOut,
-  FiBell,
   FiUser,
 } from "react-icons/fi";
 import famLogo from "../../../assets/famproject_logo.png";
+import NotificationBell from "./NotificationBell";
 
 /* ============================================================
    🧭 Header — Estilo Empresarial Moderno
@@ -66,13 +66,7 @@ export default function Header() {
           </button>
 
           {/* Notificaciones */}
-          <button
-            className="relative p-2 rounded-lg bg-primary-light/40 hover:bg-primary-light/60 transition focus-visible:ring-2 focus-visible:ring-accent"
-            title="Notificaciones"
-          >
-            <FiBell className="text-accent" size={18} />
-            <span className="absolute top-1 right-1 h-2 w-2 bg-accent rounded-full animate-pulse" />
-          </button>
+          <NotificationBell />
 
           {/* Perfil */}
           <div className="hidden sm:flex items-center gap-2 rounded-lg bg-primary-light/40 px-3 py-1.5 shadow-inner">
