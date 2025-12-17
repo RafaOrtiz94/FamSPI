@@ -1,6 +1,6 @@
 ﻿import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp, FiPlus } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
 import Button from "../components/Button";
@@ -17,7 +17,10 @@ import {
     updateExceptionStatus,
     getActiveException,
     getTodayAttendance,
+    markOvertime,
+    getOvertimeRecords,
 } from "../../api/attendanceApi";
+import { useAutoUpdate } from "../../api/index";
 
 const AttendanceWidget = () => {
     const { showToast } = useUI();
@@ -33,12 +36,24 @@ const AttendanceWidget = () => {
     const [exceptionDescription, setExceptionDescription] = useState("");
     const [exceptionLoading, setExceptionLoading] = useState(false);
 
+    // Overtime state
+    const [overtimeModalOpen, setOvertimeModalOpen] = useState(false);
+    const [overtimeHours, setOvertimeHours] = useState("");
+    const [overtimeReason, setOvertimeReason] = useState("");
+    const [overtimeLoading, setOvertimeLoading] = useState(false);
+    const [overtimeRecords, setOvertimeRecords] = useState([]);
+
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
     useEffect(() => {
+        refreshAll();
+    }, []);
+
+    // Sistema de actualizaciones automáticas sin loops
+    useAutoUpdate(() => {
         refreshAll();
     }, []);
 
@@ -226,6 +241,36 @@ const AttendanceWidget = () => {
             showToast(msg, "error");
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleMarkOvertime = async () => {
+        const hours = parseFloat(overtimeHours);
+        if (!hours || hours <= 0) {
+            showToast("Ingresa horas válidas de overtime", "error");
+            return;
+        }
+
+        if (!overtimeReason.trim()) {
+            showToast("Ingresa una razón para el overtime", "error");
+            return;
+        }
+
+        setOvertimeLoading(true);
+        try {
+            const loc = await getLocation();
+            const res = await markOvertime(hours, overtimeReason.trim(), loc);
+            if (res.ok) {
+                showToast(`Overtime de ${hours}h registrado correctamente`, "success");
+                setOvertimeModalOpen(false);
+                setOvertimeHours("");
+                setOvertimeReason("");
+            }
+        } catch (err) {
+            const msg = err.response?.data?.message || err.message || "Error registrando overtime";
+            showToast(msg, "error");
+        } finally {
+            setOvertimeLoading(false);
         }
     };
 
@@ -444,6 +489,44 @@ const AttendanceWidget = () => {
 
             {renderExceptionControls()}
 
+            {/* Overtime Section */}
+            {attendance?.is_overtime && attendance?.overtime_hours > 0 && (
+                <div className="mt-4 p-3 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl border border-orange-200">
+                    <div className="flex items-center gap-2 mb-2 text-orange-800">
+                        <FiTrendingUp size={14} />
+                        <span className="text-xs font-bold uppercase tracking-wider">
+                            Tiempo extra registrado
+                        </span>
+                        <span className="ml-auto text-sm font-mono font-bold text-orange-700">
+                            +{attendance.overtime_hours.toFixed(1)}h
+                        </span>
+                    </div>
+                    <div className="text-xs text-orange-700">
+                        Has trabajado horas adicionales hoy. Esto será considerado en tu registro de asistencia.
+                    </div>
+                </div>
+            )}
+
+            {/* Overtime Controls */}
+            {attendance?.entry_time && !attendance?.exit_time && !hasActiveException && (
+                <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
+                    <div className="flex items-center gap-2 mb-2 text-gray-800">
+                        <FiPlus size={14} />
+                        <span className="text-xs font-semibold uppercase">Registrar overtime</span>
+                    </div>
+                    <p className="text-xs text-gray-600 mb-3">
+                        Si trabajas tiempo extra, regístralo aquí para mantener un registro preciso.
+                    </p>
+                    <Button
+                        onClick={() => setOvertimeModalOpen(true)}
+                        className="w-full text-xs py-2 bg-gray-600 hover:bg-gray-700"
+                        disabled={loading}
+                    >
+                        Registrar overtime manual
+                    </Button>
+                </div>
+            )}
+
             <AnimatePresence>
                 {showCelebration && (
                     <motion.div
@@ -484,6 +567,53 @@ const AttendanceWidget = () => {
                         </button>
                         <Button onClick={handleRegisterException} disabled={exceptionLoading}>
                             Registrar
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <Modal isOpen={overtimeModalOpen} onClose={() => setOvertimeModalOpen(false)} title="Registrar tiempo extra">
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Horas trabajadas
+                        </label>
+                        <input
+                            type="number"
+                            step="0.5"
+                            min="0.5"
+                            max="12"
+                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                            placeholder="Ej: 2.5"
+                            value={overtimeHours}
+                            onChange={(e) => setOvertimeHours(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            Ingresa las horas adicionales trabajadas (mínimo 0.5h)
+                        </p>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">
+                            Razón del overtime
+                        </label>
+                        <textarea
+                            className="w-full border rounded-lg px-3 py-2 text-sm h-20"
+                            placeholder="Describe por qué trabajaste tiempo extra..."
+                            value={overtimeReason}
+                            onChange={(e) => setOvertimeReason(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            Ej: Proyecto urgente, soporte técnico, capacitación, etc.
+                        </p>
+                    </div>
+
+                    <div className="flex justify-end gap-2">
+                        <button onClick={() => setOvertimeModalOpen(false)} className="text-sm text-gray-500 hover:text-gray-700">
+                            Cancelar
+                        </button>
+                        <Button onClick={handleMarkOvertime} disabled={overtimeLoading}>
+                            Registrar overtime
                         </Button>
                     </div>
                 </div>

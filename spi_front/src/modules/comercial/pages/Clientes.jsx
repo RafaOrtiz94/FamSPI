@@ -28,6 +28,7 @@ import { getUsers } from "../../../core/api/usersApi";
 import ClientApprovalsWidget from "../../backoffice/components/ClientApprovalsWidget";
 import BackofficeClientRequestsKpiWidget from "../components/BackofficeClientRequestsKpiWidget";
 import MyClientRequestsWidget from "../components/MyClientRequestsWidget";
+import { RequestActionButton } from "../../../core/ui/components/RequestActionCards";
 
 const todayStr = new Date().toISOString().slice(0, 10);
 
@@ -641,7 +642,8 @@ const ClientesPage = () => {
         ) : (
           <>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-3">
+                <RequestActionButton type="CLIENT" size="sm" />
                 <Button variant="secondary" onClick={() => setModalType("prospect")}>
                   Visita a Prospecto
                 </Button>

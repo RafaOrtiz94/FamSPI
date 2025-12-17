@@ -20,7 +20,7 @@ const emptyPreferences = {
 
 const MyProfilePage = () => {
   const { showToast, showLoader, hideLoader, theme, setTheme } = useUI();
-  const { user } = useAuth();
+  const { user, reloadProfile } = useAuth();
 
   const [profile, setProfile] = useState(null);
   const [metadata, setMetadata] = useState(emptyMetadata);
@@ -93,6 +93,11 @@ const MyProfilePage = () => {
 
       const data = await upsertMyProfile({ metadata, preferences, avatarFile });
       setProfile((prev) => ({ ...prev, profile: data }));
+      // Sincroniza header/contexts con el nuevo avatar
+      await reloadProfile?.();
+      if (data?.avatar_url) {
+        setAvatarPreview(data.avatar_url);
+      }
       showToast("Perfil actualizado", "success");
       setAvatarFile(null);
     } catch (err) {

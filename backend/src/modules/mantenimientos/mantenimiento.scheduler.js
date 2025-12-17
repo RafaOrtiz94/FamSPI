@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { sendMail } = require("../../utils/mailer");
+const notificationManager = require("../notifications/notificationManager");
 
 const REMINDER_STATUS = {
   PENDING: "Pendiente",
@@ -56,24 +57,59 @@ async function sendReminderEmail(row) {
     return;
   }
 
+  // Buscar usuario responsable para enviar notificación en BD
+  let userId = null;
+  if (row.email_destino && row.email_destino !== process.env.SMTP_FROM) {
+    try {
+      const { rows: userRows } = await db.query(
+        'SELECT id FROM users WHERE email = $1',
+        [row.email_destino]
+      );
+      userId = userRows[0]?.id;
+    } catch (error) {
+      logger.warn('No se pudo encontrar usuario para notificación:', error);
+    }
+  }
+
   const humanDate = formatHumanDate(row.next_maintenance_date);
-  await sendMail({
-    to: recipients,
-    subject: `Recordatorio automático – Mantenimiento #${row.id}`,
-    html: `
-      <p>Hola ${row.nombre_destino || "equipo"},</p>
-      <p>
-        Te recordamos que el mantenimiento <strong>#${row.id}</strong> del equipo <strong>${row.id_equipo}</strong>
-        está programado para el <strong>${humanDate}</strong>.
-      </p>
-      <p>
-        Tipo: <b>${row.tipo}</b><br/>
-        Responsable registrado: <b>${row.responsable}</b>
-      </p>
-      <p>Por favor confirma su ejecución o reagenda la intervención en SPI.</p>
-      <p>— SPI2 • Gestión de Mantenimientos</p>
-    `,
-  });
+  const equipmentName = `Equipo ${row.id_equipo}`;
+
+  // Enviar notificación (BD + Email + Chat) si hay usuario, o solo Email si no
+  if (userId) {
+    try {
+      await notificationManager.notifyMaintenanceDue(userId, equipmentName, {
+        maintenance_id: row.id,
+        maintenance_type: row.tipo,
+        responsible: row.responsable,
+        due_date: humanDate
+      });
+    } catch (error) {
+      logger.error('Error creando notificación de mantenimiento:', error);
+    }
+  } else {
+    // Fallback para destinatarios sin usuario en BD (solo email)
+    try {
+      await sendMail({
+        to: recipients,
+        subject: `Recordatorio automático – Mantenimiento #${row.id}`,
+        html: `
+          <p>Hola ${row.nombre_destino || "equipo"},</p>
+          <p>
+            Te recordamos que el mantenimiento <strong>#${row.id}</strong> del equipo <strong>${row.id_equipo}</strong>
+            está programado para el <strong>${humanDate}</strong>.
+          </p>
+          <p>
+            Tipo: <b>${row.tipo}</b><br/>
+            Responsable registrado: <b>${row.responsable}</b>
+          </p>
+          <p>Por favor confirma su ejecución o reagenda la intervención en SPI.</p>
+          <p>— SPI2 • Gestión de Mantenimientos</p>
+        `,
+      });
+    } catch (error) {
+       logger.error({ err: error, mantenimiento_id: row.id }, "Fallo envío manual de recordatorio");
+    }
+  }
 }
 
 async function processReminders() {

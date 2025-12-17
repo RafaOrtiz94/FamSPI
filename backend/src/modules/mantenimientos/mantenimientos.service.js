@@ -8,6 +8,7 @@ const {
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
+const notificationManager = require("../notifications/notificationManager");
 const documents = require("../documents/document.service");
 const files = require("../files/file.service");
 
@@ -176,7 +177,8 @@ async function createMantenimiento({
         nextConflictMessage = `Existe un mantenimiento activo el ${formatHumanDate(
           nextDateIso
         )} (#${futureConflict.id}).`;
-        await notifyConflictEmail({
+        await notifyConflict({
+          userId: responsable_id,
           email: responsable_email,
           equipoLabel,
           fecha: nextDateIso,

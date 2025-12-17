@@ -21,6 +21,7 @@ const {
 const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
+const notificationManager = require("../notifications/notificationManager");
 const gmailService = require("../../services/gmail.service");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const crypto = require("crypto");
@@ -442,13 +443,19 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
   } catch (error) {
     logger.warn(`⚠️ Falló envío con Gmail API, intentando fallback SMTP: ${error.message}`);
     // Fallback a SMTP si falla la API
-    await sendMail({
+    await notificationManager.sendNotification({
+      template: 'custom_html',
+      data: {
+        title: "Codigo de autorizacion para tratamiento de datos",
+        message: html
+      },
       to: normalizedEmail,
-      subject: "Codigo de autorizacion para tratamiento de datos",
-      html,
-      senderName: user?.fullname || user?.name || user?.email || "SPI",
-      replyTo: user?.email || undefined,
-      gmailUserId: user?.id || null,
+      sender: {
+        name: user?.fullname || user?.name || user?.email || "SPI",
+        replyTo: user?.email || undefined,
+        gmailUserId: user?.id || null,
+      },
+      skipSave: true
     });
   }
 
@@ -1450,7 +1457,38 @@ async function updateRequestStatus(id, status, client = db) {
   );
   const updated = rows[0];
   if (updated) {
-    setImmediate(() => syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client }));
+    // Enviar notificaciones automáticas
+    setImmediate(async () => {
+      try {
+        const { rows: requestRows } = await db.query(
+          `SELECT r.*, u.email as requester_email, u.id as requester_id
+           FROM requests r
+           LEFT JOIN users u ON r.requester_id = u.id
+           WHERE r.id = $1`,
+          [updated.id]
+        );
+        const requestData = requestRows[0];
+
+        if (requestData && requestData.requester_id) {
+          if (status.toLowerCase().includes('aprob')) {
+            await notificationManager.notifyRequestApproved(requestData.requester_id, updated.id, {
+              request_type: requestData.request_type_id,
+              approved_at: new Date().toISOString()
+            });
+          } else if (status.toLowerCase().includes('rechaz')) {
+            await notificationManager.notifyRequestRejected(requestData.requester_id, updated.id, {
+              request_type: requestData.request_type_id,
+              rejected_at: new Date().toISOString()
+            });
+          }
+        }
+      } catch (error) {
+        logger.error('Error enviando notificación automática:', error);
+        // No lanzamos error para no detener el flujo
+      }
+
+      syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client });
+    });
   }
   return updated;
 }
@@ -1502,21 +1540,26 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
 
   const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, requesterEmail);
 
-  await sendMail({
-    to: recipients,
-    subject: `Solicitud pendiente de aprobación (#${request.id})`,
-    html: `
-      <h2>Solicitud pendiente de aprobación</h2>
+  await notificationManager.sendNotification({
+    template: 'custom_html',
+    data: {
+      title: `Solicitud pendiente de aprobación (#${request.id})`,
+      message: `
       <p><strong>Tipo:</strong> ${requestTitle}</p>
       <p><strong>Solicitante:</strong> ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}</p>
       ${summaryBlock}
       ${documentSection || ""}
       <p>Revisa y gestiona la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
-    `,
-    text: lines.map((line) => line.replace(/<[^>]+>/g, "")).join("\n"),
-    gmailUserId: requester?.id || null,
-    replyTo: requesterEmail || undefined,
-    from: requesterEmail || undefined,
+      `,
+      link: detailLink
+    },
+    to: recipients,
+    sender: {
+      gmailUserId: requester?.id || null,
+      replyTo: requesterEmail || undefined,
+      from: requesterEmail || undefined,
+    },
+    skipSave: true
   });
 }
 

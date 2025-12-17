@@ -20,6 +20,7 @@ const { auditMiddleware } = require("./middlewares/auditMiddleware");
 const { verifyToken } = require("./middlewares/auth");
 
 const app = express();
+app.set("etag", false); // evitar 304 con body cacheado en endpoints dinámicos
 
 const RATE_LIMIT_WINDOW_MS =
   parseInt(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, 10) || 15 * 60 * 1000;
@@ -168,6 +169,7 @@ const approvalRoutes = require("./modules/approvals/approvals.routes");
 const finRoutes = require("./modules/finanzas/finanzas.routes");
 const hrRoutes = require("./modules/talento_humano/hr.routes");
 const auditRoutes = require("./modules/auditoria/audit.routes");
+const auditPrepRoutes = require("./modules/audit-prep/auditPrep.routes");
 const managementRoutes = require("./modules/management/management.routes");
 const documentsRoutes = require("./modules/documents/documents.routes");
 const filesRoutes = require("./modules/files/files.routes");
@@ -242,6 +244,7 @@ app.use("/api/v1/finanzas", finRoutes);
 app.use("/api/v1/talento-humano", hrRoutes);
 app.use("/api/v1/departments", departmentsRoutes);
 app.use("/api/v1/auditoria", auditRoutes);
+app.use("/api/v1/audit-prep", auditPrepRoutes);
 app.use("/api/v1/management", managementRoutes);
 app.use("/api/v1/documents", documentsRoutes);
 app.use("/api/v1/files", filesRoutes);

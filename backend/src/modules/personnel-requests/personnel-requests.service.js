@@ -8,6 +8,7 @@ const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { ensureFolder } = require('../../utils/drive');
 const { sendMail } = require('../../utils/mailer');
+const notificationManager = require('../notifications/notificationManager');
 const gmailService = require('../../services/gmail.service');
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
@@ -421,26 +422,22 @@ async function notifyHRNewRequest(request, requester) {
     <p>Accede al sistema para revisar los detalles completos del perfil profesional.</p>
   `;
 
-    // Intentar enviar con Gmail API
-    try {
-        for (const email of HR_NOTIFICATION_EMAILS) {
-            await gmailService.sendEmail({
-                userId: requester.id,
-                to: email,
-                subject,
-                html,
-                replyTo: requester.email
-            });
-        }
-    } catch (error) {
-        logger.warn('Error enviando notificación con Gmail API, usando SMTP:', error.message);
-        // Fallback a SMTP
-        await sendMail({
-            to: HR_NOTIFICATION_EMAILS.join(','),
-            subject,
-            html,
-            senderName: requester.fullname || requester.email,
-            replyTo: requester.email
+    // Notificar con NotificationManager (maneja email y posibles fallos)
+    if (HR_NOTIFICATION_EMAILS.length > 0) {
+        await notificationManager.sendNotification({
+            template: 'custom_html',
+            data: {
+                title: subject,
+                message: html
+            },
+            to: HR_NOTIFICATION_EMAILS,
+            sender: {
+                from: requester.email,
+                replyTo: requester.email,
+                gmailUserId: requester.id,
+                name: requester.fullname || requester.email
+            },
+            skipSave: true
         });
     }
 }

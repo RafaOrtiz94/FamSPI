@@ -4,6 +4,7 @@ import {
     FiTool,
     FiCalendar,
     FiCheckCircle,
+    FiShield,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 
@@ -92,7 +93,7 @@ const TecnicoView = ({ stats, myMaintenances, availability, teamAvailability = [
                 </div>
             </Card>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Card
                     className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-blue-500"
                     onClick={() => navigate("/dashboard/servicio-tecnico/mantenimientos")}
@@ -134,6 +135,21 @@ const TecnicoView = ({ stats, myMaintenances, availability, teamAvailability = [
                         <div>
                             <h3 className="font-semibold text-gray-900">Historial</h3>
                             <p className="text-sm text-gray-500">Trabajos completados</p>
+                        </div>
+                    </div>
+                </Card>
+
+                <Card
+                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-purple-500"
+                    onClick={() => navigate("/dashboard/servicio-tecnico/desinfeccion")}
+                >
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-purple-100 rounded-full text-purple-600">
+                            <FiShield size={24} />
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-gray-900">Desinfección</h3>
+                            <p className="text-sm text-gray-500">Registro F.ST-02</p>
                         </div>
                     </div>
                 </Card>

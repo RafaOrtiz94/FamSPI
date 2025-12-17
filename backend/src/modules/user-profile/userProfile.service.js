@@ -3,6 +3,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { logAction } = require("../../utils/audit");
+const { ensureFolder } = require("../../utils/drive");
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BLOCKED_METADATA_KEYS = new Set([
@@ -74,10 +75,23 @@ const sanitizePreferences = (preferences = {}) => {
   );
 };
 
+const toDriveViewUrl = (driveId) =>
+  driveId ? `https://drive.google.com/uc?export=view&id=${driveId}` : null;
+
+const normalizeAvatarUrl = (row) => {
+  if (row.avatar_url && row.avatar_url.startsWith("data:")) return row.avatar_url;
+  if (row.avatar_drive_id) return toDriveViewUrl(row.avatar_drive_id);
+  if (row.avatar_url && row.avatar_url.includes("drive.google.com/file/d/")) {
+    const match = row.avatar_url.match(/\/d\/([^/]+)/);
+    if (match?.[1]) return toDriveViewUrl(match[1]);
+  }
+  return row.avatar_url || null;
+};
+
 const mapProfileRow = (row) => ({
   id: row.id,
   user_id: row.user_id,
-  avatar_url: row.avatar_url,
+  avatar_url: normalizeAvatarUrl(row),
   avatar_drive_id: row.avatar_drive_id,
   metadata: row.metadata || {},
   preferences: row.preferences || {},
@@ -109,9 +123,10 @@ const getProfile = async (userId) => {
 };
 
 const createProfile = async ({ userId, metadata = {}, preferences = {}, avatar }) => {
+  const identity = await getIdentity(userId);
   const safeMetadata = sanitizeMetadata(metadata);
   const safePreferences = sanitizePreferences(preferences);
-  const avatarInfo = avatar ? await uploadAvatar(userId, avatar) : {};
+  const avatarInfo = avatar ? await uploadAvatar(userId, avatar, null, identity) : {};
 
   const { rows } = await db.query(
     `INSERT INTO user_profile (user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at)
@@ -150,7 +165,9 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
 
   const mergedMetadata = { ...current.metadata, ...safeMetadata };
   const mergedPreferences = { ...current.preferences, ...safePreferences };
-  const avatarInfo = avatar ? await uploadAvatar(userId, avatar, current.avatar_drive_id) : {};
+  const avatarInfo = avatar
+    ? await uploadAvatar(userId, avatar, current.avatar_drive_id, identity)
+    : {};
 
   const { rows } = await db.query(
     `UPDATE user_profile
@@ -175,46 +192,88 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
   return profile;
 };
 
-const uploadAvatar = async (userId, file, previousDriveId) => {
+const resolveAvatarFolder = async (identity) => {
+  const base =
+    process.env.DRIVE_PROFILE_PHOTOS_FOLDER_ID ||
+    process.env.DRIVE_PROFILE_FOLDER_ID ||
+    process.env.DRIVE_DOCS_FOLDER_ID ||
+    process.env.DRIVE_ROOT_FOLDER_ID ||
+    process.env.DRIVE_FOLDER_ID;
+
+  if (!base) return null;
+
+  const usersRoot = await ensureFolder("Usuarios", base);
+  const userFolderName = identity?.email || identity?.fullname || `user-${identity?.id || "na"}`;
+  const userFolder = await ensureFolder(userFolderName, usersRoot.id);
+  const avatarFolder = await ensureFolder("Avatar", userFolder.id);
+  return avatarFolder.id;
+};
+
+const uploadAvatar = async (userId, file, previousDriveId, identity) => {
   if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
     const err = new Error("Formato de imagen no permitido");
     err.status = 400;
     throw err;
   }
 
-  const folderBase =
-    process.env.DRIVE_PROFILE_PHOTOS_FOLDER_ID ||
-    process.env.DRIVE_PROFILE_FOLDER_ID ||
-    process.env.DRIVE_DOCS_FOLDER_ID;
+  const buildDataUri = () =>
+    `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+
+  const actor = identity || (await getIdentity(userId));
+
+  const folderBase = await resolveAvatarFolder(actor);
 
   if (!folderBase) {
-    const err = new Error("No hay carpeta configurada para fotos de perfil");
-    err.status = 500;
-    throw err;
+    // Entorno sin Drive: guardar como data URI para no romper la UX
+    logger.warn("Sin carpeta Drive para avatar, se guardará como data URI en BD.");
+    return { avatar_url: buildDataUri(), avatar_drive_id: previousDriveId || null };
   }
 
-  const extension = file.mimetype.split("/")[1] || "png";
-  const safeName = `profile-${userId}-${Date.now()}.${extension}`;
+  try {
+    const extension = file.mimetype.split("/")[1] || "png";
+    const safeName = `profile-${userId}-${Date.now()}.${extension}`;
 
-  const stream = new Readable();
-  stream._read = () => {};
-  stream.push(file.buffer);
-  stream.push(null);
+    const stream = new Readable();
+    stream._read = () => {};
+    stream.push(file.buffer);
+    stream.push(null);
 
-  const { data } = await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: { name: safeName, parents: [folderBase] },
-    media: { mimeType: file.mimetype, body: stream },
-    fields: "id, name, mimeType, webViewLink, webContentLink",
-  });
+    const { data } = await drive.files.create({
+      supportsAllDrives: true,
+      requestBody: { name: safeName, parents: [folderBase] },
+      media: { mimeType: file.mimetype, body: stream },
+      fields: "id, name, mimeType, webViewLink, webContentLink",
+    });
 
-  if (previousDriveId) {
-    drive.files
-      .delete({ fileId: previousDriveId, supportsAllDrives: true })
-      .catch((err) => logger.warn({ err }, "No se pudo eliminar avatar anterior"));
+    // Hacer el archivo visible con link
+    try {
+      await drive.permissions.create({
+        fileId: data.id,
+        supportsAllDrives: true,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (permErr) {
+      logger.warn({ permErr }, "No se pudo hacer público el avatar (se usa link por defecto)");
+    }
+
+    if (previousDriveId) {
+      drive.files
+        .delete({ fileId: previousDriveId, supportsAllDrives: true })
+        .catch((err) => logger.warn({ err }, "No se pudo eliminar avatar anterior"));
+    }
+
+    const directView = `https://drive.google.com/uc?export=view&id=${data.id}`;
+    const dataUri = buildDataUri();
+    return {
+      // Guardamos un data URI para garantizar visualización inmediata,
+      // y el drive_id para usar la versión en Drive cuando esté disponible
+      avatar_url: dataUri || directView || data.webViewLink || data.webContentLink || null,
+      avatar_drive_id: data.id,
+    };
+  } catch (err) {
+    logger.warn({ err }, "No se pudo subir avatar a Drive, guardando data URI en BD");
+    return { avatar_url: buildDataUri(), avatar_drive_id: previousDriveId || null };
   }
-
-  return { avatar_url: data.webViewLink || data.webContentLink || null, avatar_drive_id: data.id };
 };
 
 const auditChange = async ({ userId, action, before, after }) => {

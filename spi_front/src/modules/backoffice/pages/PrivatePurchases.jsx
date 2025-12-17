@@ -162,7 +162,7 @@ const PrivatePurchasesPage = () => {
       }
       const base64payload = base64.split(",")[1];
       if (!base64payload || !base64payload.trim()) {
-        showToast("El archivo de oferta estヌ vacヌo o no se pudo procesar", "error");
+        showToast("El archivo de oferta est��� vac���o o no se pudo procesar", "error");
         setOfferModal((prev) => ({ ...prev, loading: false }));
         return;
       }
@@ -198,7 +198,7 @@ const PrivatePurchasesPage = () => {
       }
       const base64payload = base64.split(",")[1];
       if (!base64payload || !base64payload.trim()) {
-        showToast("El archivo estヌ vacヌo o no se pudo procesar", "error");
+        showToast("El archivo est��� vac���o o no se pudo procesar", "error");
         setSignedModal((prev) => ({ ...prev, loading: false }));
         return;
       }
@@ -374,7 +374,7 @@ const PrivatePurchasesPage = () => {
                         {statusLookup[req.status]?.label || req.status}
                       </span>
                     </td>
-                    <td className="px-4 py-3">{req.created_by_email || req.created_by || "Anónimo"}</td>
+                    <td className="px-4 py-3">{req.created_by_email || req.created_by || "An+�nimo"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">{formatDate(req.created_at)}</td>
                     <td className="px-4 py-3">
                       <Button
@@ -406,7 +406,7 @@ const PrivatePurchasesPage = () => {
             </h2>
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-semibold ${selectedRequest ? statusLookup[selectedRequest.status]?.accent : "bg-gray-100 text-gray-500"}`}>
-            {selectedRequest ? statusLookup[selectedRequest.status]?.label || selectedRequest.status : "Sin selección"}
+            {selectedRequest ? statusLookup[selectedRequest.status]?.label || selectedRequest.status : "Sin selecci+�n"}
           </span>
         </div>
 
@@ -542,8 +542,8 @@ const PrivatePurchasesPage = () => {
       >
         <div className="space-y-3">
           <p className="text-xs text-gray-500">
-            Sube el documento de oferta sin firma de cliente. Se guardará en Drive en{" "}
-            <span className="font-semibold">/Ofertas Sin Firmar/&lt;comercial&gt;/&lt;cliente&gt;</span> y se notificará a comercial/jefe.
+            Sube el documento de oferta sin firma de cliente. Se guardara en Drive en{" "}
+            <span className="font-semibold">/Ofertas Sin Firmar/&lt;comercial&gt;/&lt;cliente&gt;</span> y se notificara a comercial/jefe.
           </p>
           <div className="text-[11px] text-gray-500">
             Ruta destino: <span className="font-mono">{buildUnsignedFolderPath()}</span>
@@ -665,7 +665,7 @@ const PrivatePurchasesPage = () => {
                 <p className="text-xs uppercase tracking-widest text-gray-500">Fecha</p>
                 <p className="text-sm font-semibold text-gray-900">{formatDate(detailModalRequest.created_at)}</p>
                 <p className="text-xs text-gray-500">
-                  Creado por {detailModalRequest.created_by_email || detailModalRequest.created_by || "Anónimo"}
+                  Creado por {detailModalRequest.created_by_email || detailModalRequest.created_by || "An+�nimo"}
                 </p>
                 {detailModalRequest.client_registered_at && (
                   <p className="text-xs text-emerald-600">Cliente registrado el {formatDate(detailModalRequest.client_registered_at)}</p>
@@ -717,7 +717,7 @@ const PrivatePurchasesPage = () => {
                   rel="noreferrer"
                   className="inline-flex items-center gap-2 text-xs font-semibold text-blue-600 hover:underline"
                 >
-                  <FiFileText /> Documento estadístico (comodato)
+                  <FiFileText /> Documento estad+�stico (comodato)
                 </a>
               )}
               {detailModalRequest.offer_document_id && (

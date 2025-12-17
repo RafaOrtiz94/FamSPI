@@ -4,6 +4,7 @@ import BusinessCaseWizard from "./BusinessCaseWizard";
 import Button from "../../../core/ui/components/Button";
 import { FiList, FiSliders } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
+import { RequestActionButton } from "../../../core/ui/components/RequestActionCards";
 
 const BusinessCasePage = () => {
   const { user } = useAuth();
@@ -24,6 +25,7 @@ const BusinessCasePage = () => {
           </p>
         </div>
         <div className="flex gap-2">
+          <RequestActionButton type="BUSINESS_CASE" size="sm" />
           <Button
             variant={activeView === "wizard" ? "primary" : "ghost"}
             onClick={() => setActiveView("wizard")}

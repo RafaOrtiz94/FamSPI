@@ -6,6 +6,7 @@ import Header from "../ui/components/Header";
 import NavigationBar from "../ui/components/NavigationBar";
 import ImportantAlertsPanel from "../ui/components/ImportantAlertsPanel";
 import InternalLopdpConsentModal from "../ui/widgets/InternalLopdpConsentModal";
+import { RequestModalProvider } from "../ui/components/RequestActionCards";
 import { useAuth } from "../auth/AuthContext";
 
 export default function DashboardLayout() {
@@ -20,6 +21,7 @@ export default function DashboardLayout() {
       className={`min-h-screen bg-slate-100 text-slate-900 dark:bg-slate-900 dark:text-slate-100 ${lopdpPending ? "overflow-hidden" : ""}`}
     >
       <InternalLopdpConsentModal forceOpen={lopdpPending} />
+      <RequestModalProvider />
       <div className={lopdpPending ? "pointer-events-none select-none blur-[2px]" : ""}>
         <Header />
         <NavigationBar />

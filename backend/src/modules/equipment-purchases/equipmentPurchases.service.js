@@ -7,6 +7,7 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const { sheets } = require("../../config/google");
 const inventarioService = require("../inventario/inventario.service");
+const notificationManager = require("../notifications/notificationManager");
 const {
   createRequest: createServiceRequest,
   generateActa,
@@ -675,14 +676,20 @@ async function archiveEmail({ html, subject, folderId, prefix = "correo", reques
 }
 
 async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, request, actionLabel }) {
-  await sendMail({
-    to,
-    cc,
-    subject,
-    html,
-    gmailUserId: user?.id,
-    from: user?.email,
-    replyTo: user?.email,
+  await notificationManager.sendNotification({
+    template: 'custom_html',
+    data: { 
+      title: subject, 
+      message: html 
+    },
+    to: to,
+    sender: {
+      from: user?.email,
+      replyTo: user?.email,
+      cc: cc,
+      gmailUserId: user?.id
+    },
+    skipSave: true
   });
   return archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
 }
@@ -1405,7 +1412,53 @@ async function uploadContract({ id, user, file }) {
       RETURNING *`,
     [fileId, STATUS.COMPLETED, id],
   );
-  return rows[0];
+
+  const completed = rows[0];
+
+  // Enviar notificación automática de equipo disponible
+  setImmediate(async () => {
+    try {
+      const acceptedItems = getAcceptedItems(completed);
+      const equipmentNames = acceptedItems.map(item => item.name || item.sku || item.id || "Equipo").join(", ");
+
+      // Notificar al usuario que creó la solicitud
+      if (request.created_by) {
+        await notificationManager.sendNotification({
+          userId: request.created_by,
+          template: 'equipment_available',
+          data: {
+            equipment_name: equipmentNames,
+            request_id: id,
+            client_name: request.client_name,
+            completed_at: new Date().toISOString()
+          },
+          email: true,
+          source: 'equipment_purchase'
+        });
+      }
+
+      // Notificar al usuario asignado si es diferente
+      if (request.assigned_to && request.assigned_to !== request.created_by) {
+        await notificationManager.sendNotification({
+          userId: request.assigned_to,
+          template: 'equipment_available',
+          data: {
+            equipment_name: equipmentNames,
+            request_id: id,
+            client_name: request.client_name,
+            completed_at: new Date().toISOString()
+          },
+          email: true,
+          source: 'equipment_purchase'
+        });
+      }
+    } catch (error) {
+      logger.error('Error enviando notificación de equipo disponible:', error);
+      // No lanzamos error para no detener el flujo
+    }
+  });
+
+  return completed;
 }
 
 async function updateBusinessCaseFields({ id, user, fields }) {

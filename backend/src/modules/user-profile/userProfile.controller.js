@@ -15,6 +15,7 @@ const parseJsonField = (value) => {
 
 const getMine = async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     const data = await getProfileWithIdentity(req.user.id);
     return res.status(200).json({ ok: true, data });
   } catch (err) {
@@ -25,6 +26,7 @@ const getMine = async (req, res) => {
 
 const createMine = async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     const metadata = parseJsonField(req.body?.metadata) || {};
     const preferences = parseJsonField(req.body?.preferences) || {};
     const avatar = req.file || null;
@@ -46,6 +48,7 @@ const createMine = async (req, res) => {
 
 const updateMine = async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     const metadata = parseJsonField(req.body?.metadata) || {};
     const preferences = parseJsonField(req.body?.preferences) || {};
     const avatar = req.file || null;

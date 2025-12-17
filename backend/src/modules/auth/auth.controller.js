@@ -289,6 +289,7 @@ const googleCallback = async (req, res) => {
 ============================================================ */
 const me = async (req, res) => {
   try {
+    res.set("Cache-Control", "no-store, no-cache, must-revalidate");
     const { email } = req.user || {};
     if (!email) return res.status(401).json({ error: "No autorizado" });
 
@@ -300,12 +301,15 @@ const me = async (req, res) => {
         u.fullname,
         u.role,
         d.code AS department,
+        up.avatar_url,
+        up.avatar_drive_id,
         u.lopdp_internal_status,
         u.lopdp_internal_signed_at,
         u.lopdp_internal_pdf_file_id,
         u.lopdp_internal_signature_file_id
       FROM users u
       LEFT JOIN departments d ON u.department_id = d.id
+      LEFT JOIN user_profile up ON up.user_id = u.id
       WHERE u.email = $1 LIMIT 1;
       `,
       [email]
@@ -340,12 +344,21 @@ const me = async (req, res) => {
     }
 
     const meta = resolveRoleMeta(payload.role);
+    const avatarUrl = (() => {
+      if (payload.avatar_url && payload.avatar_url.startsWith("data:")) return payload.avatar_url;
+      if (payload.avatar_drive_id) {
+        return `https://drive.google.com/uc?export=view&id=${payload.avatar_drive_id}`;
+      }
+      return payload.avatar_url || null;
+    })();
     return res.status(200).json({
       user: {
         ...payload,
         scope: meta.scope,
         dashboard: meta.dashboard,
         lopdp_internal_status: payload.lopdp_internal_status || "pending",
+        avatar_url: avatarUrl,
+        avatar_drive_id: payload.avatar_drive_id || null,
         has_signature: !!payload.lopdp_internal_signature_file_id,
       },
     });

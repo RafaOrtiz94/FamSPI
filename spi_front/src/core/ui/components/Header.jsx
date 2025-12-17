@@ -1,13 +1,9 @@
 // src/core/ui/components/Header.jsx
-import React from "react";
+import React, { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../auth/useAuth";
 import { useUI } from "../UIContext";
-import {
-  FiSun,
-  FiMoon,
-  FiLogOut,
-  FiUser,
-} from "react-icons/fi";
+import { FiSun, FiMoon, FiLogOut } from "react-icons/fi";
 import famLogo from "../../../assets/famproject_logo.png";
 import NotificationBell from "./NotificationBell";
 
@@ -22,6 +18,13 @@ import NotificationBell from "./NotificationBell";
 export default function Header() {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useUI();
+  const navigate = useNavigate();
+
+  const displayName = useMemo(
+    () => user?.fullname || user?.name || user?.email || "Usuario",
+    [user?.fullname, user?.name, user?.email]
+  );
+  const userInitial = displayName?.charAt(0)?.toUpperCase() || "U";
 
   return (
     <header className="sticky top-0 z-40 bg-primary/95 text-white shadow-md backdrop-blur-md border-b border-primary-light transition-all duration-300">
@@ -68,13 +71,32 @@ export default function Header() {
           {/* Notificaciones */}
           <NotificationBell />
 
-          {/* Perfil */}
-          <div className="hidden sm:flex items-center gap-2 rounded-lg bg-primary-light/40 px-3 py-1.5 shadow-inner">
-            <FiUser className="text-accent" size={16} />
-            <span className="text-sm font-medium truncate max-w-[140px] text-white">
-              {user?.name || user?.email || "Usuario"}
-            </span>
-          </div>
+          {/* Perfil (link a Mi Perfil) */}
+          <button
+            onClick={() => navigate("/dashboard/mi-perfil")}
+            className="flex items-center gap-3 rounded-lg bg-primary-light/40 px-3 py-1.5 shadow-inner hover:bg-white/10 transition focus-visible:ring-2 focus-visible:ring-accent"
+            title="Ir a Mi Perfil"
+          >
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-sm font-bold uppercase text-white">
+              {user?.avatar_url ? (
+                <img
+                  src={user.avatar_url}
+                  alt="Avatar"
+                  className="h-full w-full rounded-full object-cover"
+                />
+              ) : (
+                userInitial
+              )}
+            </div>
+            <div className="flex flex-col items-start leading-tight">
+              <span className="text-sm font-semibold text-white truncate max-w-[160px]">
+                {displayName}
+              </span>
+              <span className="text-[11px] text-accent-light uppercase tracking-wide">
+                Mi Perfil
+              </span>
+            </div>
+          </button>
 
           {/* Logout */}
           <button

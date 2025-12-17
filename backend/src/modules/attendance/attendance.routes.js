@@ -18,6 +18,10 @@ router.post("/exception", verifyToken, controller.registerException);
 router.post("/exception/status", verifyToken, controller.updateExceptionStatus);
 router.get("/exception/active", verifyToken, controller.getActiveException);
 
+// Overtime endpoints
+router.post("/overtime", verifyToken, controller.markOvertime);
+router.get("/overtime", verifyToken, controller.getOvertimeRecords);
+
 // Query endpoints
 router.get("/today", verifyToken, controller.getToday);
 router.get("/user/:userId", verifyToken, controller.getUserAttendance);

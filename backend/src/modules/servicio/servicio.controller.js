@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
+const { generatePDF } = require("./desinfeccion.service");
 
 // ===============================================================
 // 🔐 CONFIGURACIÓN GOOGLE DRIVE / DOCS
@@ -45,7 +46,7 @@ const createCapacitacion = async (req, res) => {
     } = req.body;
 
     const { rows } = await db.query(
-      `INSERT INTO servicio.cronograma_capacitacion 
+      `INSERT INTO servicio.cronograma_capacitacion
        (titulo, descripcion, instructor, modalidad, fecha, hora_inicio, hora_fin, ubicacion)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *;`,
       [titulo, descripcion, instructor, modalidad, fecha, hora_inicio, hora_fin, ubicacion]
@@ -285,8 +286,8 @@ const createEquipo = async (req, res) => {
 const getMantenimientos = async (req, res) => {
   try {
     const { rows } = await db.query(`
-      SELECT 
-        m.*, 
+      SELECT
+        m.*,
         e.name AS equipo_nombre,
         e.manufacturer AS fabricante,
         e.category AS categoria
@@ -307,8 +308,8 @@ const getMantenimientos = async (req, res) => {
 const getMantenimientosAnuales = async (req, res) => {
   try {
     const { rows } = await db.query(`
-      SELECT 
-        ma.*, 
+      SELECT
+        ma.*,
         e.name AS equipo_nombre,
         e.manufacturer AS fabricante
       FROM servicio.cronograma_mantenimientos_anuales ma
@@ -339,6 +340,60 @@ const createMantenimientoAnual = async (req, res) => {
 };
 
 // ===============================================================
+// 🧴 DESINFECCIÓN DE INSTRUMENTOS
+// ===============================================================
+const generateDisinfectionPDF = async (req, res) => {
+  try {
+    console.log("🎯 Controller: Received disinfection PDF request", {
+      user: req.user?.email || req.user?.name || 'Unknown',
+      hasBody: !!req.body,
+      bodyKeys: Object.keys(req.body || {}),
+      signaturePresent: !!req.body?.firma_ing_SC,
+      signatureLength: req.body?.firma_ing_SC?.length,
+      attachmentsPresent: !!req.body?.adjunto_evidencia,
+      attachmentCount: req.body?.adjunto_evidencia?.length || 0
+    });
+
+    // Pass user info to the PDF generation function
+    req.userInfo = req.user; // Make user info available to the service
+    console.log("🎯 Controller: User info attached", { userInfo: req.userInfo });
+    await generatePDF(req, res);
+  } catch (err) {
+    console.error("❌ Error generando PDF de desinfección:", err);
+    res.status(500).json({ error: "Error generando PDF de desinfección" });
+  }
+};
+
+// ===============================================================
+// 🏫 COORDINACIÓN DE ENTRENAMIENTO
+// ===============================================================
+const generateTrainingCoordinationPDF = async (req, res) => {
+  try {
+    console.log("🎯 Controller: Received training coordination PDF request", {
+      user: req.user?.email || req.user?.name || 'Unknown',
+      hasBody: !!req.body,
+      bodyKeys: Object.keys(req.body || {}),
+      signaturePresent: !!req.body?.Firma_af_image,
+      signatureLength: req.body?.Firma_af_image?.length,
+      ordenNumero: req.body?.ORDNumero,
+      cliente: req.body?.ORDCliente
+    });
+
+    // Import the training service endpoint handler (acepta req, res)
+    const { generateTrainingPDF } = require("./entrenamiento.service");
+
+    // Pass user info to the PDF generation function
+    req.userInfo = req.user; // Make user info available to the service
+    console.log("🎯 Controller: User info attached", { userInfo: req.userInfo });
+
+    await generateTrainingPDF(req, res);
+  } catch (err) {
+    console.error("❌ Error generando PDF de coordinación de entrenamiento:", err);
+    res.status(500).json({ error: "Error generando PDF de coordinación de entrenamiento" });
+  }
+};
+
+// ===============================================================
 // ✅ EXPORTS
 // ===============================================================
 module.exports = {
@@ -353,4 +408,6 @@ module.exports = {
   getMantenimientos,
   getMantenimientosAnuales,
   createMantenimientoAnual,
+  generateDisinfectionPDF,
+  generateTrainingCoordinationPDF,
 };

@@ -14,7 +14,7 @@ import {
   FiCheckCircle,
   FiCalendar,
   FiLayers,
-  FiUser,
+  FiShield,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -71,7 +71,7 @@ const planificacionLink = {
 };
 
 const comercialScopes = ["comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
-const planificacionRoles = new Set(["comercial", "jefe_comercial", "gerencia", "gerencia_general"]);
+
 
 const aprobacionesPlanLink = {
   name: "Aprobación de planes",
@@ -91,6 +91,12 @@ const privatePurchasesLink = {
   name: "Compras Privadas",
   icon: FiLayers,
   path: "/dashboard/backoffice/private-purchases",
+};
+
+const publicPurchasesLink = {
+  name: "Compras Públicas",
+  icon: FiShoppingCart,
+  path: "/dashboard/comercial/equipment-purchases",
 };
 
 const businessCaseLink = {
@@ -124,12 +130,6 @@ const permisosLink = {
   name: "Permisos y Vacaciones",
   icon: FiCalendar,
   path: "/dashboard/talento-humano/permisos",
-};
-
-const myProfileLink = {
-  name: "Mi Perfil",
-  icon: FiUser,
-  path: "/dashboard/mi-perfil",
 };
 
 const auditPrepLink = {
@@ -176,91 +176,163 @@ const servicioLinks = [
   },
 ];
 
-const buildLinks = (scope, role, auditActive) => {
-  const links = [getHomeLink(scope), permisosLink, myProfileLink];
+// Sistema de prioridades por rol
+const getPriorityGroups = (scope, role, auditActive) => {
+  const groups = {
+    critical: [], // 🔥 Funciones críticas diarias - siempre visibles
+    primary: [],  // 🟡 Funciones principales del rol
+    secondary: [], // 🔵 Funciones específicas/secundarias
+    admin: []     // ⚫ Funciones administrativas/menos usadas
+  };
 
-  // Comercial links
-  if (comercialScopes.includes(scope)) {
-    links.push(...comercialLinks);
+  // Siempre incluir inicio como crítico
+  groups.critical.push(getHomeLink(scope));
+
+  // 📊 GERENCIA - Enfoque en control y supervisión
+  if (["gerencia", "gerente_general", "director"].includes(scope)) {
+    groups.critical.push(aprobacionesPlanLink); // Aprobaciones críticas
+    groups.primary.push(businessCaseLink, auditPrepLink);
+    groups.secondary.push(auditLinks[0]); // Auditoría y trazabilidad
+    groups.admin.push(permisosLink, ...talentoLinks);
   }
 
-  const privatePurchaseScopes = new Set([
-    "comercial",
-    "jefe_comercial",
-    "acp_comercial",
-    "backoffice",
-    "backoffice_comercial",
-    "gerencia",
-    "gerencia_general",
-  ]);
-  if (privatePurchaseScopes.has(scope) || role.includes("backoffice")) {
-    links.push(privatePurchasesLink);
+  // 💰 FINANZAS - Control presupuestario
+  else if (["finanzas", "jefe_finanzas", "financiero"].includes(scope)) {
+    groups.primary.push(businessCaseLink); // Control financiero principal
+    groups.secondary.push(auditPrepLink);
+    if (auditActive) groups.secondary.push(auditPrepLink);
   }
 
-  if (planificacionRoles.has(role)) {
-    links.push(planificacionLink);
+  // 💼 COMERCIAL - Flujo de ventas completo
+  else if (comercialScopes.includes(scope)) {
+    groups.critical.push(...comercialLinks); // Solicitudes y clientes críticos
+    groups.primary.push(planificacionLink); // Planificación mensual
+    groups.secondary.push(publicPurchasesLink, privatePurchasesLink, businessCaseLink);
+
+    if (scope.includes("acp") || role.includes("acp")) {
+      groups.primary.unshift(...acpLinks); // ACP pone compras primero
+    }
+
+    if (["jefe_comercial"].includes(scope)) {
+      groups.primary.push(aprobacionesPlanLink);
+    }
+
+    groups.admin.push(permisosLink);
   }
 
-  if (scope.includes("acp") || role.includes("acp")) {
-    links.push(...acpLinks);
+  // 🔧 SERVICIO TÉCNICO - Operaciones técnicas
+  else if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].includes(scope)) {
+    groups.critical.push(
+      servicioLinks.find(l => l.name === "Mantenimientos"),
+      servicioLinks.find(l => l.name === "Solicitudes"),
+      servicioLinks.find(l => l.name === "Equipos")
+    );
+    groups.primary.push(
+      servicioLinks.find(l => l.name === "Disponibilidad"),
+      servicioLinks.find(l => l.name === "Aprobaciones")
+    );
+    groups.secondary.push(
+      servicioLinks.find(l => l.name === "Capacitaciones"),
+      servicioLinks.find(l => l.name === "Aplicaciones")
+    );
   }
 
-  const businessCaseRoles = [
-    "comercial",
-    "acp_comercial",
-    "jefe_comercial",
-    "gerencia",
-    "gerencia_general",
-    "operaciones",
-    "jefe_operaciones",
-    "servicio_tecnico",
-    "jefe_tecnico",
-    "jefe_servicio_tecnico",
-  ];
-
-  if (businessCaseRoles.includes(scope)) {
-    links.push(businessCaseLink);
+  // 👥 TALENTO HUMANO - Gestión de personal
+  else if (["talento-humano", "talento_humano", "jefe_talento_humano"].includes(scope)) {
+    groups.primary.push(permisosLink, ...talentoLinks);
   }
 
-  // Talento Humano links
-  if (["talento-humano", "talento_humano", "ti", "gerencia"].includes(scope)) {
-    links.push(...talentoLinks);
+  // 🎯 TI - Tecnología y auditoría
+  else if (["ti", "jefe_ti", "admin_ti"].includes(scope)) {
+    groups.primary.push(...talentoLinks, ...auditLinks);
+    if (auditActive) groups.primary.push(auditPrepLink);
   }
 
-  // Audit links
-  if (["ti", "gerencia"].includes(scope)) {
-    links.push(...auditLinks);
+  // ⚙️ OPERACIONES - Procesos operativos
+  else if (["operaciones", "jefe_operaciones"].includes(scope)) {
+    groups.primary.push(businessCaseLink);
+    if (auditActive) groups.secondary.push(auditPrepLink);
   }
 
-  const auditScopes = new Set([
-    "ti",
-    "admin_ti",
-    "jefe_ti",
-    "gerencia",
-    "calidad",
-    "finanzas",
-    "financiero",
-    "comercial",
-    "talento_humano",
-    "operaciones",
-  ]);
-
-  const auditManagers = new Set(["admin_ti", "jefe_ti"]);
-
-  if ((auditActive && auditScopes.has(scope)) || auditManagers.has(scope)) {
-    links.push(auditPrepLink);
+  // 🎨 CALIDAD - Control de calidad
+  else if (["calidad"].includes(scope)) {
+    if (auditActive) groups.primary.push(auditPrepLink);
   }
 
-  if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico"].includes(scope)) {
-    links.push(...servicioLinks);
+  // 🏢 BACKOFFICE - Soporte administrativo
+  else if (role.includes("backoffice")) {
+    groups.primary.push(privatePurchasesLink, publicPurchasesLink);
+    groups.secondary.push(...comercialLinks);
   }
 
-  if (["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"].includes(scope)) {
-    links.push(aprobacionesPlanLink);
-  }
+  // Filtrar elementos vacíos y aplanar arrays
+  Object.keys(groups).forEach(key => {
+    groups[key] = groups[key].filter(Boolean);
+  });
 
-  return links;
+  return groups;
 };
+
+
+
+
+
+// Componente para botones de navegación
+const NavButton = ({ link, variant = "primary", mobile = false, onClick }) => {
+  const baseClasses = mobile
+    ? "flex items-center px-3 py-2 text-base font-medium rounded-md transition-colors duration-200"
+    : "inline-flex items-center px-3 py-2 text-sm font-medium rounded-md transition-all duration-200 hover:bg-gray-100 dark:hover:bg-gray-800";
+
+  const variantClasses = {
+    critical: mobile
+      ? "text-gray-900 dark:text-white"
+      : "text-gray-900 dark:text-white bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800",
+    primary: mobile
+      ? "text-gray-700 dark:text-gray-200"
+      : "text-gray-700 dark:text-gray-200 hover:text-blue-600 dark:hover:text-blue-400",
+    secondary: mobile
+      ? "text-gray-600 dark:text-gray-300"
+      : "text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-gray-100",
+    admin: mobile
+      ? "text-gray-500 dark:text-gray-400"
+      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+  };
+
+  return (
+    <NavLink
+      to={link.path}
+      end
+      onClick={onClick}
+      className={({ isActive }) =>
+        clsx(
+          baseClasses,
+          variantClasses[variant],
+          isActive && "bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300"
+        )
+      }
+    >
+      {({ isActive }) => (
+        <>
+          {React.createElement(link.icon, {
+            className: clsx(
+              "mr-3 flex-shrink-0",
+              mobile ? "h-5 w-5" : "h-4 w-4",
+              isActive ? "text-blue-600 dark:text-blue-400" : "text-gray-500 dark:text-gray-400"
+            )
+          })}
+          <span className="truncate">{link.name}</span>
+        </>
+      )}
+    </NavLink>
+  );
+};
+
+// Separador visual entre grupos
+const GroupSeparator = () => (
+  <div className="mx-1 h-6 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent dark:via-slate-600 sm:mx-2 sm:h-8" />
+);
+
+
 
 const NavigationBar = () => {
   const { user } = useAuth();
@@ -268,35 +340,126 @@ const NavigationBar = () => {
   const scope = (user?.scope || role || "").toLowerCase();
   const { status: auditStatus } = useAuditStatus();
   const auditActive = Boolean(auditStatus?.active);
-  const links = React.useMemo(
-    () => buildLinks(scope, role, auditActive),
+  const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
+
+  const priorityGroups = React.useMemo(
+    () => getPriorityGroups(scope, role, auditActive),
     [scope, role, auditActive]
   );
 
+  const toggleMobileMenu = () => {
+    setMobileMenuOpen(!mobileMenuOpen);
+  };
+
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+  };
+
   return (
-    <nav className="border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">
-      <div className="mx-auto flex max-w-6xl items-center gap-2 overflow-x-auto px-4 py-3 sm:gap-3">
-        {links.map((link) => (
-          <NavLink
-            key={link.path}
-            to={link.path}
-            end
-            className={({ isActive }) =>
-              clsx(
-                "inline-flex items-center gap-2 rounded-2xl border px-4 py-2 text-sm font-medium transition",
-                isActive
-                  ? "border-primary bg-primary text-white shadow-md shadow-primary/30"
-                  : "border-slate-200 bg-white text-slate-600 hover:border-primary hover:text-primary dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
-              )
-            }
-          >
-            {React.createElement(link.icon, { className: "text-base" })}
-            <span className="whitespace-nowrap">{link.name}</span>
-          </NavLink>
-        ))}
+    <nav className="bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-700">
+      <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Navigation Links - Desktop */}
+          <div className="hidden md:flex items-center space-x-1">
+            {/* Critical Group */}
+            {priorityGroups.critical.map((link) => (
+              <NavButton key={link.path} link={link} variant="critical" />
+            ))}
+
+            {/* Primary Group */}
+            {priorityGroups.primary.length > 0 && (
+              <>
+                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
+                {priorityGroups.primary.map((link) => (
+                  <NavButton key={link.path} link={link} variant="primary" />
+                ))}
+              </>
+            )}
+
+            {/* Secondary Group */}
+            {priorityGroups.secondary.length > 0 && (
+              <>
+                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
+                {priorityGroups.secondary.map((link) => (
+                  <NavButton key={link.path} link={link} variant="secondary" />
+                ))}
+              </>
+            )}
+
+            {/* Admin Group */}
+            {priorityGroups.admin.length > 0 && (
+              <>
+                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
+                {priorityGroups.admin.map((link) => (
+                  <NavButton key={link.path} link={link} variant="admin" />
+                ))}
+              </>
+            )}
+          </div>
+
+          {/* Mobile menu button */}
+          <div className="md:hidden ml-auto">
+            <button
+              type="button"
+              onClick={toggleMobileMenu}
+              className="bg-gray-100 dark:bg-gray-800 inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+              aria-controls="mobile-menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              <span className="sr-only">Open main menu</span>
+              <svg className="block h-6 w-6" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+          </div>
+        </div>
       </div>
+
+      {/* Mobile menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden" id="mobile-menu">
+          <div className="px-2 pt-2 pb-3 space-y-1 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
+            {/* Critical Group */}
+            {priorityGroups.critical.map((link) => (
+              <NavButton key={link.path} link={link} variant="critical" mobile onClick={closeMobileMenu} />
+            ))}
+
+            {/* Primary Group */}
+            {priorityGroups.primary.length > 0 && (
+              <>
+                <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
+                {priorityGroups.primary.map((link) => (
+                  <NavButton key={link.path} link={link} variant="primary" mobile onClick={closeMobileMenu} />
+                ))}
+              </>
+            )}
+
+            {/* Secondary Group */}
+            {priorityGroups.secondary.length > 0 && (
+              <>
+                <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
+                {priorityGroups.secondary.map((link) => (
+                  <NavButton key={link.path} link={link} variant="secondary" mobile onClick={closeMobileMenu} />
+                ))}
+              </>
+            )}
+
+            {/* Admin Group */}
+            {priorityGroups.admin.length > 0 && (
+              <>
+                <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
+                {priorityGroups.admin.map((link) => (
+                  <NavButton key={link.path} link={link} variant="admin" mobile onClick={closeMobileMenu} />
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   );
 };
 
 export default NavigationBar;
+
+

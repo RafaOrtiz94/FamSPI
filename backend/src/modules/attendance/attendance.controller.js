@@ -205,12 +205,12 @@ const clockInLunch = async (req, res) => {
 /**
  * 🏁 Clock Out - Record exit time
  * POST /api/attendance/clock-out
- * Body: { location }
+ * Body: { location, isOvertime: boolean }
  */
 const clockOut = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
-    const { location } = req.body;
+    const { location, isOvertime } = req.body;
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
@@ -221,7 +221,7 @@ const clockOut = async (req, res) => {
 
     // Check if record exists
     const existing = await db.query(
-      "SELECT id, entry_time, exit_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      "SELECT id, entry_time, exit_time, overtime_hours FROM user_attendance_records WHERE user_id = $1 AND date = $2",
       [userId, today]
     );
 
@@ -240,23 +240,51 @@ const clockOut = async (req, res) => {
       });
     }
 
-    // Update exit time and location
+    // Calculate worked hours and determine if overtime
+    const entryTime = new Date(existing.rows[0].entry_time);
+    let workedMs = now - entryTime;
+
+    // Subtract lunch break if exists
+    const lunchQuery = await db.query(
+      "SELECT lunch_start_time, lunch_end_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (lunchQuery.rows[0]?.lunch_start_time && lunchQuery.rows[0]?.lunch_end_time) {
+      const lunchStart = new Date(lunchQuery.rows[0].lunch_start_time);
+      const lunchEnd = new Date(lunchQuery.rows[0].lunch_end_time);
+      workedMs -= (lunchEnd - lunchStart);
+    }
+
+    const workedHours = workedMs / (1000 * 60 * 60);
+    const standardWorkHours = 8; // Jornada laboral estándar
+    const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+
+    // Update exit time, location, and overtime info
     const result = await db.query(
       `
       UPDATE user_attendance_records
-      SET exit_time = $1, exit_location = $4, updated_at = NOW()
+      SET exit_time = $1, exit_location = $4, is_overtime = $5, overtime_hours = $6, total_hours = $7, updated_at = NOW()
       WHERE user_id = $2 AND date = $3
       RETURNING *;
       `,
-      [now, userId, today, location || null]
+      [now, userId, today, location || null, isOvertime || overtimeHours > 0, overtimeHours, workedHours]
     );
 
-    logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()} loc: ${location}`);
+    const message = overtimeHours > 0
+      ? `Salida registrada. Has trabajado ${overtimeHours.toFixed(1)} horas extra.`
+      : "Salida registrada correctamente";
+
+    logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()} loc: ${location} overtime: ${overtimeHours.toFixed(2)}h`);
 
     return res.status(200).json({
       ok: true,
-      message: "Salida registrada correctamente",
+      message,
       data: result.rows[0],
+      overtime: overtimeHours > 0 ? {
+        hours: overtimeHours,
+        isSignificant: overtimeHours > 2 // Más de 2 horas extra es significativo
+      } : null
     });
   } catch (err) {
     logger.error({ err }, "❌ Error en clock-out");
@@ -544,6 +572,110 @@ const getRange = async (req, res) => {
   }
 };
 
+/**
+ * ⏰ Mark Overtime - Register additional work time
+ * POST /api/attendance/overtime
+ * Body: { hours: number, reason: string, location: string }
+ */
+const markOvertime = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { hours, reason, location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    if (!hours || hours <= 0) {
+      return res.status(400).json({ ok: false, message: "Horas de overtime deben ser mayores a 0" });
+    }
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ ok: false, message: "Razón requerida para overtime" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Insert overtime record
+    const result = await db.query(
+      `
+      INSERT INTO attendance_overtime (
+        user_id, date, hours, reason, location, recorded_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *;
+      `,
+      [userId, today, hours, reason.trim(), location || null, now]
+    );
+
+    logger.info(`[ATTENDANCE] Overtime marked: ${email} - ${hours}h - ${reason}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: `Overtime de ${hours} horas registrado correctamente`,
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en mark-overtime");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando overtime",
+    });
+  }
+};
+
+/**
+ * 📊 Get Overtime Records - Get overtime history
+ * GET /api/attendance/overtime?start=YYYY-MM-DD&end=YYYY-MM-DD
+ */
+const getOvertimeRecords = async (req, res) => {
+  try {
+    const { id: userId } = req.user || {};
+    const { start, end } = req.query;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    if (!start || !end) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fechas de inicio y fin requeridas",
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT * FROM attendance_overtime
+      WHERE user_id = $1 AND date BETWEEN $2 AND $3
+      ORDER BY date DESC, recorded_at DESC
+      `,
+      [userId, start, end]
+    );
+
+    // Calculate totals
+    const totalHours = result.rows.reduce((sum, record) => sum + parseFloat(record.hours), 0);
+    const totalRecords = result.rows.length;
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows,
+      summary: {
+        totalHours: totalHours.toFixed(2),
+        totalRecords,
+        period: { start, end }
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error obteniendo registros de overtime");
+    return res.status(500).json({
+      ok: false,
+      message: "Error obteniendo registros de overtime",
+    });
+  }
+};
+
 module.exports = {
   clockIn,
   clockOutLunch,
@@ -555,4 +687,6 @@ module.exports = {
   getToday,
   getUserAttendance,
   getRange,
+  markOvertime,
+  getOvertimeRecords,
 };

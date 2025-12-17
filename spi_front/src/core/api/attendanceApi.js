@@ -197,3 +197,37 @@ export const downloadAttendancePDF = async (userId, startDate, endDate) => {
 
     return true;
 };
+
+/**
+ * Mark Overtime - Register additional work time
+ * POST /api/attendance/overtime
+ * Body: { hours: number, reason: string, location: string }
+ */
+export const markOvertime = async (hours, reason, location = null) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/overtime",
+        { hours, reason, location },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Get Overtime Records - Get overtime history
+ * GET /api/attendance/overtime?start=YYYY-MM-DD&end=YYYY-MM-DD
+ */
+export const getOvertimeRecords = async (startDate, endDate) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.get(
+        `/attendance/overtime?start=${startDate}&end=${endDate}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};

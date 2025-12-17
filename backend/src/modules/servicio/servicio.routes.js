@@ -9,10 +9,30 @@ const { requireRole } = require("../../middlewares/roles");
 // ======================================================
 // 🧠 CAPACITACIONES
 // ======================================================
-router.get("/capacitaciones", verifyToken, requireRole(["tecnico", "gerencia"]), controller.getCapacitaciones);
-router.post("/capacitaciones", verifyToken, requireRole(["tecnico"]), controller.createCapacitacion);
-router.put("/capacitaciones/:id", verifyToken, requireRole(["tecnico"]), controller.updateCapacitacion);
-router.delete("/capacitaciones/:id", verifyToken, requireRole(["tecnico", "gerencia"]), controller.deleteCapacitacion);
+router.get(
+  "/capacitaciones",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.getCapacitaciones
+);
+router.post(
+  "/capacitaciones",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.createCapacitacion
+);
+router.put(
+  "/capacitaciones/:id",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.updateCapacitacion
+);
+router.delete(
+  "/capacitaciones/:id",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.deleteCapacitacion
+);
 
 // ======================================================
 // ✅ DISPONIBILIDAD DE TÉCNICOS
@@ -33,18 +53,63 @@ router.post(
 // ======================================================
 // ⚙️ EQUIPOS
 // ======================================================
-router.get("/equipos", verifyToken, requireRole(["tecnico", "gerencia", "jefe_tecnico"]), controller.getEquipos);
-router.post("/equipos", verifyToken, requireRole(["tecnico", "gerencia"]), controller.createEquipo);
+router.get(
+  "/equipos",
+  verifyToken,
+  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  controller.getEquipos
+);
+router.post(
+  "/equipos",
+  verifyToken,
+  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  controller.createEquipo
+);
 
 // ======================================================
 // 🛠️ MANTENIMIENTOS
 // ======================================================
-router.get("/mantenimientos", verifyToken, requireRole(["tecnico", "gerencia"]), controller.getMantenimientos);
+router.get(
+  "/mantenimientos",
+  verifyToken,
+  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  controller.getMantenimientos
+);
 
 // ======================================================
 // 📅 MANTENIMIENTOS ANUALES
 // ======================================================
-router.get("/mantenimientos-anuales", verifyToken, requireRole(["tecnico", "gerencia"]), controller.getMantenimientosAnuales);
-router.post("/mantenimientos-anuales", verifyToken, requireRole(["gerencia", "tecnico"]), controller.createMantenimientoAnual);
+router.get(
+  "/mantenimientos-anuales",
+  verifyToken,
+  requireRole(["tecnico", "gerencia", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  controller.getMantenimientosAnuales
+);
+router.post(
+  "/mantenimientos-anuales",
+  verifyToken,
+  requireRole(["gerencia", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico"]),
+  controller.createMantenimientoAnual
+);
+
+// ======================================================
+// 🧴 DESINFECCIÓN DE INSTRUMENTOS
+// ======================================================
+router.post(
+  "/desinfeccion/pdf",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.generateDisinfectionPDF
+);
+
+// ======================================================
+// Coordinación de Entrenamiento (PDF)
+// ======================================================
+router.post(
+  "/entrenamiento/pdf",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.generateTrainingCoordinationPDF
+);
 
 module.exports = router;

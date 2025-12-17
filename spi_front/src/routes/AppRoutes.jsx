@@ -39,6 +39,7 @@ import ServicioCapacitaciones from "../modules/servicio/pages/Capacitaciones";
 import ServicioEquipos from "../modules/servicio/pages/Equipos";
 import ServicioAprobaciones from "../modules/servicio/pages/Aprobaciones";
 import ServicioAplicaciones from "../modules/servicio/pages/Aplicaciones";
+import ServicioDesinfeccion from "../modules/servicio/pages/Desinfeccion";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
 import DashboardOperaciones from "../modules/operaciones/Dashboard";
@@ -164,6 +165,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/servicio-tecnico/equipos" element={<ServicioEquipos />} />
           <Route path="/dashboard/servicio-tecnico/aprobaciones" element={<ServicioAprobaciones />} />
           <Route path="/dashboard/servicio-tecnico/aplicaciones" element={<ServicioAplicaciones />} />
+          <Route path="/dashboard/servicio-tecnico/desinfeccion" element={<ServicioDesinfeccion />} />
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
           <Route path="/dashboard/ti" element={<DashboardTI />} />
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />

@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { FiUserPlus, FiFileText, FiCheckCircle, FiAlertCircle, FiClock, FiXCircle, FiEdit2 } from "react-icons/fi";
+import { FiUserPlus, FiFileText, FiCheckCircle, FiAlertCircle, FiClock, FiXCircle, FiEdit2, FiRefreshCw } from "react-icons/fi";
 import Card from "../components/Card";
 import Button from "../components/Button";
 import Modal from "../components/Modal";
 import NewClientRequestForm from "../../../modules/comercial/components/NewClientRequestForm";
 import { useAuth } from "../../auth/AuthContext";
 import { getMyClientRequests } from "../../api/requestsApi";
+import { useAutoUpdate } from "../../api/index";
 
 /**
  * ClientRequestWidget Component
@@ -25,6 +26,13 @@ const ClientRequestWidget = ({ compact = false, className = "" }) => {
     const canCreateClient = !!user;
 
     useEffect(() => {
+        if (user) {
+            loadMyRequests();
+        }
+    }, [user]);
+
+    // Sistema de actualizaciones automáticas sin loops
+    useAutoUpdate(() => {
         if (user) {
             loadMyRequests();
         }

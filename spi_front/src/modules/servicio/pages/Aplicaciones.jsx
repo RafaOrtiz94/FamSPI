@@ -1,13 +1,17 @@
 import React, { useEffect, useState, useCallback } from "react";
-import { FiAlertTriangle, FiExternalLink, FiMapPin, FiRefreshCw } from "react-icons/fi";
+import { FiAlertTriangle, FiExternalLink, FiMapPin, FiRefreshCw, FiShield, FiCalendar, FiX } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { getAvailableTechnicalApplications } from "../../../core/api/technicalApplicationsApi";
+import DesinfeccionStepper from "../components/DesinfeccionStepper";
+import EntrenamientoStepper from "../components/EntrenamientoStepper";
 
 const AplicacionesTecnicas = () => {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [showDesinfeccionModal, setShowDesinfeccionModal] = useState(false);
+  const [showEntrenamientoModal, setShowEntrenamientoModal] = useState(false);
 
   const loadApplications = useCallback(async () => {
     setLoading(true);
@@ -58,8 +62,59 @@ const AplicacionesTecnicas = () => {
       <Card className="p-5">
         {loading ? (
           <p className="text-sm text-gray-500">Cargando aplicaciones disponibles...</p>
-        ) : applications.length ? (
+        ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Desinfección Card - Always shown */}
+            <div
+              className="p-4 rounded-xl border border-purple-200 bg-purple-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setShowDesinfeccionModal(true)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-purple-600">Aplicación Interna</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Desinfección de Instrumentos</h3>
+                </div>
+                <span className="px-2 py-[2px] text-xs rounded-full bg-purple-100 text-purple-700 border border-purple-200">
+                  F.ST-02
+                </span>
+              </div>
+
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>Registro de desinfección según V04</p>
+                <p>Formulario digital con firma y evidencias</p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 text-sm text-purple-600 hover:text-purple-700">
+                <FiShield /> Abrir formulario
+              </div>
+            </div>
+
+            {/* Planificación del Entrenamiento Card - Always shown */}
+            <div
+              className="p-4 rounded-xl border border-blue-200 bg-blue-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setShowEntrenamientoModal(true)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-blue-600">Aplicación Interna</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Planificación del Entrenamiento</h3>
+                </div>
+                <span className="px-2 py-[2px] text-xs rounded-full bg-blue-100 text-blue-700 border border-blue-200">
+                  F.ST-04
+                </span>
+              </div>
+
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>Coordinación de fechas de entrenamiento</p>
+                <p>Planificación con firma de compromiso</p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700">
+                <FiCalendar /> Abrir formulario
+              </div>
+            </div>
+
+            {/* External Applications */}
             {applications.map((app) => (
               <div key={app.id || app._id || app.name} className="p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -98,13 +153,50 @@ const AplicacionesTecnicas = () => {
               </div>
             ))}
           </div>
-        ) : (
-          <p className="text-sm text-gray-500">No hay aplicaciones disponibles para mostrar.</p>
         )}
       </Card>
+
+      {/* Desinfección Modal */}
+      {showDesinfeccionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Desinfección de Instrumentos y Partes</h2>
+              <button
+                onClick={() => setShowDesinfeccionModal(false)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <DesinfeccionStepper />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Entrenamiento Modal */}
+      {showEntrenamientoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Planificación del Entrenamiento</h2>
+              <button
+                onClick={() => setShowEntrenamientoModal(false)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <EntrenamientoStepper />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default AplicacionesTecnicas;
-
