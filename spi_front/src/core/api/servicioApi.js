@@ -74,3 +74,67 @@ export const generateTrainingCoordinationPDF = async (trainingData) => {
 
   return response.data;
 };
+
+// ======================================================
+// 📝 LISTA DE ASISTENCIA DE ENTRENAMIENTO
+// ======================================================
+export const generateAttendanceListPDF = async (attendanceData) => {
+  console.log("📋 API: Sending training attendance list PDF request", {
+    endpoint: "/servicio/entrenamiento/asistencia/pdf",
+    hasData: !!attendanceData,
+    dataKeys: Object.keys(attendanceData || {}),
+    signaturePresent: !!attendanceData?.Firma_Especialista,
+    signatureLength: attendanceData?.Firma_Especialista?.length,
+    ordenNumero: attendanceData?.Num_Orden,
+    cliente: attendanceData?.ORDCliente
+  });
+
+  const response = await api.post("/servicio/entrenamiento/asistencia/pdf", attendanceData);
+
+  console.log("📋 API: Received training attendance list PDF response", {
+    status: response.status,
+    hasData: !!response.data,
+    ok: response.data?.ok,
+    message: response.data?.message,
+    hasFolderId: !!response.data?.driveFolderId,
+    hasPdfId: !!response.data?.pdfId,
+    ordenNumero: response.data?.ordenNumero,
+    cliente: response.data?.cliente
+  });
+
+  return response.data;
+};
+
+// ======================================================
+// 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
+// ======================================================
+export const generateEquipmentVerificationPDF = async (verificationData) => {
+  console.log("🔧 API: Sending equipment verification PDF request", {
+    endpoint: "/servicio/entrenamiento/verificacion/pdf",
+    hasData: !!verificationData,
+    dataKeys: Object.keys(verificationData || {}),
+    signaturePresent: !!verificationData?.firma_af_image,
+    signatureLength: verificationData?.firma_af_image?.length,
+    fecha: verificationData?.Fecha,
+    cliente: verificationData?.Cliente,
+    equipo: verificationData?.Equipo,
+    serie: verificationData?.Serie
+  });
+
+  const response = await api.post("/servicio/entrenamiento/verificacion/pdf", verificationData);
+
+  console.log("🔧 API: Received equipment verification PDF response", {
+    status: response.status,
+    hasData: !!response.data,
+    ok: response.data?.ok,
+    message: response.data?.message,
+    hasFolderId: !!response.data?.driveFolderId,
+    hasPdfId: !!response.data?.pdfId,
+    fecha: response.data?.fecha,
+    cliente: response.data?.cliente,
+    equipo: response.data?.equipo,
+    serie: response.data?.serie
+  });
+
+  return response.data;
+};

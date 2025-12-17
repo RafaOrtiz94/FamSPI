@@ -5,6 +5,8 @@ import Button from "../../../core/ui/components/Button";
 import { getAvailableTechnicalApplications } from "../../../core/api/technicalApplicationsApi";
 import DesinfeccionStepper from "../components/DesinfeccionStepper";
 import EntrenamientoStepper from "../components/EntrenamientoStepper";
+import AsistenciaStepper from "../components/AsistenciaStepper";
+import VerificacionStepper from "../components/VerificacionStepper";
 
 const AplicacionesTecnicas = () => {
   const [applications, setApplications] = useState([]);
@@ -12,6 +14,8 @@ const AplicacionesTecnicas = () => {
   const [error, setError] = useState(null);
   const [showDesinfeccionModal, setShowDesinfeccionModal] = useState(false);
   const [showEntrenamientoModal, setShowEntrenamientoModal] = useState(false);
+  const [showAsistenciaModal, setShowAsistenciaModal] = useState(false);
+  const [showVerificacionModal, setShowVerificacionModal] = useState(false);
 
   const loadApplications = useCallback(async () => {
     setLoading(true);
@@ -114,6 +118,56 @@ const AplicacionesTecnicas = () => {
               </div>
             </div>
 
+            {/* Lista de Asistencia Card - Always shown */}
+            <div
+              className="p-4 rounded-xl border border-green-200 bg-green-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setShowAsistenciaModal(true)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-green-600">Aplicación Interna</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Lista de Asistencia</h3>
+                </div>
+                <span className="px-2 py-[2px] text-xs rounded-full bg-green-100 text-green-700 border border-green-200">
+                  F.ST-05
+                </span>
+              </div>
+
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>Control de asistencia a entrenamientos</p>
+                <p>Registro de participantes con firma digital</p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 text-sm text-green-600 hover:text-green-700">
+                <FiCalendar /> Abrir formulario
+              </div>
+            </div>
+
+            {/* Verificación de Equipos Nuevos Card - Always shown */}
+            <div
+              className="p-4 rounded-xl border border-orange-200 bg-orange-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setShowVerificacionModal(true)}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm text-orange-600">Aplicación Interna</p>
+                  <h3 className="text-lg font-semibold text-gray-900">Verificación de Equipos</h3>
+                </div>
+                <span className="px-2 py-[2px] text-xs rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                  F.ST-09
+                </span>
+              </div>
+
+              <div className="text-sm text-gray-600 space-y-1">
+                <p>Verificación técnica de equipos nuevos</p>
+                <p>Resultados, análisis y evidencia fotográfica</p>
+              </div>
+
+              <div className="inline-flex items-center gap-2 text-sm text-orange-600 hover:text-orange-700">
+                <FiShield /> Abrir formulario
+              </div>
+            </div>
+
             {/* External Applications */}
             {applications.map((app) => (
               <div key={app.id || app._id || app.name} className="p-4 rounded-xl border border-gray-100 shadow-sm space-y-3">
@@ -191,6 +245,46 @@ const AplicacionesTecnicas = () => {
             </div>
             <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
               <EntrenamientoStepper />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Asistencia Modal */}
+      {showAsistenciaModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-6xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Lista de Asistencia de Entrenamiento</h2>
+              <button
+                onClick={() => setShowAsistenciaModal(false)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <AsistenciaStepper />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Verificación Modal */}
+      {showVerificacionModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full mx-4 max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="text-lg font-semibold text-gray-900">Verificación de Equipos Nuevos</h2>
+              <button
+                onClick={() => setShowVerificacionModal(false)}
+                className="p-1 hover:bg-gray-100 rounded"
+              >
+                <FiX className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
+              <VerificacionStepper />
             </div>
           </div>
         </div>

@@ -112,4 +112,24 @@ router.post(
   controller.generateTrainingCoordinationPDF
 );
 
+// ======================================================
+// Lista de Asistencia de Entrenamiento (PDF)
+// ======================================================
+router.post(
+  "/entrenamiento/asistencia/pdf",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.generateAttendanceListPDF
+);
+
+// ======================================================
+// Verificación de Equipos Nuevos (PDF)
+// ======================================================
+router.post(
+  "/entrenamiento/verificacion/pdf",
+  verifyToken,
+  requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.generateEquipmentVerificationPDF
+);
+
 module.exports = router;

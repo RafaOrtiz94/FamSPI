@@ -394,6 +394,66 @@ const generateTrainingCoordinationPDF = async (req, res) => {
 };
 
 // ===============================================================
+// 📝 LISTA DE ASISTENCIA DE ENTRENAMIENTO
+// ===============================================================
+const generateAttendanceListPDF = async (req, res) => {
+  try {
+    console.log("📝 Controller: Received training attendance list PDF request", {
+      user: req.user?.email || req.user?.name || 'Unknown',
+      hasBody: !!req.body,
+      bodyKeys: Object.keys(req.body || {}),
+      signaturePresent: !!req.body?.Firma_Especialista,
+      signatureLength: req.body?.Firma_Especialista?.length,
+      ordenNumero: req.body?.Num_Orden,
+      cliente: req.body?.ORDCliente
+    });
+
+    // Import the attendance service endpoint handler (acepta req, res)
+    const { generateAttendanceListPDFEndpoint } = require("./asistencia-entrenamiento.service");
+
+    // Pass user info to the PDF generation function
+    req.userInfo = req.user; // Make user info available to the service
+    console.log("📝 Controller: User info attached", { userInfo: req.userInfo });
+
+    await generateAttendanceListPDFEndpoint(req, res);
+  } catch (err) {
+    console.error("❌ Error generando PDF de lista de asistencia:", err);
+    res.status(500).json({ error: "Error generando PDF de lista de asistencia" });
+  }
+};
+
+// ===============================================================
+// 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
+// ===============================================================
+const generateEquipmentVerificationPDF = async (req, res) => {
+  try {
+    console.log("🔧 Controller: Received equipment verification PDF request", {
+      user: req.user?.email || req.user?.name || 'Unknown',
+      hasBody: !!req.body,
+      bodyKeys: Object.keys(req.body || {}),
+      signaturePresent: !!req.body?.firma_af_image,
+      signatureLength: req.body?.firma_af_image?.length,
+      fecha: req.body?.Fecha,
+      cliente: req.body?.Cliente,
+      equipo: req.body?.Equipo,
+      serie: req.body?.Serie
+    });
+
+    // Import the verification service endpoint handler (acepta req, res)
+    const { generateEquipmentVerificationPDFEndpoint } = require("./verificacion-equipos.service");
+
+    // Pass user info to the PDF generation function
+    req.userInfo = req.user; // Make user info available to the service
+    console.log("🔧 Controller: User info attached", { userInfo: req.userInfo });
+
+    await generateEquipmentVerificationPDFEndpoint(req, res);
+  } catch (err) {
+    console.error("❌ Error generando PDF de verificación de equipos:", err);
+    res.status(500).json({ error: "Error generando PDF de verificación de equipos" });
+  }
+};
+
+// ===============================================================
 // ✅ EXPORTS
 // ===============================================================
 module.exports = {
@@ -410,4 +470,6 @@ module.exports = {
   createMantenimientoAnual,
   generateDisinfectionPDF,
   generateTrainingCoordinationPDF,
+  generateAttendanceListPDF,
+  generateEquipmentVerificationPDF,
 };
