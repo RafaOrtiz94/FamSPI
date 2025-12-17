@@ -192,6 +192,8 @@ const {
   determinationsCatalogRoutes,
   calculationTemplatesRoutes,
 } = require("./modules/business-case/businessCase.routes");
+const notificationsRoutes = require("./modules/notifications/notifications.routes");
+const userProfileRoutes = require("./modules/user-profile/userProfile.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -261,6 +263,8 @@ app.use("/api/v1/permisos", permisosRoutes);
 app.use("/api/v1/vacaciones", vacacionesRoutes);
 app.use("/api/v1/clients", clientsRoutes);
 app.use("/api/v1/schedules", schedulesRoutes);
+app.use("/api/v1/notifications", notificationsRoutes);
+app.use("/api/v1/users/me/profile", userProfileRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

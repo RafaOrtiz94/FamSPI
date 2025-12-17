@@ -59,6 +59,7 @@ import MantenimientosPage from "../modules/MantenimientosPage";
 import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
 import ConfigurationPage from "../pages/ConfigurationPage";
+import MyProfilePage from "../modules/profile/MyProfilePage";
 
 const AppRoutes = () => {
   return (
@@ -184,6 +185,7 @@ const AppRoutes = () => {
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
+          <Route path="/dashboard/mi-perfil" element={<MyProfilePage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
           {/* Subrutas Backoffice */}
           <Route
