@@ -19,6 +19,7 @@ import {
 import clsx from "clsx";
 
 import { useAuth } from "../../auth/AuthContext";
+import useAuditStatus from "../../hooks/useAuditStatus";
 
 const homePathsByScope = {
   gerencia: "/dashboard/gerencia",
@@ -131,6 +132,12 @@ const myProfileLink = {
   path: "/dashboard/mi-perfil",
 };
 
+const auditPrepLink = {
+  name: "Preparación Auditoría",
+  icon: FiShield,
+  path: "/dashboard/auditoria/preparacion",
+};
+
 const servicioLinks = [
   {
     name: "Mantenimientos",
@@ -169,7 +176,7 @@ const servicioLinks = [
   },
 ];
 
-const buildLinks = (scope, role) => {
+const buildLinks = (scope, role, auditActive) => {
   const links = [getHomeLink(scope), permisosLink, myProfileLink];
 
   // Comercial links
@@ -225,6 +232,25 @@ const buildLinks = (scope, role) => {
     links.push(...auditLinks);
   }
 
+  const auditScopes = new Set([
+    "ti",
+    "admin_ti",
+    "jefe_ti",
+    "gerencia",
+    "calidad",
+    "finanzas",
+    "financiero",
+    "comercial",
+    "talento_humano",
+    "operaciones",
+  ]);
+
+  const auditManagers = new Set(["admin_ti", "jefe_ti"]);
+
+  if ((auditActive && auditScopes.has(scope)) || auditManagers.has(scope)) {
+    links.push(auditPrepLink);
+  }
+
   if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico"].includes(scope)) {
     links.push(...servicioLinks);
   }
@@ -240,7 +266,12 @@ const NavigationBar = () => {
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const scope = (user?.scope || role || "").toLowerCase();
-  const links = React.useMemo(() => buildLinks(scope, role), [scope, role]);
+  const { status: auditStatus } = useAuditStatus();
+  const auditActive = Boolean(auditStatus?.active);
+  const links = React.useMemo(
+    () => buildLinks(scope, role, auditActive),
+    [scope, role, auditActive]
+  );
 
   return (
     <nav className="border-b border-slate-200 bg-white/95 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-900/95">

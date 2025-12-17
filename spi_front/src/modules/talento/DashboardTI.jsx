@@ -14,12 +14,16 @@ import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
 import Card from "../../core/ui/components/Card";
 import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
+import useAuditStatus from "../../core/hooks/useAuditStatus";
+import { useAuth } from "../../core/auth/AuthContext";
 
 const DashboardTI = () => {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [sessions, setSessions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { status: auditStatus } = useAuditStatus();
+  const { user } = useAuth();
   const navigate = useNavigate();
 
   // ============================================================
@@ -62,6 +66,9 @@ const DashboardTI = () => {
   const totalUsuarios = users.length;
   const activos = users.filter((u) => u.role !== "pendiente").length;
   const departamentos = departments.length;
+  const role = (user?.role || "").toLowerCase();
+  const auditActive = Boolean(auditStatus?.active);
+  const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
 
   // ============================================================
   // 🔹 Render principal
@@ -144,7 +151,20 @@ const DashboardTI = () => {
             gradient: "from-purple-600 via-fuchsia-500 to-pink-500",
             icon: <FiShield size={24} />,
           },
-        ].map((card) => (
+          canSeeAudit
+            ? {
+                title: "Preparación de Auditoría",
+                desc: auditActive
+                  ? "Carga y controla la documentación requerida para auditores."
+                  : "Configura fechas y activa el modo auditoría.",
+                path: "/dashboard/auditoria/preparacion",
+                gradient: "from-amber-600 via-orange-500 to-yellow-400",
+                icon: <FiShield size={24} />,
+              }
+            : null,
+        ]
+          .filter(Boolean)
+          .map((card) => (
           <div
             key={card.title}
             className={`rounded-2xl p-6 border border-white/30 bg-gradient-to-r ${card.gradient} text-white shadow-lg flex flex-col gap-4`}

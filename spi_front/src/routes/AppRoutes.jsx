@@ -60,6 +60,7 @@ import DocumentsPage from "../modules/DocumentsPage";
 import Auditoria from "../modules/gerencia/Auditoria";
 import ConfigurationPage from "../pages/ConfigurationPage";
 import MyProfilePage from "../modules/profile/MyProfilePage";
+import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 
 const AppRoutes = () => {
   return (
@@ -178,6 +179,29 @@ const AppRoutes = () => {
           {/* Auditoría (solo Gerencia y TI) */}
           <Route element={<ProtectedRoute allowedRoles={["gerencia", "ti"]} />}>
             <Route path="/dashboard/auditoria" element={<Auditoria />} />
+          </Route>
+
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "admin_ti",
+                  "jefe_ti",
+                  "ti",
+                  "gerencia",
+                  "gerencia_general",
+                  "calidad",
+                  "finanzas",
+                  "financiero",
+                  "comercial",
+                  "jefe_comercial",
+                  "talento_humano",
+                  "operaciones",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/auditoria/preparacion" element={<AuditPrepPage />} />
           </Route>
 
           {/* Rutas compartidas */}
