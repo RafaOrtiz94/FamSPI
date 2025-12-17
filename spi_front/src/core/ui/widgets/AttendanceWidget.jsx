@@ -64,30 +64,42 @@ const AttendanceWidget = () => {
         await Promise.all([loadAttendance(), fetchException()]);
     };
 
-        const getLocation = () =>
-        new Promise((resolve) => {
-            if (!navigator.geolocation) {
-                showToast("Geolocalizacion no soportada por el navegador", "error");
-                return resolve(null);
-            }
+    const getLocation = async () => {
+        if (!navigator.geolocation) {
+            showToast("Geolocalizacion no soportada por el navegador", "error");
+            return null;
+        }
 
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
-                    const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
-                    resolve(loc);
-                },
-                (err) => {
-                    console.error("Error de geolocalizacion:", err);
-                    let msg = "No se pudo obtener ubicacion.";
-                    if (err.code === 1) msg = "Permiso de ubicacion denegado.";
-                    if (err.code === 2) msg = "Ubicacion no disponible.";
-                    if (err.code === 3) msg = "Tiempo de espera agotado al obtener ubicacion.";
-                    showToast(msg + " No se registrara el evento sin ubicacion.", "warning");
-                    resolve(null);
-                },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-        });
+        const tryGetPosition = (options) =>
+            new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, options);
+            });
+
+        const buildLoc = (pos) => `${pos.coords.latitude},${pos.coords.longitude}`;
+
+        try {
+            const pos = await tryGetPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+            return buildLoc(pos);
+        } catch (err) {
+            console.warn("Geo (alta precisión) falló, probando modo reducido:", err);
+            try {
+                const pos = await tryGetPosition({
+                    enableHighAccuracy: false,
+                    timeout: 12000,
+                    maximumAge: 60_000,
+                });
+                return buildLoc(pos);
+            } catch (err2) {
+                console.error("Error de geolocalizacion:", err2);
+                let msg = "No se pudo obtener ubicacion.";
+                if (err2.code === 1) msg = "Permiso de ubicacion denegado.";
+                if (err2.code === 2) msg = "Ubicacion no disponible.";
+                if (err2.code === 3) msg = "Tiempo de espera agotado al obtener ubicacion.";
+                showToast(msg + " Revisa GPS/WiFi o intenta nuevamente.", "warning");
+                return null;
+            }
+        }
+    };
     const formatTime = (ts) =>
         ts
             ? new Date(ts).toLocaleTimeString("es-EC", {

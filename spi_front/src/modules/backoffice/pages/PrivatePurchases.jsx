@@ -4,9 +4,10 @@ import {
   FiFileText,
   FiRefreshCw,
   FiSend,
-  FiShare,
   FiUpload,
-  FiUsers,
+  FiLayers,
+  FiActivity,
+  FiFilter,
 } from "react-icons/fi";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
@@ -14,13 +15,7 @@ import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/useAuth";
 import { useApi } from "../../../core/hooks/useApi";
 import { useUI } from "../../../core/ui/useUI";
-import {
-  forwardPrivatePurchaseToAcp,
-  listPrivatePurchases,
-  registerPrivateClient,
-  sendPrivatePurchaseOffer,
-  uploadPrivateSignedOffer,
-} from "../../../core/api/privatePurchasesApi";
+import { listPrivatePurchases, sendPrivatePurchaseOffer, uploadPrivateSignedOffer } from "../../../core/api/privatePurchasesApi";
 
 const STATUS_DEFINITIONS = [
   { value: "pending_commercial", label: "Pendiente comercial", accent: "bg-blue-50 text-blue-700" },
@@ -145,6 +140,16 @@ const PrivatePurchasesPage = () => {
     return `/Ofertas Sin Firmar/${commercial}/${client}`;
   };
 
+  const buildSignedFolderPath = () => {
+    const commercial =
+      selectedRequest?.created_by_email ||
+      selectedRequest?.created_by ||
+      user?.email ||
+      "comercial";
+    const client = selectedRequest?.client_snapshot?.commercial_name || "cliente";
+    return `/Ofertas Firmadas/${commercial}/${client}`;
+  };
+
   const handleOfferSubmit = async () => {
     if (!selectedRequest) return;
     if (!offerModal.file) {
@@ -170,6 +175,7 @@ const PrivatePurchasesPage = () => {
         offer_base64: base64payload,
         file_name: offerModal.file.name,
         folder_path: buildUnsignedFolderPath(),
+        mime_type: offerModal.file?.type,
       });
       showToast("Oferta registrada y enviada", "success");
       setOfferModal({ open: false, loading: false, file: null });
@@ -205,6 +211,8 @@ const PrivatePurchasesPage = () => {
       await uploadPrivateSignedOffer(selectedRequest.id, {
         signed_offer_base64: base64payload,
         file_name: signedModal.file.name,
+        mime_type: signedModal.file?.type,
+        signed_folder_path: buildSignedFolderPath(),
       });
       showToast("Oferta firmada registrada", "success");
       setSignedModal({ open: false, loading: false, file: null });
@@ -215,23 +223,6 @@ const PrivatePurchasesPage = () => {
       console.error(error);
       showToast("No se pudo subir la oferta firmada", "error");
       setSignedModal((prev) => ({ ...prev, loading: false }));
-    }
-  };
-
-  const handleRegisterClient = async () => {
-    if (!selectedRequest) return;
-    setProcessingAction({ id: selectedRequest.id, type: "register" });
-    try {
-      await registerPrivateClient(selectedRequest.id);
-      showToast("Cliente marcado como registrado", "success");
-      fetchPrivatePurchases({
-        status: statusFilter !== "all" ? statusFilter : undefined,
-      });
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo registrar el cliente", "error");
-    } finally {
-      setProcessingAction(null);
     }
   };
 
@@ -252,88 +243,85 @@ const PrivatePurchasesPage = () => {
     }
   };
 
-  const handleForwardToAcp = async () => {
-    if (!selectedRequest) return;
-    setProcessingAction({ id: selectedRequest.id, type: "forward" });
-    try {
-      await forwardPrivatePurchaseToAcp(selectedRequest.id);
-      showToast("Solicitud enviada a ACP", "success");
-      fetchPrivatePurchases({
-        status: statusFilter !== "all" ? statusFilter : undefined,
-      });
-    } catch (error) {
-      console.error(error);
-      showToast("No se pudo enviar a ACP", "error");
-    } finally {
-      setProcessingAction(null);
-    }
-  };
-
   return (
-      <div className="space-y-6 p-6">
-        <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-8 p-6">
+      {/* 1️⃣ HERO HEADER */}
+      <div className="rounded-3xl bg-gradient-to-r from-indigo-600 to-blue-700 p-6 text-white shadow-xl">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <FiFileText className="text-blue-600" />
-              Compras Privadas
+            <h1 className="text-2xl font-extrabold flex items-center gap-3">
+              <FiLayers /> Compras Privadas
             </h1>
-            <p className="text-sm text-gray-500">
-              Gestiona el flujo privado que empieza en comercial y termina en ACP.
+            <p className="text-sm opacity-90 mt-1">
+              Pipeline privado desde comercial hasta cierre legal y ACP
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
-          >
-            <option value="all">Todos los estados</option>
-            {STATUS_DEFINITIONS.map((status) => (
-              <option key={status.value} value={status.value}>
-                {status.label}
-              </option>
-            ))}
-          </select>
-          <Button
-            size="sm"
-            variant="ghost"
-            leftIcon={FiRefreshCw}
-            loading={loading}
-            onClick={() =>
-              fetchPrivatePurchases({
-                status: statusFilter !== "all" ? statusFilter : undefined,
-              })
-            }
-          >
-            Actualizar
-          </Button>
-        </div>
-      </header>
 
-      <div className="grid gap-3 md:grid-cols-3">
+          <div className="flex items-center gap-2">
+            <FiFilter />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="rounded-lg bg-white/90 px-3 py-2 text-sm text-gray-800"
+            >
+              <option value="all">Todos los estados</option>
+              {STATUS_DEFINITIONS.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              size="sm"
+              variant="ghost"
+              leftIcon={FiRefreshCw}
+              loading={loading}
+              onClick={() =>
+                fetchPrivatePurchases({
+                  status: statusFilter !== "all" ? statusFilter : undefined,
+                })
+              }
+            >
+              Actualizar
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* 2️⃣ STATUS OVERVIEW */}
+      <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-5">
         {summary.map((chunk) => (
-          <Card key={chunk.value} className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-            <p className="text-xs uppercase tracking-[0.3em] text-gray-500">{chunk.label}</p>
+          <Card key={chunk.value} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <p className="text-xs uppercase tracking-[0.3em] text-gray-500">{chunk.label}</p>
+              <FiActivity className="text-gray-400" />
+            </div>
             <p className="mt-2 text-3xl font-bold text-gray-900">{chunk.count}</p>
           </Card>
         ))}
       </div>
 
-      <Card className="overflow-hidden">
+      {/* 3️⃣ PIPELINE TABLE */}
+      <Card className="overflow-hidden shadow-lg">
+        <div className="bg-gray-50 px-4 py-3 text-xs font-bold uppercase tracking-wider text-gray-600">
+          Solicitudes privadas
+        </div>
+
         <div className="overflow-x-auto bg-white">
-                <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50 text-left text-xs uppercase tracking-wider text-gray-500">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-100 text-xs uppercase text-gray-500">
               <tr>
-                <th className="px-4 py-3">ID</th>
-                <th className="px-4 py-3">Cliente</th>
-                <th className="px-4 py-3">Tipo</th>
-                <th className="px-4 py-3">Estado</th>
-                <th className="px-4 py-3">Creado por</th>
-                <th className="px-4 py-3">Fecha</th>
-                <th className="px-4 py-3">Detalle</th>
+                <th className="px-4 py-3 text-left">ID</th>
+                <th className="px-4 py-3 text-left">Cliente</th>
+                <th className="px-4 py-3 text-left">Tipo</th>
+                <th className="px-4 py-3 text-left">Estado</th>
+                <th className="px-4 py-3 text-left">Creado por</th>
+                <th className="px-4 py-3 text-left">Fecha</th>
+                <th className="px-4 py-3 text-right">Acción</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100 bg-white text-sm text-gray-700">
+            <tbody className="divide-y text-sm text-gray-700">
               {loading ? (
                 <tr>
                   <td colSpan="7" className="py-10 text-center">
@@ -343,17 +331,17 @@ const PrivatePurchasesPage = () => {
               ) : requests.length === 0 ? (
                 <tr>
                   <td colSpan="7" className="py-10 text-center text-gray-500">
-                    No hay solicitudes privadas registradas
+                    No existen solicitudes privadas
                   </td>
                 </tr>
               ) : (
                 requests.map((req) => (
                   <tr
                     key={req.id}
-                    className={`${req.id === selectedId ? "bg-blue-50" : ""} cursor-pointer hover:bg-blue-50`}
+                    className={`cursor-pointer hover:bg-blue-50 ${req.id === selectedId ? "bg-blue-50" : ""}`}
                     onClick={() => setSelectedId(req.id)}
                   >
-                    <td className="px-4 py-3 text-xs font-semibold text-gray-800">{req.id}</td>
+                    <td className="px-4 py-3 font-semibold">{req.id}</td>
                     <td className="px-4 py-3">
                       <p className="font-medium text-gray-900">
                         {req.client_snapshot?.commercial_name || "Cliente temporal"}
@@ -363,23 +351,23 @@ const PrivatePurchasesPage = () => {
                       </p>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="rounded-full bg-gray-100 px-2 py-[2px] text-[11px] font-semibold text-gray-600">
+                      <span className="rounded-full bg-gray-100 px-2 py-[2px] text-[11px] font-semibold">
                         {req.client_type || req.client_snapshot?.client_type || "Privado"}
                       </span>
                     </td>
                     <td className="px-4 py-3">
                       <span
-                        className={`inline-flex rounded-full px-2 py-[2px] text-[11px] font-semibold ${statusLookup[req.status]?.accent || "bg-gray-100 text-gray-600"}`}
+                        className={`rounded-full px-2 py-[2px] text-[11px] font-semibold ${statusLookup[req.status]?.accent || "bg-gray-100 text-gray-600"}`}
                       >
                         {statusLookup[req.status]?.label || req.status}
                       </span>
                     </td>
                     <td className="px-4 py-3">{req.created_by_email || req.created_by || "Anónimo"}</td>
                     <td className="px-4 py-3 text-xs text-gray-500">{formatDate(req.created_at)}</td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       <Button
                         size="sm"
-                        variant={req.id === selectedId ? "secondary" : "ghost"}
+                        variant="ghost"
                         onClick={(event) => {
                           event.stopPropagation();
                           handleDetailOpen(req);
@@ -465,39 +453,17 @@ const PrivatePurchasesPage = () => {
                     <FiSend /> Enviar oferta
                   </Button>
                 )}
-                {(selectedRequest.status === "offer_sent" || selectedRequest.status === "pending_manager_signature") && (
-                  <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
-                    <FiUpload /> Registrar oferta firmada
-                  </Button>
-                )}
-                {selectedRequest.status === "offer_signed" && (
-                  <Button
-                    variant="secondary"
-                    onClick={handleRegisterClient}
-                    loading={processingAction?.type === "register" && processingAction?.id === selectedRequest.id}
-                  >
-                    <FiUsers /> Registrar cliente
-                  </Button>
-                )}
-                {selectedRequest.status === "client_registered" && (
-                  <Button
-                    variant="outline"
-                    onClick={handleForwardToAcp}
-                    loading={processingAction?.type === "forward" && processingAction?.id === selectedRequest.id}
-                  >
-                    <FiShare /> Enviar a ACP
-                  </Button>
-                )}
               </div>
             ) : isManagerUser ? (
               <div className="flex flex-wrap gap-2">
                 {(selectedRequest.status === "pending_manager_signature" ||
-                  selectedRequest.status === "pending_client_signature") && (
+                  selectedRequest.status === "offer_sent") && (
                   <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
                     <FiUpload /> Aprobar y firmar
                   </Button>
                 )}
-                {selectedRequest.status === "pending_manager_signature" && (
+                {(selectedRequest.status === "pending_manager_signature" ||
+                  selectedRequest.status === "offer_sent") && (
                   <Button
                     variant="danger"
                     onClick={handleManagerReject}
@@ -506,22 +472,15 @@ const PrivatePurchasesPage = () => {
                     Rechazar
                   </Button>
                 )}
-                {selectedRequest.status === "pending_client_signature" && (
-                  <p className="text-xs text-gray-500">Pendiente de firma de cliente.</p>
+                {selectedRequest.status === "pending_manager_signature" && (
+                  <p className="text-xs text-gray-500">Pendiente de firma de jefe comercial.</p>
                 )}
               </div>
             ) : isPureCommercial ? (
               <div className="flex flex-wrap gap-2">
-                {selectedRequest.status === "pending_client_signature" && (
-                  <Button onClick={() => setSignedModal({ open: true, loading: false, file: null })} variant="success">
-                    <FiUpload /> Subir firma del cliente
-                  </Button>
-                )}
-                {selectedRequest.status !== "pending_client_signature" && (
-                  <p className="text-xs text-gray-500">
-                    Espera la aprobaci&oacute;n de backoffice y jefe comercial antes de subir la firma del cliente.
-                  </p>
-                )}
+                <p className="text-xs text-gray-500">
+                  Espera la oferta firmada por jefe comercial para presentarla al cliente.
+                </p>
               </div>
             ) : (
               <p className="text-xs text-gray-500">
@@ -584,11 +543,11 @@ const PrivatePurchasesPage = () => {
         title="Subir oferta firmada"
         maxWidth="max-w-lg"
       >
-        <div className="space-y-4 text-sm text-gray-700">
+          <div className="space-y-4 text-sm text-gray-700">
             <p className="text-xs text-gray-500">
               {isManagerUser
-                ? "Adjunta el documento firmado por jefe comercial para pasar a la firma del cliente."
-                : "Adjunta el documento firmado por el cliente para cerrar el flujo interno."}
+                ? "Adjunta el documento firmado por jefe comercial para cerrar la revisión interna."
+                : "Adjunta el documento firmado por Backoffice para enviarlo a jefe comercial."}
             </p>
           <label className="flex flex-col gap-2 text-sm font-semibold text-gray-700">
             Selecciona archivo (PDF, PNG o JPG)
@@ -604,6 +563,9 @@ const PrivatePurchasesPage = () => {
               className="mt-1 cursor-pointer rounded-lg border border-dashed border-gray-300 bg-white px-3 py-3 text-xs text-gray-600"
             />
           </label>
+          <div className="text-[11px] text-gray-500">
+            Ruta destino firma: <span className="font-mono">{buildSignedFolderPath()}</span>
+          </div>
           {signedModal.file && (
             <div className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600">
               <p className="font-semibold text-gray-900">{signedModal.file.name}</p>
@@ -757,7 +719,7 @@ const PrivatePurchasesPage = () => {
               )}
               {isManagerUser &&
                 (detailModalRequest.status === "pending_manager_signature" ||
-                  detailModalRequest.status === "pending_client_signature") && (
+                  detailModalRequest.status === "offer_sent") && (
                 <>
                   <Button
                     variant="success"
@@ -775,26 +737,6 @@ const PrivatePurchasesPage = () => {
                     Rechazar
                   </Button>
                 </>
-              )}
-              {isBackofficeUser && detailModalRequest.status === "offer_signed" && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={handleRegisterClient}
-                  loading={processingAction?.type === "register" && processingAction?.id === detailModalRequest.id}
-                >
-                  <FiUsers /> Registrar cliente
-                </Button>
-              )}
-              {isBackofficeUser && detailModalRequest.status === "client_registered" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleForwardToAcp}
-                  loading={processingAction?.type === "forward" && processingAction?.id === detailModalRequest.id}
-                >
-                  <FiShare /> Enviar a ACP
-                </Button>
               )}
             </div>
           </div>

@@ -222,7 +222,7 @@ const Step2EquipmentSelector = ({ onPrev, onNext, hideNavigation }) => {
       // Note: Using a special endpoint or assuming the existing one can handle it.
       // If current backend expects 1-to-1, this calls for backend refactor.
       // I will use a new route path to be safe or just POST to equipment-details and handle in backend (I'll check backend service next).
-      await api.post(`/business-case/${state.businessCaseId}/equipment-details-v2`, payload);
+      await api.post(`/business-case/${state.businessCaseId}/equipment-details`, payload);
 
       updateState({ equipmentPairs });
       onNext();

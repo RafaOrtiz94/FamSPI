@@ -6,6 +6,7 @@
  */
 
 const db = require("../../config/db");
+const logger = require("../../config/logger");
 const { v4: uuidv4 } = require("uuid");
 const {
   ensureFolder,
@@ -14,6 +15,7 @@ const {
   uploadBase64File,
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
+const { createPurchaseRequest } = require("../equipment-purchases/equipmentPurchases.service");
 
 const PRIVATE_PURCHASE_STATUSES = [
   "pending_commercial",
@@ -51,13 +53,39 @@ async function ensureRequestFolder(request, forceRecreate = false) {
 async function ensurePathFolder(pathStr) {
   if (!pathStr) return null;
   if (!DRIVE_BASE_FOLDER) return null;
-  const parts = pathStr.split("/").filter(Boolean);
+  const sanitize = (value) => String(value || "").replace(/[\\/:*?"<>|]/g, "-").trim() || "general";
+  const parts = pathStr
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => sanitize(segment));
   let currentParent = DRIVE_BASE_FOLDER;
   for (const segment of parts) {
     const folder = await ensureFolder(segment, currentParent);
     currentParent = folder?.id || currentParent;
   }
   return currentParent;
+}
+
+function buildSignedFolderPath(request, user = {}) {
+  const sanitize = (value) =>
+    String(value || "")
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .trim() || "general";
+
+  const commercial =
+    request.created_by_email ||
+    request.created_by ||
+    user.email ||
+    user.mail ||
+    "comercial";
+  const client = request.client_snapshot?.commercial_name || "cliente";
+  return `/Ofertas Firmadas/${sanitize(commercial)}/${sanitize(client)}`;
+}
+
+function toEquipmentArray(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (typeof raw === "object" && raw !== null) return [raw];
+  return normalizeEquipmentInput(raw);
 }
 
 async function uploadComodatoDocument(folderId, { base64, name, mime }) {
@@ -283,8 +311,13 @@ async function createOfferDocument(id, payload = {}, user = {}) {
       entity_id: id,
     });
 
+    const withBc = await ensureBusinessCaseFromPrivatePurchase({
+      request: updated,
+      user,
+    });
+
     return {
-      ...updated,
+      ...withBc,
       offer_document_link: driveViewLink(uploaded.id),
       offer_document_name: uploaded.name,
     };
@@ -319,8 +352,13 @@ async function createOfferDocument(id, payload = {}, user = {}) {
     entity_id: id,
   });
 
+  const withBc = await ensureBusinessCaseFromPrivatePurchase({
+    request: updated,
+    user,
+  });
+
   return {
-    ...updated,
+    ...withBc,
     offer_document_link: driveViewLink(doc.id),
     offer_document_name: doc.name,
   };
@@ -338,13 +376,23 @@ async function attachOfferDocument(id, documentId, folderId = null) {
 async function registerSignedOffer(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
+  if (request.status === "sent_to_acp") {
+    const err = Object.assign(new Error("La solicitud ya fue cerrada y enviada a ACP"), { status: 400 });
+    throw err;
+  }
 
   const { document_id, signed_offer_base64, file_name, mime_type } = payload;
   const decision = (payload.decision || payload.status || "").toString().toLowerCase();
 
   let documentId = document_id;
+  const signedFolderPath =
+    payload.signed_folder_path || payload.folder_path || buildSignedFolderPath(request, user);
   const folderId =
-    request.drive_folder_id || (await ensureRequestFolder(request));
+    payload.folder_id ||
+    payload.folderId ||
+    (signedFolderPath ? await ensurePathFolder(signedFolderPath) : null) ||
+    request.drive_folder_id ||
+    (await ensureRequestFolder(request));
 
   if (decision === "reject") {
     const updated = await updatePrivatePurchaseStatus(id, "rejected", {
@@ -379,12 +427,22 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
   }
 
   const isManagerStage =
-    request.status === "pending_manager_signature" || request.status === "offer_sent";
-  const nextStatus = isManagerStage ? "pending_client_signature" : "offer_signed";
+    request.status === "pending_manager_signature" ||
+    request.status === "offer_sent" ||
+    request.status === "pending_client_signature";
+  if (!isManagerStage && decision !== "reject") {
+    const err = Object.assign(
+      new Error("La solicitud no está en etapa de firma de jefe comercial"),
+      { status: 400 },
+    );
+    throw err;
+  }
+  const nextStatus = "offer_signed";
 
   const extras = {
     offer_signed_document_id: documentId,
     signed_offer_received_at: new Date(),
+    offer_signed_uploaded_at: new Date(),
   };
   if (folderId) extras.drive_folder_id = folderId;
   await logAction({
@@ -394,8 +452,63 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
     entity: "private_purchase_requests",
     entity_id: id,
   });
-  // Luego de la firma del jefe comercial, queda pendiente la firma del cliente; en la segunda carga queda como firmada.
-  return updatePrivatePurchaseStatus(id, nextStatus, extras);
+  // Firma del jefe comercial: cerrar el flujo interno y asegurar Business Case
+  const updated = await updatePrivatePurchaseStatus(id, nextStatus, extras);
+
+  const requestSnapshot = { ...request, ...updated, offer_signed_document_id: documentId };
+  return ensureBusinessCaseFromPrivatePurchase({ request: requestSnapshot, user, folderId });
+}
+
+async function ensureBusinessCaseFromPrivatePurchase({ request, user, folderId }) {
+  if (!request) throw new Error("Solicitud privada no encontrada");
+  if (request.equipment_purchase_request_id) return request;
+
+  const equipment = toEquipmentArray(request.equipment);
+  const clientSnapshot = request.client_snapshot || {};
+  const clientName = clientSnapshot.commercial_name || "Cliente privado";
+
+  try {
+    const bcRequest = await createPurchaseRequest({
+      user: user || {},
+      clientId: request.client_request_id || clientSnapshot.client_request_id || null,
+      clientName,
+      clientEmail: clientSnapshot.client_email || clientSnapshot.contact_email || null,
+      equipment,
+      notes: request.notes,
+      extra: {
+        source: "private_purchase",
+        private_purchase_id: request.id,
+        signed_offer_document_id: request.offer_signed_document_id || null,
+      },
+      requestType: "business_case",
+    });
+
+    const extras = {
+      equipment_purchase_request_id: bcRequest.id,
+    };
+    if (folderId) extras.drive_folder_id = folderId;
+
+    const updated = await updatePrivatePurchaseStatus(request.id, request.status, extras);
+
+    await logAction({
+      user_id: user.id || null,
+      module: "private_purchase",
+      action: "auto_bc_created",
+      entity: "private_purchase_requests",
+      entity_id: request.id,
+      details: `Business Case ${bcRequest.id} generado automáticamente`,
+    });
+
+    return { ...updated, equipment_purchase_request_id: bcRequest.id };
+  } catch (error) {
+    logger.error(
+      "No se pudo iniciar Business Case para compra privada %s: %s",
+      request.id,
+      error.message,
+    );
+    const err = Object.assign(new Error("No se pudo iniciar el Business Case"), { status: 500 });
+    throw err;
+  }
 }
 
 async function markClientRegistered(id) {

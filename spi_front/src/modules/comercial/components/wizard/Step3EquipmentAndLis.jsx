@@ -160,6 +160,11 @@ const Step3EquipmentAndLis = ({ onPrev, onComplete }) => {
                 hideLoader();
                 return;
             }
+            if (!state.businessCaseId) {
+                showToast("Primero guarda los datos generales para generar el Business Case", "warning");
+                hideLoader();
+                return;
+            }
             if (equipmentPairs.length > 0) {
                 const eqPayload = {
                 equipment_pairs: equipmentPairs.map(p => ({
@@ -168,7 +173,7 @@ const Step3EquipmentAndLis = ({ onPrev, onComplete }) => {
                     backup_install_simultaneous: p.backup?.install_with_primary || false,
                 })),
             };
-                await api.post(`/business-case/${state.businessCaseId}/equipment-details-v2`, eqPayload);
+                await api.post(`/business-case/${state.businessCaseId}/equipment-details`, eqPayload);
             }
 
             // 1. Save LIS

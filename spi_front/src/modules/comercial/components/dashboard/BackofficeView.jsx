@@ -30,12 +30,6 @@ const BackofficeView = ({ onRefresh }) => {
           route: "/dashboard/comercial",
         },
         {
-          title: "Permisos y vacaciones",
-          subtitle: "Solicita ausencias o revisa permisos",
-          icon: FiCalendar,
-          route: "/dashboard/talento-humano/permisos",
-        },
-        {
           title: "Solicitudes",
           subtitle: "Módulo dedicado de nuevas solicitudes",
           icon: FiClipboard,
@@ -52,6 +46,12 @@ const BackofficeView = ({ onRefresh }) => {
           subtitle: "Oportunidades y casos de negocio",
           icon: FiBriefcase,
           route: "/dashboard/business-case",
+        },
+         {
+          title: "Permisos y vacaciones",
+          subtitle: "Solicita ausencias o revisa permisos",
+          icon: FiCalendar,
+          route: "/dashboard/talento-humano/permisos",
         },
       ];
     }
