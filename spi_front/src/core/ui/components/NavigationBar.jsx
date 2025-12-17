@@ -14,6 +14,7 @@ import {
   FiCheckCircle,
   FiCalendar,
   FiLayers,
+  FiUser,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -124,6 +125,12 @@ const permisosLink = {
   path: "/dashboard/talento-humano/permisos",
 };
 
+const myProfileLink = {
+  name: "Mi Perfil",
+  icon: FiUser,
+  path: "/dashboard/mi-perfil",
+};
+
 const servicioLinks = [
   {
     name: "Mantenimientos",
@@ -163,7 +170,7 @@ const servicioLinks = [
 ];
 
 const buildLinks = (scope, role) => {
-  const links = [getHomeLink(scope), permisosLink];
+  const links = [getHomeLink(scope), permisosLink, myProfileLink];
 
   // Comercial links
   if (comercialScopes.includes(scope)) {
