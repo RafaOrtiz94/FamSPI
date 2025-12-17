@@ -235,8 +235,8 @@ async function getApplicableFormula(determinationId, equipmentId, calculationTyp
     if (equipmentId) {
         const eqResult = await db.query(
             `SELECT default_calculation_formula 
-       FROM servicio.equipos 
-       WHERE id_equipo = $1`,
+       FROM public.equipment_models 
+       WHERE id = $1`,
             [equipmentId]
         );
 

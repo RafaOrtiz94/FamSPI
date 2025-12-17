@@ -136,7 +136,7 @@ const SolicitudesTecnicas = () => {
         {loading ? (
           <div className="py-10 text-center text-gray-500">Cargando...</div>
         ) : (
-          <SolicitudesGrid items={mapped} onView={openDetail} />
+          <SolicitudesGrid items={mapped} onView={openDetail} variant="technical" />
         )}
       </Card>
 

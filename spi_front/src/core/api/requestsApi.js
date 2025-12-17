@@ -3,8 +3,8 @@ import api from "./index";
 
 /** 📋 Lista paginada de solicitudes */
 export const getRequests = async (params = {}) => {
-  const { page = 1, pageSize = 12, mine, status, q } = params;
-  const requestParams = { page, pageSize, mine, status, q };
+  const { page = 1, pageSize = 12, mine, status, q, type } = params;
+  const requestParams = { page, pageSize, mine, status, q, type };
 
   let response;
 
@@ -18,8 +18,6 @@ export const getRequests = async (params = {}) => {
       throw err;
     }
   }
-
-  console.log("📡 API /requests respondió:", response.data);
 
   const data = response.data;
 
@@ -140,6 +138,15 @@ export const getClientRequests = async (params = {}) => {
 };
 
 /** � Mis solicitudes de nuevos clientes */
+
+/** ?? Resumen de solicitudes de nuevos clientes */
+export const getClientRequestsSummary = async (params = {}) => {
+  const response = await api.get("/requests/new-client/summary", {
+    params,
+  });
+  return response.data?.data || response.data;
+};
+
 export const getMyClientRequests = async (params = {}) => {
   const { page = 1, pageSize = 25, status, q } = params;
   const response = await api.get("/requests/new-client/my", {

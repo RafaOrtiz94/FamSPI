@@ -1,25 +1,61 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiRefreshCw, FiTrash2 } from "react-icons/fi";
-import Step1GeneralData from "../components/wizard/Step1GeneralData";
+import Step1ClientData from "../components/wizard/Step1ClientData";
+import Step2LabData from "../components/wizard/Step2LabData";
+import Step3EquipmentAndLis from "../components/wizard/Step3EquipmentAndLis";
 import Step2EquipmentSelector from "../components/wizard/Step2EquipmentSelector";
 import Step3DeterminationSelector from "../components/wizard/Step3DeterminationSelector";
 import Step4CalculationsSummary from "../components/wizard/Step4CalculationsSummary";
 import Step5Investments from "../components/wizard/Step5Investments";
 import FinalStep from "../components/wizard/FinalStep";
 import { useUI } from "../../../core/ui/UIContext";
+import Step4RentabilitySummary from "../components/wizard/Step4RentabilitySummary";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const WizardContext = createContext();
 const STORAGE_KEY = "business_case_wizard_draft";
 
 const defaultState = {
   businessCaseId: null,
+  bcType: 'comodato_publico',
+  calculationMode: 'annual',
   generalData: {
     client: "",
-    businessType: "",
+    clientType: "",
+    contractingEntity: "",
+    processCode: "",
+    contractObject: "",
+    provinceCity: "",
     notes: "",
-    date: new Date().toISOString().slice(0, 10),
+    durationYears: 3,
+    targetMargin: 25,
+    labWorkDaysPerWeek: "",
+    labShiftsPerDay: "",
+    labHoursPerShift: "",
+    labQualityControlsPerShift: "",
+    labControlLevels: "",
+    labRoutineQCFrequency: "",
+    labSpecialTests: "",
+    labSpecialQCFrequency: "",
+    lisIncludes: false,
+    lisProvider: "",
+    lisIncludesHardware: false,
+    lisMonthlyPatients: "",
+    lisInterfaceSystem: "",
+    lisInterfaceProvider: "",
+    lisInterfaceHardware: "",
+    requirementsDeadlineMonths: "",
+    requirementsProjectedDeadlineMonths: "",
+    deliveryType: "total",
+    effectiveDetermination: false,
   },
-  selectedEquipment: null,
+  lisInterfaces: [],
+  equipmentConfig: {
+    primary: null,
+    backup: null,
+    secondary: [],
+  },
   determinations: [],
   calculations: null,
   investments: [],
@@ -27,14 +63,30 @@ const defaultState = {
 
 export const useBusinessCaseWizard = () => useContext(WizardContext);
 
-const steps = [
-  { id: "general", title: "Datos Generales" },
-  { id: "equipment", title: "Equipo" },
-  { id: "determinations", title: "Determinaciones" },
-  { id: "calculations", title: "Resumen" },
-  { id: "investments", title: "Inversiones" },
-  { id: "final", title: "Finalizar" },
-];
+const getStepsForRole = (role) => {
+  const isJefe = ["jefe_comercial", "gerencia", "gerencia_general", "admin"].includes(role);
+
+  if (!isJefe) {
+    // Commercial User Workflow
+    return [
+      { id: "client_data", title: "Datos del Cliente" },
+      { id: "lab_data", title: "Datos Laboratorio" },
+      { id: "equipment_lis", title: "Equipamiento y LIS" },
+    ];
+  }
+
+  // Manager Workflow (Full)
+  return [
+    { id: "client_data", title: "Datos del Cliente" },
+    { id: "lab_data", title: "Datos Laboratorio" },
+    { id: "equipment", title: "Equipamiento" },
+    { id: "determinations", title: "Determinaciones" },
+    { id: "calculations", title: "Resumen técnico" },
+    { id: "rentability", title: "Rentabilidad y ROI" },
+    { id: "investments", title: "Inversiones" },
+    { id: "final", title: "Finalizar" },
+  ];
+};
 
 const WizardProvider = ({ children }) => {
   const [state, setState] = useState(() => {
@@ -70,14 +122,14 @@ const WizardProvider = ({ children }) => {
   }, []);
 
   const value = useMemo(
-    () => ({ state, updateState, currentStep, setCurrentStep, steps, clearDraft }),
-    [state, currentStep, clearDraft]
+    () => ({ state, updateState, currentStep, setCurrentStep, clearDraft }),
+    [state, currentStep, clearDraft, updateState]
   );
 
   return <WizardContext.Provider value={value}>{children}</WizardContext.Provider>;
 };
 
-const Stepper = ({ currentStep }) => (
+const Stepper = ({ currentStep, steps }) => (
   <div className="flex items-center gap-4 overflow-x-auto pb-2">
     {steps.map((step, idx) => {
       const active = idx === currentStep;
@@ -85,13 +137,12 @@ const Stepper = ({ currentStep }) => (
       return (
         <div key={step.id} className="flex items-center gap-2">
           <div
-            className={`h-10 w-10 flex items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${
-              completed
-                ? "bg-green-500 text-white border-green-500"
-                : active
+            className={`h-10 w-10 flex items-center justify-center rounded-full border-2 text-sm font-semibold transition-all ${completed
+              ? "bg-green-500 text-white border-green-500"
+              : active
                 ? "bg-blue-600 text-white border-blue-600"
                 : "border-gray-300 text-gray-500"
-            }`}
+              }`}
           >
             {idx + 1}
           </div>
@@ -135,20 +186,52 @@ const Navigation = ({ onPrev, onNext, disablePrev, disableNext, nextLabel = "Sig
 
 const BusinessCaseWizard = () => {
   const { currentStep, setCurrentStep, state, clearDraft } = useBusinessCaseWizard();
+  const { user } = useAuth(); // Get current user role
+  const navigate = useNavigate();
+  const steps = useMemo(() => getStepsForRole(user?.role), [user?.role]);
   const progress = Math.round(((currentStep + 1) / steps.length) * 100);
   const goPrev = () => setCurrentStep((prev) => Math.max(0, prev - 1));
   const goNext = () => setCurrentStep((prev) => Math.min(steps.length - 1, prev + 1));
+  const { showToast } = useUI();
+
+  useEffect(() => {
+    if (currentStep >= steps.length) {
+      setCurrentStep(steps.length - 1);
+    }
+  }, [steps, currentStep, setCurrentStep]);
+
+  const handleCommercialFinish = async () => {
+    const bcId = state.businessCaseId;
+    try {
+      showToast("Proceso finalizado. Pendiente de revisión.", "success");
+      clearDraft();
+      if (bcId) {
+        navigate(`/dashboard/business-case/${bcId}/view`, { replace: true });
+      } else {
+        navigate("/dashboard/business-case", { replace: true });
+      }
+    } catch (e) { console.error(e) }
+  };
 
   const renderStep = () => {
-    switch (steps[currentStep].id) {
-      case "general":
-        return <Step1GeneralData onNext={goNext} />;
+    const stepId = steps[currentStep]?.id;
+    switch (stepId) {
+      case "client_data":
+        return <Step1ClientData onNext={goNext} />;
+      case "lab_data":
+        return <Step2LabData onPrev={goPrev} onNext={goNext} />;
+      case "equipment_lis":
+        return <Step3EquipmentAndLis onPrev={goPrev} onComplete={handleCommercialFinish} />;
+
+      // Manager Steps
       case "equipment":
         return <Step2EquipmentSelector onPrev={goPrev} onNext={goNext} />;
       case "determinations":
         return <Step3DeterminationSelector onPrev={goPrev} onNext={goNext} />;
       case "calculations":
         return <Step4CalculationsSummary onPrev={goPrev} onNext={goNext} />;
+      case "rentability":
+        return <Step4RentabilitySummary onPrev={goPrev} onNext={goNext} />;
       case "investments":
         return <Step5Investments onPrev={goPrev} onNext={goNext} />;
       case "final":
@@ -183,7 +266,7 @@ const BusinessCaseWizard = () => {
       </div>
 
       <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-4 space-y-4 shadow-sm">
-        <Stepper currentStep={currentStep} />
+        <Stepper currentStep={currentStep} steps={steps} />
         <ProgressBar value={progress} />
         <div className="border border-dashed border-gray-200 dark:border-gray-800 rounded-xl p-4 bg-gray-50 dark:bg-gray-800/40">
           {renderStep()}

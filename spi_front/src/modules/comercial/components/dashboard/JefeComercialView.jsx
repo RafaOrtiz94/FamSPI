@@ -1,19 +1,20 @@
-import React from "react";
-import { FiTrendingUp, FiUsers, FiClipboard, FiPackage } from "react-icons/fi";
-import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
+﻿import React, { useState } from "react";
 import Card from "../../../../core/ui/components/Card";
-
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
-import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
-import PermisosStatusWidget from "../../../shared/solicitudes/components/PermisosStatusWidget";
+import PersonnelRequestForm from "../../../../core/ui/widgets/PersonnelRequestForm";
 
 const JefeComercialView = ({ onRefresh }) => {
+  const [showPersonnelForm, setShowPersonnelForm] = useState(false);
+
     return (
         <>
+            {/* ==============================
+                HEADER
+            =============================== */}
             <DashboardHeader
                 title="Dashboard Gerencia Comercial"
-                subtitle="Visión general del rendimiento comercial y equipo de ventas"
+                subtitle="GestiÃ³n y seguimiento del talento humano en el Ã¡rea comercial."
                 actions={
                     <button
                         onClick={onRefresh}
@@ -22,63 +23,34 @@ const JefeComercialView = ({ onRefresh }) => {
                         Actualizar
                     </button>
                 }
-            />
+      />
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-                <ExecutiveStatCard
-                    icon={<FiTrendingUp size={22} />}
-                    label="Crecimiento"
-                    value="--"
-                    from="from-blue-600"
-                    to="to-blue-500"
-                />
-                <ExecutiveStatCard
-                    icon={<FiUsers size={22} />}
-                    label="Equipo Activo"
-                    value="8"
-                    from="from-purple-600"
-                    to="to-purple-500"
-                />
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <Card className="p-4 border border-gray-200">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-blue-50 rounded-md text-blue-600">
-                            <FiClipboard size={18} />
-                        </div>
-                        <div>
-                            <p className="text-sm font-semibold text-gray-900">Solicitudes</p>
-                            <p className="text-xs text-gray-500">Gestionar en el módulo</p>
-                        </div>
-                    </div>
+      {/* ==============================
+          SOLICITUDES DE PERSONAL
+      =============================== */}
+            <section className="mt-6">
+                <Card className="p-6">
+                    <PersonnelRequestWidget
+                        openModal={() => setShowPersonnelForm(true)}
+                    />
                 </Card>
+            </section>
 
-                <Card className="p-4 border border-gray-200">
-                    <div className="flex items-center gap-3">
-                        <div className="p-2 bg-amber-50 rounded-md text-amber-600">
-                            <FiPackage size={18} />
-                        </div>
-                        <div className="flex-1">
-                            <p className="text-sm font-semibold text-gray-900">Solicitud de compra</p>
-                            <p className="text-xs text-gray-500">Derivar a ACP</p>
-                        </div>
-                        <PurchaseHandoffWidget />
-                    </div>
-                </Card>
-            </div>
+      {/* ==============================
+          MODAL: FORMULARIO SOLICITUD PERSONAL
+      =============================== */}
+      {showPersonnelForm && (
+        <PersonnelRequestForm
+                    onClose={() => setShowPersonnelForm(false)}
+                    onSuccess={() => {
+                        setShowPersonnelForm(false);
+                        onRefresh?.();
+                    }}
+        />
+      )}
 
-            {/* Widget de Solicitudes de Personal */}
-            <div className="mt-6">
-                <PersonnelRequestWidget />
-            </div>
-
-            <div className="mt-6">
-                <PermisosStatusWidget />
-            </div>
-
-        </>
-    );
+    </>
+  );
 };
 
 export default JefeComercialView;

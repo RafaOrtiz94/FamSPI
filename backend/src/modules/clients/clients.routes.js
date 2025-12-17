@@ -16,4 +16,6 @@ router.post(
 
 router.post("/:id/visit-status", clientsController.setVisitStatus);
 
+router.post("/prospect-visit", clientsController.registerProspectVisit);
+
 module.exports = router;

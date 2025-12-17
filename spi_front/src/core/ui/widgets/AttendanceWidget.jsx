@@ -1,269 +1,384 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiLogOut, FiCheckCircle, FiSun, FiMoon } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle } from "react-icons/fi";
 import confetti from "canvas-confetti";
+
 import Button from "../components/Button";
 import Card from "../components/Card";
+import Modal from "../components/Modal";
 import { useUI } from "../useUI";
+
 import {
+    clockIn,
     clockOutLunch,
     clockInLunch,
     clockOut,
+    registerException,
+    updateExceptionStatus,
+    getActiveException,
     getTodayAttendance,
 } from "../../api/attendanceApi";
 
-/**
- * AttendanceWidget Component - Enhanced Interactive Version
- * ----------------------------------------------------------
- * 🎮 Gamified attendance tracking with:
- * - Auto clock-in on login
- * - Interactive buttons with animations
- * - Progress bar showing work day completion
- * - Celebration effects on milestones
- * - Time tracking with visual feedback
- */
 const AttendanceWidget = () => {
     const { showToast } = useUI();
+
     const [attendance, setAttendance] = useState(null);
     const [loading, setLoading] = useState(false);
     const [currentTime, setCurrentTime] = useState(new Date());
     const [showCelebration, setShowCelebration] = useState(false);
 
-    // Update current time every second
-    useEffect(() => {
-        const timer = setInterval(() => {
-            setCurrentTime(new Date());
-        }, 1000);
+    const [activeException, setActiveException] = useState(null);
+    const [exceptionModalOpen, setExceptionModalOpen] = useState(false);
+    const [exceptionType, setExceptionType] = useState("");
+    const [exceptionDescription, setExceptionDescription] = useState("");
+    const [exceptionLoading, setExceptionLoading] = useState(false);
 
+    useEffect(() => {
+        const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
     }, []);
 
-    // Load today's attendance on mount
     useEffect(() => {
-        loadAttendance();
+        refreshAll();
     }, []);
 
     const loadAttendance = async () => {
         try {
-            const data = await getTodayAttendance();
-            setAttendance(data.data);
+            const res = await getTodayAttendance();
+            setAttendance(res.data);
         } catch (err) {
-            console.error("Error loading attendance:", err);
+            console.error(err);
         }
     };
+
+    const fetchException = async () => {
+        try {
+            const res = await getActiveException();
+            setActiveException(res.data);
+        } catch (err) {
+            console.error("Error fetching active exception:", err);
+        }
+    };
+
+    const refreshAll = async () => {
+        await Promise.all([loadAttendance(), fetchException()]);
+    };
+
+    const getLocation = async () => {
+        if (!navigator.geolocation) {
+            showToast("Geolocalizacion no soportada por el navegador", "error");
+            return null;
+        }
+
+        const tryGetPosition = (options) =>
+            new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, options);
+            });
+
+        const buildLoc = (pos) => `${pos.coords.latitude},${pos.coords.longitude}`;
+
+        try {
+            const pos = await tryGetPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 });
+            return buildLoc(pos);
+        } catch (err) {
+            console.warn("Geo (alta precisión) falló, probando modo reducido:", err);
+            try {
+                const pos = await tryGetPosition({
+                    enableHighAccuracy: false,
+                    timeout: 12000,
+                    maximumAge: 60_000,
+                });
+                return buildLoc(pos);
+            } catch (err2) {
+                console.error("Error de geolocalizacion:", err2);
+                let msg = "No se pudo obtener ubicacion.";
+                if (err2.code === 1) msg = "Permiso de ubicacion denegado.";
+                if (err2.code === 2) msg = "Ubicacion no disponible.";
+                if (err2.code === 3) msg = "Tiempo de espera agotado al obtener ubicacion.";
+                showToast(msg + " Revisa GPS/WiFi o intenta nuevamente.", "warning");
+                return null;
+            }
+        }
+    };
+    const formatTime = (ts) =>
+        ts
+            ? new Date(ts).toLocaleTimeString("es-EC", {
+                hour: "2-digit",
+                minute: "2-digit",
+                hour12: false,
+            })
+            : "--:--";
+
+    const formatDateTime = (ts) =>
+        ts
+            ? new Date(ts).toLocaleString("es-EC", {
+                hour: "2-digit",
+                minute: "2-digit",
+                day: "2-digit",
+                month: "2-digit",
+            })
+            : "--:--";
 
     const celebrate = () => {
         confetti({
-            particleCount: 100,
-            spread: 70,
+            particleCount: 120,
+            spread: 80,
             origin: { y: 0.6 },
-            colors: ["#10b981", "#3b82f6", "#f59e0b"],
+            colors: ["#3b82f6", "#22c55e", "#6366f1"],
         });
         setShowCelebration(true);
-        setTimeout(() => setShowCelebration(false), 3000);
-    };
-
-    const handleClockOutLunch = async () => {
-        setLoading(true);
-        try {
-            const result = await clockOutLunch();
-            if (result.ok) {
-                showToast("¡Buen provecho! 🍽️", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando salida a almuerzo", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleClockInLunch = async () => {
-        setLoading(true);
-        try {
-            const result = await clockInLunch();
-            if (result.ok) {
-                showToast("¡De vuelta al trabajo! 💪", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando regreso de almuerzo", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleClockOut = async () => {
-        setLoading(true);
-        try {
-            const result = await clockOut();
-            if (result.ok) {
-                celebrate();
-                showToast("¡Excelente día de trabajo! 🎉", "success");
-                await loadAttendance();
-            }
-        } catch (err) {
-            showToast(err.message || "Error registrando salida", "error");
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const formatTime = (timestamp) => {
-        if (!timestamp) return "---";
-        return new Date(timestamp).toLocaleTimeString("es-EC", {
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-        });
+        setTimeout(() => setShowCelebration(false), 2500);
     };
 
     const calculateProgress = () => {
         if (!attendance?.entry_time) return 0;
 
-        const entry = new Date(attendance.entry_time);
         const now = new Date();
-        const workDayHours = 8; // 8 hour work day
-        const elapsedMs = now - entry;
-        const elapsedHours = elapsedMs / (1000 * 60 * 60);
+        const entry = new Date(attendance.entry_time);
+        let workedMs = now - entry;
 
-        // Subtract lunch time if applicable
-        let lunchMs = 0;
-        if (attendance.lunch_start_time && attendance.lunch_end_time) {
-            lunchMs = new Date(attendance.lunch_end_time) - new Date(attendance.lunch_start_time);
-        } else if (attendance.lunch_start_time && !attendance.lunch_end_time) {
-            lunchMs = now - new Date(attendance.lunch_start_time);
+        if (attendance.lunch_start_time) {
+            const lunchStart = new Date(attendance.lunch_start_time);
+            const lunchEnd = attendance.lunch_end_time ? new Date(attendance.lunch_end_time) : now;
+            workedMs -= lunchEnd - lunchStart;
         }
 
-        const workHours = (elapsedMs - lunchMs) / (1000 * 60 * 60);
-        const progress = Math.min((workHours / workDayHours) * 100, 100);
-
-        return Math.round(progress);
+        const hours = workedMs / (1000 * 60 * 60);
+        return Math.min(Math.round((hours / 8) * 100), 100);
     };
 
     const getStatusInfo = () => {
-        if (!attendance?.entry_time) {
+        if (!attendance?.entry_time)
             return {
-                message: "¡Bienvenido! Tu entrada se registró automáticamente 🎉",
-                color: "text-blue-600",
-                icon: <FiSun className="text-yellow-500" size={24} />,
+                text: "Marca tu entrada",
+                icon: <FiSun className="text-yellow-500" />,
             };
-        }
-        if (attendance.exit_time) {
+
+        if (attendance.exit_time)
             return {
-                message: "¡Día completado! Descansa bien 🌙",
-                color: "text-green-600",
-                icon: <FiMoon className="text-indigo-500" size={24} />,
+                text: "Jornada completada",
+                icon: <FiMoon className="text-indigo-500" />,
             };
-        }
-        if (attendance.lunch_start_time && !attendance.lunch_end_time) {
+
+        if (attendance.lunch_start_time && !attendance.lunch_end_time)
             return {
-                message: "En almuerzo 🍽️",
-                color: "text-orange-500",
-                icon: <FiCoffee className="text-orange-500" size={24} />,
+                text: "En almuerzo",
+                icon: <FiCoffee className="text-orange-500" />,
             };
-        }
-        if (attendance.lunch_end_time) {
-            return {
-                message: "¡Sigue así! 💪",
-                color: "text-blue-600",
-                icon: <FiCheckCircle className="text-blue-500" size={24} />,
-            };
-        }
+
         return {
-            message: "Jornada en progreso ⚡",
-            color: "text-blue-600",
-            icon: <FiClock className="text-blue-500" size={24} />,
+            text: "Jornada en progreso",
+            icon: <FiClock className="text-blue-500" />,
         };
     };
 
-    const getNextAction = () => {
-        if (!attendance?.entry_time) {
-            return (
-                <div className="text-center p-4 bg-green-50 rounded-lg border-2 border-green-200">
-                    <p className="text-sm text-green-700 font-medium">
-                        ✅ Tu entrada fue registrada automáticamente al iniciar sesión
-                    </p>
-                    <p className="text-xs text-green-600 mt-1">
-                        {formatTime(attendance?.entry_time || new Date())}
-                    </p>
+    const handle = async (fn, successMsg, celebrateDay = false) => {
+        setLoading(true);
+        try {
+            const loc = await getLocation();
+            if (!loc) {
+                setLoading(false);
+                return;
+            }
+            const res = await fn(loc);
+            if (res.ok) {
+                if (celebrateDay) celebrate();
+                showToast(successMsg, "success");
+                await refreshAll();
+            }
+        } catch (err) {
+            showToast(err.message || "Error", "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleRegisterException = async () => {
+        const finalType = exceptionType || "otro";
+        const finalDescription = exceptionDescription || "Salida inesperada";
+
+        setExceptionLoading(true);
+        try {
+            const loc = await getLocation();
+            if (!loc) {
+                setExceptionLoading(false);
+                return;
+            }
+            const res = await registerException(finalType, finalDescription, loc);
+            if (res.ok) {
+                showToast("Salida registrada. Notifica tu llegada.", "success");
+                setExceptionModalOpen(false);
+                setExceptionType("");
+                setExceptionDescription("");
+                await refreshAll();
+            }
+        } catch (err) {
+            const msg = err.response?.data?.message || err.message || "Error";
+            showToast(msg, "error");
+        } finally {
+            setExceptionLoading(false);
+        }
+    };
+
+    const handleExceptionUpdate = async (status, successMsg) => {
+        setLoading(true);
+        try {
+            const loc = await getLocation();
+            if (!loc) {
+                setLoading(false);
+                return;
+            }
+            const res = await updateExceptionStatus(status, loc);
+            if (res.ok) {
+                showToast(successMsg, "success");
+                await refreshAll();
+            }
+        } catch (err) {
+            const msg = err.response?.data?.message || err.message || "Error actualizando estado";
+            showToast(msg, "error");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const progress = calculateProgress();
+    const status = getStatusInfo();
+    const hasActiveException = Boolean(activeException);
+    const exceptionStatus = activeException?.status || "NONE";
+    const exceptionStepLabel =
+        {
+            ACTIVE: "En ruta",
+            ON_SITE: "En sitio",
+            RETURNING: "Regresando",
+            COMPLETED: "Completada",
+            NONE: "Sin salidas inesperadas",
+        }[exceptionStatus] || "Sin salidas inesperadas";
+
+    const renderExceptionBanner = () => {
+        if (!hasActiveException) return null;
+        const items = [
+            { label: "Salida de oficina", value: activeException.start_time },
+            { label: "Llegada a destino", value: activeException.arrival_time },
+            { label: "Salida de destino", value: activeException.departure_time },
+            { label: "Regreso a oficina", value: activeException.return_time },
+        ];
+
+        return (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-amber-800">
+                        <FiAlertTriangle />
+                        <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide">Salida inesperada</p>
+                            <p className="text-sm font-bold">{exceptionStepLabel}</p>
+                        </div>
+                    </div>
+                    <span className="text-[11px] px-2 py-1 rounded-full bg-white text-amber-700 border border-amber-200">
+                        {activeException.type}
+                    </span>
                 </div>
-            );
-        }
+                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-amber-800">
+                    {items.map((item) => (
+                        <div
+                            key={item.label}
+                            className="flex flex-col rounded-lg bg-white/60 px-2 py-2 border border-amber-100"
+                        >
+                            <span className="text-[11px] uppercase font-semibold">{item.label}</span>
+                            <span className="font-mono">{formatDateTime(item.value)}</span>
+                        </div>
+                    ))}
+                </div>
+            </div>
+        );
+    };
 
-        if (attendance.exit_time) {
-            return (
-                <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-center p-6 bg-gradient-to-r from-green-50 to-blue-50 rounded-xl border-2 border-green-200"
-                >
-                    <FiCheckCircle className="text-green-500 text-4xl mx-auto mb-2" />
-                    <p className="text-lg font-bold text-gray-800">¡Jornada completada!</p>
-                    <p className="text-sm text-gray-600 mt-1">Hasta mañana 👋</p>
-                </motion.div>
-            );
-        }
+    const renderExceptionControls = () => {
+        if (!attendance?.entry_time || attendance?.exit_time) return null;
 
-        if (attendance.lunch_end_time) {
+        if (!hasActiveException) {
             return (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
+                <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 mt-2">
+                    <div className="flex items-center gap-2 text-amber-800 mb-2">
+                        <FiAlertTriangle size={14} />
+                        <span className="text-xs font-semibold uppercase">Salida inesperada</span>
+                    </div>
+                    <p className="text-xs text-amber-700 mb-3">
+                        Si necesitas salir por permiso, cita o emergencia, registralo aqui para dejar trazabilidad.
+                    </p>
                     <Button
-                        variant="danger"
-                        icon={FiLogOut}
-                        onClick={handleClockOut}
+                        onClick={() => setExceptionModalOpen(true)}
+                        className="w-full text-xs py-2 bg-amber-500 hover:bg-amber-600"
                         disabled={loading}
-                        className="w-full py-3 text-base font-semibold bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600"
                     >
-                        🏁 Marcar Salida
+                        Registrar salida inesperada
                     </Button>
-                </motion.div>
-            );
-        }
-
-        if (attendance.lunch_start_time) {
-            return (
-                <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                    <Button
-                        variant="success"
-                        icon={FiCheckCircle}
-                        onClick={handleClockInLunch}
-                        disabled={loading}
-                        className="w-full py-3 text-base font-semibold bg-gradient-to-r from-green-500 to-emerald-500 hover:from-green-600 hover:to-emerald-600"
-                    >
-                        🔙 Regresar de Almuerzo
-                    </Button>
-                </motion.div>
+                </div>
             );
         }
 
         return (
-            <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}>
-                <Button
-                    variant="warning"
-                    icon={FiCoffee}
-                    onClick={handleClockOutLunch}
-                    disabled={loading}
-                    className="w-full py-3 text-base font-semibold bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600"
-                >
-                    🍽️ Salir a Almuerzo
-                </Button>
-            </motion.div>
+            <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-100">
+                <div className="flex items-center gap-2 mb-2 text-amber-800">
+                    <FiAlertTriangle size={14} />
+                    <span className="text-xs font-bold uppercase tracking-wider">
+                        Salida en curso: {activeException.type}
+                    </span>
+                </div>
+
+                {activeException.status === "ACTIVE" && (
+                    <>
+                        <p className="text-xs text-amber-700 mb-3">Estas en camino a tu destino.</p>
+                        <Button
+                            onClick={() => handleExceptionUpdate("ON_SITE", "Has llegado a tu destino")}
+                            className="w-full text-xs py-2 bg-amber-500 hover:bg-amber-600"
+                            disabled={loading}
+                        >
+                            Llegue a destino
+                        </Button>
+                    </>
+                )}
+
+                {activeException.status === "ON_SITE" && (
+                    <>
+                        <p className="text-xs text-amber-700 mb-3">Estas en el sitio. Registra cuando salgas.</p>
+                        <Button
+                            onClick={() => handleExceptionUpdate("RETURNING", "Has salido del destino")}
+                            className="w-full text-xs py-2 bg-amber-500 hover:bg-amber-600"
+                            disabled={loading}
+                        >
+                            Salir de destino
+                        </Button>
+                    </>
+                )}
+
+                {activeException.status === "RETURNING" && (
+                    <>
+                        <p className="text-xs text-amber-700 mb-3">Estas regresando a la oficina.</p>
+                        <Button
+                            onClick={() => handleExceptionUpdate("COMPLETED", "Ciclo de salida completado")}
+                            className="w-full text-xs py-2 bg-green-600 hover:bg-green-700"
+                            disabled={loading}
+                        >
+                            Llegue a oficina
+                        </Button>
+                    </>
+                )}
+            </div>
         );
     };
 
-    const statusInfo = getStatusInfo();
-    const progress = calculateProgress();
-
     return (
-        <Card className="p-3 sm:p-4 bg-gradient-to-br from-white to-blue-50 shadow-sm">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                    {statusInfo.icon}
-                    <h3 className="text-base font-bold text-gray-900">Mi Asistencia</h3>
+        <Card className="relative overflow-hidden rounded-2xl bg bg-white/70 backdrop-blur-xl shadow-lg shadow-blue-500/5 p-5">
+            <div className="flex justify-between items-center mb-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-blue-500/10">{status.icon}</div>
+                    <div>
+                        <h3 className="text-sm font-semibold text-gray-900">Asistencia de Hoy</h3>
+                        <p className="text-xs text-gray-500">{status.text}</p>
+                    </div>
                 </div>
-                <div className="text-lg font-mono font-bold text-blue-600">
+
+                <div className="text-sm font-mono font-semibold text-blue-600">
                     {currentTime.toLocaleTimeString("es-EC", {
                         hour: "2-digit",
                         minute: "2-digit",
@@ -273,92 +388,118 @@ const AttendanceWidget = () => {
                 </div>
             </div>
 
-            {/* Status Message */}
-            <motion.div
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className={`text-center text-sm font-semibold mb-3 ${statusInfo.color}`}
-            >
-                {statusInfo.message}
-            </motion.div>
-
-            {/* Progress Bar */}
             {attendance?.entry_time && !attendance?.exit_time && (
-                <div className="mb-4">
-                    <div className="flex justify-between text-[10px] text-gray-600 mb-1">
-                        <span>Progreso del día</span>
-                        <span className="font-bold">{progress}%</span>
+                <div className="mb-5">
+                    <div className="flex justify-between text-xs text-gray-500 mb-1">
+                        <span>Progreso del dia</span>
+                        <span className="font-semibold">{progress}%</span>
                     </div>
-                    <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+                    <div className="h-3 bg-gray-200/60 rounded-full overflow-hidden">
                         <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${progress}%` }}
-                            transition={{ duration: 0.5 }}
-                            className="h-full bg-gradient-to-r from-blue-500 to-green-500"
+                            transition={{ type: "spring", stiffness: 120 }}
+                            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400"
                         />
                     </div>
                 </div>
             )}
 
-            {/* Time Grid */}
-            <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-green-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">✅ Entrada</div>
-                    <div className="font-bold text-sm text-green-600">
-                        {formatTime(attendance?.entry_time)}
-                    </div>
-                </motion.div>
+            {renderExceptionBanner()}
 
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-orange-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🍽️ Almuerzo</div>
-                    <div className="font-bold text-sm text-orange-600">
-                        {formatTime(attendance?.lunch_start_time)}
-                    </div>
-                </motion.div>
-
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-blue-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🔙 Regreso</div>
-                    <div className="font-bold text-sm text-blue-600">
-                        {formatTime(attendance?.lunch_end_time)}
-                    </div>
-                </motion.div>
-
-                <motion.div
-                    whileHover={{ scale: 1.05 }}
-                    className="bg-white rounded-lg p-2 shadow-sm border border-red-100"
-                >
-                    <div className="text-gray-500 text-[10px] mb-1 font-medium">🏁 Salida</div>
-                    <div className="font-bold text-sm text-red-600">
-                        {formatTime(attendance?.exit_time)}
-                    </div>
-                </motion.div>
+            <div className="grid grid-cols-2 gap-3 mb-5">
+                {[
+                    ["Entrada", attendance?.entry_time, "In"],
+                    ["Almuerzo", attendance?.lunch_start_time, "Alm"],
+                    ["Regreso", attendance?.lunch_end_time, "Reg"],
+                    ["Salida", attendance?.exit_time, "Out"],
+                ].map(([label, time, icon]) => (
+                    <motion.div key={label} whileHover={{ y: -2 }} className="rounded-xl bg-white/60 p-3 shadow-sm">
+                        <div className="text-xs text-gray-500 flex items-center gap-1">
+                            <span>{icon}</span>
+                            {label}
+                        </div>
+                        <div className="text-sm font-semibold text-gray-800">{formatTime(time)}</div>
+                    </motion.div>
+                ))}
             </div>
 
-            {/* Action Button */}
-            {getNextAction()}
+            {!attendance?.exit_time && !hasActiveException && (
+                attendance?.entry_time ? (
+                    <Button
+                        onClick={() =>
+                            attendance?.lunch_start_time && !attendance?.lunch_end_time
+                                ? handle(clockInLunch, "Regresaste del almuerzo")
+                                : attendance?.lunch_end_time
+                                    ? handle(clockOut, "Buen trabajo!", true)
+                                    : handle(clockOutLunch, "Buen provecho")
+                        }
+                        disabled={loading}
+                        className="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/20"
+                    >
+                        {attendance?.lunch_start_time && !attendance?.lunch_end_time
+                            ? "Regresar de Almuerzo"
+                            : attendance?.lunch_end_time
+                                ? "Finalizar Jornada"
+                                : "Salir a Almuerzo"}
+                    </Button>
+                ) : (
+                    <Button
+                        onClick={() => handle(clockIn, "Entrada registrada")}
+                        disabled={loading}
+                        className="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-500/20"
+                    >
+                        Marcar entrada
+                    </Button>
+                )
+            )}
 
-            {/* Celebration Animation */}
+            {renderExceptionControls()}
+
             <AnimatePresence>
                 {showCelebration && (
                     <motion.div
-                        initial={{ opacity: 0, scale: 0.5 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.5 }}
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 0.5, opacity: 0 }}
                         className="fixed inset-0 flex items-center justify-center pointer-events-none z-50"
                     >
-                        <div className="text-6xl">🎉</div>
+                        <div className="text-4xl font-bold text-blue-600">Â¡Listo!</div>
                     </motion.div>
                 )}
             </AnimatePresence>
+
+            <Modal isOpen={exceptionModalOpen} onClose={() => setExceptionModalOpen(false)} title="Registrar salida inesperada">
+                <div className="space-y-4">
+                    <select
+                        className="w-full border rounded-lg px-3 py-2 text-sm"
+                        value={exceptionType}
+                        onChange={(e) => setExceptionType(e.target.value)}
+                    >
+                        <option value="">Motivo</option>
+                        <option value="permiso">Permiso</option>
+                        <option value="medico">Cita medica</option>
+                        <option value="proveedor">Proveedor</option>
+                        <option value="otro">Otro</option>
+                    </select>
+
+                    <textarea
+                        className="w-full border rounded-lg px-3 py-2 text-sm h-24"
+                        placeholder="Describe la salida..."
+                        value={exceptionDescription}
+                        onChange={(e) => setExceptionDescription(e.target.value)}
+                    />
+
+                    <div className="flex justify-end gap-2">
+                        <button onClick={() => setExceptionModalOpen(false)} className="text-sm text-gray-500 hover:text-gray-700">
+                            Cancelar
+                        </button>
+                        <Button onClick={handleRegisterException} disabled={exceptionLoading}>
+                            Registrar
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </Card>
     );
 };

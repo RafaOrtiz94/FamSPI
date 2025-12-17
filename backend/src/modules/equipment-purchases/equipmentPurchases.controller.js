@@ -28,6 +28,15 @@ exports.getMeta = async (req, res, next) => {
   }
 };
 
+exports.getStats = async (req, res, next) => {
+  try {
+    const stats = await service.getStats({ requestType: req.query.request_type || "purchase" });
+    res.json({ ok: true, data: stats });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.getBusinessCaseOptions = async (req, res, next) => {
   try {
     const options = await service.getBusinessCaseOptions();

@@ -35,11 +35,6 @@ const COMMON_REQUIRED_FIELDS = [
   "shipping_phone",
   "shipping_cellphone",
   "shipping_delivery_hours",
-  "legal_rep_name",
-  "legal_rep_position",
-  "legal_rep_id_document",
-  "legal_rep_cellphone",
-  "legal_rep_email",
   "operating_permit_status",
 ];
 
@@ -48,6 +43,14 @@ const NATURAL_REQUIRED_FIELDS = ["natural_person_firstname", "natural_person_las
 const LEGAL_REQUIRED_FIELDS = [
   "legal_person_business_name",
   "nationality",
+];
+
+const LEGAL_REP_REQUIRED_FIELDS = [
+  "legal_rep_name",
+  "legal_rep_position",
+  "legal_rep_id_document",
+  "legal_rep_cellphone",
+  "legal_rep_email",
 ];
 
 const FILE_REQUIREMENTS = {
@@ -479,6 +482,7 @@ const NewClientRequestForm = ({
       NATURAL_REQUIRED_FIELDS.forEach(checkField);
     } else {
       LEGAL_REQUIRED_FIELDS.forEach(checkField);
+      LEGAL_REP_REQUIRED_FIELDS.forEach(checkField);
     }
 
     const missingFiles = requiredFiles.filter((field) => !files[field]);
@@ -928,49 +932,51 @@ const NewClientRequestForm = ({
           />
         </Section>
 
-        <Section title="Representante legal y contacto">
-          <InputField
-            name="legal_rep_name"
-            label="Nombre completo"
-            value={formData.legal_rep_name}
-            onChange={handleChange}
-            required
-            error={errors.legal_rep_name}
-          />
-          <InputField
-            name="legal_rep_position"
-            label="Cargo"
-            value={formData.legal_rep_position}
-            onChange={handleChange}
-            required
-            error={errors.legal_rep_position}
-          />
-          <InputField
-            name="legal_rep_id_document"
-            label="Documento de identificación"
-            value={formData.legal_rep_id_document}
-            onChange={handleChange}
-            required
-            error={errors.legal_rep_id_document}
-          />
-          <InputField
-            name="legal_rep_cellphone"
-            label="Teléfono celular"
-            value={formData.legal_rep_cellphone}
-            onChange={handleChange}
-            required
-            error={errors.legal_rep_cellphone}
-          />
-          <InputField
-            name="legal_rep_email"
-            label="Correo electrónico"
-            type="email"
-            value={formData.legal_rep_email}
-            onChange={handleChange}
-            required
-            error={errors.legal_rep_email}
-          />
-        </Section>
+        {formData.client_type === "persona_juridica" && (
+          <Section title="Representante legal y contacto">
+            <InputField
+              name="legal_rep_name"
+              label="Nombre completo"
+              value={formData.legal_rep_name}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_name}
+            />
+            <InputField
+              name="legal_rep_position"
+              label="Cargo"
+              value={formData.legal_rep_position}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_position}
+            />
+            <InputField
+              name="legal_rep_id_document"
+              label="Documento de identificación"
+              value={formData.legal_rep_id_document}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_id_document}
+            />
+            <InputField
+              name="legal_rep_cellphone"
+              label="Teléfono celular"
+              value={formData.legal_rep_cellphone}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_cellphone}
+            />
+            <InputField
+              name="legal_rep_email"
+              label="Correo electrónico"
+              type="email"
+              value={formData.legal_rep_email}
+              onChange={handleChange}
+              required
+              error={errors.legal_rep_email}
+            />
+          </Section>
+        )}
         <Section title="Datos para el envío de mercadería">
           <InputField
             name="shipping_contact_name"
@@ -1067,6 +1073,9 @@ const NewClientRequestForm = ({
           <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
             {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => {
               if (key === "consent_evidence_file" && formData.consent_capture_method === "email_link") {
+                return null;
+              }
+              if (key === "legal_rep_appointment_file" && formData.client_type !== "persona_juridica") {
                 return null;
               }
               return (

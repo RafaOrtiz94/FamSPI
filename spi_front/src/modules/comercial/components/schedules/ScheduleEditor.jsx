@@ -3,7 +3,17 @@ import { fetchClients } from "../../../../core/api/clientsApi";
 import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 
-const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete, editingLocked, onRequestEdit }) => {
+const ScheduleEditor = ({
+  schedule,
+  onCreate,
+  onAddVisit,
+  onUpdateVisit,
+  onRemoveVisit,
+  onSubmit,
+  onDelete,
+  editingLocked,
+  onRequestEdit,
+}) => {
   const [form, setForm] = useState({ month: "", year: new Date().getFullYear(), notes: "" });
   const [visitForm, setVisitForm] = useState({ client_request_id: "", planned_date: "", city: "", priority: 1, notes: "" });
   const [clients, setClients] = useState([]);
@@ -24,12 +34,21 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete, ed
   const filteredClients = useMemo(() => {
     if (!clientSearch) return clients;
     const term = clientSearch.toLowerCase();
-    return clients.filter(
-      (client) =>
-        client.commercial_name?.toLowerCase().includes(term) ||
-        String(client.id).includes(term) ||
-        client.shipping_city?.toLowerCase().includes(term),
-    );
+    return clients.filter((client) => {
+      const fields = [
+        client.commercial_name,
+        client.nombre,
+        client.name,
+        client.display_name,
+        client.email,
+        client.identificador,
+        client.shipping_city,
+        client.shipping_province,
+      ]
+        .filter(Boolean)
+        .map((f) => String(f).toLowerCase());
+      return fields.some((f) => f.includes(term)) || String(client.id).includes(term);
+    });
   }, [clients, clientSearch]);
 
   const handleSelectClient = (value) => {
@@ -172,11 +191,21 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete, ed
                   onChange={(e) => handleSelectClient(e.target.value)}
                 >
                   <option value="">Selecciona un cliente</option>
-                  {filteredClients.map((client) => (
-                    <option key={client.id} value={client.id}>
-                      {client.commercial_name || "Cliente"} — {client.shipping_city || "Ciudad no especificada"}
-                    </option>
-                  ))}
+                  {filteredClients.map((client) => {
+                    const label =
+                      client.commercial_name ||
+                      client.nombre ||
+                      client.name ||
+                      client.display_name ||
+                      client.email ||
+                      client.identificador ||
+                      `Cliente #${client.id}`;
+                    return (
+                      <option key={client.id} value={client.id}>
+                        {label} - {client.shipping_city || "Ciudad no especificada"}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
               <input
@@ -230,7 +259,14 @@ const ScheduleEditor = ({ schedule, onCreate, onAddVisit, onSubmit, onDelete, ed
 
       <div className="lg:col-span-2">
         {schedule ? (
-          <ScheduleCalendarView schedule={schedule} />
+          <ScheduleCalendarView
+            schedule={schedule}
+            clients={clients}
+            onUpdateVisit={onUpdateVisit}
+            onRemoveVisit={onRemoveVisit}
+            editingLocked={editingLocked}
+            onRequestEdit={onRequestEdit}
+          />
         ) : (
           <div className="h-full border rounded-lg p-4 bg-gray-50 flex items-center justify-center text-sm text-gray-500">
             Selecciona o crea un cronograma para visualizarlo.

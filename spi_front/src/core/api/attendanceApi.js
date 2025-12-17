@@ -13,13 +13,16 @@ import { getAccessToken } from "./authApi";
 /**
  * Clock In - Record entry time
  */
-export const clockIn = async () => {
+/**
+ * Clock In - Record entry time
+ */
+export const clockIn = async (location = null) => {
     const token = getAccessToken();
     if (!token) throw new Error("No hay token activo");
 
     const { data } = await api.post(
         "/attendance/clock-in",
-        {},
+        { location },
         { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -29,13 +32,13 @@ export const clockIn = async () => {
 /**
  * Clock Out for Lunch - Record lunch start time
  */
-export const clockOutLunch = async (signatureBase64) => {
+export const clockOutLunch = async (location = null) => {
     const token = getAccessToken();
     if (!token) throw new Error("No hay token activo");
 
     const { data } = await api.post(
         "/attendance/clock-out-lunch",
-        { signature_base64: signatureBase64 },
+        { location },
         { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -45,13 +48,13 @@ export const clockOutLunch = async (signatureBase64) => {
 /**
  * Clock In from Lunch - Record lunch end time
  */
-export const clockInLunch = async () => {
+export const clockInLunch = async (location = null) => {
     const token = getAccessToken();
     if (!token) throw new Error("No hay token activo");
 
     const { data } = await api.post(
         "/attendance/clock-in-lunch",
-        {},
+        { location },
         { headers: { Authorization: `Bearer ${token}` } }
     );
 
@@ -61,15 +64,61 @@ export const clockInLunch = async () => {
 /**
  * Clock Out - Record exit time
  */
-export const clockOut = async (signatureBase64) => {
+export const clockOut = async (location = null) => {
     const token = getAccessToken();
     if (!token) throw new Error("No hay token activo");
 
     const { data } = await api.post(
         "/attendance/clock-out",
-        { signature_base64: signatureBase64 },
+        { location },
         { headers: { Authorization: `Bearer ${token}` } }
     );
+
+    return data;
+};
+
+/**
+ * Register Exception (Salida Inesperada)
+ */
+export const registerException = async (type, description, location = null) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/exception",
+        { type, description, location },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
+ */
+export const updateExceptionStatus = async (status, location = null) => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.post(
+        "/attendance/exception/status",
+        { status, location },
+        { headers: { Authorization: `Bearer ${token}` } }
+    );
+
+    return data;
+};
+
+/**
+ * Get active exception for current user
+ */
+export const getActiveException = async () => {
+    const token = getAccessToken();
+    if (!token) throw new Error("No hay token activo");
+
+    const { data } = await api.get("/attendance/exception/active", {
+        headers: { Authorization: `Bearer ${token}` },
+    });
 
     return data;
 };
@@ -148,4 +197,3 @@ export const downloadAttendancePDF = async (userId, startDate, endDate) => {
 
     return true;
 };
-

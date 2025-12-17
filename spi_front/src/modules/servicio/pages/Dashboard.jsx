@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useAuth } from "../../../core/auth/AuthContext";
 import api from "../../../core/api";
 import { getMantenimientos } from "../../../core/api/mantenimientosApi";
@@ -7,10 +7,28 @@ import { getPendingApprovals } from "../../../core/api/approvalsApi";
 import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 import PermisosStatusWidget from "../../shared/solicitudes/components/PermisosStatusWidget";
-
-// Views
+import { useApi } from "../../../core/hooks/useApi";
+import Button from "../../../core/ui/components/Button";
+import Card from "../../../core/ui/components/Card";
+import RequestsListModal from "../../shared/solicitudes/components/RequestsListModal";
 import JefeTecnicoView from "../components/dashboard/JefeTecnicoView";
 import TecnicoView from "../components/dashboard/TecnicoView";
+
+const normalizeStatus = (value) => (value || "").toString().toLowerCase();
+const isRequestOpen = (status) =>
+  !["cerrado", "cancelado", "finalizado"].includes(normalizeStatus(status));
+
+const parseRequestPayload = (payload) => {
+  if (!payload) return {};
+  if (typeof payload === "string") {
+    try {
+      return JSON.parse(payload);
+    } catch {
+      return {};
+    }
+  }
+  return payload;
+};
 
 const fetchEquipos = async () => {
   const { data } = await api.get("/servicio/equipos");
@@ -32,9 +50,7 @@ const fetchCapacitaciones = async () => {
   return [];
 };
 
-const fetchSolicitudesTecnicas = async () => {
-  return getRequests({ pageSize: 30 });
-};
+const fetchSolicitudesTecnicas = () => getRequests({ pageSize: 30 });
 
 const ServicioDashboard = () => {
   const { user } = useAuth();
@@ -45,6 +61,7 @@ const ServicioDashboard = () => {
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [approvals, setApprovals] = useState([]);
   const [availability, setAvailability] = useState([]);
+  const [requestsModalOpen, setRequestsModalOpen] = useState(false);
 
   const unwrapRows = useCallback((payload) => {
     if (Array.isArray(payload)) return payload;
@@ -56,13 +73,29 @@ const ServicioDashboard = () => {
     return [];
   }, []);
 
+  const {
+    execute: loadSolicitudes,
+  } = useApi(
+    useCallback(() => getRequests({ pageSize: 30 }), []),
+    { errorMsg: "No se pudieron cargar las solicitudes técnicas." }
+  );
+
+  const solicitudesRef = useRef(loadSolicitudes);
+  useEffect(() => {
+    solicitudesRef.current = loadSolicitudes;
+  }, [loadSolicitudes]);
+
+  const openRequestsModal = useCallback(() => setRequestsModalOpen(true), []);
+  const closeRequestsModal = useCallback(() => setRequestsModalOpen(false), []);
+  const fetchRequestsForModal = useCallback(() => solicitudesRef.current(), []);
+
   const refreshSnapshots = useCallback(async () => {
     setLoadingSnapshots(true);
     const tasks = [
       { label: "mantenimientos", fn: () => getMantenimientos({ pageSize: 200 }), setter: setMantenimientos },
       { label: "equipos", fn: fetchEquipos, setter: setEquipos },
       { label: "capacitaciones", fn: fetchCapacitaciones, setter: setCapacitaciones },
-      { label: "solicitudes", fn: fetchSolicitudesTecnicas, setter: setSolicitudes },
+      { label: "solicitudes", fn: () => solicitudesRef.current(), setter: setSolicitudes },
       { label: "aprobaciones", fn: getPendingApprovals, setter: setApprovals },
       { label: "availability", fn: getTeamAvailability, setter: setAvailability },
     ];
@@ -90,6 +123,12 @@ const ServicioDashboard = () => {
     [capacitaciones]
   );
   const safeSolicitudes = useMemo(() => (Array.isArray(solicitudes) ? solicitudes : []), [solicitudes]);
+  const displayedSolicitudes = useMemo(() => {
+    const openRequests = safeSolicitudes.filter((s) =>
+      isRequestOpen(s.status || s.estado)
+    );
+    return openRequests.slice(0, 4);
+  }, [safeSolicitudes]);
   const safeApprovals = useMemo(() => (Array.isArray(approvals) ? approvals : []), [approvals]);
   const safeAvailability = useMemo(() => (Array.isArray(availability) ? availability : []), [availability]);
 
@@ -193,9 +232,67 @@ const ServicioDashboard = () => {
   return (
     <DashboardLayout includeWidgets={false}>
       {renderView()}
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Solicitudes en curso</h2>
+            <p className="text-sm text-gray-500">
+              Accede al historial completo y mantiene el contexto de las solicitudes técnicas abiertas.
+            </p>
+          </div>
+          <Button
+            className="text-sm px-4 py-2"
+            onClick={openRequestsModal}
+          >
+            Ver historial
+          </Button>
+        </div>
+        {displayedSolicitudes.length === 0 ? (
+          <p className="text-sm text-gray-500 mt-4">
+            No hay solicitudes abiertas en este momento.
+          </p>
+        ) : (
+          <div className="mt-4 space-y-3">
+            {displayedSolicitudes.map((req) => {
+              const payload = parseRequestPayload(req.payload);
+              const cliente =
+                payload.nombre_cliente ||
+                payload.cliente ||
+                payload.customer_name ||
+                "Cliente desconocido";
+              const tipo =
+                req.type_name ||
+                req.type_title ||
+                payload.tipo ||
+                "Solicitud técnica";
+              const estado = req.status || req.estado || "Pendiente";
+              return (
+                <div
+                  key={`${req.id}-${estado}`}
+                  className="flex items-center justify-between rounded-lg border border-gray-100 bg-white px-3 py-2 shadow-sm"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{cliente}</p>
+                    <p className="text-xs text-gray-500">{tipo}</p>
+                  </div>
+                  <span className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                    {estado}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
       <div className="mt-6">
         <PermisosStatusWidget />
       </div>
+      <RequestsListModal
+        open={requestsModalOpen}
+        onClose={closeRequestsModal}
+        title="Solicitudes en curso"
+        customFetcher={fetchRequestsForModal}
+      />
     </DashboardLayout>
   );
 };

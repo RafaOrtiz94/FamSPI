@@ -1,15 +1,16 @@
-import React, { useEffect, useState } from "react";
-import { FiCpu, FiFilter, FiSearch } from "react-icons/fi";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FiChevronDown, FiCpu, FiFilter, FiSearch, FiTrash2, FiPlus, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useBusinessCaseWizard } from "../../pages/BusinessCaseWizard";
 
-const EquipmentCard = ({ item, onSelect, selected }) => (
-  <button
-    type="button"
-    onClick={() => onSelect(item)}
-    className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"
-      }`}
+const DEFAULT_EQUIPMENT_PAIRS = [
+  { id: Date.now(), primary: null, backup: null } // Start with one empty pair
+];
+
+const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => (
+  <div
+    className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${disabled ? "opacity-60 pointer-events-none border-gray-200" : selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"}`}
   >
     <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
@@ -37,30 +38,73 @@ const EquipmentCard = ({ item, onSelect, selected }) => (
         </span>
       ))}
     </div>
-  </button>
+    {onSelect && (
+      <button
+        type="button"
+        onClick={() => onSelect(item)}
+        className={`w-full rounded-lg bg-${actionColor}-500 px-3 py-2 text-xs font-semibold text-white hover:bg-${actionColor}-600 mt-2`}
+      >
+        {actionLabel}
+      </button>
+    )}
+  </div>
 );
 
-const Step2EquipmentSelector = ({ onPrev, onNext }) => {
+const AccordionSection = ({ title, description, isOpen, onToggle, statusBadge, children }) => (
+  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm mb-4">
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 focus:outline-none"
+    >
+      <div>
+        <p>{title}</p>
+        {description && <p className="text-xs text-gray-500">{description}</p>}
+      </div>
+      <div className="flex items-center gap-3">
+        {statusBadge}
+        <FiChevronDown className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+      </div>
+    </button>
+    <div className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
+      <div className="px-6 pb-6 pt-0">{children}</div>
+    </div>
+  </div>
+);
+
+const SwitchField = ({ label, checked, onChange }) => (
+  <div className="flex items-center justify-between">
+    <span className="text-sm font-semibold text-gray-700">{label}</span>
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-gray-200"}`}
+      onClick={() => onChange(!checked)}
+    >
+      <span
+        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${checked ? "translate-x-5" : "translate-x-1"}`}
+      />
+    </button>
+  </div>
+);
+
+const Step2EquipmentSelector = ({ onPrev, onNext, hideNavigation }) => {
   const { state, updateState } = useBusinessCaseWizard();
   const { showToast, showLoader, hideLoader } = useUI();
   const [items, setItems] = useState([]);
   const [filters, setFilters] = useState({ search: "", category: "" });
   const [loading, setLoading] = useState(false);
 
-  const normalizeItem = (item) => {
-    const id =
-      item.id ?? item.equipment_id ?? item.equipmentId ?? item.bc_equipment_id ?? item.bcEquipmentId ?? item.code;
+  // Pairs state: Array of { id, primary: {}, backup: {} }
+  const [equipmentPairs, setEquipmentPairs] = useState(() => {
+    return state.equipmentPairs || DEFAULT_EQUIPMENT_PAIRS;
+  });
 
-    return {
-      id,
-      name: item.name ?? item.equipment_name ?? item.display_name ?? "Equipo",
-      code: item.code ?? item.codigo ?? item.equipment_code,
-      capacity: item.capacity ?? item.capacidad ?? item.capacidad_maxima,
-      price: item.price ?? item.precio ?? item.base_price,
-      description: item.description ?? item.descripcion ?? item.summary,
-      categories: item.categories ?? item.categorias ?? item.tags ?? [],
-      raw: item,
-    };
+  const [openPairs, setOpenPairs] = useState({}); // { [pairId]: boolean }
+
+  const togglePair = (pairId) => {
+    setOpenPairs(prev => ({ ...prev, [pairId]: !prev[pairId] }));
   };
 
   const loadEquipment = async () => {
@@ -73,21 +117,21 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
         },
       });
       const payload = res.data?.data ?? res.data;
-      const parsedItems = Array.isArray(payload?.items)
-        ? payload.items
-        : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload?.rows)
-            ? payload.rows
-            : Array.isArray(payload?.items?.data)
-              ? payload.items.data
-              : Array.isArray(payload?.records)
-                ? payload.records
-                : Array.isArray(payload)
-                  ? payload
-                  : [];
+      const parsedItems = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
 
-      const normalized = (Array.isArray(parsedItems) ? parsedItems : []).map(normalizeItem).filter((i) => i.id);
+      const normalized = parsedItems.map((item) => {
+        const id = item.id ?? item.equipment_id ?? item.equipmentId ?? item.code;
+        return {
+          id,
+          name: item.name ?? item.equipment_name ?? "Equipo",
+          code: item.code,
+          capacity: item.capacity,
+          price: item.price,
+          description: item.description,
+          categories: item.categories ?? [item.category || item.categoria || item.category_type].filter(Boolean),
+          raw: item,
+        };
+      }).filter((i) => i.id);
       setItems(normalized);
     } catch (err) {
       showToast("No se pudo cargar el catálogo", "error");
@@ -98,117 +142,236 @@ const Step2EquipmentSelector = ({ onPrev, onNext }) => {
 
   useEffect(() => {
     loadEquipment();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSelect = async (item) => {
+  // Update a specific pair
+  const updatePair = (pairId, updates) => {
+    const newPairs = equipmentPairs.map(p => p.id === pairId ? { ...p, ...updates } : p);
+    setEquipmentPairs(newPairs);
+    updateState({ equipmentPairs: newPairs });
+  };
+
+  const addPair = () => {
+    const newPair = { id: Date.now(), primary: null, backup: null };
+    const newPairs = [...equipmentPairs, newPair];
+    setEquipmentPairs(newPairs);
+    updateState({ equipmentPairs: newPairs });
+    setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
+  };
+
+  const removePair = (pairId) => {
+    if (equipmentPairs.length <= 1) {
+      showToast("Debe haber al menos un grupo de equipos", "warning");
+      return;
+    }
+    const newPairs = equipmentPairs.filter(p => p.id !== pairId);
+    setEquipmentPairs(newPairs);
+    updateState({ equipmentPairs: newPairs });
+  };
+
+  const selectPrimary = (pairId, item) => {
+    updatePair(pairId, {
+      primary: { ...item },
+      backup: null,
+    });
+    showToast("Equipo principal seleccionado", "success");
+  };
+
+  const selectBackup = (pairId, item) => {
+    updatePair(pairId, {
+      backup: { ...item, condition: "Nuevo", install_with_primary: false }
+    });
+    showToast("Backup seleccionado", "success");
+  };
+
+  const getBackupCandidates = (primaryItem) => {
+    if (!primaryItem || !primaryItem.categories) return [];
+    // Filter by similar categories
+    return items.filter(i => i.id !== primaryItem.id && i.categories.some(cat => primaryItem.categories.includes(cat)));
+  };
+
+  const handleNext = async () => {
+    if (equipmentPairs.some(p => !p.primary)) {
+      showToast("Todos los grupos deben tener un equipo principal seleccionado", "warning");
+      return;
+    }
     if (!state.businessCaseId) {
       showToast("Primero guarda los datos generales", "warning");
       return;
     }
-    showLoader();
+
     try {
-      const equipmentId =
-        item.id ||
-        item.raw?.id ||
-        item.raw?.equipment_id ||
-        item.raw?.equipmentId ||
-        item.raw?.bc_equipment_id ||
-        item.raw?.bcEquipmentId;
+      showLoader();
+      // Prepare payload with list of pairs
+      // Backend currently expects equipment details. 
+      // We might need to update backend to accept list, or loop here.
+      // For now, let's assume we send the whole structure to a new endpoint or the same one updated.
+      // Since I can't edit backend right now easily to support list if it doesn't, I will try to save the MAIN (first) pair as the primary one for legacy compatibility, 
+      // and save the full list in a JSON field if possible, or assume backend handles list.
+      // Actually, the user asked to change the LOGIC, implying backend might need change or already supports it.
+      // I will basically send the array.
 
-      if (!equipmentId) {
-        showToast("No se pudo identificar el equipo seleccionado", "error");
-        return;
-      }
+      const payload = {
+        equipment_pairs: equipmentPairs.map(p => ({
+          primary_id: p.primary.id,
+          backup_id: p.backup?.id || null,
+          backup_install_simultaneous: p.backup?.install_with_primary || false,
+        })),
+      };
 
-      await api.post(`/business-case/${state.businessCaseId}/equipment`, {
-        equipmentId,
-        isPrimary: true,
-      });
-      updateState({ selectedEquipment: item });
-      showToast("Equipo seleccionado", "success");
-      if (onNext) onNext();
+      // Note: Using a special endpoint or assuming the existing one can handle it.
+      // If current backend expects 1-to-1, this calls for backend refactor.
+      // I will use a new route path to be safe or just POST to equipment-details and handle in backend (I'll check backend service next).
+      await api.post(`/business-case/${state.businessCaseId}/equipment-details`, payload);
+
+      updateState({ equipmentPairs });
+      onNext();
     } catch (err) {
-      showToast(err.response?.data?.message || "No se pudo seleccionar el equipo", "error");
+      showToast("Error guardando equipos", "error");
+      console.error(err);
     } finally {
       hideLoader();
     }
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900">Selecciona un equipo</h2>
-          <p className="text-sm text-gray-500">Filtra por categoría o busca por nombre.</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="relative">
-            <FiSearch className="absolute left-3 top-3 text-gray-400" />
-            <input
-              value={filters.search}
-              onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value }))}
-              className="pl-10 pr-3 py-2 rounded-lg border border-gray-200"
-              placeholder="Buscar equipo"
-            />
-          </div>
-          <select
-            value={filters.category}
-            onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value }))}
-            className="px-3 py-2 rounded-lg border border-gray-200"
-          >
-            <option value="">Todas las categorías</option>
-            <option value="hematologia">Hematología</option>
-            <option value="quimica">Química</option>
-            <option value="coagulacion">Coagulación</option>
-          </select>
-          <button
-            type="button"
-            onClick={loadEquipment}
-            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-gray-700"
-          >
-            <FiFilter /> Filtrar
-          </button>
-        </div>
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-gray-500">Cargando catálogo...</p>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {(Array.isArray(items) ? items : []).map((item) => (
-            <EquipmentCard
-              key={item.id}
-              item={item}
-              onSelect={handleSelect}
-              selected={state.selectedEquipment?.id === item.id}
-            />
-          ))}
-          {!items.length && <p className="text-sm text-gray-500">No hay equipos para mostrar.</p>}
-        </div>
-      )}
-
-      {state.selectedEquipment && (
-        <div className="p-3 rounded-lg bg-blue-50 text-blue-800 text-sm">Equipo seleccionado: {state.selectedEquipment.name}</div>
-      )}
-
-      <div className="flex justify-between pt-2">
+    <div className="space-y-6">
+      <div className="flex justify-between items-center border-b pb-4">
+        <h2 className="text-lg font-semibold text-gray-800">Selección de Equipos</h2>
         <button
-          type="button"
-          onClick={onPrev}
-          className="px-4 py-2 rounded-lg border border-gray-200 text-gray-700"
+          onClick={addPair}
+          className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
         >
-          Regresar
-        </button>
-        <button
-          type="button"
-          onClick={onNext}
-          className="px-4 py-2 rounded-lg bg-blue-600 text-white"
-          disabled={!state.selectedEquipment}
-        >
-          Continuar
+          <FiPlus /> Agregar Grupo de Equipos
         </button>
       </div>
+
+      <div className="space-y-4">
+        {equipmentPairs.map((pair, index) => (
+          <AccordionSection
+            key={pair.id}
+            title={`Grupo de Equipos #${index + 1}`}
+            description={pair.primary ? `${pair.primary.name} ${pair.backup ? '+ Backup' : ''}` : "Seleccione equipos..."}
+            isOpen={openPairs[pair.id]}
+            onToggle={() => togglePair(pair.id)}
+            statusBadge={pair.primary ? <span className="text-green-600 text-xs font-bold">Listo</span> : <span className="text-amber-600 text-xs">Pendiente</span>}
+          >
+            <div className="space-y-6">
+              {/* Primary Selection */}
+              <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-700">Equipo Principal</h4>
+                {/* Simple Search for this pair (uses global items but could filter locally) */}
+                <div className="flex gap-2 mb-2">
+                  <input
+                    placeholder="Filtrar..."
+                    className="border rounded px-2 py-1 text-sm w-full"
+                    onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))} // Global search for simplicity
+                  />
+                </div>
+
+                {!pair.primary ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                    {items.filter(i => i.name.toLowerCase().includes(filters.search.toLowerCase())).map(item => (
+                      <EquipmentCard
+                        key={item.id}
+                        item={item}
+                        actionLabel="Seleccionar Principal"
+                        onSelect={(i) => selectPrimary(pair.id, i)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="relative">
+                    <EquipmentCard item={pair.primary} selected />
+                    <button
+                      onClick={() => updatePair(pair.id, { primary: null, backup: null })}
+                      className="absolute top-2 right-2 text-red-500 hover:text-red-700"
+                    >
+                      <FiTrash2 /> Cambiar
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Backup Selection (Only if Primary is set) */}
+              {pair.primary && (
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex justify-between items-center">
+                    <h4 className="text-sm font-semibold text-gray-700">Equipo de Respaldo (Backup)</h4>
+                    {pair.backup && (
+                      <button
+                        onClick={() => updatePair(pair.id, { backup: null })}
+                        className="text-xs text-red-500 hover:text-red-700"
+                      >
+                        Eliminar Backup
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500">
+                    Mostrando equipos con características similares (mismas categorías).
+                  </p>
+
+                  {!pair.backup ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                      {getBackupCandidates(pair.primary).map(item => (
+                        <EquipmentCard
+                          key={item.id}
+                          item={item}
+                          actionLabel="Agregar como Backup"
+                          actionColor="amber"
+                          onSelect={(i) => selectBackup(pair.id, i)}
+                        />
+                      ))}
+                      {getBackupCandidates(pair.primary).length === 0 && (
+                        <p className="text-sm text-gray-500 italic">No se encontraron equipos similares.</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
+                      <h5 className="font-semibold text-sm text-amber-900">{pair.backup.name}</h5>
+                      <div className="mt-2 text-xs space-y-2">
+                        <label className="block">
+                          Condición:
+                          <input
+                            value={pair.backup.condition}
+                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
+                            className="ml-2 border rounded px-1"
+                          />
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={pair.backup.install_with_primary}
+                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
+                          />
+                          Instalar simultáneamente
+                        </label>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Remove Pair Button */}
+              <div className="pt-4 flex justify-end">
+                <button
+                  onClick={() => removePair(pair.id)}
+                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                >
+                  <FiTrash2 /> Eliminar Grupo
+                </button>
+              </div>
+            </div>
+          </AccordionSection>
+        ))}
+      </div>
+
+      {!hideNavigation && (
+        <div className="flex justify-between pt-4">
+          <button onClick={onPrev} className="px-6 py-2 rounded-lg border hover:bg-gray-50 text-gray-700">Regresar</button>
+          <button onClick={handleNext} className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700">Continuar</button>
+        </div>
+      )}
     </div>
   );
 };

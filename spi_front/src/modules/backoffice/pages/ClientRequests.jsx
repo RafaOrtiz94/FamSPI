@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { FiRefreshCw } from "react-icons/fi";
-import DashboardLayout from "../../../core/layout/DashboardLayout";
 import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
-import { getClientRequests } from "../../../core/api/requestsApi";
+import { getClientRequests, getRequestById } from "../../../core/api/requestsApi";
+import { getDocumentsByRequest } from "../../../core/api/documentsApi";
+import { getFilesByRequest } from "../../../core/api/filesApi";
 import { useNavigate } from "react-router-dom";
+import RequestDetailModal from "../../comercial/components/RequestDetailModal";
 
 const ClientRequests = () => {
   const { showToast } = useUI();
@@ -13,6 +15,12 @@ const ClientRequests = () => {
   const [filters, setFilters] = useState({ q: "", status: "pending_approval" });
   const { data, loading, execute: fetchRequests } = useApi(getClientRequests, {
     errorMsg: "Error al cargar las solicitudes de clientes",
+  });
+  const [detail, setDetail] = useState({
+    open: false,
+    loading: false,
+    data: null,
+    error: null,
   });
 
   const loadRequests = useCallback(async () => {
@@ -28,14 +36,50 @@ const ClientRequests = () => {
     setFilters((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleViewDetails = (id) => {
-    navigate(`/dashboard/backoffice/client-request/${id}`);
+  const handleViewDetails = async (req) => {
+    setDetail({ open: true, loading: true, data: null, error: null });
+    try {
+      const requestResponse = await getRequestById(req.id);
+      const documents = await getDocumentsByRequest(req.id);
+      const files = await getFilesByRequest(req.id);
+
+      const normalizedRequest =
+        requestResponse?.request || requestResponse || {};
+      let payload = normalizedRequest.payload;
+      if (typeof payload === "string") {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = {};
+        }
+      }
+      payload = payload || {};
+
+      setDetail({
+        open: true,
+        loading: false,
+        data: {
+          request: { ...normalizedRequest, payload },
+          documents: documents || [],
+          files: files || [],
+        },
+        error: null,
+      });
+    } catch (error) {
+      console.error("No se pudieron cargar los detalles:", error);
+      setDetail({
+        open: true,
+        loading: false,
+        data: null,
+        error: "No se pudo cargar el detalle de la solicitud",
+      });
+    }
   };
 
   const requests = data?.rows || [];
 
   return (
-    <DashboardLayout>
+    <>
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
@@ -95,21 +139,34 @@ const ClientRequests = () => {
             </thead>
             <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
               {loading ? (
-                <tr><td colSpan="7" className="text-center py-10">Cargando...</td></tr>
+                <tr>
+                  <td colSpan="7" className="text-center py-10">
+                    Cargando...
+                  </td>
+                </tr>
               ) : requests.length === 0 ? (
-                <tr><td colSpan="7" className="text-center py-10">No hay solicitudes.</td></tr>
+                <tr>
+                  <td colSpan="7" className="text-center py-10">
+                    No hay solicitudes.
+                  </td>
+                </tr>
               ) : (
                 requests.map((req) => (
-                  <tr key={req.id} className="hover:bg-gray-50 dark:hover:bg-gray-700">
+                  <tr
+                    key={req.id}
+                    className="hover:bg-gray-50 dark:hover:bg-gray-700"
+                  >
                     <Td>{req.id}</Td>
                     <Td>{req.commercial_name}</Td>
                     <Td>{req.ruc_cedula}</Td>
                     <Td>{req.created_by}</Td>
-                    <Td><StatusBadge status={req.status} /></Td>
+                    <Td>
+                      <StatusBadge status={req.status} />
+                    </Td>
                     <Td>{new Date(req.created_at).toLocaleDateString()}</Td>
                     <Td>
                       <button
-                        onClick={() => handleViewDetails(req.id)}
+                        onClick={() => handleViewDetails(req)}
                         className="text-blue-600 hover:text-blue-800"
                       >
                         Ver Detalles
@@ -122,7 +179,13 @@ const ClientRequests = () => {
           </table>
         </div>
       </motion.div>
-    </DashboardLayout>
+      <RequestDetailModal
+        detail={detail}
+        onClose={() =>
+          setDetail({ open: false, loading: false, data: null, error: null })
+        }
+      />
+    </>
   );
 };
 

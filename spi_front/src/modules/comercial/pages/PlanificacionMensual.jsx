@@ -1,4 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FiCalendar,
+  FiLock,
+  FiEdit3,
+  FiAlertTriangle,
+  FiActivity,
+  FiCheckCircle,
+  FiTrendingUp,
+} from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import { DashboardHeader } from "../../../core/ui/layouts/DashboardLayout";
 import { useAuth } from "../../../core/auth/useAuth";
@@ -8,43 +17,93 @@ import ScheduleStatusBadge from "../components/schedules/ScheduleStatusBadge";
 import ScheduleApprovalWidget from "../components/schedules/ScheduleApprovalWidget";
 import EditWarningModal from "../components/schedules/EditWarningModal";
 
+/* =========================
+   CONFIG VISUAL ENTERPRISE
+========================= */
+const STATUS_META = {
+  draft: {
+    gradient: "from-slate-500 to-slate-700",
+    label: "Borrador",
+  },
+  pending_approval: {
+    gradient: "from-amber-500 to-orange-600",
+    label: "Pendiente de aprobación",
+  },
+  approved: {
+    gradient: "from-emerald-500 to-green-700",
+    label: "Aprobado",
+  },
+  rejected: {
+    gradient: "from-rose-500 to-red-700",
+    label: "Rechazado",
+  },
+};
+
 const PlanificacionMensual = () => {
   const { role } = useAuth();
-  const isManager = ["jefe_comercial", "gerencia", "gerencia_general"].includes(role);
-  const { schedules, activeSchedule, loadScheduleDetail, create, addVisit, submit, remove, loading, error } =
-    useSchedules({ skipLoad: isManager });
+  const isManager = ["jefe_comercial", "gerencia", "gerencia_general"].includes(
+    role,
+  );
+
+  const {
+    schedules,
+    activeSchedule,
+    loadScheduleDetail,
+    create,
+    addVisit,
+    updateVisit,
+    removeVisit,
+    submit,
+    remove,
+    loading,
+    error,
+  } = useSchedules({ skipLoad: isManager });
+
   const [editingLocked, setEditingLocked] = useState(false);
   const [unlockedScheduleId, setUnlockedScheduleId] = useState(null);
   const [showEditWarning, setShowEditWarning] = useState(false);
   const [scheduleToUnlock, setScheduleToUnlock] = useState(null);
 
+  /* =========================
+     BLOQUEO LÓGICO
+  ========================= */
   useEffect(() => {
     if (!activeSchedule && schedules.length) {
       setUnlockedScheduleId(null);
-      setEditingLocked(["approved"].includes(schedules[0].status));
+      setEditingLocked(schedules[0].status === "approved");
       loadScheduleDetail(schedules[0].id);
     }
   }, [activeSchedule, schedules, loadScheduleDetail]);
 
   useEffect(() => {
     if (!activeSchedule) return;
-    const shouldLock = activeSchedule.status === "approved" && unlockedScheduleId !== activeSchedule.id;
-    setEditingLocked(shouldLock);
+    const locked =
+      activeSchedule.status === "approved" &&
+      unlockedScheduleId !== activeSchedule.id;
+    setEditingLocked(locked);
   }, [activeSchedule, unlockedScheduleId]);
 
+  /* =========================
+     HANDLERS
+  ========================= */
   const handleSelectSchedule = useCallback(
-    (schedule) => {
+    (e) => {
+      const id = Number(e.target.value);
+      const schedule = schedules.find((s) => s.id === id);
+      if (!schedule) return;
       setUnlockedScheduleId(null);
       setEditingLocked(schedule.status === "approved");
       loadScheduleDetail(schedule.id);
     },
-    [loadScheduleDetail],
+    [loadScheduleDetail, schedules],
   );
 
   const startEditing = useCallback(
     (schedule) => {
       setEditingLocked(false);
-      setUnlockedScheduleId(schedule.status === "approved" ? schedule.id : null);
+      setUnlockedScheduleId(
+        schedule.status === "approved" ? schedule.id : null,
+      );
       loadScheduleDetail(schedule.id);
     },
     [loadScheduleDetail],
@@ -72,115 +131,172 @@ const PlanificacionMensual = () => {
     setScheduleToUnlock(null);
   }, [scheduleToUnlock, startEditing]);
 
-  const scheduleCards = useMemo(
-    () =>
-      schedules.map((schedule) => {
-        const isActive = activeSchedule?.id === schedule.id;
-        return (
-          <div
-            key={schedule.id}
-            className={`rounded-md p-3 border ${isActive ? "border-indigo-500 bg-indigo-50/30" : "border-gray-200"}`}
-          >
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <p className="text-sm font-semibold text-gray-900">
-                  {schedule.month}/{schedule.year}
-                </p>
-                <p className="text-xs text-gray-500">
-                  Actualizado {schedule.updated_at ? new Date(schedule.updated_at).toLocaleDateString() : ""}
-                </p>
-              </div>
-              <ScheduleStatusBadge status={schedule.status} />
-            </div>
+  /* =========================
+     KPIs
+  ========================= */
+  const kpis = useMemo(() => {
+    if (!activeSchedule) return [];
+    return [
+      {
+        label: "Periodo",
+        value: `${activeSchedule.month}/${activeSchedule.year}`,
+        icon: FiCalendar,
+      },
+      {
+        label: "Visitas",
+        value: activeSchedule.visits?.length || 0,
+        icon: FiActivity,
+      },
+      {
+        label: "Estado",
+        value: STATUS_META[activeSchedule.status]?.label,
+        icon: FiCheckCircle,
+      },
+    ];
+  }, [activeSchedule]);
 
-            {schedule.status === "rejected" && schedule.rejection_reason && (
-              <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-2">
-                <p className="text-xs font-semibold text-red-800">Razón de rechazo</p>
-                <p className="text-xs text-red-700">{schedule.rejection_reason}</p>
-              </div>
-            )}
+  const statusMeta =
+    STATUS_META[activeSchedule?.status] || STATUS_META.draft;
 
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                className="rounded border border-gray-200 px-3 py-1 text-xs text-gray-800 hover:border-gray-300"
-                onClick={() => handleSelectSchedule(schedule)}
-              >
-                Ver detalles
-              </button>
-              {schedule.status === "draft" && (
-                <button
-                  className="rounded bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
-                  onClick={() => handleEditSchedule(schedule)}
-                >
-                  Editar
-                </button>
-              )}
-              {schedule.status === "pending_approval" && (
-                <button
-                  className="rounded bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-200"
-                  onClick={() => handleEditSchedule(schedule)}
-                >
-                  Editar
-                </button>
-              )}
-              {schedule.status === "approved" && (
-                <button
-                  className="rounded bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 hover:bg-blue-100"
-                  onClick={() => handleEditSchedule(schedule)}
-                >
-                  Modificar
-                </button>
-              )}
-              {schedule.status === "rejected" && (
-                <button
-                  className="rounded bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100"
-                  onClick={() => handleEditSchedule(schedule)}
-                >
-                  Corregir y reenviar
-                </button>
-              )}
-            </div>
-          </div>
-        );
-      }),
-    [activeSchedule?.id, handleEditSchedule, schedules],
-  );
-
+  /* =========================
+     RENDER
+  ========================= */
   return (
-    <div className="space-y-4">
-      <DashboardHeader title="Planificación mensual" />
-      {error && <div className="p-3 bg-red-50 text-red-700 rounded">{error}</div>}
+    <div className="space-y-8">
+      {/* 1️⃣ HEADER ESTRATÉGICO */}
+      <div
+        className={`rounded-2xl p-6 text-white shadow-xl bg-gradient-to-r ${statusMeta.gradient}`}
+      >
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight">
+              Planificación Mensual
+            </h1>
+            <p className="text-sm opacity-90">
+              Consola operativa • Control • Ejecución
+            </p>
+          </div>
+
+          {activeSchedule && (
+            <div className="flex items-center gap-3">
+              <ScheduleStatusBadge status={activeSchedule.status} />
+              <span className="text-sm font-semibold">
+                {activeSchedule.month}/{activeSchedule.year}
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {error}
+        </div>
+      )}
 
       {isManager ? (
         <ScheduleApprovalWidget />
       ) : (
-        <div className="grid lg:grid-cols-3 gap-4">
-          <div className="space-y-3">
-            <Card className="p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-gray-900">Tus cronogramas</h3>
-                {loading && <span className="text-xs text-gray-500">Cargando…</span>}
+        <>
+          {/* 2️⃣ CONTROL BAR */}
+          <Card className="p-5">
+            <div className="grid lg:grid-cols-4 gap-4 items-end">
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  Periodo operativo
+                </label>
+                <select
+                  value={activeSchedule?.id || ""}
+                  onChange={handleSelectSchedule}
+                  className="w-full rounded-xl border px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500"
+                >
+                  {schedules.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.month}/{s.year}
+                    </option>
+                  ))}
+                </select>
               </div>
-              {schedules.length === 0 && <p className="text-sm text-gray-500">No tienes cronogramas aún.</p>}
-              <div className="space-y-2">{scheduleCards}</div>
-            </Card>
-          </div>
 
-          <div className="lg:col-span-2">
-            <ScheduleEditor
-              schedule={activeSchedule}
-              editingLocked={editingLocked}
-              onRequestEdit={() => handleEditSchedule(activeSchedule)}
-              onCreate={create}
-              onAddVisit={addVisit}
-              onSubmit={submit}
-              onDelete={remove}
-            />
-          </div>
-        </div>
+              {kpis.map((kpi, idx) => (
+                <div
+                  key={idx}
+                  className="rounded-xl border bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-center gap-3">
+                    <kpi.icon className="text-indigo-600" />
+                    <div>
+                      <p className="text-xs text-gray-500">{kpi.label}</p>
+                      <p className="text-lg font-bold text-gray-900">
+                        {kpi.value}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* 3️⃣ ALERTA DE BLOQUEO */}
+          {editingLocked && activeSchedule && (
+            <Card className="p-5 border-red-300 bg-red-50">
+              <div className="flex items-start gap-4">
+                <FiLock className="text-red-600 text-xl mt-1" />
+                <div>
+                  <p className="text-sm font-bold text-red-800">
+                    Cronograma aprobado
+                  </p>
+                  <p className="text-sm text-red-700">
+                    Este cronograma está bloqueado por control operativo.
+                    Cualquier cambio quedará registrado.
+                  </p>
+                  <button
+                    onClick={() => handleEditSchedule(activeSchedule)}
+                    className="mt-3 inline-flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+                  >
+                    <FiEdit3 /> Solicitar modificación
+                  </button>
+                </div>
+              </div>
+            </Card>
+          )}
+
+          {/* 4️⃣ ÁREA OPERATIVA */}
+          <Card className="overflow-hidden shadow-xl">
+            <div className="bg-gray-900 text-white px-6 py-4 flex items-center justify-between">
+              <h3 className="text-sm font-bold uppercase tracking-widest">
+                Área Operativa
+              </h3>
+              {loading && (
+                <span className="text-xs opacity-80">
+                  Sincronizando datos…
+                </span>
+              )}
+            </div>
+
+            <div className="p-6 bg-gradient-to-br from-white to-gray-50">
+              <ScheduleEditor
+                schedule={activeSchedule}
+                editingLocked={editingLocked}
+                onRequestEdit={() => handleEditSchedule(activeSchedule)}
+                onCreate={create}
+                onAddVisit={addVisit}
+                onUpdateVisit={updateVisit}
+                onRemoveVisit={removeVisit}
+                onSubmit={submit}
+                onDelete={remove}
+              />
+            </div>
+          </Card>
+        </>
       )}
 
-      <EditWarningModal open={showEditWarning} onClose={() => setShowEditWarning(false)} onConfirm={confirmEdit} />
+      {/* MODAL DE SEGURIDAD */}
+      <EditWarningModal
+        open={showEditWarning}
+        onClose={() => setShowEditWarning(false)}
+        onConfirm={confirmEdit}
+      />
     </div>
   );
 };

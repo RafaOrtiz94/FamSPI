@@ -85,6 +85,12 @@ async function sendViaGmail({
   return { delivered: true, via: "gmail", response };
 }
 
+const encodeHeaderValue = (value) => {
+  if (!value) return "";
+  const encoded = Buffer.from(String(value), "utf-8").toString("base64");
+  return `=?UTF-8?B?${encoded}?=`;
+};
+
 const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
   const lines = [
     `From: ${from}`,
@@ -95,7 +101,7 @@ const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
   if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.join(", ") : bcc}`);
   if (replyTo) lines.push(`Reply-To: ${replyTo}`);
 
-  lines.push(`Subject: ${subject}`);
+  lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
   lines.push("Content-Type: text/html; charset=utf-8");
   lines.push("");
@@ -235,63 +241,16 @@ async function sendMail({
   }
 
   const fromAddress = resolveFrom({ from, senderName });
-
-  try {
-    return await sendViaGmail({
-      gmailUserId,
-      to,
-      subject,
-      html,
-      text: text || (!html ? undefined : htmlToText(html)),
-      cc,
-      bcc,
-      replyTo,
-      from: fromAddress || delegatedUser || undefined,
-    });
-  } catch (error) {
-    logGoogleApiError(error, {
-      step: "gmail_oauth_send",
-      gmailUserId: gmailUserId || DEFAULT_GMAIL_USER_ID,
-      to: normalizeRecipients(to),
-      subject,
-    });
-    logger.warn(
-      `[MAILER] Error enviando con Gmail OAuth (${error.message}). Intentando con service account...`
-    );
-
-    try {
-      return await sendViaServiceAccount({
-        to,
-        subject,
-        html,
-        text: text || (!html ? undefined : htmlToText(html)),
-        cc,
-        bcc,
-        replyTo,
-        from: fromAddress || delegatedUser || undefined,
-      });
-    } catch (fallbackError) {
-      logger.error({ err: fallbackError }, "[MAILER] Fallback con service account falló");
-      const reason = `Gmail OAuth y service account fallaron: ${fallbackError.message}`;
-
-      try {
-        return await sendViaChatFallback({
-          to,
-          subject,
-          html,
-          text: text || (!html ? undefined : htmlToText(html)),
-          cc,
-          bcc,
-          replyTo,
-          from: fromAddress || delegatedUser || undefined,
-          reason,
-        });
-      } catch (chatError) {
-        logger.error({ err: chatError }, "[MAILER] Fallback final a Google Chat falló");
-        throw new Error(`No se pudo enviar el correo (${reason}; Chat también falló: ${chatError.message})`);
-      }
-    }
-  }
+  return await sendViaServiceAccount({
+    to,
+    subject,
+    html,
+    text: text || (!html ? undefined : htmlToText(html)),
+    cc,
+    bcc,
+    replyTo,
+    from: fromAddress || delegatedUser || undefined,
+  });
 }
 
 module.exports = { sendMail };

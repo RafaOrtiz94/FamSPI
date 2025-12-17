@@ -85,7 +85,7 @@ function requireRole(allowedRoles = []) {
       return res.status(401).json({ ok: false, error: "No autenticado." });
     }
 
-    const role = normalizeRoleName(req.user.role);
+    const role = normalizeRoleName(req.user.role || req.user.scope || req.user.role_name);
     if (role && SUPER_ROLES.has(role)) {
       return next();
     }

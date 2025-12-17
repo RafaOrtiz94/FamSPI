@@ -1,5 +1,5 @@
 // src/modules/comercial/pages/Requests.jsx
-import React, { useEffect, useState, useCallback, useMemo, Fragment } from "react";
+import React, { useEffect, useState, useCallback, useMemo, Fragment, useRef } from "react";
 import { motion } from "framer-motion";
 import { Dialog, Transition } from "@headlessui/react";
 import {
@@ -40,19 +40,20 @@ const Requests = () => {
     errorMsg: "Error al cargar las solicitudes",
   });
 
-  const load = useCallback(async () => {
-    await fetchRequests({
+  const fetchRef = useRef(fetchRequests);
+  useEffect(() => {
+    fetchRef.current = fetchRequests;
+  }, [fetchRequests]);
+
+  useEffect(() => {
+    fetchRef.current({
       page: 1,
       pageSize: 20,
       mine: true,
       q: query,
       status: status === "all" ? undefined : status,
     });
-  }, [fetchRequests, query, status]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  }, [query, status]);
 
   const safeJSON = (txt) => {
     try {

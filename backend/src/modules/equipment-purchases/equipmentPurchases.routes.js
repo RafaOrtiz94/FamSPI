@@ -18,6 +18,7 @@ const businessCaseRoles = [
 const viewerRoles = Array.from(new Set([...creatorRoles, "jefe_tecnico", "jefe_operaciones"]));
 
 router.get("/meta", verifyToken, requireRole(creatorRoles), ctrl.getMeta);
+router.get("/stats", verifyToken, requireRole(managerRoles), ctrl.getStats);
 router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
 router.get("/business-case/options", verifyToken, requireRole(businessCaseRoles), ctrl.getBusinessCaseOptions);
 router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);

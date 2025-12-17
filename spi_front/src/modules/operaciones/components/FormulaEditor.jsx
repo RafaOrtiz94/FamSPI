@@ -5,6 +5,33 @@ import { useUI } from "../../../core/ui/UIContext";
 
 const defaultVariables = ["monthly_quantity", "equipment.capacity_per_hour", "equipment.max_daily_capacity", "sample.volume"];
 
+const fallbackTemplates = [
+  {
+    id: "tpl-basic-mult",
+    name: "Volumen mensual x factor",
+    description: "Multiplica la cantidad mensual por un factor de volumen de muestra.",
+    type: "expression",
+    formula: "return monthly_quantity * (sample?.volume || 1);",
+    exampleContext: { monthly_quantity: 1000, sample: { volume: 1.2 } },
+  },
+  {
+    id: "tpl-capacidad",
+    name: "Uso de capacidad",
+    description: "Calcula uso de capacidad diaria del equipo.",
+    type: "expression",
+    formula: "return monthly_quantity / 30 / (equipment?.capacity_per_hour || 1);",
+    exampleContext: { monthly_quantity: 9000, equipment: { capacity_per_hour: 20 } },
+  },
+  {
+    id: "tpl-conditional",
+    name: "Descuento por volumen",
+    description: "Aplica descuento cuando el volumen supera 5k.",
+    type: "expression",
+    formula: "return monthly_quantity > 5000 ? monthly_quantity * 0.9 : monthly_quantity;",
+    exampleContext: { monthly_quantity: 6000 },
+  },
+];
+
 const FormulaEditor = ({
   open = true,
   onClose,
@@ -90,10 +117,16 @@ const FormulaEditor = ({
     try {
       showLoader();
       const res = await api.get("/calculation-templates");
-      setTemplates(res.data?.data || res.data || []);
+      const remote = res.data?.data || res.data || [];
+      if (Array.isArray(remote) && remote.length) {
+        setTemplates(remote);
+      } else {
+        setTemplates(fallbackTemplates);
+      }
       setTemplatePickerOpen(true);
     } catch (err) {
-      showToast("No se pudieron cargar las plantillas", "error");
+      setTemplates(fallbackTemplates);
+      showToast("No se pudieron cargar las plantillas remotas, usando base local.", "warning");
     } finally {
       hideLoader();
     }
@@ -160,7 +193,7 @@ const FormulaEditor = ({
           value={formulaText}
           onChange={(e) => setFormulaText(e.target.value)}
           className="border rounded-lg px-3 py-2 font-mono text-sm"
-          placeholder="{ \"expression\": \"return monthly_quantity * 1.2\" }"
+          placeholder='{"expression": "return monthly_quantity * 1.2"}'
         />
       </label>
 

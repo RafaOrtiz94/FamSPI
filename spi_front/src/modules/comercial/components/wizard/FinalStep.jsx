@@ -1,28 +1,29 @@
 import React from "react";
 import { FiCheckCircle, FiExternalLink } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useBusinessCaseWizard } from "../../pages/BusinessCaseWizard";
 
 const FinalStep = ({ onPrev }) => {
   const { state, clearDraft } = useBusinessCaseWizard();
-  const { showToast, showLoader, hideLoader } = useUI();
+  const { showToast } = useUI();
+  const navigate = useNavigate();
 
-  const finalize = async () => {
+  const finalize = () => {
     if (!state.businessCaseId) {
       showToast("No hay Business Case para finalizar", "warning");
       return;
     }
-    showLoader();
-    try {
-      await api.put(`/business-case/${state.businessCaseId}`, { status: "completed" });
-      showToast("Business Case finalizado", "success");
-      clearDraft();
-    } catch (err) {
-      showToast(err.response?.data?.message || "No se pudo finalizar", "error");
-    } finally {
-      hideLoader();
-    }
+
+    // Limpiar draft del localStorage
+    localStorage.removeItem('business_case_wizard_draft');
+    clearDraft();
+
+    // Redirigir a vista unificada
+    navigate(`/dashboard/business-case/${state.businessCaseId}/view`);
+
+    showToast('Business Case creado exitosamente', 'success');
   };
 
   return (
@@ -39,7 +40,9 @@ const FinalStep = ({ onPrev }) => {
 
       <div className="border border-gray-200 rounded-lg p-4 bg-white">
         <p className="text-sm text-gray-700">ID de Business Case: {state.businessCaseId || "Sin generar"}</p>
-        <p className="text-sm text-gray-700">Equipo seleccionado: {state.selectedEquipment?.name || "Sin equipo"}</p>
+        <p className="text-sm text-gray-700">
+          Equipo seleccionado: {state.equipmentConfig?.primary?.name || "Sin equipo"}
+        </p>
         <p className="text-sm text-gray-700">Determinaciones: {state.determinations?.length || 0}</p>
       </div>
 

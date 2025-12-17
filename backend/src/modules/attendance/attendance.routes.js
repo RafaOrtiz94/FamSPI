@@ -14,6 +14,9 @@ router.post("/clock-in", verifyToken, controller.clockIn);
 router.post("/clock-out-lunch", verifyToken, controller.clockOutLunch);
 router.post("/clock-in-lunch", verifyToken, controller.clockInLunch);
 router.post("/clock-out", verifyToken, controller.clockOut);
+router.post("/exception", verifyToken, controller.registerException);
+router.post("/exception/status", verifyToken, controller.updateExceptionStatus);
+router.get("/exception/active", verifyToken, controller.getActiveException);
 
 // Query endpoints
 router.get("/today", verifyToken, controller.getToday);

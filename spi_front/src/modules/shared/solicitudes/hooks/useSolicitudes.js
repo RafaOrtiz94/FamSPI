@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 /**
  * Hook reutilizable para manejar estado y carga de solicitudes
@@ -13,20 +13,29 @@ export const useSolicitudes = (config) => {
         fetchFunction,
         parseResponse,
         defaultFilters = {},
-        autoLoad = true
+        autoLoad = true,
+        dependencies = []
     } = config;
 
     const [solicitudes, setSolicitudes] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const [filters, setFilters] = useState(defaultFilters);
+    const parseResponseRef = useRef(parseResponse);
+
+    useEffect(() => {
+        parseResponseRef.current = parseResponse;
+    }, [parseResponse]);
+
+    const dependencyValues = Array.isArray(dependencies) ? dependencies : [];
 
     const load = useCallback(async () => {
         setLoading(true);
         setError(null);
         try {
             const response = await fetchFunction(filters);
-            const parsed = parseResponse ? parseResponse(response) : response;
+            const parser = parseResponseRef.current;
+            const parsed = parser ? parser(response) : response;
             setSolicitudes(Array.isArray(parsed) ? parsed : []);
         } catch (err) {
             console.error('Error loading solicitudes:', err);
@@ -35,7 +44,7 @@ export const useSolicitudes = (config) => {
         } finally {
             setLoading(false);
         }
-    }, [filters, fetchFunction, parseResponse]);
+    }, [filters, fetchFunction, ...dependencyValues]);
 
     useEffect(() => {
         if (autoLoad) {

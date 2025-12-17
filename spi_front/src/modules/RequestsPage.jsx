@@ -1,5 +1,5 @@
 // src/pages/modules/RequestsPage.jsx
-import React, { useEffect, useMemo, useState, useCallback, Fragment } from "react";
+import React, { useEffect, useMemo, useState, useCallback, Fragment, useRef } from "react";
 import { Dialog, Transition } from "@headlessui/react";
 import { motion } from "framer-motion";
 import { FiFileText, FiLink, FiSearch, FiPlus } from "react-icons/fi";
@@ -23,7 +23,6 @@ import SolicitudesGrid from "./comercial/components/SolicitudesGrid";
 import { AprobacionPermisosView } from "./shared/solicitudes";
 import PermisosStatusWidget from "./shared/solicitudes/components/PermisosStatusWidget";
 import PurchaseHandoffWidget from "./comercial/components/PurchaseHandoffWidget";
-import EquipmentPurchaseWidget from "./comercial/components/EquipmentPurchaseWidget";
 import ClientRequestManagement from "./comercial/components/ClientRequestManagement";
 
 // ======= Utilidades locales =======
@@ -105,11 +104,11 @@ const RequestsPage = () => {
   const [statusFilter, setStatusFilter] = useState("all");
 
   // Listado
-  const {
-    data: listData,
-    loading: loadingList,
-    execute: fetchRequests,
-  } = useApi(getRequests, {
+    const {
+      data: listData,
+      loading: loadingList,
+      execute: fetchRequests,
+    } = useApi(getRequests, {
     globalLoader: true,
     errorMsg: "Error al cargar las solicitudes.",
   });
@@ -126,30 +125,40 @@ const RequestsPage = () => {
   const [formPayload, setFormPayload] = useState({
     // campos dinámicos según plantilla
     nombre_cliente: "",
+    direccion_cliente: "",
     persona_contacto: "",
+    fecha_instalacion: "",
     observacion: "",
     files: [],
   });
 
   // ======= Cargar inicialmente =======
-  const load = useCallback(async () => {
+  const fetchRef = useRef(fetchRequests);
+  useEffect(() => {
+    fetchRef.current = fetchRequests;
+  }, [fetchRequests]);
+
+  const reloadRequests = useCallback(async () => {
     try {
-      await fetchRequests(defaultRequestParams);
+      await fetchRef.current(defaultRequestParams);
     } catch (err) {
       if (err?.response?.status === 403) {
         showToast("Mostrando solo tus solicitudes por permisos de acceso.", "warning");
-        await fetchRequests({ ...defaultRequestParams, mine: true });
+        await fetchRef.current({ ...defaultRequestParams, mine: true });
       }
     }
-  }, [fetchRequests, defaultRequestParams, showToast]);
+  }, [defaultRequestParams, showToast]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    reloadRequests();
+  }, [reloadRequests]);
 
   // ======= Filtro =======
   const debounced = useDebounce(query, 350);
-  const solicitudes = listData?.rows || listData?.result?.rows || listData || [];
+  const solicitudes = useMemo(
+    () => listData?.rows || listData?.result?.rows || listData || [],
+    [listData],
+  );
 
   const filtered = useMemo(() => {
     const q = (debounced || "").trim().toLowerCase();
@@ -181,7 +190,14 @@ const RequestsPage = () => {
       showToast("Solo el Jefe Comercial puede crear solicitudes.", "error");
       return;
     }
-    setFormPayload({ nombre_cliente: "", persona_contacto: "", observacion: "", files: [] });
+    setFormPayload({
+      nombre_cliente: "",
+      direccion_cliente: "",
+      persona_contacto: "",
+      fecha_instalacion: "",
+      observacion: "",
+      files: [],
+    });
     setCreateModal({ open: true, type });
   };
   const handleCloseCreate = () => setCreateModal({ open: false, type: "inspection" });
@@ -205,22 +221,22 @@ const RequestsPage = () => {
     }
 
     // Mapeo request_type_id según tipo
-    let request_type_id = 1;
+    let request_type_id = "F.ST-20";
     switch (createModal.type) {
       case "inspection":
-        request_type_id = 1;
+        request_type_id = "F.ST-20";
         break;
       case "purchase":
-        request_type_id = 2;
+        request_type_id = "F.ST-19";
         break;
       case "retirement":
-        request_type_id = 3;
+        request_type_id = "F.ST-21";
         break;
       case "client":
-        request_type_id = 7;
+        request_type_id = "F.ST-22";
         break;
       default:
-        request_type_id = 1;
+        request_type_id = "F.ST-20";
     }
 
     try {
@@ -228,7 +244,14 @@ const RequestsPage = () => {
       showLoader();
 
       const { files = [], ...payload } = formPayload;
-      await createRequest({ request_type_id, payload, files });
+      const payloadToSend = {
+        ...payload,
+        observaciones: payload.observacion,
+      };
+
+      delete payloadToSend.observacion;
+
+      await createRequest({ request_type_id, payload: payloadToSend, files });
       showToast("Solicitud enviada correctamente ✅", "success");
       await fetchRequests(defaultRequestParams);
       handleCloseCreate();
@@ -384,10 +407,6 @@ const RequestsPage = () => {
         <PermisosStatusWidget />
       </div>
 
-      <div className="mb-6">
-        <EquipmentPurchaseWidget showCreation={false} />
-      </div>
-
       {canViewAllRequests && (
         <Card className="mb-6 p-4" id="permisos-aprobacion">
           <AprobacionPermisosView />
@@ -445,11 +464,11 @@ const RequestsPage = () => {
         </div>
       </Card>
 
-      <PermisoVacacionModal
-        open={vacationModal}
-        onClose={() => setVacationModal(false)}
-        onSuccess={load}
-      />
+          <PermisoVacacionModal
+            open={vacationModal}
+            onClose={() => setVacationModal(false)}
+            onSuccess={reloadRequests}
+          />
 
       <Card className="mb-6">
         <div className="mb-4 flex items-center justify-between">
@@ -510,10 +529,22 @@ const RequestsPage = () => {
                 placeholder="ACME S.A."
               />
               <Input
+                label="Dirección del Cliente"
+                value={formPayload.direccion_cliente}
+                onChange={(e) => setFormPayload((p) => ({ ...p, direccion_cliente: e.target.value }))}
+                placeholder="Av. Siempre Viva 123"
+              />
+              <Input
                 label="Persona de contacto"
                 value={formPayload.persona_contacto}
                 onChange={(e) => setFormPayload((p) => ({ ...p, persona_contacto: e.target.value }))}
                 placeholder="Juan Pérez"
+              />
+              <Input
+                label="Fecha tentantiva de instalación"
+                type="date"
+                value={formPayload.fecha_instalacion}
+                onChange={(e) => setFormPayload((p) => ({ ...p, fecha_instalacion: e.target.value }))}
               />
               <Input
                 label="Observación"

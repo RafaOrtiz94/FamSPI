@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo } from "react";
+import React, { useCallback, useEffect, useMemo, useRef } from "react";
 import {
   FiClipboard,
   FiRefreshCw,
@@ -42,14 +42,19 @@ const DashboardOperaciones = () => {
     execute: loadMantenimientos,
   } = useApi(getMantenimientos, { errorMsg: "No se pudieron cargar los mantenimientos." });
 
+  const requestsRef = useRef(loadRequests);
+  useEffect(() => {
+    requestsRef.current = loadRequests;
+  }, [loadRequests]);
+
   const refresh = useCallback(async () => {
     try {
-      await Promise.all([loadRequests(), loadMantenimientos()]);
+      await Promise.all([requestsRef.current(), loadMantenimientos()]);
     } catch (err) {
       console.error("DashboardOperaciones refresh error:", err);
       showToast("No se pudo actualizar el panel operativo.", "error");
     }
-  }, [loadMantenimientos, loadRequests, showToast]);
+  }, [loadMantenimientos, showToast]);
 
   useEffect(() => {
     refresh();

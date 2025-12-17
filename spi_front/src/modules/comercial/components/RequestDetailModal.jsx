@@ -23,6 +23,57 @@ const RequestDetailModal = ({ detail, onClose }) => {
     const documents = Array.isArray(detail.data?.documents) ? detail.data.documents : [];
     const files = Array.isArray(detail.data?.files) ? detail.data.files : [];
 
+    const formFields = [
+        { key: "nombre_cliente", label: "Cliente" },
+        { key: "commercial_name", label: "Nombre comercial" },
+        { key: "ruc_cedula", label: "RUC / Cédula" },
+        { key: "persona_contacto", label: "Persona de contacto" },
+        { key: "celular_contacto", label: "Celular" },
+        { key: "correo_contacto", label: "Correo" },
+        { key: "direccion_cliente", label: "Dirección" },
+        { key: "fecha_instalacion", label: "Fecha de instalación" },
+        { key: "fecha_tope_instalacion", label: "Fecha tope" },
+        { key: "equipo_principal", label: "Equipo principal" },
+        { key: "equipos", label: "Equipos relacionados" },
+        { key: "observaciones", label: "Observaciones" },
+        { key: "anotaciones", label: "Anotaciones" },
+        { key: "accesorios", label: "Accesorios" },
+        { key: "requiere_lis", label: "Requiere LIS" },
+        { key: "requiere_instalacion", label: "Requiere instalación" },
+        { key: "direccion", label: "Dirección alternativa" },
+    ];
+
+    const formatValue = (key, value) => {
+        if (value === null || value === undefined || value === "") return null;
+        const boolKeys = ["requiere_lis", "requiere_instalacion"];
+        if (typeof value === "boolean" && boolKeys.includes(key)) {
+            return value ? "Sí" : "No";
+        }
+        if (Array.isArray(value)) {
+            return value.map((item) => {
+                if (typeof item === "string") return item;
+                if (item?.nombre_equipo) return item.nombre_equipo;
+                if (item?.nombre) return item.nombre;
+                return JSON.stringify(item);
+            }).join(", ");
+        }
+        return typeof value === "object" ? JSON.stringify(value) : String(value);
+    };
+
+    const fallbackValues = {
+        commercial_name: detail.data?.request?.commercial_name,
+        ruc_cedula: detail.data?.request?.payload?.ruc_cedula ?? detail.data?.request?.ruc_cedula,
+    };
+
+    const sanitizedFields = formFields
+        .map(({ key, label }) => {
+            const value = payload?.[key] ?? (key === "equipos" ? payload?.equipos : null) ?? fallbackValues[key];
+            const formatted = formatValue(key, value);
+            if (!formatted) return null;
+            return { label, value: formatted };
+        })
+        .filter(Boolean);
+
     return (
         <Transition.Root show={detail.open} as={Fragment}>
             <Dialog as="div" className="relative z-50" onClose={onClose}>
@@ -111,24 +162,22 @@ const RequestDetailModal = ({ detail, onClose }) => {
                                             <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
                                                 Información del formulario
                                             </h4>
-                                            {Object.keys(payload).length === 0 ? (
+                                            {sanitizedFields.length === 0 ? (
                                                 <p className="text-sm text-gray-500">
-                                                    No hay información disponible.
+                                                    No hay información relevante disponible.
                                                 </p>
                                             ) : (
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                                                    {Object.entries(payload).map(([key, value]) => (
+                                                    {sanitizedFields.map(({ label, value }) => (
                                                         <div
-                                                            key={key}
+                                                            key={label}
                                                             className="bg-gray-50 dark:bg-gray-800 rounded-xl p-3 border border-gray-100 dark:border-gray-700"
                                                         >
                                                             <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-                                                                {key.replace(/_/g, " ")}
+                                                                {label}
                                                             </p>
                                                             <p className="font-medium text-gray-900 dark:text-gray-100 break-words">
-                                                                {typeof value === "object"
-                                                                    ? JSON.stringify(value)
-                                                                    : String(value)}
+                                                                {value}
                                                             </p>
                                                         </div>
                                                     ))}

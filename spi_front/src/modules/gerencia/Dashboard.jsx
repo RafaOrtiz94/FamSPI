@@ -65,16 +65,21 @@ const Dashboard = () => {
   } = useApi(getRequests, { globalLoader: true });
   const { data: auditData, execute: fetchAuditoria } = useApi(getAuditoria);
 
+  const fetchRef = useRef(fetchRequests);
+  useEffect(() => {
+    fetchRef.current = fetchRequests;
+  }, [fetchRequests]);
+
   const load = useCallback(async () => {
     showLoader();
     try {
-      await Promise.all([fetchRequests(), fetchAuditoria()]);
+      await Promise.all([fetchRef.current(), fetchAuditoria()]);
     } catch (err) {
       console.error(err);
     } finally {
       hideLoader();
     }
-  }, [fetchRequests, fetchAuditoria, showLoader, hideLoader]);
+  }, [fetchAuditoria, showLoader, hideLoader]);
 
   useEffect(() => {
     if (!initialized) {

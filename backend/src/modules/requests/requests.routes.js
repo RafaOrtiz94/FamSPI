@@ -64,8 +64,31 @@ router.get(
 router.get(
   "/new-client",
   verifyToken,
-  requireRole(["backoffice_comercial", "gerencia"]),
+  requireRole([
+    "backoffice_comercial",
+    "gerencia",
+    "comercial",
+    "jefe_comercial",
+    "acp_comercial",
+    "ti",
+    "jefe_ti"
+  ]),
   ctrl.listClientRequests
+);
+
+router.get(
+  "/new-client/summary",
+  verifyToken,
+  requireRole([
+    "backoffice_comercial",
+    "gerencia",
+    "comercial",
+    "jefe_comercial",
+    "acp_comercial",
+    "ti",
+    "jefe_ti",
+  ]),
+  ctrl.getClientRequestSummary,
 );
 
 // 🔍 DETALLE DE SOLICITUD DE NUEVO CLIENTE
@@ -112,7 +135,7 @@ router.put(
 router.post(
   "/",
   verifyToken,
-  requireRole(["jefe_comercial"]),
+  requireRole(["comercial"]),
   upload.fields([
     { name: "files", maxCount: 10 },
     { name: "files[]", maxCount: 10 },

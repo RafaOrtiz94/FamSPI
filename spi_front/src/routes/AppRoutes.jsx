@@ -24,7 +24,11 @@ import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
 import ClientesPage from "../modules/comercial/pages/Clientes";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
+import ACPEquipmentPurchasesPage from "../modules/comercial/pages/ACPEquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
+import UnifiedBCView from "../modules/comercial/pages/UnifiedBCView";
+import BusinessCaseWizard from "../modules/comercial/pages/BusinessCaseWizard";
+import ManualBCForm from "../modules/comercial/pages/ManualBCForm";
 import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
 import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
@@ -41,6 +45,8 @@ import DashboardOperaciones from "../modules/operaciones/Dashboard";
 import DashboardCalidad from "../modules/calidad/Dashboard";
 import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
+import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
+import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
 
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
@@ -101,12 +107,22 @@ const AppRoutes = () => {
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
           {/* Subrutas Comercial */}
-          <Route element={<ProtectedRoute allowedRoles={["comercial", "gerencia", "ti", "acp_comercial", "jefe_comercial"]} />}>
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={["comercial", "jefe_comercial", "gerencia", "gerencia_general"]}
+              />
+            }
+          >
             <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
             <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+          </Route>
+
+          <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
+            <Route path="/dashboard/comercial/acp-compras" element={<ACPEquipmentPurchasesPage />} />
           </Route>
 
           <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
@@ -133,6 +149,9 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
             <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
+            <Route path="/dashboard/business-case/:id/view" element={<UnifiedBCView />} />
+            <Route path="/dashboard/business-case/wizard" element={<BusinessCaseWizard />} />
+            <Route path="/dashboard/business-case/:id/manual-form" element={<ManualBCForm />} />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
@@ -148,12 +167,7 @@ const AppRoutes = () => {
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
-
-          {/* Subrutas Backoffice */}
-          <Route element={<ProtectedRoute allowedRoles={["backoffice_comercial", "gerencia"]} />}>
-            <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
-            <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
-          </Route>
+          <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
 
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
@@ -171,7 +185,26 @@ const AppRoutes = () => {
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
+          {/* Subrutas Backoffice */}
+          <Route
+            element={(
+              <ProtectedRoute
+                allowedRoles={[
+                  "backoffice_comercial",
+                  "gerencia",
+                  "comercial",
+                  "jefe_comercial",
+                  "acp_comercial",
+                ]}
+              />
+            )}
+          >
+            <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
+            <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
+            <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+          </Route>
         </Route>
+
       </Route>
 
       {/* =======================================

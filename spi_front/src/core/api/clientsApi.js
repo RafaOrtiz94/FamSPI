@@ -3,7 +3,8 @@ import api from "./index";
 export const fetchClients = async (params = {}) => {
   const { data } = await api.get("/clients", { params });
   return {
-    clients: data.data || data.clients || [],
+    clients: data.data || [],
+    prospects: data.prospects || [],
     summary: data.summary || {},
   };
 };
@@ -13,9 +14,14 @@ export const assignClient = async (clientId, assigneeEmail) => {
   return data.data || data;
 };
 
-export const updateVisitStatus = async (clientId, payload) => {
-  const { data } = await api.post(`/clients/${clientId}/visit-status`, payload);
-  return data.data || data;
+export const setVisitStatus = async (clientId, data) => {
+  const response = await api.post(`/clients/${clientId}/visit-status`, data);
+  return response.data.data;
+};
+
+export const registerProspectVisit = async (data) => {
+  const response = await api.post(`/clients/prospect-visit`, data);
+  return response.data.data;
 };
 
 export const startClientVisit = async (clientId, payload = {}) => {
