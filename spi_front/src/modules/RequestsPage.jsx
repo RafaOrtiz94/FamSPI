@@ -25,6 +25,7 @@ import Select from "../core/ui/components/Select";
 import Card from "../core/ui/components/Card";
 import Modal from "../core/ui/components/Modal";
 import FileUploader from "../core/ui/components/FileUploader";
+import PurchaseRequestForm from "./comercial/components/PurchaseRequestForm";
 
 // ======= Utilidades locales =======
 const statusStyles = {
@@ -62,6 +63,7 @@ const RequestsPage = () => {
   // Estado UI
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
 
   // Listado
   const {
@@ -79,13 +81,7 @@ const RequestsPage = () => {
   // Crear
   const [createModal, setCreateModal] = useState({ open: false, type: "inspection" });
   const [submitting, setSubmitting] = useState(false);
-  const [formPayload, setFormPayload] = useState({
-    // campos dinámicos según plantilla
-    nombre_cliente: "",
-    persona_contacto: "",
-    observacion: "",
-    files: [],
-  });
+  const [formPayload, setFormPayload] = useState({});
 
   // ======= Cargar inicialmente =======
   const load = useCallback(async () => {
@@ -105,15 +101,17 @@ const RequestsPage = () => {
     return (solicitudes || []).filter((s) => {
       const payload = typeof s.payload === "string" ? safeJSON(s.payload) : (s.payload || {});
       const status = (s.status || "").toLowerCase();
+      const typeName = (s.type_name || "").toLowerCase();
       const matchesText =
         !q ||
-        [s.id, payload?.nombre_cliente, payload?.persona_contacto, payload?.observacion]
+        [s.id, payload?.nombre_cliente, payload?.persona_contacto, payload?.observacion, payload?.product_service, payload?.supplier]
           .filter(Boolean)
           .some((v) => String(v).toLowerCase().includes(q));
       const matchesStatus = statusFilter === "all" || status === statusFilter;
-      return matchesText && matchesStatus;
+      const matchesType = typeFilter === 'all' || typeName.includes(typeFilter);
+      return matchesText && matchesStatus && matchesType;
     });
-  }, [solicitudes, debounced, statusFilter]);
+  }, [solicitudes, debounced, statusFilter, typeFilter]);
 
   // ======= Helpers =======
   function safeJSON(text) {
@@ -130,7 +128,19 @@ const RequestsPage = () => {
       showToast("Solo el Jefe Comercial puede crear solicitudes.", "error");
       return;
     }
-    setFormPayload({ nombre_cliente: "", persona_contacto: "", observacion: "", files: [] });
+    // Set initial payload based on type
+    const commonFields = { observacion: "", files: [] };
+    if (type === 'purchase') {
+        setFormPayload({
+            ...commonFields,
+            product_service: "",
+            quantity: 1,
+            supplier: "",
+            estimated_total_price: "",
+        });
+    } else {
+        setFormPayload({ ...commonFields, nombre_cliente: "", persona_contacto: "" });
+    }
     setCreateModal({ open: true, type });
   };
   const handleCloseCreate = () => setCreateModal({ open: false, type: "inspection" });
@@ -309,12 +319,25 @@ const RequestsPage = () => {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             options={[
-              { value: "all", label: "Todos" },
+              { value: "all", label: "Todos los estados" },
               { value: "pendiente", label: "Pendiente" },
               { value: "en_revision", label: "En revisión" },
               { value: "aprobado", label: "Aprobado" },
               { value: "rechazado", label: "Rechazado" },
               { value: "cancelado", label: "Cancelado" },
+            ]}
+            className="md:w-48"
+          />
+          <Select
+            label=""
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value)}
+            options={[
+                { value: 'all', label: 'Todos los tipos' },
+                { value: 'inspección', label: 'Inspección' },
+                { value: 'compra', label: 'Compra' },
+                { value: 'retiro', label: 'Retiro' },
+                { value: 'cliente', label: 'Cliente' },
             ]}
             className="md:w-48"
           />
@@ -406,37 +429,35 @@ const RequestsPage = () => {
             onSubmit={submitCreate}
             className={`space-y-4 ${submitting ? "opacity-50 pointer-events-none" : ""}`}
           >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Select
-              label="Tipo de solicitud"
-              value={createModal.type}
-              onChange={(e) => setCreateModal((m) => ({ ...m, type: e.target.value }))}
-              options={[
-                { value: "inspection", label: "Inspección" },
-                { value: "purchase", label: "Compra" },
-                { value: "retirement", label: "Retiro" },
-                { value: "client", label: "Cliente" },
-              ]}
-            />
-            <Input
-              label="Nombre del Cliente"
-              value={formPayload.nombre_cliente}
-              onChange={(e) => setFormPayload((p) => ({ ...p, nombre_cliente: e.target.value }))}
-              placeholder="ACME S.A."
-            />
-            <Input
-              label="Persona de contacto"
-              value={formPayload.persona_contacto}
-              onChange={(e) => setFormPayload((p) => ({ ...p, persona_contacto: e.target.value }))}
-              placeholder="Juan Pérez"
-            />
+            <p className="text-sm font-medium text-gray-600 dark:text-gray-300">
+              Creando una nueva solicitud de <span className="font-bold capitalize text-blue-600">{createModal.type}</span>.
+            </p>
+
+            {createModal.type === 'purchase' ? (
+              <PurchaseRequestForm payload={formPayload} onPayloadChange={setFormPayload} />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Input
+                    label="Nombre del Cliente"
+                    value={formPayload.nombre_cliente || ''}
+                    onChange={(e) => setFormPayload(p => ({ ...p, nombre_cliente: e.target.value }))}
+                    placeholder="ACME S.A."
+                />
+                <Input
+                    label="Persona de contacto"
+                    value={formPayload.persona_contacto || ''}
+                    onChange={(e) => setFormPayload(p => ({ ...p, persona_contacto: e.target.value }))}
+                    placeholder="Juan Pérez"
+                />
+              </div>
+            )}
+
             <Input
               label="Observación"
-              value={formPayload.observacion}
+              value={formPayload.observacion || ''}
               onChange={(e) => setFormPayload((p) => ({ ...p, observacion: e.target.value }))}
               placeholder="Detalles breves…"
             />
-          </div>
 
           <div className="mt-2">
             <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -546,14 +567,19 @@ const RequestsPage = () => {
                         <span className="font-semibold">Tipo de Solicitud:</span>{" "}
                         {detail.data.request?.type_name || "—"}
                       </p>
-                      <p>
-                        <span className="font-semibold">Cliente:</span>{" "}
-                        {detail.data.request?.payload?.nombre_cliente || "—"}
-                      </p>
-                      <p>
-                        <span className="font-semibold">Persona de contacto:</span>{" "}
-                        {detail.data.request?.payload?.persona_contacto || "—"}
-                      </p>
+                      {detail.data.request?.type_name?.toLowerCase() === 'compra' ? (
+                        <>
+                          <p><span className="font-semibold">Producto/Servicio:</span> {detail.data.request.payload?.product_service || '—'}</p>
+                          <p><span className="font-semibold">Cantidad:</span> {detail.data.request.payload?.quantity || '—'}</p>
+                          <p><span className="font-semibold">Proveedor:</span> {detail.data.request.payload?.supplier || '—'}</p>
+                          <p><span className="font-semibold">Precio Total Estimado:</span> ${detail.data.request.payload?.estimated_total_price || '0.00'}</p>
+                        </>
+                      ) : (
+                        <>
+                          <p><span className="font-semibold">Cliente:</span> {detail.data.request?.payload?.nombre_cliente || "—"}</p>
+                          <p><span className="font-semibold">Persona de contacto:</span> {detail.data.request?.payload?.persona_contacto || "—"}</p>
+                        </>
+                      )}
                       <p>
                         <span className="font-semibold">Fecha de creación:</span>{" "}
                         {detail.data.request?.created_at
