@@ -28,6 +28,7 @@ router.get("/:id", verifyToken, ctrl.getDetail);
 
 // 🖊️ Firmar posteriormente
 router.post("/:id/sign", verifyToken, requireRole(["gerencia", "tecnico"]), ctrl.sign);
+router.post("/:id/sign-advanced", verifyToken, requireRole(["gerencia", "tecnico"]), ctrl.signAdvanced);
 
 // ✅ Aprobar mantenimiento (gerencia)
 router.post("/:id/approve", verifyToken, requireRole(["gerencia"]), ctrl.approve);
