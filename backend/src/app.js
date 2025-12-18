@@ -196,6 +196,7 @@ const {
 } = require("./modules/business-case/businessCase.routes");
 const notificationsRoutes = require("./modules/notifications/notifications.routes");
 const userProfileRoutes = require("./modules/user-profile/userProfile.routes");
+const signatureRoutes = require("./modules/signature/signature.routes");
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -221,7 +222,8 @@ app.use((req, res, next) => {
     req.path.startsWith("/ws/") ||
     req.path.startsWith("/api/v1/auth/google") ||
     req.path.startsWith("/api/v1/gmail/auth/callback") ||
-    req.path.startsWith("/health")
+    req.path.startsWith("/health") ||
+    req.path.startsWith("/api/verificar")
   ) {
     return next();
   }
@@ -268,6 +270,7 @@ app.use("/api/v1/clients", clientsRoutes);
 app.use("/api/v1/schedules", schedulesRoutes);
 app.use("/api/v1/notifications", notificationsRoutes);
 app.use("/api/v1/users/me/profile", userProfileRoutes);
+app.use("/api", signatureRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores
