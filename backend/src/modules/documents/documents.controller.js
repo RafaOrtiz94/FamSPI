@@ -29,6 +29,42 @@ exports.exportPdf = asyncHandler(async (req, res) => {
   res.json({ ok: true, pdf });
 });
 
+exports.signAdvanced = asyncHandler(async (req, res) => {
+  const { documentId } = req.params;
+  const {
+    consent,
+    consent_text: consentText,
+    role_at_sign: roleAtSign,
+    authorized_role: authorizedRole,
+    session_id: sessionId,
+  } = req.body || {};
+
+  // La firma avanzada sólo procede con consentimiento expreso del titular
+  if (consent !== true) {
+    return res.status(400).json({ ok: false, message: "Se requiere consentimiento expreso" });
+  }
+
+  if (!sessionId) {
+    return res.status(400).json({ ok: false, message: "session_id es obligatorio para trazabilidad" });
+  }
+
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip;
+  const userAgent = req.headers["user-agent"]; // Evidencia técnica exigida por LOPDP
+
+  const result = await svc.applyAdvancedSignature({
+    documentId,
+    user: req.user,
+    consentText,
+    roleAtSign,
+    authorizedRole,
+    sessionId,
+    ip,
+    userAgent,
+  });
+
+  res.status(201).json({ ok: true, ...result });
+});
+
 exports.getDocument = asyncHandler(async (req, res) => {
   const { documentId } = req.params;
   logger.info("[documents] getDocument → %s", documentId);

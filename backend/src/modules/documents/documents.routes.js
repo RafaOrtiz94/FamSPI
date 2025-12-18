@@ -20,6 +20,13 @@ router.post(
   ctrl.signAtTag
 );
 
+router.post(
+  "/:documentId/sign-advanced",
+  verifyToken,
+  requireRole(["tecnico", "gerencia"]),
+  ctrl.signAdvanced
+);
+
 // Exportar a PDF y registrar
 router.post(
   "/:documentId/export-pdf",

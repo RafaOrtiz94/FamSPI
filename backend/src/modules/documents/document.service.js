@@ -18,6 +18,12 @@ const {
   exportPdf: exportPdfUtil,
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
+const documentHashService = require("../../services/signatures/documentHash.service");
+const advancedSignatureService = require("../../services/signatures/advancedSignature.service");
+const digitalSealService = require("../../services/signatures/digitalSeal.service");
+const QRCode = require("qrcode");
+
+const PUBLIC_BASE_URL = (process.env.PUBLIC_BASE_URL || process.env.FRONTEND_URL || "https://spi.local").replace(/\/$/, "");
 
 // ============================================================
 // 🔹 Helpers internos
@@ -199,6 +205,91 @@ async function signAtTag({ documentId, userId, base64, tag, role_at_sign }) {
   return { document_id: doc.id, doc_drive_id: doc.doc_drive_id };
 }
 
+async function downloadPdfBuffer(fileId) {
+  const response = await drive.files.get({ fileId, alt: "media" }, { responseType: "arraybuffer" });
+  return Buffer.from(response.data);
+}
+
+async function exportPdfForSignature(documentId) {
+  // Generamos y descargamos el PDF exacto que será firmado para asegurar integridad
+  const exported = await exportPdf(documentId);
+  const pdfBuffer = await downloadPdfBuffer(exported.id);
+  return { pdfBuffer, exported };
+}
+
+async function applyAdvancedSignature({
+  documentId,
+  user,
+  consentText,
+  roleAtSign,
+  authorizedRole,
+  sessionId,
+  ip,
+  userAgent,
+}) {
+  if (!user?.id) {
+    const err = new Error("Usuario requerido para firmar");
+    err.status = 401;
+    throw err;
+  }
+
+  if (!consentText || typeof consentText !== "string" || consentText.trim().length === 0) {
+    const err = new Error("Se requiere consentimiento expreso para la firma");
+    err.status = 400;
+    throw err;
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { pdfBuffer, exported } = await exportPdfForSignature(documentId);
+
+    const hashRecord = await documentHashService.createHash({
+      documentId,
+      documentBuffer: pdfBuffer,
+      userId: user.id,
+      client,
+    });
+
+    // La firma avanzada une hash + identidad + sesión para manifestar voluntad y trazabilidad
+    const signatureRecord = await advancedSignatureService.signDocument({
+      documentHash: hashRecord,
+      user,
+      consentText,
+      roleAtSign,
+      ip,
+      userAgent,
+      sessionId,
+      client,
+    });
+
+    // Sello institucional posterior a la firma para representación corporativa
+    const sealRecord = await digitalSealService.applySeal({
+      documentHash: hashRecord,
+      authorizedRole: authorizedRole || user.role,
+      client,
+    });
+
+    await client.query("COMMIT");
+
+    const verificationUrl = `${PUBLIC_BASE_URL}/api/verificar/${sealRecord.verification_token}`;
+    const qr = await QRCode.toDataURL(verificationUrl);
+
+    return {
+      hash: hashRecord,
+      signature: signatureRecord,
+      seal: { ...sealRecord, verification_url: verificationUrl, qr },
+      pdf: exported,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 // ============================================================
 // 📄 Exportar documento a PDF
 // ============================================================
@@ -250,6 +341,7 @@ module.exports = {
   createFromTemplate,
   signAtTag,
   exportPdf,
+  applyAdvancedSignature,
   getDocument,
   listByRequest,
 };
