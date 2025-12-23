@@ -1,20 +1,23 @@
 import React, { useState } from "react";
-import { FiClipboard, FiCreditCard, FiUserPlus, FiUsers } from "react-icons/fi";
+import { FiCreditCard, FiUserPlus, FiUsers } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
 import { createRequest, getClientRequests } from "../../../../core/api/requestsApi";
 import CreateRequestModal from "../CreateRequestModal";
-import ActionCard from "../../../../core/ui/patterns/ActionCard";
+import Modal from "../../../../core/ui/components/Modal";
+import Button from "../../../../core/ui/components/Button";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
+import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
 
 const ACPComercialSolicitudesView = () => {
-const { showToast, showLoader, hideLoader } = useUI();
+    const { showToast, showLoader, hideLoader } = useUI();
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
+    const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
 
     // View Modal State
     const [viewType, setViewType] = useState(null);
@@ -50,6 +53,16 @@ const { showToast, showLoader, hideLoader } = useUI();
         setViewCustomFetcher(() => fetcher);
     };
 
+    const handlePurchaseTypeSelection = (type) => {
+        setShowPurchaseTypeModal(false);
+        if (type === "public") {
+            handlePurchaseHandoffOpen();
+        } else if (type === "private") {
+            // ✅ USAR MODAL GLOBAL
+            window.dispatchEvent(new CustomEvent('open-request-modal', { detail: { type: 'PRIVATE_PURCHASE' } }));
+        }
+    };
+
     const statWidgets = [
         {
             id: 'clientes',
@@ -80,71 +93,70 @@ const { showToast, showLoader, hideLoader } = useUI();
         }
     ];
 
-    return (
-        <div className="space-y-8">
-            {/* CREAR NUEVA SOLICITUD - Grid limitado para ACP Comercial */}
-            <section>
-                <div className="mb-5">
-                    <h2 className="text-xl font-bold text-gray-900 mb-1">
-                        Crear Nueva Solicitud
-                    </h2>
-                    <p className="text-sm text-gray-600">
-                        Selecciona el tipo de solicitud que deseas crear
-                    </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    <div className="flex">
-                        <ActionCard
-                            icon={FiUserPlus}
-                            subtitle="Clientes"
-                            title="Registrar Cliente"
-                            color="emerald"
-                            onClick={() => openRequestModal("cliente")}
-                        />
-                    </div>
-                    <div className="flex">
-                        <ActionCard
-                            icon={FiCreditCard}
-                            subtitle="Compras"
-                            title="Requerimientos"
-                            color="indigo"
-                            onClick={handlePurchaseHandoffOpen}
-                        />
-                    </div>
-                    <div className="flex">
-                        <ActionCard
-                            icon={FiClipboard}
-                            subtitle="Talento Humano"
-                            title="Permisos y Vacaciones"
-                            color="orange"
-                            onClick={() => setShowPermisoModal(true)}
-                        />
-                    </div>
-                </div>
-            </section>
+    const acpActionCards = [
+        {
+            id: "cliente",
+            subtitle: "Clientes",
+            title: "Registrar Cliente",
+            color: "emerald",
+            icon: FiUserPlus,
+        },
+        {
+            id: "compra",
+            subtitle: "Compras",
+            title: "Requerimientos",
+            color: "indigo",
+            icon: FiCreditCard,
+        },
+        {
+            id: "vacaciones",
+            subtitle: "Talento Humano",
+            title: "Permisos y Vacaciones",
+            color: "orange",
+            icon: FiUsers,
+        }
+    ];
 
-            {/* RESUMEN DE SOLICITUDES (NUEVO) */}
-            <section>
-                <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-gray-900">
-                        Historial de Solicitudes
-                    </h2>
-                    <p className="text-sm text-gray-600">
-                        Consulta el estado de tus gestiones
-                    </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {statWidgets.map(widget => (
-                        <RequestStatWidget
-                            key={widget.id}
-                            title={widget.title}
-                            icon={widget.icon}
-                            color={widget.color}
-                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
-                        />
-                    ))}
-                </div>
-            </section>
+    const handleActionClick = (id) => {
+        if (id === "vacaciones") {
+            setShowPermisoModal(true);
+            return;
+        }
+        if (id === "compra") {
+            setShowPurchaseTypeModal(true);
+            return;
+        }
+        openRequestModal(id);
+    };
+
+    return (
+        <>
+            <BaseSolicitudesView
+                actionCards={acpActionCards}
+                onActionCardClick={(card) => handleActionClick(card.id)}
+                createSectionTitle="Crear Nueva Solicitud"
+                createSectionSubtitle="Selecciona el tipo de solicitud que deseas crear"
+                customSections={[
+                    {
+                        id: "historial",
+                        title: "Historial de Solicitudes",
+                        subtitle: "Consulta el estado de tus gestiones",
+                        content: (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                {statWidgets.map(widget => (
+                                    <RequestStatWidget
+                                        key={widget.id}
+                                        title={widget.title}
+                                        icon={widget.icon}
+                                        color={widget.color}
+                                        onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
+                                    />
+                                ))}
+                            </div>
+                        )
+                    }
+                ]}
+            />
 
             {/* PURCHASE HANDOFF MODAL */}
             <PurchaseHandoffWidget
@@ -152,6 +164,24 @@ const { showToast, showLoader, hideLoader } = useUI();
                 onOpenChange={setShowPurchaseHandoff}
                 hideButton={true}
             />
+
+            <Modal
+                open={showPurchaseTypeModal}
+                onClose={() => setShowPurchaseTypeModal(false)}
+                title="Selecciona el tipo de cliente"
+            >
+                <div className="space-y-3">
+                    <p>¿El cliente pertenece a la red pública o es un cliente privado?</p>
+                    <div className="flex flex-wrap gap-3">
+                        <Button variant="secondary" onClick={() => handlePurchaseTypeSelection("public")}>
+                            Público
+                        </Button>
+                        <Button variant="primary" onClick={() => handlePurchaseTypeSelection("private")}>
+                            Privado
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
 
             {/* PERMISOS/VACACIONES MODAL */}
             <PermisoVacacionModal
@@ -178,7 +208,7 @@ const { showToast, showLoader, hideLoader } = useUI();
                 onSubmit={handleCreate}
                 presetType={presetRequestType}
             />
-        </div>
+        </>
     );
 };
 

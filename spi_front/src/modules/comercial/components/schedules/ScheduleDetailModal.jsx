@@ -26,12 +26,16 @@ const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="success" icon={FiCheck} onClick={onApprove}>
-            Aprobar
-          </Button>
-          <Button size="sm" variant="danger" icon={FiX} onClick={onReject}>
-            Rechazar
-          </Button>
+          {onApprove && (
+            <Button size="sm" variant="success" icon={FiCheck} onClick={onApprove}>
+              Aprobar
+            </Button>
+          )}
+          {onReject && (
+            <Button size="sm" variant="danger" icon={FiX} onClick={onReject}>
+              Rechazar
+            </Button>
+          )}
         </div>
       </div>
 

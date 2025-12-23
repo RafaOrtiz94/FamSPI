@@ -144,12 +144,18 @@ const MyProfilePage = () => {
                   src={avatarPreview}
                   alt="Foto de perfil"
                   className="h-full w-full object-cover"
+                  onError={(e) => {
+                    // Fallback si la imagen de Drive no carga
+                    console.warn('Error cargando imagen de perfil:', avatarPreview);
+                    e.target.style.display = 'none';
+                    e.target.nextElementSibling.style.display = 'flex';
+                  }}
                 />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 text-3xl font-bold text-slate-600 dark:from-slate-800 dark:to-slate-700 dark:text-slate-200">
-                  {(identity?.fullname || identity?.email || "?").charAt(0)}
-                </div>
-              )}
+              ) : null}
+              {/* Fallback siempre visible cuando no hay avatarPreview o cuando hay error */}
+              <div className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-slate-200 to-slate-300 text-3xl font-bold text-slate-600 dark:from-slate-800 dark:to-slate-700 dark:text-slate-200 ${avatarPreview ? 'hidden' : ''}`}>
+                {(identity?.fullname || identity?.email || "?").charAt(0).toUpperCase()}
+              </div>
               <label className="absolute bottom-2 right-2 flex h-9 w-9 cursor-pointer items-center justify-center rounded-full bg-primary text-white shadow-lg hover:bg-primary-dark">
                 <FiCamera />
                 <input type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />

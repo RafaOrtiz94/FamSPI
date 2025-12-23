@@ -290,34 +290,47 @@ const AttendanceWidget = () => {
     const renderExceptionBanner = () => {
         if (!hasActiveException) return null;
         const items = [
-            { label: "Salida de oficina", value: activeException.start_time },
-            { label: "Llegada a destino", value: activeException.arrival_time },
-            { label: "Salida de destino", value: activeException.departure_time },
-            { label: "Regreso a oficina", value: activeException.return_time },
+            { label: "Salida de oficina", value: activeException.start_time, icon: "🏢" },
+            { label: "Llegada a destino", value: activeException.arrival_time, icon: "📍" },
+            { label: "Salida de destino", value: activeException.departure_time, icon: "🚶" },
+            { label: "Regreso a oficina", value: activeException.return_time, icon: "🏠" },
         ];
 
         return (
-            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3">
-                <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 text-amber-800">
-                        <FiAlertTriangle />
+            <div className="mb-6 p-5 rounded-2xl border-2 border-amber-200/60 bg-gradient-to-r from-amber-50 via-orange-50 to-amber-50 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-100 rounded-xl">
+                            <FiAlertTriangle className="text-amber-600" size={20} />
+                        </div>
                         <div>
-                            <p className="text-xs font-semibold uppercase tracking-wide">Salida inesperada</p>
-                            <p className="text-sm font-bold">{exceptionStepLabel}</p>
+                            <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider">
+                                🚨 Salida Inesperada Activa
+                            </h4>
+                            <p className="text-sm font-semibold text-amber-800">{exceptionStepLabel}</p>
                         </div>
                     </div>
-                    <span className="text-[11px] px-2 py-1 rounded-full bg-white text-amber-700 border border-amber-200">
-                        {activeException.type}
-                    </span>
+                    <div className="text-right">
+                        <span className="px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-bold border border-amber-200">
+                            {activeException.type}
+                        </span>
+                    </div>
                 </div>
-                <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-amber-800">
+                <div className="grid grid-cols-2 gap-3">
                     {items.map((item) => (
                         <div
                             key={item.label}
-                            className="flex flex-col rounded-lg bg-white/60 px-2 py-2 border border-amber-100"
+                            className="flex items-center gap-3 rounded-xl bg-white/70 px-3 py-3 border border-amber-100/50 shadow-sm"
                         >
-                            <span className="text-[11px] uppercase font-semibold">{item.label}</span>
-                            <span className="font-mono">{formatDateTime(item.value)}</span>
+                            <span className="text-lg">{item.icon}</span>
+                            <div className="flex-1">
+                                <div className="text-xs font-semibold text-amber-900 uppercase tracking-wider">
+                                    {item.label}
+                                </div>
+                                <div className="text-sm font-mono font-bold text-amber-800">
+                                    {formatDateTime(item.value)}
+                                </div>
+                            </div>
                         </div>
                     ))}
                 </div>
@@ -401,131 +414,181 @@ const AttendanceWidget = () => {
     };
 
     return (
-        <Card className="relative overflow-hidden rounded-2xl bg bg-white/70 backdrop-blur-xl shadow-lg shadow-blue-500/5 p-5">
-            <div className="flex justify-between items-center mb-4">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 rounded-xl bg-blue-500/10">{status.icon}</div>
+        <Card className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/20 backdrop-blur-xl shadow-xl shadow-blue-500/10 border border-white/50 p-6">
+            {/* Header Section */}
+            <div className="flex justify-between items-start mb-6 pb-4 border-b border-gray-100/80">
+                <div className="flex items-center gap-4">
+                    <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/15 to-indigo-500/15 shadow-sm">
+                        {status.icon}
+                    </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-gray-900">Asistencia de Hoy</h3>
-                        <p className="text-xs text-gray-500">{status.text}</p>
+                        <h3 className="text-lg font-bold text-gray-900 tracking-tight">Asistencia de Hoy</h3>
+                        <p className="text-sm text-gray-600 font-medium">{status.text}</p>
                     </div>
                 </div>
 
-                <div className="text-sm font-mono font-semibold text-blue-600">
-                    {currentTime.toLocaleTimeString("es-EC", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                        second: "2-digit",
-                        hour12: false,
-                    })}
+                <div className="text-right">
+                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Hora Actual</div>
+                    <div className="text-lg font-mono font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-lg">
+                        {currentTime.toLocaleTimeString("es-EC", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                            second: "2-digit",
+                            hour12: false,
+                        })}
+                    </div>
                 </div>
             </div>
 
+            {/* Progress Section */}
             {attendance?.entry_time && !attendance?.exit_time && (
-                <div className="mb-5">
-                    <div className="flex justify-between text-xs text-gray-500 mb-1">
-                        <span>Progreso del dia</span>
-                        <span className="font-semibold">{progress}%</span>
+                <div className="mb-6 p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/60 rounded-xl border border-blue-100/50">
+                    <div className="flex justify-between items-center mb-3">
+                        <div className="flex items-center gap-2">
+                            <FiTrendingUp className="text-blue-600" size={16} />
+                            <span className="text-sm font-semibold text-blue-900">Progreso del Día</span>
+                        </div>
+                        <span className="text-lg font-bold text-blue-700">{progress}%</span>
                     </div>
-                    <div className="h-3 bg-gray-200/60 rounded-full overflow-hidden">
+                    <div className="h-4 bg-blue-100/60 rounded-full overflow-hidden shadow-inner">
                         <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${progress}%` }}
-                            transition={{ type: "spring", stiffness: 120 }}
-                            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400"
+                            transition={{ type: "spring", stiffness: 120, damping: 20 }}
+                            className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 shadow-sm"
                         />
+                    </div>
+                    <div className="text-xs text-blue-600/80 mt-2 text-center font-medium">
+                        Jornada laboral de 8 horas
                     </div>
                 </div>
             )}
 
             {renderExceptionBanner()}
 
-            <div className="grid grid-cols-2 gap-3 mb-5">
-                {[
-                    ["Entrada", attendance?.entry_time, "In"],
-                    ["Almuerzo", attendance?.lunch_start_time, "Alm"],
-                    ["Regreso", attendance?.lunch_end_time, "Reg"],
-                    ["Salida", attendance?.exit_time, "Out"],
-                ].map(([label, time, icon]) => (
-                    <motion.div key={label} whileHover={{ y: -2 }} className="rounded-xl bg-white/60 p-3 shadow-sm">
-                        <div className="text-xs text-gray-500 flex items-center gap-1">
-                            <span>{icon}</span>
-                            {label}
-                        </div>
-                        <div className="text-sm font-semibold text-gray-800">{formatTime(time)}</div>
-                    </motion.div>
-                ))}
+            {/* Time Records Grid */}
+            <div className="mb-6">
+                <h4 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <FiClock className="text-gray-600" size={16} />
+                    Registro de Tiempos
+                </h4>
+                <div className="grid grid-cols-2 gap-4">
+                    {[
+                        ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
+                        ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
+                        ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
+                        ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
+                    ].map(([label, time, colors]) => (
+                        <motion.div
+                            key={label}
+                            whileHover={{ y: -2, scale: 1.02 }}
+                            className={`rounded-xl border ${colors} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
+                        >
+                            <div className="text-xs font-medium uppercase tracking-wider mb-1 opacity-75">
+                                {label}
+                            </div>
+                            <div className="text-lg font-mono font-bold">{formatTime(time)}</div>
+                        </motion.div>
+                    ))}
+                </div>
             </div>
 
+            {/* Primary Action Section */}
             {!attendance?.exit_time && !hasActiveException && (
-                attendance?.entry_time ? (
-                    <Button
-                        onClick={() =>
-                            attendance?.lunch_start_time && !attendance?.lunch_end_time
-                                ? handle(clockInLunch, "Regresaste del almuerzo")
+                <div className="mb-6">
+                    <div className="text-center mb-4">
+                        <h4 className="text-sm font-semibold text-gray-800 mb-3">Acción Principal</h4>
+                    </div>
+                    {attendance?.entry_time ? (
+                        <Button
+                            onClick={() =>
+                                attendance?.lunch_start_time && !attendance?.lunch_end_time
+                                    ? handle(clockInLunch, "Regresaste del almuerzo")
+                                    : attendance?.lunch_end_time
+                                        ? handle(clockOut, "Buen trabajo!", true)
+                                        : handle(clockOutLunch, "Buen provecho")
+                            }
+                            disabled={loading}
+                            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-xl shadow-blue-500/25 transform hover:scale-[1.02] transition-all duration-200"
+                        >
+                            {attendance?.lunch_start_time && !attendance?.lunch_end_time
+                                ? "🍽️ Regresar de Almuerzo"
                                 : attendance?.lunch_end_time
-                                    ? handle(clockOut, "Buen trabajo!", true)
-                                    : handle(clockOutLunch, "Buen provecho")
-                        }
-                        disabled={loading}
-                        className="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-lg shadow-blue-500/20"
-                    >
-                        {attendance?.lunch_start_time && !attendance?.lunch_end_time
-                            ? "Regresar de Almuerzo"
-                            : attendance?.lunch_end_time
-                                ? "Finalizar Jornada"
-                                : "Salir a Almuerzo"}
-                    </Button>
-                ) : (
-                    <Button
-                        onClick={() => handle(clockIn, "Entrada registrada")}
-                        disabled={loading}
-                        className="w-full py-3 rounded-xl font-semibold bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-lg shadow-emerald-500/20"
-                    >
-                        Marcar entrada
-                    </Button>
-                )
-            )}
-
-            {renderExceptionControls()}
-
-            {/* Overtime Section */}
-            {attendance?.is_overtime && attendance?.overtime_hours > 0 && (
-                <div className="mt-4 p-3 bg-gradient-to-r from-orange-50 to-yellow-50 rounded-xl border border-orange-200">
-                    <div className="flex items-center gap-2 mb-2 text-orange-800">
-                        <FiTrendingUp size={14} />
-                        <span className="text-xs font-bold uppercase tracking-wider">
-                            Tiempo extra registrado
-                        </span>
-                        <span className="ml-auto text-sm font-mono font-bold text-orange-700">
-                            +{attendance.overtime_hours.toFixed(1)}h
-                        </span>
-                    </div>
-                    <div className="text-xs text-orange-700">
-                        Has trabajado horas adicionales hoy. Esto será considerado en tu registro de asistencia.
-                    </div>
+                                    ? "🏁 Finalizar Jornada"
+                                    : "🍽️ Salir a Almuerzo"}
+                        </Button>
+                    ) : (
+                        <Button
+                            onClick={() => handle(clockIn, "Entrada registrada")}
+                            disabled={loading}
+                            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-xl shadow-emerald-500/25 transform hover:scale-[1.02] transition-all duration-200"
+                        >
+                            🚀 Marcar Entrada
+                        </Button>
+                    )}
                 </div>
             )}
 
-            {/* Overtime Controls */}
-            {attendance?.entry_time && !attendance?.exit_time && !hasActiveException && (
-                <div className="mt-4 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                    <div className="flex items-center gap-2 mb-2 text-gray-800">
-                        <FiPlus size={14} />
-                        <span className="text-xs font-semibold uppercase">Registrar overtime</span>
+            {/* Secondary Actions Section */}
+            <div className="space-y-4">
+                {renderExceptionControls()}
+
+                {/* Overtime Section */}
+                {attendance?.is_overtime && attendance?.overtime_hours > 0 && (
+                    <div className="p-4 bg-gradient-to-r from-orange-50 via-yellow-50 to-orange-50 rounded-xl border border-orange-200/60 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-orange-100 rounded-lg">
+                                    <FiTrendingUp className="text-orange-600" size={16} />
+                                </div>
+                                <div>
+                                    <h5 className="text-sm font-bold text-orange-900 uppercase tracking-wider">
+                                        Tiempo Extra Registrado
+                                    </h5>
+                                    <p className="text-xs text-orange-700">Horas adicionales trabajadas</p>
+                                </div>
+                            </div>
+                            <div className="text-right">
+                                <div className="text-2xl font-mono font-bold text-orange-700">
+                                    +{attendance.overtime_hours.toFixed(1)}h
+                                </div>
+                            </div>
+                        </div>
+                        <div className="text-xs text-orange-700/90 bg-orange-100/50 p-2 rounded-lg">
+                            ✅ Has trabajado horas adicionales hoy. Esto será considerado en tu registro de asistencia.
+                        </div>
                     </div>
-                    <p className="text-xs text-gray-600 mb-3">
-                        Si trabajas tiempo extra, regístralo aquí para mantener un registro preciso.
-                    </p>
-                    <Button
-                        onClick={() => setOvertimeModalOpen(true)}
-                        className="w-full text-xs py-2 bg-gray-600 hover:bg-gray-700"
-                        disabled={loading}
-                    >
-                        Registrar overtime manual
-                    </Button>
-                </div>
-            )}
+                )}
+
+                {/* Overtime Controls */}
+                {attendance?.entry_time && !attendance?.exit_time && !hasActiveException && (
+                    <div className="p-4 bg-gradient-to-r from-gray-50 to-slate-50 rounded-xl border border-gray-200/60 shadow-sm">
+                        <div className="flex items-center justify-between mb-3">
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 bg-gray-100 rounded-lg">
+                                    <FiPlus className="text-gray-600" size={16} />
+                                </div>
+                                <div>
+                                    <h5 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
+                                        Registrar Overtime
+                                    </h5>
+                                    <p className="text-xs text-gray-600">Tiempo extra manual</p>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="text-xs text-gray-600 mb-4 bg-gray-100/50 p-2 rounded-lg">
+                            📊 Si trabajas tiempo extra, regístralo aquí para mantener un registro preciso.
+                        </p>
+                        <Button
+                            onClick={() => setOvertimeModalOpen(true)}
+                            className="w-full py-2.5 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
+                            disabled={loading}
+                        >
+                            ⚡ Registrar Overtime Manual
+                        </Button>
+                    </div>
+                )}
+            </div>
 
             <AnimatePresence>
                 {showCelebration && (
@@ -540,80 +603,131 @@ const AttendanceWidget = () => {
                 )}
             </AnimatePresence>
 
-            <Modal isOpen={exceptionModalOpen} onClose={() => setExceptionModalOpen(false)} title="Registrar salida inesperada">
-                <div className="space-y-4">
-                    <select
-                        className="w-full border rounded-lg px-3 py-2 text-sm"
-                        value={exceptionType}
-                        onChange={(e) => setExceptionType(e.target.value)}
-                    >
-                        <option value="">Motivo</option>
-                        <option value="permiso">Permiso</option>
-                        <option value="medico">Cita medica</option>
-                        <option value="proveedor">Proveedor</option>
-                        <option value="otro">Otro</option>
-                    </select>
+            <Modal
+                isOpen={exceptionModalOpen}
+                onClose={() => setExceptionModalOpen(false)}
+                title="🚨 Registrar Salida Inesperada"
+                className="max-w-md"
+            >
+                <div className="space-y-5">
+                    <div className="p-3 bg-amber-50 rounded-lg border border-amber-200">
+                        <p className="text-sm text-amber-800">
+                            📝 Registra tu salida por motivos excepcionales para mantener trazabilidad.
+                        </p>
+                    </div>
 
-                    <textarea
-                        className="w-full border rounded-lg px-3 py-2 text-sm h-24"
-                        placeholder="Describe la salida..."
-                        value={exceptionDescription}
-                        onChange={(e) => setExceptionDescription(e.target.value)}
-                    />
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">
+                            🎯 Tipo de Salida
+                        </label>
+                        <select
+                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all"
+                            value={exceptionType}
+                            onChange={(e) => setExceptionType(e.target.value)}
+                        >
+                            <option value="">Selecciona un motivo...</option>
+                            <option value="permiso">🏠 Permiso personal</option>
+                            <option value="medico">🏥 Cita médica</option>
+                            <option value="proveedor">🤝 Reunión con proveedor</option>
+                            <option value="otro">❓ Otro motivo</option>
+                        </select>
+                    </div>
 
-                    <div className="flex justify-end gap-2">
-                        <button onClick={() => setExceptionModalOpen(false)} className="text-sm text-gray-500 hover:text-gray-700">
-                            Cancelar
+                    <div>
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">
+                            📝 Descripción Detallada
+                        </label>
+                        <textarea
+                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-amber-400 focus:ring-2 focus:ring-amber-100 transition-all resize-none"
+                            rows="3"
+                            placeholder="Describe brevemente el motivo de tu salida..."
+                            value={exceptionDescription}
+                            onChange={(e) => setExceptionDescription(e.target.value)}
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                            💡 Incluye detalles como destino, duración aproximada, etc.
+                        </p>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-2">
+                        <button
+                            onClick={() => setExceptionModalOpen(false)}
+                            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-lg transition-colors"
+                        >
+                            ❌ Cancelar
                         </button>
-                        <Button onClick={handleRegisterException} disabled={exceptionLoading}>
-                            Registrar
+                        <Button
+                            onClick={handleRegisterException}
+                            disabled={exceptionLoading}
+                            className="px-6 py-2 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all"
+                        >
+                            {exceptionLoading ? "⏳ Registrando..." : "✅ Registrar Salida"}
                         </Button>
                     </div>
                 </div>
             </Modal>
 
-            <Modal isOpen={overtimeModalOpen} onClose={() => setOvertimeModalOpen(false)} title="Registrar tiempo extra">
-                <div className="space-y-4">
+            <Modal
+                isOpen={overtimeModalOpen}
+                onClose={() => setOvertimeModalOpen(false)}
+                title="⚡ Registrar Tiempo Extra"
+                className="max-w-md"
+            >
+                <div className="space-y-5">
+                    <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
+                        <p className="text-sm text-orange-800">
+                            🕐 Registra las horas extras trabajadas para mantener un control preciso.
+                        </p>
+                    </div>
+
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Horas trabajadas
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">
+                            ⏰ Horas Trabajadas
                         </label>
                         <input
                             type="number"
                             step="0.5"
                             min="0.5"
                             max="12"
-                            className="w-full border rounded-lg px-3 py-2 text-sm"
+                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all"
                             placeholder="Ej: 2.5"
                             value={overtimeHours}
                             onChange={(e) => setOvertimeHours(e.target.value)}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                            Ingresa las horas adicionales trabajadas (mínimo 0.5h)
+                            🔢 Mínimo 0.5 horas, máximo 12 horas por día
                         </p>
                     </div>
 
                     <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">
-                            Razón del overtime
+                        <label className="block text-sm font-semibold text-gray-800 mb-2">
+                            📋 Razón del Tiempo Extra
                         </label>
                         <textarea
-                            className="w-full border rounded-lg px-3 py-2 text-sm h-20"
+                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all resize-none"
+                            rows="3"
                             placeholder="Describe por qué trabajaste tiempo extra..."
                             value={overtimeReason}
                             onChange={(e) => setOvertimeReason(e.target.value)}
                         />
                         <p className="text-xs text-gray-500 mt-1">
-                            Ej: Proyecto urgente, soporte técnico, capacitación, etc.
+                            💼 Ej: Proyecto urgente, soporte técnico, capacitación, etc.
                         </p>
                     </div>
 
-                    <div className="flex justify-end gap-2">
-                        <button onClick={() => setOvertimeModalOpen(false)} className="text-sm text-gray-500 hover:text-gray-700">
-                            Cancelar
+                    <div className="flex justify-end gap-3 pt-2">
+                        <button
+                            onClick={() => setOvertimeModalOpen(false)}
+                            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-lg transition-colors"
+                        >
+                            ❌ Cancelar
                         </button>
-                        <Button onClick={handleMarkOvertime} disabled={overtimeLoading}>
-                            Registrar overtime
+                        <Button
+                            onClick={handleMarkOvertime}
+                            disabled={overtimeLoading}
+                            className="px-6 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all"
+                        >
+                            {overtimeLoading ? "⏳ Registrando..." : "⚡ Registrar Overtime"}
                         </Button>
                     </div>
                 </div>

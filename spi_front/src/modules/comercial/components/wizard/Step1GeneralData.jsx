@@ -554,8 +554,6 @@ const Step1GeneralData = ({ onNext }) => {
             {...register("contractObject")}
           />
         </label>
-
-      </div>
         <label className="flex flex-col gap-1">
           <div className="flex items-center justify-between">
             <span className="text-sm font-medium text-gray-700">Notas / contexto</span>
@@ -568,6 +566,7 @@ const Step1GeneralData = ({ onNext }) => {
             {...register("notes")}
           />
         </label>
+      </div>
         </AccordionSection>
 
         <AccordionSection
@@ -663,7 +662,7 @@ const Step1GeneralData = ({ onNext }) => {
                 />
               </label>
             </div>
-            
+          </div>
         </AccordionSection>
         <AccordionSection
           id="lis"

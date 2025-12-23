@@ -1,5 +1,6 @@
 import React from "react";
 import axios from "axios";
+export * from "./signatureApi";
 
 /**
  * ==========================================================
@@ -301,12 +302,12 @@ export const useAutoUpdate = (callback, dependencies = []) => {
   React.useEffect(() => {
     const unsubscribe = eventEmitter.on('auto-update', callback);
     return unsubscribe;
-  }, dependencies);
+  }, [callback, ...dependencies]);
 
   React.useEffect(() => {
     const unsubscribe = eventEmitter.on('data-updated', callback);
     return unsubscribe;
-  }, dependencies);
+  }, [callback, ...dependencies]);
 };
 
 // ==========================================================

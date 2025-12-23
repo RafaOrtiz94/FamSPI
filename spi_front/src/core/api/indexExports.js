@@ -13,3 +13,4 @@ export * from "./technicalApplicationsApi";
 export * from "./schedulesApi";
 export * from "./inventarioApi";
 export * from "./permisosApi";
+export * from "./signatureApi";

@@ -311,7 +311,7 @@ const CreateRequestModal = ({
   initialData = null,
   isEditing = false,
 }) => {
-  const [type, setType] = useState(null);
+  const [type, setType] = useState(presetType || "inspection");
   const [formData, setFormData] = useState({});
   const [equipos, setEquipos] = useState([]);
   const [files, setFiles] = useState([]);
@@ -375,14 +375,12 @@ const CreateRequestModal = ({
     }
 
     if (isEditing && initialData) {
-      setType(presetType || (initialData.client_type ? "cliente" : null));
+      setType(presetType || (initialData.client_type ? "cliente" : "inspection"));
       if (presetType !== "cliente") {
         setFormData(initialData);
       }
-    } else if (presetType) {
-      setType(presetType);
     } else {
-      setType(null);
+      setType(presetType || "inspection");
     }
 
     if (!isEditing) {
@@ -747,13 +745,7 @@ const CreateRequestModal = ({
             </button>
           </div>
 
-          {!type && (
-            <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-100">
-              Selecciona un flujo desde los accesos directos del dashboard para cargar la información correspondiente.
-            </div>
-          )}
-
-          {/* Campos dinámicos */}
+          {/* Siempre abrimos con un tipo por defecto para evitar pasos extra */}
           {type && type !== "cliente" && (
               <form onSubmit={handleSubmit} className="space-y-3">
               {clientSelectionRequired && (

@@ -676,20 +676,14 @@ async function archiveEmail({ html, subject, folderId, prefix = "correo", reques
 }
 
 async function sendAndArchive({ user, to, subject, html, cc, folderId, prefix, request, actionLabel }) {
-  await notificationManager.sendNotification({
-    template: 'custom_html',
-    data: { 
-      title: subject, 
-      message: html 
-    },
-    to: to,
-    sender: {
-      from: user?.email,
-      replyTo: user?.email,
-      cc: cc,
-      gmailUserId: user?.id
-    },
-    skipSave: true
+  await sendMail({
+    to,
+    cc,
+    subject,
+    html,
+    gmailUserId: user?.id,
+    from: user?.email,
+    replyTo: user?.email,
   });
   return archiveEmail({ html, subject, folderId, prefix, request, actionLabel, user });
 }

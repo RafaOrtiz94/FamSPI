@@ -5,14 +5,16 @@ import Button from "../../../../core/ui/components/Button";
 import Modal from "../../../../core/ui/components/Modal";
 import { useUI } from "../../../../core/ui/useUI";
 import { useScheduleApproval } from "../../hooks/useScheduleApproval";
+import { fetchScheduleDetail } from "../../../../core/api/schedulesApi";
 import ScheduleCard from "./ScheduleCard";
 import ScheduleDetailModal from "./ScheduleDetailModal";
 import RejectScheduleModal from "./RejectScheduleModal";
 
 const ScheduleApprovalWidget = () => {
-  const { pending, loading, approve, reject, loadPending } = useScheduleApproval();
+  const { pending, loading: listLoading, approve, reject, loadPending } = useScheduleApproval();
   const { showToast } = useUI();
   const [selectedSchedule, setSelectedSchedule] = useState(null);
+  const [modalLoading, setModalLoading] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
 
@@ -52,7 +54,7 @@ const ScheduleApprovalWidget = () => {
         </span>
       </div>
 
-      {loading && <p className="text-sm text-gray-500">Cargando cronogramas...</p>}
+      {listLoading && <p className="text-sm text-gray-500">Cargando cronogramas...</p>}
 
       <div className="space-y-3">
         {pending.map((schedule) => (
@@ -64,19 +66,33 @@ const ScheduleApprovalWidget = () => {
               setSelectedSchedule(schedule);
               setShowRejectModal(true);
             }}
-            onViewDetails={() => {
+            onViewDetails={async () => {
               setSelectedSchedule(schedule);
               setShowDetailModal(true);
+              setModalLoading(true);
+              try {
+                const fullData = await fetchScheduleDetail(schedule.id);
+                setSelectedSchedule(fullData);
+              } catch (err) {
+                showToast("No se pudo cargar el detalle", "error");
+              } finally {
+                setModalLoading(false);
+              }
             }}
           />
         ))}
-        {!pending.length && !loading && (
+        {!pending.length && !listLoading && (
           <div className="text-sm text-gray-500">No hay cronogramas pendientes por revisar.</div>
         )}
       </div>
 
       <Modal open={showDetailModal} onClose={() => setShowDetailModal(false)} title="Detalle de cronograma">
-        {selectedSchedule && (
+        {modalLoading ? (
+          <div className="p-10 flex flex-col items-center justify-center text-gray-500">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
+            <p className="text-sm">Cargando detalles...</p>
+          </div>
+        ) : selectedSchedule ? (
           <ScheduleDetailModal
             schedule={selectedSchedule}
             onApprove={() => handleApprove(selectedSchedule.id)}
@@ -84,7 +100,7 @@ const ScheduleApprovalWidget = () => {
               setShowRejectModal(true);
             }}
           />
-        )}
+        ) : null}
       </Modal>
 
       <RejectScheduleModal

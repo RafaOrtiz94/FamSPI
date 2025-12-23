@@ -347,7 +347,8 @@ const me = async (req, res) => {
     const avatarUrl = (() => {
       if (payload.avatar_url && payload.avatar_url.startsWith("data:")) return payload.avatar_url;
       if (payload.avatar_drive_id) {
-        return `https://drive.google.com/uc?export=view&id=${payload.avatar_drive_id}`;
+        // Usar sz=300 para asegurar buena calidad y compatibilidad con visualización directa
+        return `https://drive.google.com/thumbnail?id=${payload.avatar_drive_id}&sz=w300`;
       }
       return payload.avatar_url || null;
     })();

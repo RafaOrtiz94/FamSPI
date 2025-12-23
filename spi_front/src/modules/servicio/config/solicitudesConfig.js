@@ -1,4 +1,4 @@
-import { FiTool, FiPackage, FiClipboard, FiSettings, FiCalendar } from "react-icons/fi";
+import { FiTool, FiPackage, FiClipboard, FiSettings, FiCalendar, FiCreditCard } from "react-icons/fi";
 
 /**
  * Configuración de action cards para el módulo de Servicio Técnico
@@ -44,6 +44,14 @@ export const servicioActionCards = [
         color: "orange",
         icon: FiCalendar,
         description: "Solicitar días de vacaciones"
+    },
+    {
+        id: "compra",
+        subtitle: "Compras",
+        title: "Requerimiento de Compra",
+        color: "indigo",
+        icon: FiCreditCard,
+        description: "Inicia un proceso de compra de equipos"
     }
 ];
 

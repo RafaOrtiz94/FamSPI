@@ -1,7 +1,3 @@
---
--- Migration 015: Extiende las solicitudes privadas con metadatos comerciales adicionales
---
-
 ALTER TABLE public.private_purchase_requests
   ADD COLUMN IF NOT EXISTS offer_valid_until timestamp with time zone,
   ADD COLUMN IF NOT EXISTS offer_kind character varying(32) DEFAULT 'venta',

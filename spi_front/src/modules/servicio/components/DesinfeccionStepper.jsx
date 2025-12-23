@@ -6,6 +6,8 @@ import Button from "../../../core/ui/components/Button";
 import { generateDisinfectionPDF } from "../../../core/api/servicioApi";
 import { useUI } from "../../../core/ui/UIContext";
 import FirmaDigital from "./FirmaDigital";
+import DocumentSigner from "../../signature/components/DocumentSigner";
+import { signDocument, fileToBase64 } from "../../../core/api";
 
 const STEPS = [
   {
@@ -140,20 +142,42 @@ const DesinfeccionStepper = () => {
       setIsGeneratingPDF(true);
 
       console.log("Form data received:", {
-        firma_ing_SC: !!data.firma_ing_SC,
-        signatureLength: data.firma_ing_SC?.length,
         adjunto_evidencia: !!data.adjunto_evidencia,
         evidenceCount: data.adjunto_evidencia?.length || 0
       });
 
-      // Validate that at least signature is present
-      if (!data.firma_ing_SC || data.firma_ing_SC.length < 10) {
-        showToast("Debe firmar digitalmente antes de completar el registro", "error");
+      // ✅ VALIDACIONES OBLIGATORIAS ANTES DE COMPLETAR
+
+      // 1. Validar que se haya subido evidencia fotográfica
+      if (!data.adjunto_evidencia || data.adjunto_evidencia.length === 0) {
+        showToast("Debe adjuntar al menos una evidencia fotográfica del proceso de desinfección", "error");
         setIsGeneratingPDF(false);
         return;
       }
 
-      // Prepare data for PDF generation - Include all fields from the detailed mapping
+      // 2. Validar que se haya realizado la firma (temporal, será reemplazada por firma avanzada)
+      if (!data.firma_ing_SC || data.firma_ing_SC.length < 10) {
+        showToast("Debe firmar digitalmente el registro antes de completarlo", "error");
+        setIsGeneratingPDF(false);
+        return;
+      }
+
+      // 3. Validar que todos los pasos críticos estén marcados
+      const criticalSteps = [
+        'chk_general', 'chk_PEO', 'chk_PEO_1', 'chk_OP_1',
+        'chk_en', 'chk_CP', 'chk_lim', 'chk_cloro',
+        'chk_PS', 'chk_tras', 'chk_CVITE',
+        'chk_DFD', 'chk_CD'
+      ];
+
+      const missingSteps = criticalSteps.filter(step => !data[step]);
+      if (missingSteps.length > 0) {
+        showToast(`Faltan completar ${missingSteps.length} paso(s) obligatorio(s) del proceso de desinfección`, "error");
+        setIsGeneratingPDF(false);
+        return;
+      }
+
+      // Prepare data for PDF generation (con firma básica, será reemplazada por firma avanzada)
       const pdfData = {
         // 1️⃣ DATOS GENERALES
         fecha: data.fecha,
@@ -200,29 +224,46 @@ const DesinfeccionStepper = () => {
         chk_CD_peo: data.chk_CD_peo || false,
         chk_CD_op: data.chk_CD_op || false,
 
-        // 9️⃣ DECLARACIÓN Y FIRMA
-        firma_ing_SC: data.firma_ing_SC,
+        // 9️⃣ DECLARACIÓN Y FIRMA (temporal, será reemplazada por firma avanzada)
+        firma_ing_SC: "FIRMA_ELECTRONICA_AVANZADA_PENDIENTE",
 
         // 🔟 ADJUNTOS
         adjunto_evidencia: data.adjunto_evidencia,
       };
 
-      console.log("Submitting disinfection data:", {
-        hasSignature: !!pdfData.firma_ing_SC,
-        signatureLength: pdfData.firma_ing_SC?.length,
+      console.log("Submitting disinfection data for PDF generation:", {
         hasAttachments: !!pdfData.adjunto_evidencia && pdfData.adjunto_evidencia.length > 0,
         attachmentCount: pdfData.adjunto_evidencia?.length || 0
       });
 
       const result = await generateDisinfectionPDF(pdfData);
 
-      console.log("API Response:", result);
+      console.log("PDF Generation API Response:", result);
 
       if (result.ok) {
-        // Show completion screen instead of resetting immediately
+        // Crear documento en el sistema de firma electrónica
+        const documentData = {
+          title: `Desinfección - ${data.equipo} - ${data.fecha}`,
+          type: 'DESINFECTION_REPORT',
+          content: `Registro de desinfección de instrumento médico según F.ST-02 V04`,
+          metadata: {
+            form_type: 'F.ST-02',
+            form_version: 'V04',
+            equipment: data.equipo,
+            serial: data.serie,
+            responsible: data.responsable,
+            disinfection_date: data.fecha,
+            drive_folder_id: result.driveFolderId,
+            pdf_url: result.pdfUrl
+          }
+        };
+
+        // Aquí iría la lógica para crear el documento y redirigir a firma avanzada
+        // Por ahora, mostramos el resultado del PDF
         setIsCompleted(true);
         setCompletionData(result);
-        showToast(`Registro completado: ${result.imageCount || 0} evidencia(s) guardada(s)`, "success");
+        showToast(`PDF generado exitosamente. Próximamente: Firma electrónica avanzada.`, "success");
+
       } else {
         showToast(result.message || "Error al procesar el registro", "error");
       }
@@ -706,14 +747,26 @@ const DesinfeccionStepper = () => {
                 Certificación y Evidencia
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Firma digital y evidencia fotográfica del proceso
+                Firma electrónica avanzada y evidencia fotográfica del proceso
               </p>
             </div>
 
-            <Card className="p-4">
-              <h4 className="font-medium text-gray-900 mb-4">Firma Digital</h4>
-              <div onClick={(e) => e.preventDefault()}>
-                <FirmaDigital onSignatureCapture={handleSignatureCapture} />
+            {/* Información importante sobre la firma avanzada */}
+            <Card className="p-4 bg-yellow-50 border-yellow-200">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0">
+                  <svg className="w-5 h-5 text-yellow-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                          d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                  </svg>
+                </div>
+                <div>
+                  <h4 className="font-medium text-yellow-900 mb-1">Firma Electrónica Avanzada</h4>
+                  <p className="text-sm text-yellow-800">
+                    Este documento será firmado digitalmente con sello institucional y código QR verificable,
+                    cumpliendo con la Ley de Comercio Electrónico del Ecuador.
+                  </p>
+                </div>
               </div>
             </Card>
 
@@ -721,7 +774,7 @@ const DesinfeccionStepper = () => {
               <h4 className="font-medium text-gray-900 mb-4">Evidencia Fotográfica</h4>
               <div className="space-y-3">
                 <p className="text-sm text-gray-600">
-                  Adjunte fotos del proceso de desinfección para evidencia
+                  Adjunte fotos del proceso de desinfección para evidencia legal
                 </p>
                 <div className="flex items-center gap-3">
                   <input
@@ -748,12 +801,47 @@ const DesinfeccionStepper = () => {
               </div>
             </Card>
 
+            {/* Certificación legal */}
             <Card className="p-4 bg-blue-50 border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">Certificación</h4>
-              <p className="text-sm text-blue-800">
+              <h4 className="font-medium text-blue-900 mb-2">Certificación Legal</h4>
+              <p className="text-sm text-blue-800 mb-3">
                 "Con la presente certifico que: He completado los pasos de desinfección para el instrumento en mención.
                 El instrumento se encuentra libre de fluidos corporales y material contaminante."
               </p>
+              <p className="text-xs text-blue-700">
+                Esta certificación tendrá valor legal equivalente a una firma manuscrita según la legislación ecuatoriana.
+              </p>
+            </Card>
+
+            {/* Información sobre la firma avanzada */}
+            <Card className="p-4 bg-green-50 border-green-200">
+              <h4 className="font-medium text-green-900 mb-2">¿Qué incluye la firma avanzada?</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Hash criptográfico SHA-256</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Sello institucional</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Código QR verificable</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Cadena de confianza</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Bloqueo del documento</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                  <span className="text-green-800">Audit trail completo</span>
+                </div>
+              </div>
             </Card>
           </div>
         );

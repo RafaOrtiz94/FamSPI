@@ -111,7 +111,13 @@ const Requests = () => {
     try {
       await cancelRequest(req.id);
       showToast(`Solicitud #${req.id} cancelada`, "success");
-      await load();
+      await fetchRequests({
+        page: 1,
+        pageSize: 20,
+        mine: true,
+        q: query,
+        status: status === "all" ? undefined : status,
+      });
     } catch (e) {
       console.error(e);
       showToast("No se pudo cancelar la solicitud", "error");
@@ -132,7 +138,13 @@ const Requests = () => {
             Solicitudes Comerciales
           </h1>
           <button
-            onClick={load}
+            onClick={() => fetchRequests({
+              page: 1,
+              pageSize: 20,
+              mine: true,
+              q: query,
+              status: status === "all" ? undefined : status,
+            })}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
           >
             <FiRefreshCw /> Actualizar
@@ -145,7 +157,13 @@ const Requests = () => {
           onChange={setQuery}
           status={status}
           setStatus={setStatus}
-          onRefresh={load}
+          onRefresh={() => fetchRequests({
+            page: 1,
+            pageSize: 20,
+            mine: true,
+            q: query,
+            status: status === "all" ? undefined : status,
+          })}
         />
 
         {/* Listado */}
