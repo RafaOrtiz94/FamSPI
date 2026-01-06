@@ -12,6 +12,7 @@ const bcDeliveriesService = require("./bcDeliveries.service");
 const orchestrator = require("./BusinessCaseOrchestrator.service");
 const pdfGenerator = require("./pdfGenerator.service");
 const excelExporter = require("./excelExporter.service");
+const equipmentCompatibilityService = require("./equipmentCompatibility.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -653,6 +654,114 @@ async function getCompleteBCMaster(req, res) {
   }
 }
 
+// ===== EQUIPMENT COMPATIBILITY ENDPOINTS =====
+
+/**
+ * Get compatible backup candidates for equipment
+ *
+ * NEW ENDPOINT: Advanced compatibility-based backup selection
+ * Falls back to legacy category-based logic when compatibility data is missing
+ */
+async function getCompatibleBackupCandidates(req, res) {
+  try {
+    const { equipmentId } = req.params;
+    const {
+      maxCandidates = 10,
+      minCompatibilityScore = 0.3,
+      maxCostPenalty = 50.0,
+      requireCapacityOverlap = true
+    } = req.query;
+
+    const options = {
+      maxCandidates: parseInt(maxCandidates),
+      minCompatibilityScore: parseFloat(minCompatibilityScore),
+      maxCostPenalty: parseFloat(maxCostPenalty),
+      requireCapacityOverlap: requireCapacityOverlap === 'true'
+    };
+
+    const candidates = await equipmentCompatibilityService.getCompatibleBackupCandidates(
+      parseInt(equipmentId),
+      options
+    );
+
+    res.json({
+      ok: true,
+      data: candidates,
+      meta: {
+        equipmentId: parseInt(equipmentId),
+        options,
+        totalCandidates: candidates.length,
+        hasCompatibilityData: candidates.some(c => c.compatibility_metadata?.match_type !== 'legacy_fallback')
+      }
+    });
+  } catch (error) {
+    logger.error({
+      error: error.message,
+      equipmentId: req.params.equipmentId
+    }, 'Error getting compatible backup candidates');
+
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "Error obteniendo candidatos de respaldo compatibles"
+    });
+  }
+}
+
+/**
+ * Validate compatibility between two equipment items
+ *
+ * NEW ENDPOINT: Advanced validation beyond basic category matching
+ */
+async function validateEquipmentCompatibility(req, res) {
+  try {
+    const { primaryId, backupId } = req.params;
+
+    const validation = await equipmentCompatibilityService.validateEquipmentCompatibility(
+      parseInt(primaryId),
+      parseInt(backupId)
+    );
+
+    res.json({
+      ok: true,
+      data: validation
+    });
+  } catch (error) {
+    logger.error({
+      error: error.message,
+      primaryId: req.params.primaryId,
+      backupId: req.params.backupId
+    }, 'Error validating equipment compatibility');
+
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "Error validando compatibilidad de equipos"
+    });
+  }
+}
+
+/**
+ * Get compatibility system statistics
+ *
+ * NEW ENDPOINT: Analytics for monitoring compatibility system health
+ */
+async function getCompatibilityStatistics(req, res) {
+  try {
+    const stats = await equipmentCompatibilityService.getCompatibilityStatistics();
+
+    res.json({
+      ok: true,
+      data: stats
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error getting compatibility statistics');
+
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "Error obteniendo estadísticas de compatibilidad"
+    });
+  }
+}
+
 module.exports = {
   list,
   create,
@@ -696,5 +805,9 @@ module.exports = {
   recalculateWithOperational,
   validateBC,
   promoteStage,
-  getCompleteBCMaster
+  getCompleteBCMaster,
+  // Equipment compatibility endpoints
+  getCompatibleBackupCandidates,
+  validateEquipmentCompatibility,
+  getCompatibilityStatistics
 };

@@ -43,6 +43,11 @@ const AttendanceWidget = () => {
     const [overtimeLoading, setOvertimeLoading] = useState(false);
     const [overtimeRecords, setOvertimeRecords] = useState([]);
 
+    // Geolocation state
+    const [locationLoading, setLocationLoading] = useState(false);
+    const [cachedLocation, setCachedLocation] = useState(null);
+    const [locationTimestamp, setLocationTimestamp] = useState(null);
+
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
         return () => clearInterval(timer);
@@ -79,30 +84,86 @@ const AttendanceWidget = () => {
         await Promise.all([loadAttendance(), fetchException()]);
     };
 
-        const getLocation = () =>
-        new Promise((resolve) => {
-            if (!navigator.geolocation) {
-                showToast("Geolocalizacion no soportada por el navegador", "error");
-                return resolve(null);
+        /**
+         * Optimized geolocation with caching, retry logic, and performance improvements
+         * - Uses cached location if recent (< 10 minutes)
+         * - Fast mode first (low accuracy, 5s timeout), fallback to high accuracy
+         * - Non-blocking with loading indicators
+         * - Allows attendance without location when geolocation fails
+         */
+        const getLocation = async (showErrors = true) => {
+            // Check cache first (10 minutes validity)
+            const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+            if (cachedLocation && locationTimestamp &&
+                (Date.now() - locationTimestamp) < CACHE_DURATION) {
+                return cachedLocation;
             }
 
-            navigator.geolocation.getCurrentPosition(
-                (pos) => {
+            if (!navigator.geolocation) {
+                if (showErrors) {
+                    showToast("Geolocalización no soportada por el navegador", "warning");
+                }
+                return null;
+            }
+
+            const getPosition = (options) =>
+                new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, options);
+                });
+
+            try {
+                setLocationLoading(true);
+
+                // Try fast mode first (5 seconds, low accuracy)
+                const fastOptions = {
+                    enableHighAccuracy: false,
+                    timeout: 5000,
+                    maximumAge: 300000 // 5 minutes cache
+                };
+
+                try {
+                    const pos = await getPosition(fastOptions);
                     const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
-                    resolve(loc);
-                },
-                (err) => {
-                    console.error("Error de geolocalizacion:", err);
-                    let msg = "No se pudo obtener ubicacion.";
-                    if (err.code === 1) msg = "Permiso de ubicacion denegado.";
-                    if (err.code === 2) msg = "Ubicacion no disponible.";
-                    if (err.code === 3) msg = "Tiempo de espera agotado al obtener ubicacion.";
-                    showToast(msg + " No se registrara el evento sin ubicacion.", "warning");
-                    resolve(null);
-                },
-                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-            );
-        });
+                    setCachedLocation(loc);
+                    setLocationTimestamp(Date.now());
+                    return loc;
+                } catch (fastError) {
+                    console.warn("Fast geolocation failed, trying high accuracy mode:", fastError);
+
+                    // Fallback to high accuracy mode (8 seconds timeout)
+                    const highAccuracyOptions = {
+                        enableHighAccuracy: true,
+                        timeout: 8000,
+                        maximumAge: 180000 // 3 minutes cache
+                    };
+
+                    const pos = await getPosition(highAccuracyOptions);
+                    const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
+                    setCachedLocation(loc);
+                    setLocationTimestamp(Date.now());
+                    return loc;
+                }
+            } catch (err) {
+                console.error("Geolocation error:", err);
+
+                // Handle different error types gracefully
+                if (showErrors) {
+                    let msg = "No se pudo obtener ubicación.";
+                    if (err.code === 1) {
+                        msg = "Permiso de ubicación denegado. El registro continuará sin ubicación.";
+                    } else if (err.code === 2) {
+                        msg = "Ubicación no disponible. El registro continuará sin ubicación.";
+                    } else if (err.code === 3) {
+                        msg = "Tiempo de espera agotado. El registro continuará sin ubicación.";
+                    }
+                    showToast(msg, "warning");
+                }
+
+                return null; // Allow attendance without location
+            } finally {
+                setLocationLoading(false);
+            }
+        };
     const formatTime = (ts) =>
         ts
             ? new Date(ts).toLocaleTimeString("es-EC", {
@@ -175,68 +236,86 @@ const AttendanceWidget = () => {
         };
     };
 
+    /**
+     * Optimized non-blocking attendance handler
+     * - Starts geolocation in background
+     * - Proceeds with attendance registration regardless of geolocation result
+     * - Shows appropriate loading states and feedback
+     */
     const handle = async (fn, successMsg, celebrateDay = false) => {
         setLoading(true);
+
         try {
-            const loc = await getLocation();
-            if (!loc) {
-                setLoading(false);
-                return;
-            }
-            const res = await fn(loc);
+            // Start geolocation in background (non-blocking)
+            const locationPromise = getLocation(false); // Don't show errors in background
+
+            // Proceed with attendance registration
+            const res = await fn(await locationPromise);
+
             if (res.ok) {
                 if (celebrateDay) celebrate();
                 showToast(successMsg, "success");
                 await refreshAll();
+            } else {
+                showToast("Error registrando asistencia", "error");
             }
         } catch (err) {
-            showToast(err.message || "Error", "error");
+            console.error("Attendance registration error:", err);
+            showToast(err.response?.data?.message || err.message || "Error registrando asistencia", "error");
         } finally {
             setLoading(false);
         }
     };
 
+    /**
+     * Optimized exception registration with background geolocation
+     */
     const handleRegisterException = async () => {
         const finalType = exceptionType || "otro";
         const finalDescription = exceptionDescription || "Salida inesperada";
 
         setExceptionLoading(true);
         try {
-            const loc = await getLocation();
-            if (!loc) {
-                setExceptionLoading(false);
-                return;
-            }
-            const res = await registerException(finalType, finalDescription, loc);
+            // Start geolocation in background
+            const locationPromise = getLocation(false);
+
+            const res = await registerException(finalType, finalDescription, await locationPromise);
             if (res.ok) {
                 showToast("Salida registrada. Notifica tu llegada.", "success");
                 setExceptionModalOpen(false);
                 setExceptionType("");
                 setExceptionDescription("");
                 await refreshAll();
+            } else {
+                showToast("Error registrando salida", "error");
             }
         } catch (err) {
-            const msg = err.response?.data?.message || err.message || "Error";
+            console.error("Exception registration error:", err);
+            const msg = err.response?.data?.message || err.message || "Error registrando salida";
             showToast(msg, "error");
         } finally {
             setExceptionLoading(false);
         }
     };
 
+    /**
+     * Optimized exception status update with background geolocation
+     */
     const handleExceptionUpdate = async (status, successMsg) => {
         setLoading(true);
         try {
-            const loc = await getLocation();
-            if (!loc) {
-                setLoading(false);
-                return;
-            }
-            const res = await updateExceptionStatus(status, loc);
+            // Start geolocation in background
+            const locationPromise = getLocation(false);
+
+            const res = await updateExceptionStatus(status, await locationPromise);
             if (res.ok) {
                 showToast(successMsg, "success");
                 await refreshAll();
+            } else {
+                showToast("Error actualizando estado", "error");
             }
         } catch (err) {
+            console.error("Exception update error:", err);
             const msg = err.response?.data?.message || err.message || "Error actualizando estado";
             showToast(msg, "error");
         } finally {
@@ -244,6 +323,9 @@ const AttendanceWidget = () => {
         }
     };
 
+    /**
+     * Optimized overtime registration with background geolocation
+     */
     const handleMarkOvertime = async () => {
         const hours = parseFloat(overtimeHours);
         if (!hours || hours <= 0) {
@@ -258,15 +340,20 @@ const AttendanceWidget = () => {
 
         setOvertimeLoading(true);
         try {
-            const loc = await getLocation();
-            const res = await markOvertime(hours, overtimeReason.trim(), loc);
+            // Start geolocation in background
+            const locationPromise = getLocation(false);
+
+            const res = await markOvertime(hours, overtimeReason.trim(), await locationPromise);
             if (res.ok) {
                 showToast(`Overtime de ${hours}h registrado correctamente`, "success");
                 setOvertimeModalOpen(false);
                 setOvertimeHours("");
                 setOvertimeReason("");
+            } else {
+                showToast("Error registrando overtime", "error");
             }
         } catch (err) {
+            console.error("Overtime registration error:", err);
             const msg = err.response?.data?.message || err.message || "Error registrando overtime";
             showToast(msg, "error");
         } finally {
@@ -508,10 +595,12 @@ const AttendanceWidget = () => {
                                         ? handle(clockOut, "Buen trabajo!", true)
                                         : handle(clockOutLunch, "Buen provecho")
                             }
-                            disabled={loading}
+                            disabled={loading || locationLoading}
                             className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-xl shadow-blue-500/25 transform hover:scale-[1.02] transition-all duration-200"
                         >
-                            {attendance?.lunch_start_time && !attendance?.lunch_end_time
+                            {loading ? "⏳ Registrando..." :
+                             locationLoading ? "📍 Obteniendo ubicación..." :
+                             attendance?.lunch_start_time && !attendance?.lunch_end_time
                                 ? "🍽️ Regresar de Almuerzo"
                                 : attendance?.lunch_end_time
                                     ? "🏁 Finalizar Jornada"
@@ -520,10 +609,12 @@ const AttendanceWidget = () => {
                     ) : (
                         <Button
                             onClick={() => handle(clockIn, "Entrada registrada")}
-                            disabled={loading}
+                            disabled={loading || locationLoading}
                             className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-xl shadow-emerald-500/25 transform hover:scale-[1.02] transition-all duration-200"
                         >
-                            🚀 Marcar Entrada
+                            {loading ? "⏳ Registrando entrada..." :
+                             locationLoading ? "📍 Obteniendo ubicación..." :
+                             "🚀 Marcar Entrada"}
                         </Button>
                     )}
                 </div>

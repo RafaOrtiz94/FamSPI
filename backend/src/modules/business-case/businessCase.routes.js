@@ -73,18 +73,23 @@ router.get("/:id/requirements", verifyToken, requireRole(businessCaseRoles), ctr
 router.post("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.saveDeliveries);
 router.get("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.getDeliveries);
 
-// Orchestrator routes (Unified BC Workflow)
-router.post("/orchestrator/create-economic", verifyToken, requireRole(businessCaseRoles), ctrl.createEconomicBC);
-router.post("/:id/orchestrator/calculate-roi", verifyToken, requireRole(businessCaseRoles), ctrl.calculateROI);
-router.post("/:id/orchestrator/evaluate-approval", verifyToken, requireRole(businessCaseRoles), ctrl.evaluateEconomicApproval);
-router.post("/:id/orchestrator/attach-operational", verifyToken, requireRole(businessCaseRoles), ctrl.attachOperationalData);
-router.post("/:id/orchestrator/attach-lis", verifyToken, requireRole(businessCaseRoles), ctrl.attachLISData);
-router.post("/:id/orchestrator/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculateWithOperational);
-router.post("/:id/orchestrator/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateBC);
-router.post("/:id/orchestrator/promote-stage", verifyToken, requireRole(businessCaseRoles), ctrl.promoteStage);
-router.get("/:id/orchestrator/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getCompleteBCMaster);
+  // Orchestrator routes (Unified BC Workflow)
+  router.post("/orchestrator/create-economic", verifyToken, requireRole(businessCaseRoles), ctrl.createEconomicBC);
+  router.post("/:id/orchestrator/calculate-roi", verifyToken, requireRole(businessCaseRoles), ctrl.calculateROI);
+  router.post("/:id/orchestrator/evaluate-approval", verifyToken, requireRole(businessCaseRoles), ctrl.evaluateEconomicApproval);
+  router.post("/:id/orchestrator/attach-operational", verifyToken, requireRole(businessCaseRoles), ctrl.attachOperationalData);
+  router.post("/:id/orchestrator/attach-lis", verifyToken, requireRole(businessCaseRoles), ctrl.attachLISData);
+  router.post("/:id/orchestrator/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculateWithOperational);
+  router.post("/:id/orchestrator/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateBC);
+  router.post("/:id/orchestrator/promote-stage", verifyToken, requireRole(businessCaseRoles), ctrl.promoteStage);
+  router.get("/:id/orchestrator/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getCompleteBCMaster);
 
-// Equipment catalog
+  // Equipment compatibility routes (NEW - Automatic backup selection)
+  router.get("/equipment/:equipmentId/compatibility/backups", verifyToken, requireRole(businessCaseRoles), ctrl.getCompatibleBackupCandidates);
+  router.get("/equipment/:primaryId/:backupId/compatibility/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateEquipmentCompatibility);
+  router.get("/compatibility/statistics", verifyToken, requireRole(adminRoles), ctrl.getCompatibilityStatistics);
+
+  // Equipment catalog
 const equipmentCatalogRoutes = express.Router();
 equipmentCatalogRoutes.get("/", verifyToken, requireRole(businessCaseRoles), equipmentCatalogCtrl.list);
 equipmentCatalogRoutes.get("/:id", verifyToken, requireRole(businessCaseRoles), equipmentCatalogCtrl.getDetails);
