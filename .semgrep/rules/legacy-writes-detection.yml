@@ -1,0 +1,108 @@
+rules:
+  - id: legacy-equipment-purchase-writes
+    patterns:
+      - pattern: |
+          equipmentPurchasesService\.(createPurchaseRequest|assignProvider|uploadProforma|uploadSignedProforma|uploadContract|submitBusinessCase|approveBusinessCase|rejectBusinessCase)\(
+      message: |
+        Legacy equipment-purchases service write detected. When REQUESTS_UNIFICATION_V2=true,
+        all purchase operations must go through purchaseRequestsFacade instead.
+        Replace with: purchaseRequestsFacade.{method}()
+      severity: ERROR
+      languages: [javascript, typescript]
+
+  - id: direct-equipment-purchase-db-writes
+    patterns:
+      - pattern: |
+          db\.query\(`.*INSERT INTO equipment_purchase_requests.*`, \[
+      - pattern: |
+          db\.query\(`.*UPDATE equipment_purchase_requests.*`, \[
+      - pattern: |
+          db\.query\(`.*DELETE FROM equipment_purchase_requests.*`, \[
+      - pattern: |
+          db\.query\(.*INSERT INTO equipment_purchase_requests.*\)
+      - pattern: |
+          db\.query\(.*UPDATE equipment_purchase_requests.*\)
+      - pattern: |
+          db\.query\(.*DELETE FROM equipment_purchase_requests.*\)
+    message: |
+        Direct database write to equipment_purchase_requests detected.
+        When REQUESTS_UNIFICATION_V2=true, all writes must go through purchaseRequestsFacade.
+        Use facade methods instead of direct DB operations.
+    severity: ERROR
+    languages: [javascript, typescript]
+
+  - id: direct-equipment-purchase-service-call
+    patterns:
+      - pattern: |
+          const equipmentService = require\(['"`].*equipmentPurchases.*['"`]\)
+          ...
+          equipmentService\.(createPurchaseRequest|assignProvider|uploadProforma|uploadSignedProforma|uploadContract)\(
+      message: |
+        Direct call to legacy equipmentPurchases service detected.
+        When REQUESTS_UNIFICATION_V2=true, use purchaseRequestsFacade instead.
+    severity: WARNING
+    languages: [javascript, typescript]
+
+  - id: missing-legacy-adapter-logging
+    patterns:
+      - pattern: |
+          exports\.(create|assignProvider|uploadProforma|uploadSignedProforma|uploadContract|submitBusinessCase|approveBusinessCase|rejectBusinessCase) = async \(req, res, next\) => \{
+          ...
+          const facade = require\(['"`].*purchaseRequestsFacade['"`]\)
+          ...
+          const updated = await facade\.\w+\(
+          ...
+          res\.json\(\{ ok: true, data: updated \}\)
+      - pattern-not: |
+          logger\.info\(.*, \{\s*legacy_adapter_used: true
+    message: |
+        Legacy adapter endpoint missing legacy_adapter_used logging.
+        Add logger.info with legacy_adapter_used: true for monitoring migration progress.
+    severity: WARNING
+    languages: [javascript, typescript]
+
+  - id: unsafe-drive-folder-creation
+    patterns:
+      - pattern: |
+          ensureFolder\([^)]*\)
+      - pattern-not-inside: |
+          _ensurePurchaseFolder\([^)]*\)
+      - pattern-not-inside: |
+          _uploadDocumentToPurchaseFolder\([^)]*\)
+    message: |
+        Direct ensureFolder call detected outside of facade utility functions.
+        Use _ensurePurchaseFolder or _uploadDocumentToPurchaseFolder for idempotent Drive operations.
+    severity: WARNING
+    languages: [javascript, typescript]
+
+  - id: unsafe-drive-upload
+    patterns:
+      - pattern: |
+          uploadBase64File\([^)]*\)
+      - pattern-not-inside: |
+          _uploadDocumentToPurchaseFolder\([^)]*\)
+    message: |
+        Direct uploadBase64File call detected outside of facade utility functions.
+        Use _uploadDocumentToPurchaseFolder for idempotent Drive operations.
+    severity: WARNING
+    languages: [javascript, typescript]
+
+  - id: missing-facade-error-handling
+    patterns:
+      - pattern: |
+          const facade = require\(['"`].*purchaseRequestsFacade['"`]\)
+          ...
+          const result = await facade\.\w+\([^)]*\)
+          ...
+          res\.json\(\{ ok: true, data: result \}\)
+      - pattern-not: |
+          try \{
+          ...
+          \} catch \(error\) \{
+          ...
+          next\(error\)
+      message: |
+        Facade call missing proper error handling.
+        Wrap facade calls in try-catch blocks and call next(error) on failure.
+    severity: ERROR
+    languages: [javascript, typescript]
