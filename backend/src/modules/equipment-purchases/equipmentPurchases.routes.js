@@ -70,6 +70,13 @@ router.post(
 );
 
 router.post(
+  "/:id/business-case/resolve",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.resolveBusinessCase
+);
+
+router.post(
   "/:id/business-case/items",
   verifyToken,
   requireRole(businessCaseRoles),
@@ -96,6 +103,37 @@ router.post(
   requireRole(managerRoles),
   ctrl.upload.single("file"),
   ctrl.submitSignedProformaWithInspection,
+);
+
+// ===== BUSINESS CASE APPROVAL ROUTES =====
+const bcApprovalRoles = ["gerencia", "jefe_comercial"];
+
+router.post(
+  "/:id/business-case/submit",
+  verifyToken,
+  requireRole(managerRoles),
+  ctrl.submitBusinessCase
+);
+
+router.post(
+  "/:id/business-case/approve",
+  verifyToken,
+  requireRole(bcApprovalRoles),
+  ctrl.approveBusinessCase
+);
+
+router.post(
+  "/:id/business-case/reject",
+  verifyToken,
+  requireRole(bcApprovalRoles),
+  ctrl.rejectBusinessCase
+);
+
+router.get(
+  "/:id/gating-status",
+  verifyToken,
+  requireRole(managerRoles),
+  ctrl.getPurchaseGatingStatus
 );
 
 module.exports = router;

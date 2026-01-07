@@ -221,6 +221,14 @@ exports.uploadSignedProforma = async (req, res, next) => {
 
 exports.uploadContract = async (req, res, next) => {
   try {
+    // FEATURE FLAG: BC gating for contracts
+    const bcGatingEnabled = process.env.BC_GATING_FOR_CONTRACT === 'true';
+
+    if (bcGatingEnabled) {
+      // Check if contract upload is allowed
+      await service.assertPurchaseCanProceedToContract(req.params.id, req.user);
+    }
+
     const updated = await service.uploadContract({
       id: req.params.id,
       user: req.user,
@@ -282,6 +290,26 @@ exports.listBusinessCaseItems = async (req, res, next) => {
   }
 };
 
+
+exports.resolveBusinessCase = async (req, res, next) => {
+  try {
+    const result = await service.resolveBusinessCaseForPurchase({ id: req.params.id, user: req.user });
+
+    await logAction({
+      user_id: req.user.id,
+      module: "equipment_purchases",
+      action: result.created ? "create_business_case" : "link_business_case",
+      entity: "equipment_purchase_requests",
+      entity_id: req.params.id,
+      details: { business_case_id: result.business_case_id, created: result.created }
+    });
+
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.submitSignedProformaWithInspection = async (req, res, next) => {
   try {
     const { inspection_min_date, inspection_max_date, includes_starter_kit } = req.body;
@@ -317,6 +345,53 @@ exports.startAvailability = async (req, res, next) => {
     });
 
     res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// ===== BUSINESS CASE APPROVAL ENDPOINTS =====
+
+exports.submitBusinessCase = async (req, res, next) => {
+  try {
+    const updated = await service.submitBusinessCaseForApproval(req.params.id, req.user);
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.approveBusinessCase = async (req, res, next) => {
+  try {
+    const { notes } = req.body;
+    const updated = await service.approveBusinessCase(req.params.id, req.user, notes);
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.rejectBusinessCase = async (req, res, next) => {
+  try {
+    const { reason } = req.body;
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Se requiere razón de rechazo"
+      });
+    }
+
+    const updated = await service.rejectBusinessCase(req.params.id, req.user, reason.trim());
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getPurchaseGatingStatus = async (req, res, next) => {
+  try {
+    const status = await service.getPurchaseGatingStatus(req.params.id, req.user);
+    res.json({ ok: true, data: status });
   } catch (error) {
     next(error);
   }

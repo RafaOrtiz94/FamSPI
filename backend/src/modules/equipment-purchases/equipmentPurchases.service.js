@@ -1545,6 +1545,349 @@ async function uploadContract({ id, user, file }) {
   return completed;
 }
 
+async function assertPurchaseCanProceedToContract(requestId, user) {
+  await ensureTables();
+
+  // FEATURE FLAG: BC gating for contracts
+  const bcGatingEnabled = process.env.BC_GATING_FOR_CONTRACT === 'true';
+
+  if (!bcGatingEnabled) {
+    logger.info("BC gating disabled, allowing contract upload");
+    return { canProceed: true, reasons: [] };
+  }
+
+  const { rows } = await db.query(
+    `SELECT
+      id, proforma_signed_at, commercial_certainty,
+      bc_spreadsheet_id, bc_status, bc_gating_exempt
+     FROM equipment_purchase_requests
+     WHERE id = $1`,
+    [requestId]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Solicitud no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const request = rows[0];
+  const reasons = [];
+
+  // Check 1: Commercial certainty (signed proforma)
+  if (!request.proforma_signed_at || !request.commercial_certainty) {
+    reasons.push({
+      code: 'NO_COMMERCIAL_CERTAINTY',
+      message: 'Se requiere proforma firmada para proceder con el contrato',
+      blocking: true
+    });
+  }
+
+  // Check 2: BC exists
+  if (!request.bc_spreadsheet_id) {
+    reasons.push({
+      code: 'BC_NOT_CREATED',
+      message: 'Se requiere Business Case aprobado para proceder con el contrato',
+      blocking: true
+    });
+  }
+
+  // Check 3: BC approved
+  if (request.bc_spreadsheet_id && request.bc_status !== 'approved') {
+    reasons.push({
+      code: 'BC_NOT_APPROVED',
+      message: 'El Business Case debe estar aprobado para proceder con el contrato',
+      blocking: true
+    });
+  }
+
+  // Check 4: Legacy exemption
+  if (request.bc_gating_exempt) {
+    logger.info("Legacy exemption applied for request %s", requestId);
+    return { canProceed: true, reasons: [], exempt: true };
+  }
+
+  // Check 5: Role authorization
+  const allowedRoles = ['acp_comercial', 'gerencia', 'jefe_comercial'];
+  if (!allowedRoles.includes(user?.role)) {
+    reasons.push({
+      code: 'ROLE_NOT_ALLOWED',
+      message: 'Usuario no autorizado para subir contratos',
+      blocking: true
+    });
+  }
+
+  const canProceed = reasons.length === 0 || reasons.every(r => !r.blocking);
+
+  if (!canProceed) {
+    // Log gating block for monitoring
+    logger.info({
+      requestId,
+      userId: user?.id,
+      userRole: user?.role,
+      reasons: reasons.map(r => r.code)
+    }, "Contract upload blocked by BC gating");
+
+    const error = new Error("No se puede proceder con el contrato: " + reasons[0].message);
+    error.status = 409; // Conflict
+    error.code = reasons[0].code;
+    error.details = { reasons };
+    throw error;
+  }
+
+  return { canProceed: true, reasons: [] };
+}
+
+async function submitBusinessCaseForApproval(id, user) {
+  await ensureTables();
+
+  const { rows } = await db.query(
+    `SELECT id, bc_spreadsheet_id, bc_status, proforma_signed_at, commercial_certainty
+     FROM equipment_purchase_requests
+     WHERE id = $1`,
+    [id]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Solicitud no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const request = rows[0];
+
+  // Validate prerequisites
+  if (!request.proforma_signed_at || !request.commercial_certainty) {
+    const error = new Error("Se requiere proforma firmada para enviar BC a aprobación");
+    error.status = 409;
+    error.code = 'COMMERCIAL_CERTAINTY_REQUIRED';
+    throw error;
+  }
+
+  if (!request.bc_spreadsheet_id) {
+    const error = new Error("Business Case no existe");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.bc_status === 'approved') {
+    const error = new Error("Business Case ya está aprobado");
+    error.status = 409;
+    error.code = 'BC_ALREADY_APPROVED';
+    throw error;
+  }
+
+  // Update status
+  const { rows: updated } = await db.query(
+    `UPDATE equipment_purchase_requests
+     SET bc_status = 'in_review',
+         bc_submitted_at = NOW(),
+         bc_submitted_by = $2,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, user.id]
+  );
+
+  logger.info({
+    requestId: id,
+    submittedBy: user.id,
+    bcStatus: 'in_review'
+  }, "BC submitted for approval");
+
+  return mapRequestRow(updated[0]);
+}
+
+async function approveBusinessCase(id, user, notes = null) {
+  await ensureTables();
+
+  // Check role authorization
+  const allowedRoles = ['gerencia', 'jefe_comercial'];
+  if (!allowedRoles.includes(user?.role)) {
+    const error = new Error("Usuario no autorizado para aprobar Business Cases");
+    error.status = 403;
+    error.code = 'ROLE_NOT_AUTHORIZED';
+    throw error;
+  }
+
+  const { rows } = await db.query(
+    `SELECT id, bc_spreadsheet_id, bc_status
+     FROM equipment_purchase_requests
+     WHERE id = $1`,
+    [id]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Solicitud no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const request = rows[0];
+
+  if (!request.bc_spreadsheet_id) {
+    const error = new Error("Business Case no existe");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.bc_status === 'approved') {
+    const error = new Error("Business Case ya está aprobado");
+    error.status = 409;
+    error.code = 'BC_ALREADY_APPROVED';
+    throw error;
+  }
+
+  if (request.bc_status !== 'in_review') {
+    const error = new Error("Business Case debe estar en revisión para ser aprobado");
+    error.status = 409;
+    error.code = 'BC_NOT_IN_REVIEW';
+    throw error;
+  }
+
+  // Update status
+  const { rows: updated } = await db.query(
+    `UPDATE equipment_purchase_requests
+     SET bc_status = 'approved',
+         bc_approved_at = NOW(),
+         bc_approved_by = $2,
+         bc_rejected_at = NULL,
+         bc_rejected_by = NULL,
+         bc_rejection_reason = NULL,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, user.id]
+  );
+
+  logger.info({
+    requestId: id,
+    approvedBy: user.id,
+    bcStatus: 'approved'
+  }, "BC approved");
+
+  return mapRequestRow(updated[0]);
+}
+
+async function rejectBusinessCase(id, user, reason) {
+  await ensureTables();
+
+  // Check role authorization
+  const allowedRoles = ['gerencia', 'jefe_comercial'];
+  if (!allowedRoles.includes(user?.role)) {
+    const error = new Error("Usuario no autorizado para rechazar Business Cases");
+    error.status = 403;
+    error.code = 'ROLE_NOT_AUTHORIZED';
+    throw error;
+  }
+
+  if (!reason || reason.trim().length === 0) {
+    const error = new Error("Se requiere razón de rechazo");
+    error.status = 400;
+    throw error;
+  }
+
+  const { rows } = await db.query(
+    `SELECT id, bc_spreadsheet_id, bc_status
+     FROM equipment_purchase_requests
+     WHERE id = $1`,
+    [id]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Solicitud no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const request = rows[0];
+
+  if (!request.bc_spreadsheet_id) {
+    const error = new Error("Business Case no existe");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.bc_status === 'approved') {
+    const error = new Error("No se puede rechazar un Business Case aprobado");
+    error.status = 409;
+    error.code = 'BC_ALREADY_APPROVED';
+    throw error;
+  }
+
+  // Update status
+  const { rows: updated } = await db.query(
+    `UPDATE equipment_purchase_requests
+     SET bc_status = 'rejected',
+         bc_rejected_at = NOW(),
+         bc_rejected_by = $2,
+         bc_rejection_reason = $3,
+         bc_approved_at = NULL,
+         bc_approved_by = NULL,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id, user.id, reason.trim()]
+  );
+
+  logger.info({
+    requestId: id,
+    rejectedBy: user.id,
+    bcStatus: 'rejected',
+    reason: reason.trim()
+  }, "BC rejected");
+
+  return mapRequestRow(updated[0]);
+}
+
+async function getPurchaseGatingStatus(id, user) {
+  await ensureTables();
+
+  const { rows } = await db.query(
+    `SELECT
+      id, proforma_signed_at, commercial_certainty,
+      bc_spreadsheet_id, bc_status, bc_gating_exempt
+     FROM equipment_purchase_requests
+     WHERE id = $1`,
+    [id]
+  );
+
+  if (!rows.length) {
+    const error = new Error("Solicitud no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const request = rows[0];
+  const gatingEnabled = process.env.BC_GATING_FOR_CONTRACT === 'true';
+
+  if (!gatingEnabled || request.bc_gating_exempt) {
+    return {
+      can_proceed_to_contract: true,
+      gating_reasons: [],
+      exempt: request.bc_gating_exempt || !gatingEnabled
+    };
+  }
+
+  const reasons = [];
+
+  if (!request.proforma_signed_at || !request.commercial_certainty) {
+    reasons.push('NO_COMMERCIAL_CERTAINTY');
+  }
+
+  if (!request.bc_spreadsheet_id) {
+    reasons.push('BC_NOT_CREATED');
+  } else if (request.bc_status !== 'approved') {
+    reasons.push('BC_NOT_APPROVED');
+  }
+
+  return {
+    can_proceed_to_contract: reasons.length === 0,
+    gating_reasons: reasons,
+    exempt: false
+  };
+}
+
 async function updateBusinessCaseFields({ id, user, fields }) {
   await ensureTables();
   const request = await getById(id, user);

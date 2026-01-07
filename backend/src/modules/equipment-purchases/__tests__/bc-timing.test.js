@@ -236,4 +236,257 @@ describe('Business Case Timing Feature', () => {
             expect(result).toBeDefined();
         });
     });
+
+    describe('assertPurchaseCanProceedToContract', () => {
+        beforeEach(() => {
+            process.env.BC_GATING_FOR_CONTRACT = 'true';
+        });
+
+        afterEach(() => {
+            delete process.env.BC_GATING_FOR_CONTRACT;
+        });
+
+        it('should ALLOW contract upload when all conditions are met', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: new Date(),
+                commercial_certainty: true,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'approved',
+                bc_gating_exempt: false
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act
+            const result = await service.assertPurchaseCanProceedToContract('test-uuid', mockUser);
+
+            // Assert
+            expect(result.canProceed).toBe(true);
+            expect(result.reasons).toEqual([]);
+        });
+
+        it('should BLOCK contract upload when proforma not signed', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: null,
+                commercial_certainty: false,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'approved',
+                bc_gating_exempt: false
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.assertPurchaseCanProceedToContract('test-uuid', mockUser))
+                .rejects.toThrow('Se requiere proforma firmada para proceder con el contrato');
+        });
+
+        it('should BLOCK contract upload when BC not created', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: new Date(),
+                commercial_certainty: true,
+                bc_spreadsheet_id: null,
+                bc_status: 'not_created',
+                bc_gating_exempt: false
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.assertPurchaseCanProceedToContract('test-uuid', mockUser))
+                .rejects.toThrow('Se requiere Business Case aprobado para proceder con el contrato');
+        });
+
+        it('should BLOCK contract upload when BC not approved', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: new Date(),
+                commercial_certainty: true,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'in_review',
+                bc_gating_exempt: false
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.assertPurchaseCanProceedToContract('test-uuid', mockUser))
+                .rejects.toThrow('El Business Case debe estar aprobado para proceder con el contrato');
+        });
+
+        it('should ALLOW contract upload for legacy exempt records', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: null,
+                commercial_certainty: false,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'draft',
+                bc_gating_exempt: true
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act
+            const result = await service.assertPurchaseCanProceedToContract('test-uuid', mockUser);
+
+            // Assert
+            expect(result.canProceed).toBe(true);
+            expect(result.exempt).toBe(true);
+        });
+
+        it('should BLOCK contract upload when user lacks role', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: new Date(),
+                commercial_certainty: true,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'approved',
+                bc_gating_exempt: false
+            };
+
+            const unauthorizedUser = { ...mockUser, role: 'comercial' };
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.assertPurchaseCanProceedToContract('test-uuid', unauthorizedUser))
+                .rejects.toThrow('Usuario no autorizado para subir contratos');
+        });
+    });
+
+    describe('submitBusinessCaseForApproval', () => {
+        it('should submit BC for approval when prerequisites are met', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'draft'
+            };
+
+            db.query
+                .mockResolvedValueOnce({ rows: [mockRequest] }) // getById
+                .mockResolvedValueOnce({ rows: [mockRequest] }); // update
+
+            // Act
+            const result = await service.submitBusinessCaseForApproval('test-uuid', mockUser);
+
+            // Assert
+            expect(result.bc_status).toBe('in_review');
+            expect(result.bc_submitted_at).toBeDefined();
+            expect(result.bc_submitted_by).toBe(mockUser.id);
+        });
+
+        it('should BLOCK submission when proforma not signed', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: null,
+                commercial_certainty: false,
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'draft'
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.submitBusinessCaseForApproval('test-uuid', mockUser))
+                .rejects.toThrow('Se requiere proforma firmada para enviar BC a aprobación');
+        });
+    });
+
+    describe('approveBusinessCase', () => {
+        it('should approve BC when user has correct role', async () => {
+            // Arrange
+            const approverUser = { ...mockUser, role: 'gerencia' };
+            const mockRequest = {
+                id: 'test-uuid',
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'in_review'
+            };
+
+            db.query
+                .mockResolvedValueOnce({ rows: [mockRequest] }) // getById
+                .mockResolvedValueOnce({ rows: [mockRequest] }); // update
+
+            // Act
+            const result = await service.approveBusinessCase('test-uuid', approverUser);
+
+            // Assert
+            expect(result.bc_status).toBe('approved');
+            expect(result.bc_approved_at).toBeDefined();
+            expect(result.bc_approved_by).toBe(approverUser.id);
+        });
+
+        it('should BLOCK approval when user lacks role', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                bc_spreadsheet_id: 'sheet123',
+                bc_status: 'in_review'
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act & Assert
+            await expect(service.approveBusinessCase('test-uuid', mockUser))
+                .rejects.toThrow('Usuario no autorizado para aprobar Business Cases');
+        });
+    });
+
+    describe('getPurchaseGatingStatus', () => {
+        beforeEach(() => {
+            process.env.BC_GATING_FOR_CONTRACT = 'true';
+        });
+
+        afterEach(() => {
+            delete process.env.BC_GATING_FOR_CONTRACT;
+        });
+
+        it('should return gating status with reasons', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                proforma_signed_at: null,
+                commercial_certainty: false,
+                bc_spreadsheet_id: null,
+                bc_status: 'not_created',
+                bc_gating_exempt: false
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act
+            const result = await service.getPurchaseGatingStatus('test-uuid', mockUser);
+
+            // Assert
+            expect(result.can_proceed_to_contract).toBe(false);
+            expect(result.gating_reasons).toEqual(['NO_COMMERCIAL_CERTAINTY', 'BC_NOT_CREATED']);
+            expect(result.exempt).toBe(false);
+        });
+
+        it('should return exempt status for legacy records', async () => {
+            // Arrange
+            const mockRequest = {
+                id: 'test-uuid',
+                bc_gating_exempt: true
+            };
+
+            db.query.mockResolvedValueOnce({ rows: [mockRequest] });
+
+            // Act
+            const result = await service.getPurchaseGatingStatus('test-uuid', mockUser);
+
+            // Assert
+            expect(result.can_proceed_to_contract).toBe(true);
+            expect(result.exempt).toBe(true);
+        });
+    });
 });
