@@ -51,9 +51,9 @@ SELECT
   -- BC fields (V2 payload preferred)
   COALESCE(r.payload->>'bc_status', epr.bc_status) as bc_status,
   COALESCE(r.payload->>'bc_spreadsheet_id', epr.bc_spreadsheet_id) as bc_spreadsheet_id,
-  COALESCE(r.payload->>'bc_approved_at', epr.bc_approved_at) as bc_approved_at,
+  COALESCE(r.payload->>'bc_approved_at', epr.bc_approved_at::text) as bc_approved_at,
   COALESCE(r.payload->>'commercial_certainty', epr.commercial_certainty::text) as commercial_certainty,
-  COALESCE(r.payload->>'proforma_signed_at', epr.proforma_signed_at) as proforma_signed_at,
+  COALESCE(r.payload->>'proforma_signed_at', epr.proforma_signed_at::text) as proforma_signed_at,
 
   -- File IDs
   COALESCE(r.payload->>'proforma_file_id', epr.proforma_file_id) as proforma_file_id,
