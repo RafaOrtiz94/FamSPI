@@ -2,8 +2,9 @@
 -- Description: Create 1:1 mapping between equipment_purchase_requests (legacy) and requests (V2)
 
 -- Add mapping field to legacy table (preferred approach)
+-- Note: requests.id is INTEGER, so v2_request_id must be INTEGER too
 ALTER TABLE equipment_purchase_requests
-ADD COLUMN IF NOT EXISTS v2_request_id UUID REFERENCES requests(id);
+ADD COLUMN IF NOT EXISTS v2_request_id INTEGER REFERENCES requests(id);
 
 -- Add unique constraint and index
 ALTER TABLE equipment_purchase_requests

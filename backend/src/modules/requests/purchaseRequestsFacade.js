@@ -27,6 +27,192 @@ const V2_ENABLED = process.env.REQUESTS_UNIFICATION_V2 === 'true';
 const BC_GATING_ENABLED = process.env.BC_GATING_FOR_CONTRACT === 'true';
 const BC_AFTER_SIGNED_PROFORMA = process.env.BC_AFTER_SIGNED_PROFORMA === 'true';
 
+// ===== LEGACY↔V2 MAPPING HELPERS =====
+
+/**
+ * Resolve canonical purchase ID - determines which store to use
+ * @param {string|number} purchaseId - Could be legacy or V2 ID (both INTEGER)
+ * @returns {Object} { store: 'v2'|'legacy', id: canonicalId, legacyId?, v2Id? }
+ */
+async function resolveCanonicalId(purchaseId) {
+    // First check if it's a V2 request
+    const { rows: v2Rows } = await db.query(
+        `SELECT r.id, r.payload->>'__form_variant' as form_variant, r.legacy_purchase_id
+     FROM requests r
+     WHERE r.id = $1 AND r.request_type_id = (SELECT id FROM request_types WHERE code = 'F.ST-19')`,
+        [purchaseId]
+    );
+
+    if (v2Rows.length > 0 && v2Rows[0].form_variant === 'purchase') {
+        return {
+            store: 'v2',
+            id: purchaseId,
+            v2Id: purchaseId,
+            legacyId: v2Rows[0].legacy_purchase_id
+        };
+    }
+
+    // Check if it's a legacy purchase with V2 mapping
+    const { rows: legacyRows } = await db.query(
+        'SELECT id, v2_request_id FROM equipment_purchase_requests WHERE id = $1',
+        [purchaseId]
+    );
+
+    if (legacyRows.length > 0) {
+        const legacyRow = legacyRows[0];
+        if (legacyRow.v2_request_id) {
+            // Has V2 mapping - use V2
+            return {
+                store: 'v2',
+                id: legacyRow.v2_request_id,
+                v2Id: legacyRow.v2_request_id,
+                legacyId: purchaseId
+            };
+        } else {
+            // No V2 mapping - use legacy
+            return {
+                store: 'legacy',
+                id: purchaseId,
+                legacyId: purchaseId
+            };
+        }
+    }
+
+    // Not found
+    throw new Error('Purchase request not found');
+}
+
+/**
+ * Ensure V2 mapping exists for legacy purchase
+ * @param {string|UUID} legacyId - Legacy purchase ID
+ * @param {Object} user - User creating the mapping
+ * @returns {string} V2 request ID
+ */
+async function ensureV2MappingForLegacy(legacyId, user) {
+    const client = await db.getClient();
+    try {
+        await client.query('BEGIN');
+
+        // Lock legacy row
+        const { rows: legacyRows } = await client.query(
+            'SELECT * FROM equipment_purchase_requests WHERE id = $1 FOR UPDATE',
+            [legacyId]
+        );
+
+        if (!legacyRows.length) {
+            throw new Error('Legacy purchase not found');
+        }
+
+        const legacyPurchase = legacyRows[0];
+
+        // Check if mapping already exists
+        if (legacyPurchase.v2_request_id) {
+            await client.query('COMMIT');
+            return legacyPurchase.v2_request_id;
+        }
+
+        // Create V2 equivalent
+        const v2Payload = {
+            __form_variant: 'purchase',
+            client_id: legacyPurchase.client_id,
+            client_name: legacyPurchase.client_name,
+            client_email: legacyPurchase.client_email,
+            assigned_to: legacyPurchase.assigned_to,
+            assigned_to_email: legacyPurchase.assigned_to_email,
+            assigned_to_name: legacyPurchase.assigned_to_name,
+            provider_email: legacyPurchase.provider_email,
+            equipment: legacyPurchase.equipment,
+            notes: legacyPurchase.notes,
+            ...legacyPurchase.extra,
+
+            // BC fields from migration 043
+            bc_status: legacyPurchase.bc_status || 'not_created',
+            bc_submitted_at: legacyPurchase.bc_submitted_at,
+            bc_submitted_by: legacyPurchase.bc_submitted_by,
+            bc_approved_at: legacyPurchase.bc_approved_at,
+            bc_approved_by: legacyPurchase.bc_approved_by,
+            bc_rejected_at: legacyPurchase.bc_rejected_at,
+            bc_rejected_by: legacyPurchase.bc_rejected_by,
+            bc_rejection_reason: legacyPurchase.bc_rejection_reason,
+            bc_gating_exempt: legacyPurchase.bc_gating_exempt,
+            commercial_certainty: legacyPurchase.commercial_certainty,
+            proforma_signed_at: legacyPurchase.proforma_signed_at,
+
+            // File IDs
+            proforma_file_id: legacyPurchase.proforma_file_id,
+            signed_proforma_file_id: legacyPurchase.signed_proforma_file_id,
+            contract_file_id: legacyPurchase.contract_file_id,
+
+            // Drive
+            drive_folder_id: legacyPurchase.drive_folder_id,
+            bc_spreadsheet_id: legacyPurchase.bc_spreadsheet_id,
+            bc_spreadsheet_url: legacyPurchase.bc_spreadsheet_url,
+
+            // Status and progress
+            status: legacyPurchase.status,
+            bc_stage: legacyPurchase.bc_stage,
+            bc_progress: legacyPurchase.bc_progress,
+
+            // Migration metadata
+            migrated_from: 'equipment_purchase_requests',
+            migrated_at: new Date().toISOString(),
+            migrated_by: user?.id
+        };
+
+        // Create V2 request
+        const v2Result = await client.query(
+            `INSERT INTO requests(
+        request_group_id, requester_id, request_type_id, payload, status, created_at, updated_at
+       ) VALUES(
+        gen_random_uuid(),
+        $1, -- Use legacy creator or current user
+        (SELECT id FROM request_types WHERE code = 'F.ST-19'),
+        $2,
+        $3,
+        $4,
+        NOW()
+       ) RETURNING id`,
+            [
+                legacyPurchase.created_by || user?.id,
+                JSON.stringify(v2Payload),
+                legacyPurchase.status || 'draft',
+                legacyPurchase.created_at || new Date()
+            ]
+        );
+
+        const v2Id = v2Result.rows[0].id;
+
+        // Update legacy with mapping
+        await client.query(
+            'UPDATE equipment_purchase_requests SET v2_request_id = $1, v2_migration_status = $2 WHERE id = $3',
+            [v2Id, 'migrated', legacyId]
+        );
+
+        // Update V2 with reverse mapping (for debugging)
+        await client.query(
+            'UPDATE requests SET legacy_purchase_id = $1 WHERE id = $2',
+            [legacyId, v2Id]
+        );
+
+        await client.query('COMMIT');
+
+        logger.info({
+            legacyId,
+            v2Id,
+            userId: user?.id
+        }, 'Created V2 mapping for legacy purchase');
+
+        return v2Id;
+
+    } catch (error) {
+        await client.query('ROLLBACK');
+        logger.error({ error, legacyId }, 'Failed to create V2 mapping');
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 // ===== CONSTANTS =====
 const PURCHASE_REQUEST_TYPE = 'F.ST-19'; // Purchase request type ID
 const STATUS = {
@@ -75,10 +261,13 @@ async function createPurchaseRequest(params) {
  * Get Purchase Request - Read from appropriate table
  */
 async function getPurchaseRequest(id, user) {
-    if (V2_ENABLED) {
-        return await _getPurchaseRequestV2(id, user);
+    // Resolve canonical ID - works for both legacy and V2 IDs
+    const canonical = await resolveCanonicalId(id);
+
+    if (canonical.store === 'v2') {
+        return await _getPurchaseRequestV2(canonical.id, user);
     } else {
-        return await _getPurchaseRequestLegacy(id, user);
+        return await _getPurchaseRequestLegacy(canonical.id, user);
     }
 }
 
