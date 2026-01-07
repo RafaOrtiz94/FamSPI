@@ -29,8 +29,8 @@ ON requests(legacy_purchase_id) WHERE legacy_purchase_id IS NOT NULL;
 -- Create view for unified purchase requests (shows both legacy and V2 data)
 CREATE OR REPLACE VIEW v_unified_purchase_requests AS
 SELECT
-  -- Use V2 ID as canonical if exists, otherwise legacy ID
-  COALESCE(r.id, epr.id) as canonical_id,
+  -- Use V2 ID as canonical if exists, otherwise legacy ID (both are INTEGER now)
+  COALESCE(r.id::text, epr.id::text)::integer as canonical_id,
   CASE WHEN r.id IS NOT NULL THEN 'v2' ELSE 'legacy' END as store,
 
   -- Canonical fields (prefer V2, fallback to legacy)
