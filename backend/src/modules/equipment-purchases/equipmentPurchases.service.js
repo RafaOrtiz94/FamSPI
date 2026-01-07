@@ -8,6 +8,7 @@ const { sendMail } = require("../../utils/mailer");
 const { sheets } = require("../../config/google");
 const inventarioService = require("../inventario/inventario.service");
 const notificationManager = require("../notifications/notificationManager");
+const businessCaseService = require("../business-case/businessCase.service");
 const {
   createRequest: createServiceRequest,
   generateActa,
@@ -352,6 +353,17 @@ async function ensureTables() {
       created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS equipment_purchase_business_case_links (
+      equipment_purchase_id UUID PRIMARY KEY REFERENCES equipment_purchase_requests(id) ON DELETE CASCADE,
+      business_case_id UUID NOT NULL REFERENCES equipment_purchase_requests(id) ON DELETE CASCADE,
+      created_by INTEGER,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_ep_bc_links_business_case_id ON equipment_purchase_business_case_links (business_case_id)`
+  );
   initialized = true;
 }
 
@@ -499,10 +511,10 @@ function buildBusinessCaseName(request) {
   const monthYear = new Date().toLocaleDateString("es-EC", { month: "long", year: "numeric" }).toUpperCase();
   const equipmentLabels = Array.isArray(request?.equipment)
     ? request.equipment
-        .map((item) => item?.name || item?.sku || item?.id)
-        .filter(Boolean)
-        .slice(0, 3)
-        .join(",")
+      .map((item) => item?.name || item?.sku || item?.id)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(",")
     : "";
   const suffix = equipmentLabels ? `-${equipmentLabels}` : "";
   return `BC-${request?.client_name || "CLIENTE"}${suffix ? `-${suffix}` : ""}-${monthYear}`;
@@ -556,8 +568,17 @@ function buildBusinessCasePrefill({ request, clientInfo }) {
 }
 
 async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
-  if (request?.bc_spreadsheet_id) return request;
-  if (!request?.drive_folder_id || !BUSINESS_CASE_TEMPLATE_ID) return request;
+  // SAFE EARLY RETURN: If BC already exists, NEVER touch Drive
+  if (request?.bc_spreadsheet_id) {
+    logger.info("Business Case document already exists, skipping Drive operations");
+    return request;
+  }
+
+  // SAFE EARLY RETURN: If no Drive folder or template, continue without Drive
+  if (!request?.drive_folder_id || !BUSINESS_CASE_TEMPLATE_ID) {
+    logger.info("Drive integration not available, continuing without document creation");
+    return request;
+  }
 
   try {
     const name = buildBusinessCaseName(request);
@@ -577,8 +598,9 @@ async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
 
     return { ...request, bc_spreadsheet_id: copy.id, bc_spreadsheet_url: copy.webViewLink };
   } catch (error) {
-    logger.warn("No se pudo generar Business Case automático: %s", error.message);
-    return request;
+    // SAFE FAILURE: Drive failures MUST NOT block Business Case operations
+    logger.warn("Drive integration failed, but continuing Business Case flow: %s", error.message);
+    return request; // Return unchanged request - BC operation continues
   }
 }
 
@@ -998,10 +1020,19 @@ async function createPurchaseRequest({
     }
   }
 
-  try {
-    created = await ensureBusinessCaseDocument({ request: created, clientInfo, user });
-  } catch (error) {
-    logger.warn("No se pudo crear Business Case automático al iniciar: %s", error.message);
+  // FEATURE FLAG: BC creation timing
+  const bcAfterSignedProforma = process.env.BC_AFTER_SIGNED_PROFORMA === 'true';
+
+  if (!bcAfterSignedProforma) {
+    // LEGACY BEHAVIOR: Create BC immediately (current production behavior)
+    try {
+      created = await ensureBusinessCaseDocument({ request: created, clientInfo, user });
+    } catch (error) {
+      logger.warn("No se pudo crear Business Case automático al iniciar: %s", error.message);
+    }
+  } else {
+    // NEW BEHAVIOR: BC created only after signed proforma
+    logger.info("BC creation deferred until signed proforma for request %s", id);
   }
 
   return created;
@@ -1288,37 +1319,96 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
     logger.warn("No se pudo crear recordatorio de contrato en Calendar: %s", error.message);
   }
 
-  const { rows } = await db.query(
-    `UPDATE equipment_purchase_requests
-        SET signed_proforma_file_id = $1,
-            signed_proforma_uploaded_at = now(),
-            arrival_eta_email_sent_at = now(),
-            arrival_eta_email_file_id = $2,
-            inspection_min_date = $3,
-            inspection_max_date = $4,
-            includes_starter_kit = $5,
-            inspection_recorded_at = now(),
-            contract_reminder_event_id = $6,
-            contract_reminder_event_link = $7,
-            status = $8,
-            bc_stage = 'pending_comercial',
-            bc_progress = '{}'::jsonb,
-            updated_at = now()
-      WHERE id = $9
-      RETURNING *`,
-    [
-      fileId,
-      arrivalFileId,
-      inspection_min_date || null,
-      inspection_max_date || null,
-      includes_starter_kit === true,
-      contractReminder.id || null,
-      contractReminder.htmlLink || null,
-      STATUS.PENDING_CONTRACT,
-      id,
-    ],
-  );
-  return rows[0];
+  // FEATURE FLAG: BC creation timing
+  const bcAfterSignedProforma = process.env.BC_AFTER_SIGNED_PROFORMA === 'true';
+
+  let updatedRequest;
+  if (bcAfterSignedProforma) {
+    // NEW BEHAVIOR: Set commercial certainty and create BC
+    const { rows } = await db.query(
+      `UPDATE equipment_purchase_requests
+          SET signed_proforma_file_id = $1,
+              signed_proforma_uploaded_at = now(),
+              proforma_signed_at = now(),
+              commercial_certainty = true,
+              arrival_eta_email_sent_at = now(),
+              arrival_eta_email_file_id = $2,
+              inspection_min_date = $3,
+              inspection_max_date = $4,
+              includes_starter_kit = $5,
+              inspection_recorded_at = now(),
+              contract_reminder_event_id = $6,
+              contract_reminder_event_link = $7,
+              status = $8,
+              bc_created_reason = 'signed_proforma',
+              bc_locked_until_signed = false,
+              updated_at = now()
+        WHERE id = $9
+        RETURNING *`,
+      [
+        fileId,
+        arrivalFileId,
+        inspection_min_date || null,
+        inspection_max_date || null,
+        includes_starter_kit === true,
+        contractReminder.id || null,
+        contractReminder.htmlLink || null,
+        STATUS.PENDING_CONTRACT,
+        id,
+      ],
+    );
+    updatedRequest = rows[0];
+
+    // Create BC after setting commercial certainty
+    let clientInfo = null;
+    try {
+      clientInfo = await getClientDetails(updatedRequest.client_id);
+    } catch (error) {
+      logger.warn("No se pudieron obtener los datos del cliente %s: %s", updatedRequest.client_id, error.message);
+    }
+
+    try {
+      updatedRequest = await ensureBusinessCaseDocument({ request: updatedRequest, clientInfo, user });
+      logger.info("BC created after signed proforma for request %s", id);
+    } catch (error) {
+      logger.warn("No se pudo crear Business Case tras proforma firmada: %s", error.message);
+    }
+  } else {
+    // LEGACY BEHAVIOR: Keep original logic
+    const { rows } = await db.query(
+      `UPDATE equipment_purchase_requests
+          SET signed_proforma_file_id = $1,
+              signed_proforma_uploaded_at = now(),
+              arrival_eta_email_sent_at = now(),
+              arrival_eta_email_file_id = $2,
+              inspection_min_date = $3,
+              inspection_max_date = $4,
+              includes_starter_kit = $5,
+              inspection_recorded_at = now(),
+              contract_reminder_event_id = $6,
+              contract_reminder_event_link = $7,
+              status = $8,
+              bc_stage = 'pending_comercial',
+              bc_progress = '{}'::jsonb,
+              updated_at = now()
+        WHERE id = $9
+        RETURNING *`,
+      [
+        fileId,
+        arrivalFileId,
+        inspection_min_date || null,
+        inspection_max_date || null,
+        includes_starter_kit === true,
+        contractReminder.id || null,
+        contractReminder.htmlLink || null,
+        STATUS.PENDING_CONTRACT,
+        id,
+      ],
+    );
+    updatedRequest = rows[0];
+  }
+
+  return updatedRequest;
 }
 
 async function submitSignedProformaWithInspection({
@@ -1460,6 +1550,30 @@ async function updateBusinessCaseFields({ id, user, fields }) {
   const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
 
+  // FEATURE FLAG: BC editing validation
+  const bcAfterSignedProforma = process.env.BC_AFTER_SIGNED_PROFORMA === 'true';
+
+  if (bcAfterSignedProforma) {
+    // NEW BEHAVIOR: Block BC editing until signed proforma
+    if (!request.proforma_signed_at || !request.commercial_certainty) {
+      const error = new Error("No se puede editar el Business Case hasta que se suba la proforma firmada");
+      error.status = 409; // Conflict
+      error.code = 'COMMERCIAL_CERTAINTY_REQUIRED';
+      throw error;
+    }
+  } else {
+    // LEGACY BEHAVIOR: Allow editing (existing behavior)
+    logger.info("BC editing allowed without commercial certainty (legacy mode)");
+  }
+
+  // BLOCK LEGACY BCs: BCs created before signed proforma are locked
+  if (request.bc_locked_until_signed) {
+    const error = new Error("Este Business Case fue creado antes de la proforma firmada y está bloqueado para edición");
+    error.status = 409;
+    error.code = 'BC_LOCKED_LEGACY';
+    throw error;
+  }
+
   const clientInfo = await getClientDetails(request.client_id);
   const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
   if (!ensured?.bc_spreadsheet_id) {
@@ -1592,6 +1706,72 @@ async function listBusinessCaseItems({ id, user }) {
   return rows;
 }
 
+
+async function resolveBusinessCaseForPurchase({ id, user }) {
+  await ensureTables();
+
+  const request = await getById(id, user);
+  if (!request) {
+    const error = new Error("Solicitud de compra no encontrada o sin acceso");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.request_type === "business_case") {
+    return {
+      business_case_id: request.id,
+      equipment_purchase_id: request.id,
+      created: false,
+      already_linked: true,
+    };
+  }
+
+  const { rows: linkRows } = await db.query(
+    `SELECT business_case_id FROM equipment_purchase_business_case_links WHERE equipment_purchase_id = $1 LIMIT 1`,
+    [id]
+  );
+
+  if (linkRows.length) {
+    return {
+      business_case_id: linkRows[0].business_case_id,
+      equipment_purchase_id: id,
+      created: false,
+      already_linked: true,
+    };
+  }
+
+  const bcPayload = {
+    client_name: request.client_name,
+    client_id: request.client_id || null,
+    extra: {
+      source: "equipment_purchase",
+      equipment_purchase_id: id,
+      notes: request.notes || null,
+    },
+    modern_bc_metadata: {
+      source: "equipment_purchase",
+      equipment_purchase_id: id,
+    },
+  };
+
+  const businessCase = await businessCaseService.createBusinessCase(bcPayload, user);
+
+  await db.query(
+    `INSERT INTO equipment_purchase_business_case_links (equipment_purchase_id, business_case_id, created_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (equipment_purchase_id)
+     DO UPDATE SET business_case_id = EXCLUDED.business_case_id, created_by = EXCLUDED.created_by`,
+    [id, businessCase.id, user?.id || null]
+  );
+
+  return {
+    business_case_id: businessCase.id,
+    equipment_purchase_id: id,
+    created: true,
+    already_linked: false,
+  };
+}
+
 async function getStats({ requestType = "purchase" } = {}) {
   await ensureTables();
   const { rows } = await db.query(
@@ -1635,5 +1815,6 @@ module.exports = {
   addBusinessCaseItem,
   listBusinessCaseItems,
   getStats,
+  resolveBusinessCaseForPurchase,
   STATUS,
 };
