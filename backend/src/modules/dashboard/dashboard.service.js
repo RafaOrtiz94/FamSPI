@@ -10,6 +10,52 @@
 const { pool } = require("../../config/db");
 const logger = require("../../config/logger");
 
+/**
+ * 🔍 Clasifica errores PostgreSQL para determinar el tipo de respuesta HTTP apropiada
+ * @param {Error} err - Error de PostgreSQL
+ * @returns {Object} { type: 'SCHEMA_MISSING'|'DB_ERROR', statusCode: 500|503, message: string }
+ */
+function classifyPgError(err) {
+    if (!err || !err.code) {
+        return {
+            type: 'DB_ERROR',
+            statusCode: 503,
+            message: 'Database error',
+            code: 'DB_ERROR'
+        };
+    }
+
+    // Errores de schema missing (tablas/columnas no existen)
+    if (err.code === '42P01') { // undefined_table
+        return {
+            type: 'SCHEMA_MISSING',
+            statusCode: 500,
+            message: `Table does not exist: ${err.table || 'unknown'}`,
+            code: 'SCHEMA_MISSING',
+            details: { errorCode: err.code, table: err.table }
+        };
+    }
+
+    if (err.code === '42703') { // undefined_column
+        return {
+            type: 'SCHEMA_MISSING',
+            statusCode: 500,
+            message: `Column does not exist: ${err.column || 'unknown'}`,
+            code: 'SCHEMA_MISSING',
+            details: { errorCode: err.code, column: err.column }
+        };
+    }
+
+    // Otros errores de conexión/DB (connection lost, timeout, etc.)
+    return {
+        type: 'DB_ERROR',
+        statusCode: 503,
+        message: 'Database unavailable',
+        code: 'DB_ERROR',
+        details: { errorCode: err.code, message: err.message }
+    };
+}
+
 // Cache in-memory simple para performance
 const cache = new Map();
 const CACHE_TTL = 60 * 1000; // 60 segundos
@@ -69,6 +115,8 @@ async function getCommercialSummary(options = {}) {
 
     try {
         // Ejecutar todas las consultas en paralelo para mejor performance
+        // ⚠️ IMPORTANTE: NO usar .catch() aquí - los errores de schema deben propagarse
+        // para que el controller pueda devolver el código HTTP apropiado (500 vs 503)
         const [
             bcStatusResult,
             requestsStatusResult,
@@ -82,7 +130,7 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY current_stage
                 ORDER BY total DESC
                 LIMIT 10
-            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
+            `),
 
             // KPI: Solicitudes por estado
             client.query(`
@@ -91,14 +139,14 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY status
                 ORDER BY total DESC
                 LIMIT 10
-            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
+            `),
 
-            // KPI: Clientes nuevos últimos 30 días (manejar tabla vacía)
+            // KPI: Clientes nuevos últimos 30 días
             client.query(`
                 SELECT COUNT(*) as nuevos_30d
                 FROM clients
                 WHERE created_at >= NOW() - INTERVAL '30 days'
-            `).catch(() => ({ rows: [{ nuevos_30d: 0 }] })), // Fallback si tabla no existe
+            `),
 
             // KPI: Tendencia mensual (últimos 6 meses) de solicitudes
             client.query(`
@@ -110,7 +158,7 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY 1
                 ORDER BY 1
                 LIMIT 6
-            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
+            `),
         ]);
 
         // Calcular métricas agregadas con mappings reales
