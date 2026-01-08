@@ -25,6 +25,11 @@ const {
   closeSessionsByEmail,
   closeSessionByRefreshToken,
 } = require("./session.repository");
+const { isOffHours } = require("../../utils/offHoursPolicy");
+const { getGeoLocation } = require("../../utils/geoip");
+const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
+const { logAction } = require("../../utils/audit");
+const { v4: uuidv4 } = require('uuid');
 
 const SCOPES = ["profile", "email"];
 const ROLE_META = {
@@ -82,6 +87,16 @@ if (!process.env.FRONTEND_URL) {
     "⚠️ FRONTEND_URL no está definido en .env; usando %s como valor por defecto",
     FRONTEND_URL
   );
+}
+
+// 🔍 Debug logging for OAuth URL configuration
+if (process.env.NODE_ENV !== 'production') {
+  logger.info('🔧 OAuth URL Configuration Debug:', {
+    NODE_ENV: process.env.NODE_ENV,
+    FRONTEND_URL,
+    GOOGLE_REDIRECT_URI: process.env.GOOGLE_REDIRECT_URI,
+    isProd: process.env.NODE_ENV === 'production'
+  });
 }
 const isProd = process.env.NODE_ENV === "production";
 
@@ -236,6 +251,18 @@ const googleCallback = async (req, res) => {
       lopdp_internal_status: user.lopdp_internal_status || "pending",
     };
 
+    // Generar correlation ID para tracking de sesión
+    const correlationId = uuidv4();
+
+    // Set correlation ID in request context for this request
+    const { setContext } = require("../../utils/requestContext");
+    setContext({
+      correlation_id: correlationId,
+      user_id: user.id,
+      user_email: user.email,
+      role: user.role
+    });
+
     // Firmar tokens
     const accessToken = signAccess(userProfile);
     const refreshToken = signRefresh({ id: user.id, email: user.email });
@@ -254,12 +281,73 @@ const googleCallback = async (req, res) => {
       logger.warn("⚠️ No se pudo registrar la sesión en user_sessions: %s", sessionErr.message);
     }
 
+    // 🔐 Seguridad: Verificar login fuera de horario
+    let offHoursCheck = isOffHours(new Date());
+
+    // TEST HOOK: Solo en desarrollo/sandbox para generar eventos de prueba
+    if (process.env.NODE_ENV !== 'production' && req.headers['x-security-test'] === '1') {
+      logger.warn('🚨 SECURITY TEST HOOK USED - Forcing off-hours detection');
+      offHoursCheck = {
+        isOffHours: true,
+        reason: 'offhours_test',
+        schedule: { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] }
+      };
+    }
+
+    const geoInfo = getGeoLocation(ip);
+
+    if (offHoursCheck.isOffHours) {
+      logger.warn(`🚨 Login fuera de horario detectado: ${email}`, {
+        correlationId,
+        reason: offHoursCheck.reason,
+        ip,
+        geo: geoInfo,
+        userAgent: req.headers["user-agent"]
+      });
+
+      // Notificar a TI sobre login fuera de horario
+      await notifyTIAboutOffHoursLogin({
+        correlationId,
+        user,
+        offHoursCheck,
+        ip,
+        geo: geoInfo,
+        userAgent: req.headers["user-agent"]
+      });
+    }
+
+    // Registrar login exitoso en auditoría - usando datos_nuevos (no contexto)
+    await logAction({
+      usuario_id: user.id,
+      usuario_email: user.email,
+      rol: user.role || "pendiente",
+      modulo: "auth",
+      accion: offHoursCheck.isOffHours ? "offhours_login" : "login_success",
+      descripcion: offHoursCheck.isOffHours ?
+        `Login exitoso fuera de horario (${offHoursCheck.reason})` :
+        "Login exitoso",
+      datos_nuevos: {
+        event: offHoursCheck.isOffHours ? "security.offhours_login" : "auth.login_success",
+        correlation_id: correlationId,
+        reason: offHoursCheck.reason,
+        schedule: offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] },
+        ip,
+        user_agent: req.headers["user-agent"],
+        geo_location: geoInfo,
+        off_hours_info: offHoursCheck,
+        session: {
+          user_email: user.email,
+          login_time_guess_iso: new Date().toISOString()
+        }
+      }
+    });
+
     // Redirigir al frontend con tokens
     const redirectUrl = `${FRONTEND_URL}/login/callback#accessToken=${encodeURIComponent(
       accessToken
     )}&refreshToken=${encodeURIComponent(refreshToken)}&email=${encodeURIComponent(email)}`;
 
-    logger.info(`✅ Login exitoso: ${email}`);
+    logger.info(`✅ Login exitoso: ${email}`, { correlationId, offHours: offHoursCheck.isOffHours });
     return res.redirect(redirectUrl);
   } catch (err) {
     if (err.code === "ECONNREFUSED" || err.code === "EPERM") {
