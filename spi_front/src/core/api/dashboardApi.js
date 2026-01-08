@@ -7,12 +7,16 @@ import api from './index';
 
 /**
  * Obtener resumen para dashboard comercial
- * @returns {Promise} Payload interno con métricas y datos (sin wrapper ok/message)
+ * @returns {Promise} Wrapper compatible con useApi (ok + data)
  */
 export const getCommercialSummary = async () => {
     const response = await api.get('/dashboard/comercial/summary');
-    // Normalizar: retornar solo el payload interno, no el wrapper completo
-    return response.data.data;
+    // Retornar wrapper compatible: useApi espera data.ok para determinar success
+    return {
+        ok: true,
+        data: response.data.data,
+        message: response.data.message || "Dashboard summary loaded successfully"
+    };
 };
 
 export default {

@@ -21,6 +21,13 @@ const ComercialDashboard = () => {
     { globalLoader: false }
   );
 
+  // Debug log in development
+  if (process.env.NODE_ENV !== 'production') {
+    console.log('Dashboard summaryData:', summaryData);
+    console.log('Dashboard summaryError:', summaryError);
+    console.log('Dashboard summaryLoading:', summaryLoading);
+  }
+
   const handleRefresh = async () => {
     await fetchSummary();
   };
