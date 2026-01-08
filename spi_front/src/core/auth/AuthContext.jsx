@@ -26,32 +26,32 @@ export const AuthProvider = ({ children }) => {
   /* ============================================================
      🚀 Sincronizar sesión desde tokens locales o refresh
   ============================================================ */
-const refresh = async () => {
-  if (!hasRefreshToken()) {
-    console.warn("⚠️ No se pudo sincronizar sesión: No hay refresh token");
-    setLoading(false);
-    return false;
-  }
+  const refresh = async () => {
+    if (!hasRefreshToken()) {
+      console.warn("⚠️ No se pudo sincronizar sesión: No hay refresh token");
+      setLoading(false);
+      return false;
+    }
 
-  try {
-    const newAccess = await refreshAccessToken();
-    if (!newAccess) return false;
+    try {
+      const newAccess = await refreshAccessToken();
+      if (!newAccess) return false;
 
-    const profile = await getProfile();
-    setUser(profile);
-    setIsAuthenticated(true);
-    localStorage.setItem("user", JSON.stringify(profile));
+      const profile = await getProfile();
+      setUser(profile);
+      setIsAuthenticated(true);
+      localStorage.setItem("user", JSON.stringify(profile));
 
-    console.log(`✅ Sesión sincronizada: ${profile.email}`);
-    return profile; // 👈 importante
-  } catch (err) {
-    console.warn("⚠️ No se pudo sincronizar sesión:", err.message);
-    setIsAuthenticated(false);
-    return false;
-  } finally {
-    setLoading(false);
-  }
-};
+      console.log(`✅ Sesión sincronizada: ${profile.email}`);
+      return profile; // 👈 importante
+    } catch (err) {
+      console.warn("⚠️ No se pudo sincronizar sesión:", err.message);
+      setIsAuthenticated(false);
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  };
 
   /* ============================================================
      🧹 Cerrar sesión
@@ -92,6 +92,8 @@ const refresh = async () => {
         setUser(JSON.parse(storedUser));
         setIsAuthenticated(true);
         setLoading(false);
+        // Sincronizar en segundo plano para actualizar avatar/datos
+        refresh();
       } else {
         await refresh();
       }

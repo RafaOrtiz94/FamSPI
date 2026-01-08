@@ -7,7 +7,15 @@ import { AuthContext } from "./AuthContext";
  * Incluye atajos comunes como isGerencia(), isTecnico(), etc.
  */
 export const useAuth = () => {
-  const { user, isAuthenticated, login, logout, refresh, loading } = useContext(AuthContext);
+  const {
+    user,
+    isAuthenticated,
+    login,
+    logout,
+    refresh,
+    reloadProfile,
+    loading,
+  } = useContext(AuthContext);
 
   const role = user?.role?.toLowerCase?.() || "";
   const scope = user?.scope?.toLowerCase?.() || role;
@@ -27,6 +35,7 @@ export const useAuth = () => {
     login,
     logout,
     refresh,
+    reloadProfile, // 👈 Se agrega para permitir recargas manuales
     scope,
     isGerencia,
     isTecnico,

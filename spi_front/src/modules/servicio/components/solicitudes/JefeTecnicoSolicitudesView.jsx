@@ -11,7 +11,10 @@ import InspeccionModal from "./modals/InspeccionModal";
 import PrestamoEquiposModal from "./modals/PrestamoEquiposModal";
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
-import { FiTool, FiPackage, FiClipboard, FiSettings, FiCalendar } from "react-icons/fi";
+import { FiTool, FiPackage, FiClipboard, FiSettings, FiCalendar, FiCreditCard } from "react-icons/fi";
+import Modal from "../../../../core/ui/components/Modal";
+import Button from "../../../../core/ui/components/Button";
+import PurchaseHandoffWidget from "../../../comercial/components/PurchaseHandoffWidget";
 
 /**
  * Vista de solicitudes para Jefe de Servicio Técnico
@@ -21,6 +24,8 @@ const JefeTecnicoSolicitudesView = () => {
     const [filters, setFilters] = useState({});
     const [viewType, setViewType] = useState(null); // 'orden-servicio', 'repuestos', etc.
     const [viewTitle, setViewTitle] = useState("");
+    const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
+    const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
 
     const { solicitudes, loading, reload } = useSolicitudes({
         fetchFunction: async (filters) => {
@@ -38,7 +43,21 @@ const JefeTecnicoSolicitudesView = () => {
 
     const { openModal, closeModal, isOpen } = useModalManager();
 
+    const handlePurchaseTypeSelection = (type) => {
+        setShowPurchaseTypeModal(false);
+        if (type === "public") {
+            setShowPurchaseHandoff(true);
+        } else if (type === "private") {
+            // ✅ USAR MODAL GLOBAL DETALLADO
+            window.dispatchEvent(new CustomEvent('open-request-modal', { detail: { type: 'PRIVATE_PURCHASE' } }));
+        }
+    };
+
     const handleActionCardClick = (cardId) => {
+        if (cardId === "compra") {
+            setShowPurchaseTypeModal(true);
+            return;
+        }
         openModal(cardId);
     };
 
@@ -132,6 +151,48 @@ const JefeTecnicoSolicitudesView = () => {
                 // Títulos personalizados
                 createSectionTitle="Crear Nueva Solicitud"
                 createSectionSubtitle="Selecciona el tipo de solicitud de servicio técnico"
+            />
+
+            {/* PURCHASE SELECTOR MODAL */}
+            <Modal
+                open={showPurchaseTypeModal}
+                onClose={() => setShowPurchaseTypeModal(false)}
+                title="Selecciona el tipo de compra"
+            >
+                <div className="space-y-4">
+                    <p className="text-sm text-gray-600 font-medium">¿Qué tipo de requerimiento de compra deseas realizar?</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <Button
+                            variant="secondary"
+                            onClick={() => handlePurchaseTypeSelection("public")}
+                            className="flex flex-col items-center gap-3 p-6 h-auto border-2 border-emerald-100 hover:border-emerald-300 hover:bg-emerald-50 transition-all"
+                        >
+                            <FiClipboard className="w-8 h-8 text-emerald-600" />
+                            <div className="text-center">
+                                <span className="block font-bold text-gray-900">Compra Pública</span>
+                                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Flujo ACP</span>
+                            </div>
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={() => handlePurchaseTypeSelection("private")}
+                            className="flex flex-col items-center gap-3 p-6 h-auto"
+                        >
+                            <FiCreditCard className="w-8 h-8" />
+                            <div className="text-center">
+                                <span className="block font-bold">Compra Privada</span>
+                                <span className="text-[10px] opacity-80 uppercase tracking-wider">Flujo Interno</span>
+                            </div>
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            {/* PURCHASE HANDOFF MODAL */}
+            <PurchaseHandoffWidget
+                isOpen={showPurchaseHandoff}
+                onOpenChange={setShowPurchaseHandoff}
+                hideButton={true}
             />
 
             {/* Modal de Listado de Solicitudes */}

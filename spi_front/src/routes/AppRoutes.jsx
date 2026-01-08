@@ -65,6 +65,11 @@ import ConfigurationPage from "../pages/ConfigurationPage";
 import MyProfilePage from "../modules/profile/MyProfilePage";
 import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 
+// 📝 Sistema de Firma Digital
+import DocumentSigner from "../modules/signature/components/DocumentSigner";
+import DocumentVerification from "../modules/signature/pages/DocumentVerification";
+import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
+
 const AppRoutes = () => {
   return (
     <Routes>
@@ -75,6 +80,9 @@ const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/login/callback" element={<LoginCallback />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
+
+        {/* 📝 Verificación pública de documentos firmados */}
+        <Route path="/verificar/:token" element={<DocumentVerification />} />
       </Route>
 
       {/* =======================================
@@ -217,6 +225,29 @@ const AppRoutes = () => {
           <Route path="/configuration" element={<ConfigurationPage />} />
           <Route path="/dashboard/mi-perfil" element={<MyProfilePage />} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
+
+          {/* 📝 Sistema de Firma Digital */}
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "gerencia",
+                  "gerencia_general",
+                  "ti",
+                  "jefe_ti",
+                  "admin_ti",
+                  "comercial",
+                  "jefe_comercial",
+                  "talento_humano",
+                  "finanzas",
+                  "calidad"
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/signatures" element={<SignatureDashboard />} />
+            <Route path="/dashboard/signatures/:documentId/sign" element={<DocumentSigner />} />
+          </Route>
           {/* Subrutas Backoffice */}
           <Route
             element={(

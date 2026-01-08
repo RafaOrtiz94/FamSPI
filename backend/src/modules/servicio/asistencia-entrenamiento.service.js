@@ -305,13 +305,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             });
         }
 
-        // Specialist signature required
-        if (!attendanceData.Firma_Especialista || attendanceData.Firma_Especialista.length < 10) {
-            return res.status(400).json({
-                ok: false,
-                message: "La firma del especialista es obligatoria",
-            });
-        }
+        // La firma dibujada deja de ser obligatoria; se firmarГЎ con flujo avanzado posteriormente
 
         const pdfBuffer = await generateAttendanceListPDF(attendanceData);
 
@@ -343,6 +337,21 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             imageCount: driveResult.images?.length || 0
         }, "Archivos de lista de asistencia guardados en Google Drive");
 
+        // Registrar documento en tabla documents para habilitar firma avanzada
+        let documentRecord = null;
+        try {
+            const insert = await db.query(
+                `INSERT INTO documents (doc_drive_id, folder_drive_id, signature_status, is_locked)
+                 VALUES ($1,$2,'PENDING',false)
+                 RETURNING id`,
+                [driveResult.pdfFile?.id || null, driveResult.folderId || null]
+            );
+            documentRecord = insert.rows?.[0] || null;
+            logger.info({ documentId: documentRecord?.id }, "Documento registrado para firma avanzada");
+        } catch (docErr) {
+            logger.warn({ docErr }, "No se pudo registrar el documento para firma avanzada");
+        }
+
         // Return success without downloading PDF
         res.json({
             ok: true,
@@ -350,7 +359,9 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             driveFolderId: driveResult.folderId,
             pdfId: driveResult.pdfFile?.id,
             ordenNumero: attendanceData.Num_Orden,
-            cliente: attendanceData.ORDCliente
+            cliente: attendanceData.ORDCliente,
+            documentId: documentRecord?.id || null,
+            documentBase64: pdfBuffer.toString("base64")
         });
     } catch (err) {
         logger.error({ err }, "Error en endpoint de PDF de lista de asistencia");

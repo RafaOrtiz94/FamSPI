@@ -16,6 +16,7 @@ import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
+import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
 
 const initialPrivateForm = {
     firstName: "",
@@ -82,34 +83,44 @@ const ComercialSolicitudesView = () => {
     const { user } = useAuth();
     const normalizedRole = (user?.role || user?.role_name || "").toLowerCase();
     const isBackofficeUser = normalizedRole.includes("backoffice");
+
     const visibleStatWidgets = isBackofficeUser
         ? statWidgets.filter(
-              (widget) => widget.id !== "inspecciones" && widget.id !== "retiros"
-          )
+            (widget) => widget.id !== "inspecciones" && widget.id !== "retiros"
+        )
         : statWidgets;
+
     const [modalOpen, setModalOpen] = useState(false);
     const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
     const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
-    const [showPrivateModal, setShowPrivateModal] = useState(false);
-    const [creatingPrivate, setCreatingPrivate] = useState(false);
+
+    // Private purchase modal states - RESTORED FROM REFERENCE VERSION
     const [privateForm, setPrivateForm] = useState(initialPrivateForm);
     const [selectedEquipment, setSelectedEquipment] = useState([]);
     const [equipmentCatalog, setEquipmentCatalog] = useState([]);
+    const [loadingEquipment, setLoadingEquipment] = useState(false);
     const [offerValidity, setOfferValidity] = useState(defaultOfferValidity());
     const [offerKind, setOfferKind] = useState("venta");
     const [comodatoFile, setComodatoFile] = useState(null);
+    const [showPrivateModal, setShowPrivateModal] = useState(false);
+    const [creatingPrivate, setCreatingPrivate] = useState(false);
+
+    // Cargar equipos disponibles al montar el componente - RESTORED FROM REFERENCE VERSION
     useEffect(() => {
         let active = true;
         const loadEquipment = async () => {
+            setLoadingEquipment(true);
             try {
                 const meta = await getEquipmentPurchaseMeta();
                 if (!active) return;
                 setEquipmentCatalog(meta.equipment || []);
             } catch (error) {
-                console.error(error);
+                console.error("Error cargando equipos:", error);
                 showToast("No se pudieron cargar los equipos disponibles", "error");
+            } finally {
+                setLoadingEquipment(false);
             }
         };
         loadEquipment();
@@ -142,8 +153,7 @@ const ComercialSolicitudesView = () => {
             } catch (err) {
                 console.warn("No se pudieron cargar los archivos:", err);
             }
-            const normalizedRequest =
-                requestData?.request || requestData || {};
+            const normalizedRequest = requestData?.request || requestData || {};
             let payload = normalizedRequest.payload;
             if (typeof payload === "string") {
                 try {
@@ -185,9 +195,7 @@ const ComercialSolicitudesView = () => {
             id: "inspection",
             subtitle: "Inspecciones",
             title: "Evalúa ambientes críticos",
-            description:
-                "Agenda la visita del equipo técnico y genera automáticamente la F.ST-INS para ambientes, LIS y periféricos.",
-            chips: ["F.ST-INS", "Checklist"],
+            description: "Agenda la visita del equipo técnico y genera automáticamente la F.ST-INS.",
             color: "blue",
             icon: FiClipboard,
         },
@@ -195,13 +203,12 @@ const ComercialSolicitudesView = () => {
             id: "retiro",
             subtitle: "Retiros",
             title: "Coordina retiros y devoluciones",
-            description:
-                "Gestiona la logística inversa para equipos en campo y documenta las observaciones.",
-            chips: ["Rutas"],
+            description: "Gestiona la logística inversa para equipos en campo.",
             color: "amber",
             icon: FiTruck,
         },
     ];
+
     const visibleActionCards = isBackofficeUser
         ? requestActionCards.filter((card) => card.id !== "inspection" && card.id !== "retiro")
         : requestActionCards;
@@ -252,12 +259,14 @@ const ComercialSolicitudesView = () => {
         setShowPurchaseTypeModal(false);
         if (type === "public") {
             handlePurchaseHandoffOpen();
-            return;
+        } else if (type === "private") {
+            // Abrir modal de compra privada detallado
+            resetPrivateModalFields();
+            setShowPrivateModal(true);
         }
-        resetPrivateModalFields();
-        setShowPrivateModal(true);
     };
 
+    // Funciones para manejo de equipos en modal privado
     const normalizeEquipmentId = (id) => `${id}`;
 
     const toggleEquipment = (id) => {
@@ -278,6 +287,7 @@ const ComercialSolicitudesView = () => {
         );
     };
 
+    // Función para crear solicitud privada
     const handlePrivateSubmit = async () => {
         if (!privateForm.firstName.trim() || !privateForm.lastName.trim()) {
             showToast("Ingresa nombres y apellidos del cliente", "warning");
@@ -296,13 +306,13 @@ const ComercialSolicitudesView = () => {
             return;
         }
 
-        setCreatingPrivate(true);
+        showLoader();
         try {
             const equipmentPayload = selectedEquipment
                 .map((selected) => {
-                            const item = equipmentCatalog.find(
-                                (equip) => `${equip.id}` === normalizeEquipmentId(selected.id)
-                            );
+                    const item = equipmentCatalog.find(
+                        (equip) => `${equip.id}` === normalizeEquipmentId(selected.id)
+                    );
                     return {
                         id: item?.id || selected.id,
                         name: item?.name || "Equipo",
@@ -338,100 +348,79 @@ const ComercialSolicitudesView = () => {
             showToast("Solicitud privada registrada. Backoffice la revisará", "success");
             closePrivateModal();
         } catch (error) {
-            console.error(error);
+            console.error("Error creando solicitud privada:", error);
             showToast("No pudimos crear la solicitud privada", "error");
         } finally {
-            setCreatingPrivate(false);
+            hideLoader();
         }
+    };
+
+    const comercialActionCards = [
+        ...visibleActionCards,
+        {
+            id: "cliente",
+            subtitle: "Nuevo Cliente",
+            title: "Registrar Cliente",
+            color: "emerald",
+            icon: FiUserPlus,
+        },
+        {
+            id: "compra-total",
+            subtitle: "Compras",
+            title: "Requerimientos",
+            color: "indigo",
+            icon: FiCreditCard,
+        },
+        {
+            id: "vacaciones",
+            subtitle: "Talento Humano",
+            title: "Permisos y Vacaciones",
+            color: "orange",
+            icon: FiUsers,
+        }
+    ];
+
+    const handleActionClick = (id) => {
+        if (id === "vacaciones") {
+            setShowPermisoModal(true);
+            return;
+        }
+        if (id === "compra-total") {
+            setShowPurchaseTypeModal(true);
+            return;
+        }
+        const mappedType = id;
+        openRequestModal(mappedType);
     };
 
     return (
         <div className="space-y-8">
-            {/* Encabezado */}
-            <section>
-                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-                    <FiClipboard className="text-blue-600" />
-                    Solicitudes comerciales
-                </h1>
-                <p className="text-sm text-gray-500">
-                    Crea y da seguimiento a las solicitudes vinculadas a tus clientes y operaciones.
-                </p>
-            </section>
-
-            {/* CREAR NUEVA SOLICITUD - Grid completo */}
-            <section>
-                <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-gray-900">
-                        Crear nueva solicitud
-                    </h2>
-                    <p className="text-sm text-gray-600">
-                        Elige el flujo que necesitas según el tipo de gestión.
-                    </p>
-                </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-            {visibleActionCards.map((card) => (
-                <div key={card.id} className="flex">
-                    <ActionCard
-                        icon={card.icon}
-                                subtitle={card.subtitle}
-                                title={card.title}
-                                color={card.color}
-                                onClick={() => openRequestModal(card.id)}
-                            />
-                        </div>
-                    ))}
-                    <div className="flex">
-                        <ActionCard
-                            icon={FiUserPlus}
-                            subtitle="Nuevo Cliente"
-                            title="Registrar Cliente"
-                            color="emerald"
-                            onClick={() => openRequestModal("cliente")}
-                        />
-                    </div>
-                    <div className="flex">
-                    <ActionCard
-                        icon={FiCreditCard}
-                        subtitle="Compras"
-                        title="Requerimientos"
-                        color="indigo"
-                        onClick={() => setShowPurchaseTypeModal(true)}
-                    />
-                    </div>
-                    <div className="flex">
-                        <ActionCard
-                            icon={FiUsers}
-                            subtitle="Talento Humano"
-                            title="Permisos y Vacaciones"
-                            color="orange"
-                            onClick={() => setShowPermisoModal(true)}
-                        />
-                    </div>
-                </div>
-            </section>
-
-              {/* RESUMEN DE SOLICITUDES (NUEVO) */}
-            <section>
-                <div className="mb-4">
-                    <h2 className="text-lg font-semibold text-gray-900">
-                        Resumen de Solicitudes
-                    </h2>
-                    <p className="text-sm text-gray-600">
-                        Consulta el historial de solicitudes por tipo
-                    </p>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {visibleStatWidgets.map(widget => (
-                        <RequestStatWidget
-                            key={widget.id}
-                            title={widget.title}
-                            icon={widget.icon}
-                            color={widget.color}
-                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
-                        />
-                    ))}
-                </div>
-            </section>
+            <BaseSolicitudesView
+                actionCards={comercialActionCards}
+                onActionCardClick={(card) => handleActionClick(card.id)}
+                createSectionTitle="Crear Nueva Solicitud"
+                createSectionSubtitle="Elige el flujo que necesitas según el tipo de gestión"
+                customSections={[
+                    {
+                        id: "resumen",
+                        title: "Resumen de Solicitudes",
+                        subtitle: "Consulta el historial de solicitudes por tipo",
+                        content: (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                {visibleStatWidgets.map(widget => (
+                                    <RequestStatWidget
+                                        key={widget.id}
+                                        title={widget.title}
+                                        icon={widget.icon}
+                                        color={widget.color}
+                                        onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
+                                    />
+                                ))}
+                            </div>
+                        )
+                    }
+                ]}
+            />
 
             {/* PURCHASE HANDOFF MODAL */}
             <PurchaseHandoffWidget
@@ -443,7 +432,7 @@ const ComercialSolicitudesView = () => {
             <Modal
                 open={showPurchaseTypeModal}
                 onClose={() => setShowPurchaseTypeModal(false)}
-                title="Selecciona el cliente"
+                title="Selecciona el tipo de cliente"
             >
                 <div className="space-y-3">
                     <p>¿El cliente pertenece a la red pública o es un cliente privado?</p>
@@ -458,198 +447,12 @@ const ComercialSolicitudesView = () => {
                 </div>
             </Modal>
 
-            <Modal
-                open={showPrivateModal}
-                onClose={closePrivateModal}
-                title="Registrar solicitud privada"
-            >
-                <div className="space-y-4 text-sm text-gray-700">
-                    <p className="text-sm text-gray-600">
-                        Registra los datos completos del cliente privado para que Backoffice continúe el proceso.
-                    </p>
-                    <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            placeholder="Nombres"
-                            value={privateForm.firstName}
-                            onChange={(event) =>
-                                setPrivateForm((prev) => ({ ...prev, firstName: event.target.value }))
-                            }
-                        />
-                        <input
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            placeholder="Apellidos"
-                            value={privateForm.lastName}
-                            onChange={(event) =>
-                                setPrivateForm((prev) => ({ ...prev, lastName: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <input
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        placeholder="Nombre Comercial"
-                        value={privateForm.clientName}
-                        onChange={(event) =>
-                            setPrivateForm((prev) => ({ ...prev, clientName: event.target.value }))
-                        }
-                    />
-                    <div className="grid gap-3 md:grid-cols-2">
-                        <input
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            placeholder="RUC / Cédula"
-                            value={privateForm.clientIdentifier}
-                            onChange={(event) =>
-                                setPrivateForm((prev) => ({ ...prev, clientIdentifier: event.target.value }))
-                            }
-                        />
-                        <input
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            placeholder="Correo de contacto"
-                            value={privateForm.clientEmail}
-                            onChange={(event) =>
-                                setPrivateForm((prev) => ({ ...prev, clientEmail: event.target.value }))
-                            }
-                        />
-                    </div>
-                    <label className="flex flex-col text-sm text-gray-600 gap-1">
-                        Tipo de cliente
-                        <select
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            value={privateForm.clientType}
-                            onChange={(event) =>
-                                setPrivateForm((prev) => ({ ...prev, clientType: event.target.value }))
-                            }
-                        >
-                            <option value="persona_natural">Persona natural</option>
-                            <option value="persona_juridica">Persona jurídica</option>
-                        </select>
-                    </label>
-                    <div className="space-y-2">
-                        <p className="text-sm font-semibold text-gray-600">Equipos disponibles</p>
-                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            {equipmentCatalog.map((equipment) => {
-                                const selected = selectedEquipment.find((item) => item.id === `${equipment.id}`);
-                                return (
-                                    <div
-                                        key={equipment.id}
-                                        onClick={() => toggleEquipment(equipment.id)}
-                                        className={`rounded-2xl border p-3 transition cursor-pointer ${
-                                            selected ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white"
-                                        }`}
-                                    >
-                                        <div className="flex items-center justify-between">
-                                            <div>
-                                                <p className="text-sm font-semibold text-gray-900">
-                                                    {equipment.name}
-                                                </p>
-                                                <p className="text-xs text-gray-500 flex items-center gap-1">
-                                                    SKU: {equipment.sku || "N/A"}
-                                                </p>
-                                            </div>
-                                            <span className={`text-xs font-semibold ${selected ? "text-blue-700" : "text-gray-400"}`}>
-                                                {selected ? "Seleccionado" : "Agregar"}
-                                            </span>
-                                        </div>
-                                        {selected && (
-                                            <div className="mt-2 flex items-center gap-2 text-xs text-gray-600">
-                                                <span>Tipo:</span>
-                                                <button
-                                                    type="button"
-                                                    className={`rounded-full px-2 py-1 ${
-                                                        selected.type === "new"
-                                                            ? "bg-blue-600 text-white"
-                                                            : "border border-gray-300"
-                                                    }`}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        updateEquipmentType(equipment.id, "new");
-                                                    }}
-                                                >
-                                                    Nuevo
-                                                </button>
-                                                <button
-                                                    type="button"
-                                                    className={`rounded-full px-2 py-1 ${
-                                                        selected.type === "cu"
-                                                            ? "bg-blue-600 text-white"
-                                                            : "border border-gray-300"
-                                                    }`}
-                                                    onClick={(event) => {
-                                                        event.stopPropagation();
-                                                        updateEquipmentType(equipment.id, "cu");
-                                                    }}
-                                                >
-                                                    CU
-                                                </button>
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                    <div className="flex flex-col gap-1">
-                        <label className="text-xs font-semibold text-gray-500">
-                            Renovación de la oferta
-                        </label>
-                        <input
-                            type="date"
-                            value={offerValidity}
-                            onChange={(event) => setOfferValidity(event.target.value)}
-                            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        />
-                        <p className="text-[11px] text-gray-500">
-                            Vigencia sugerida: 5 años desde la fecha actual.
-                        </p>
-                    </div>
-                    <label className="flex flex-col text-sm text-gray-600 gap-1">
-                        Tipo de oferta
-                        <select
-                            className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                            value={offerKind}
-                            onChange={(event) => setOfferKind(event.target.value)}
-                        >
-                            <option value="venta">Venta</option>
-                            <option value="prestamo">Préstamo</option>
-                            <option value="comodato">Comodato</option>
-                        </select>
-                    </label>
-                    {offerKind === "comodato" && (
-                        <label className="flex flex-col text-sm text-gray-600 gap-1">
-                            Documento de estadística de consumo
-                            <input
-                                type="file"
-                                accept=".pdf,.png,.jpg,.jpeg"
-                                onChange={(event) => setComodatoFile(event.target.files?.[0] || null)}
-                                className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm"
-                            />
-                        </label>
-                    )}
-                    <textarea
-                        rows={3}
-                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                        placeholder="Notas adicionales (opcional)"
-                        value={privateForm.notes}
-                        onChange={(event) =>
-                            setPrivateForm((prev) => ({ ...prev, notes: event.target.value }))
-                        }
-                    />
-                    <div className="flex justify-end gap-2">
-                        <Button variant="secondary" onClick={closePrivateModal}>
-                            Cancelar
-                        </Button>
-                        <Button onClick={handlePrivateSubmit} loading={creatingPrivate}>
-                            Crear solicitud privada
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
+            {/* PERMISOS/VACACIONES MODAL */}
 
             {/* PERMISOS/VACACIONES MODAL */}
             <PermisoVacacionModal
                 open={showPermisoModal}
                 onClose={() => setShowPermisoModal(false)}
-                onSuccess={() => { }}
             />
 
             {/* MODAL LISTADO DE SOLICITUDES */}
@@ -679,6 +482,213 @@ const ComercialSolicitudesView = () => {
                     setDetail({ open: false, loading: false, data: null, error: null })
                 }
             />
+
+            {/* MODAL DE COMPRA PRIVADA DETALLADO */}
+            <Modal
+                open={showPrivateModal}
+                onClose={closePrivateModal}
+                title="Registrar solicitud privada"
+                size="large"
+            >
+                <div className="space-y-6 text-sm text-gray-700">
+                    <p className="text-sm text-gray-600">
+                        Registra los datos completos del cliente privado para que Backoffice continúe el proceso.
+                    </p>
+
+                    {/* Información del Cliente */}
+                    <div className="border-b pb-4">
+                        <h3 className="text-lg font-semibold text-gray-900 mb-4">Información del Cliente</h3>
+                        <div className="grid gap-4 md:grid-cols-2">
+                            <input
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Nombres"
+                                value={privateForm.firstName}
+                                onChange={(e) => setPrivateForm(prev => ({ ...prev, firstName: e.target.value }))}
+                            />
+                            <input
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Apellidos"
+                                value={privateForm.lastName}
+                                onChange={(e) => setPrivateForm(prev => ({ ...prev, lastName: e.target.value }))}
+                            />
+                        </div>
+                        <input
+                            className="w-full mt-4 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            placeholder="Nombre Comercial"
+                            value={privateForm.clientName}
+                            onChange={(e) => setPrivateForm(prev => ({ ...prev, clientName: e.target.value }))}
+                        />
+                        <div className="grid gap-4 md:grid-cols-2 mt-4">
+                            <input
+                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="RUC / Cédula"
+                                value={privateForm.clientIdentifier}
+                                onChange={(e) => setPrivateForm(prev => ({ ...prev, clientIdentifier: e.target.value }))}
+                            />
+                            <input
+                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                placeholder="Correo de contacto"
+                                value={privateForm.clientEmail}
+                                onChange={(e) => setPrivateForm(prev => ({ ...prev, clientEmail: e.target.value }))}
+                            />
+                        </div>
+                        <div className="mt-4">
+                            <label className="flex flex-col text-sm text-gray-600 gap-1">
+                                Tipo de cliente
+                                <select
+                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={privateForm.clientType}
+                                    onChange={(e) => setPrivateForm(prev => ({ ...prev, clientType: e.target.value }))}
+                                >
+                                    <option value="persona_natural">Persona natural</option>
+                                    <option value="persona_juridica">Persona jurídica</option>
+                                </select>
+                            </label>
+                        </div>
+                    </div>
+
+                    {/* Equipos */}
+                    <div className="border-b pb-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">Equipos disponibles</h3>
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                            {equipmentCatalog.map((equipment) => {
+                                const selected = selectedEquipment.find(item => item.id === `${equipment.id}`);
+                                return (
+                                    <div
+                                        key={equipment.id}
+                                        onClick={() => toggleEquipment(equipment.id)}
+                                        className={`rounded-2xl border p-4 transition cursor-pointer ${
+                                            selected ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white"
+                                        }`}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div>
+                                                <p className="text-sm font-semibold text-gray-900">
+                                                    {equipment.name}
+                                                </p>
+                                                <p className="text-xs text-gray-500 flex items-center gap-1">
+                                                    SKU: {equipment.sku || "N/A"}
+                                                </p>
+                                            </div>
+                                            <span className={`text-xs font-semibold ${selected ? "text-blue-700" : "text-gray-400"}`}>
+                                                {selected ? "Seleccionado" : "Agregar"}
+                                            </span>
+                                        </div>
+                                        {selected && (
+                                            <div className="mt-3 flex items-center gap-2 text-xs text-gray-600">
+                                                <span>Tipo:</span>
+                                                <button
+                                                    type="button"
+                                                    className={`rounded-full px-2 py-1 ${
+                                                        selected.type === "new" ? "bg-blue-600 text-white" : "border border-gray-300"
+                                                    }`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        updateEquipmentType(equipment.id, "new");
+                                                    }}
+                                                >
+                                                    Nuevo
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`rounded-full px-2 py-1 ${
+                                                        selected.type === "cu" ? "bg-blue-600 text-white" : "border border-gray-300"
+                                                    }`}
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        updateEquipmentType(equipment.id, "cu");
+                                                    }}
+                                                >
+                                                    CU
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        {equipmentCatalog.length === 0 && (
+                            <p className="text-sm text-gray-500 text-center py-4">
+                                {loadingEquipment ? "Cargando equipos..." : "No hay equipos disponibles"}
+                            </p>
+                        )}
+                    </div>
+
+                    {/* Configuración de oferta */}
+                    <div className="space-y-4">
+                        <div className="flex flex-col gap-1">
+                            <label className="text-sm font-semibold text-gray-600">
+                                Vigencia de la oferta
+                            </label>
+                            <input
+                                type="date"
+                                value={offerValidity}
+                                onChange={(e) => setOfferValidity(e.target.value)}
+                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            />
+                            <p className="text-xs text-gray-500">
+                                Vigencia sugerida: 5 años desde la fecha actual.
+                            </p>
+                        </div>
+
+                        <div>
+                            <label className="flex flex-col text-sm text-gray-600 gap-1">
+                                Tipo de oferta
+                                <select
+                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    value={offerKind}
+                                    onChange={(e) => setOfferKind(e.target.value)}
+                                >
+                                    <option value="venta">Venta</option>
+                                    <option value="prestamo">Préstamo</option>
+                                    <option value="comodato">Comodato</option>
+                                </select>
+                            </label>
+                        </div>
+
+                        {offerKind === "comodato" && (
+                            <div>
+                                <label className="flex flex-col text-sm text-gray-600 gap-1">
+                                    Documento de estadística de consumo
+                                    <input
+                                        type="file"
+                                        accept=".pdf,.png,.jpg,.jpeg"
+                                        onChange={(e) => setComodatoFile(e.target.files?.[0] || null)}
+                                        className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm"
+                                    />
+                                </label>
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="flex flex-col text-sm text-gray-600 gap-1">
+                                Notas adicionales
+                                <textarea
+                                    rows={3}
+                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    placeholder="Información adicional sobre la solicitud..."
+                                    value={privateForm.notes}
+                                    onChange={(e) => setPrivateForm(prev => ({ ...prev, notes: e.target.value }))}
+                                />
+                            </label>
+                        </div>
+                    </div>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button variant="secondary" onClick={closePrivateModal}>
+                            Cancelar
+                        </Button>
+                        <Button
+                            onClick={handlePrivateSubmit}
+                            disabled={!privateForm.clientName || selectedEquipment.length === 0}
+                        >
+                            Crear solicitud privada
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 };

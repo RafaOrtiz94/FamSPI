@@ -1,50 +1,81 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FiClipboard,
-  FiTrendingUp,
   FiCheckCircle,
   FiClock,
   FiAlertTriangle,
   FiList,
   FiBarChart2,
-  FiUserPlus,
   FiCreditCard,
-  FiTruck,
   FiUsers,
+  FiActivity,
+  FiShoppingCart,
+  FiBriefcase,
   FiTarget,
-  FiActivity
+  FiTrendingUp
 } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/useAuth";
+import { useRequestModals } from "../../../core/hooks/useRequestModals";
 import ACPComercialSolicitudesView from "../components/solicitudes/ACPComercialSolicitudesView";
 import ComercialSolicitudesView from "../components/solicitudes/ComercialSolicitudesView";
+import UserRequestsView from "../components/solicitudes/UserRequestsView";
+import {
+  MaintenanceRequestModal,
+  PrivatePurchaseRequestModal,
+  PublicPurchaseRequestModal,
+  EquipmentRequestModal,
+  BusinessCaseRequestModal
+} from "../../../core/ui/components/RequestModals";
+import CreateRequestModal from "../components/CreateRequestModal";
+import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
+
+// Importar configuraciones centralizadas
+import { REQUEST_TYPES_CONFIG } from '../config/requestConfig';
+import StatsCard from '../components/shared/StatsCard';
 
 
 const SolicitudesPage = () => {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState("overview");
 
+  // Hook para manejar modales
+  const {
+    privatePurchaseModalOpen,
+    businessCaseModalOpen,
+    maintenanceModalOpen,
+    equipmentModalOpen,
+    openModal,
+    closeModal
+  } = useRequestModals();
+
+  // Estados para modales de creación de solicitudes comerciales
+  const [createInspectionModalOpen, setCreateInspectionModalOpen] = useState(false);
+  const [createRetiroModalOpen, setCreateRetiroModalOpen] = useState(false);
+  const [purchaseTypeSelectionModalOpen, setPurchaseTypeSelectionModalOpen] = useState(false);
+  const [publicPurchaseModalOpen, setPublicPurchaseModalOpen] = useState(false);
+  const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
+  const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
+  const [permisosModalOpen, setPermisosModalOpen] = useState(false);
+
   // Determinar configuración basada en el rol
   const roleConfig = useMemo(() => {
     const roleName = (user?.role_name || user?.role || "").toLowerCase();
     const isACP = roleName.includes('acp');
 
+    const baseActions = ["cliente", "compra", "permisos"];
+    const acpActions = ["cliente", "compra", "permisos"];
+    const fullActions = ["inspection", "retiro", ...baseActions];
+
+    const availableActionIds = isACP ? acpActions : fullActions;
+
     return {
       isACP,
       viewComponent: isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView,
-      availableActions: isACP ? [
-        { id: "cliente", label: "Registrar Cliente", icon: FiUserPlus, color: "emerald", subtitle: "Clientes" },
-        { id: "compra", label: "Requerimientos", icon: FiCreditCard, color: "indigo", subtitle: "Compras" },
-        { id: "permisos", label: "Permisos y Vacaciones", icon: FiUsers, color: "orange", subtitle: "Talento Humano" }
-      ] : [
-        { id: "inspection", label: "Inspecciones Técnicas", icon: FiClipboard, color: "blue", subtitle: "Inspecciones" },
-        { id: "retiro", label: "Retiros y Devoluciones", icon: FiTruck, color: "amber", subtitle: "Retiros" },
-        { id: "cliente", label: "Registrar Cliente", icon: FiUserPlus, color: "emerald", subtitle: "Clientes" },
-        { id: "compra", label: "Requerimientos", icon: FiCreditCard, color: "indigo", subtitle: "Compras" },
-        { id: "permisos", label: "Permisos y Vacaciones", icon: FiUsers, color: "orange", subtitle: "Talento Humano" }
-      ]
+      availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean)
     };
   }, [user]);
 
@@ -55,6 +86,41 @@ const SolicitudesPage = () => {
     approved: 28,
     rejected: 5
   }), []);
+
+  // Función para manejar acciones rápidas
+  const handleQuickAction = useCallback((actionId) => {
+    switch (actionId) {
+      case 'cliente':
+        setCreateClienteModalOpen(true);
+        break;
+      case 'compra':
+        setPurchaseTypeSelectionModalOpen(true);
+        break;
+      case 'permisos':
+        setPermisosModalOpen(true);
+        break;
+      case 'inspection':
+        setCreateInspectionModalOpen(true);
+        break;
+      case 'retiro':
+        setCreateRetiroModalOpen(true);
+        break;
+      default:
+        console.warn(`Acción rápida no reconocida: ${actionId}`);
+    }
+  }, []);
+
+  // Función para manejar selección de tipo de compra
+  const handlePurchaseTypeSelection = useCallback((type) => {
+    setPurchaseTypeSelectionModalOpen(false);
+    if (type === 'public') {
+      // Abrir modal de creación de solicitud de compra pública
+      setPublicPurchaseModalOpen(true);
+    } else if (type === 'private') {
+      // Abrir modal de compra privada
+      openModal('PRIVATE_PURCHASE');
+    }
+  }, [openModal]);
 
   // Componentes de Tabs
   const tabs = [
@@ -73,61 +139,56 @@ const SolicitudesPage = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            {/* KPIs Principales */}
+            {/* KPIs Principales - Componente Reutilizable */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <Card className="p-6 border-0 shadow-xl shadow-blue-100/50 rounded-2xl bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 border-l-4 border-blue-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800 uppercase tracking-wide">Total Solicitudes</p>
-                    <p className="text-3xl font-bold text-blue-900 mt-2">{stats.total}</p>
-                    <p className="text-xs text-blue-700 mt-1">Gestiones activas</p>
-                  </div>
-                  <div className="p-3 bg-blue-600 rounded-xl">
-                    <FiClipboard className="text-white" size={24} />
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="p-6 border-0 shadow-xl shadow-green-100/50 rounded-2xl bg-gradient-to-br from-green-50 via-green-100 to-green-200 border-l-4 border-green-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-green-800 uppercase tracking-wide">Aprobadas</p>
-                    <p className="text-3xl font-bold text-green-900 mt-2">{stats.approved}</p>
-                    <p className="text-xs text-green-700 mt-1">
-                      {stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito
-                    </p>
-                  </div>
-                  <div className="p-3 bg-green-600 rounded-xl">
-                    <FiCheckCircle className="text-white" size={24} />
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="p-6 border-0 shadow-xl shadow-yellow-100/50 rounded-2xl bg-gradient-to-br from-yellow-50 via-yellow-100 to-yellow-200 border-l-4 border-yellow-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-yellow-800 uppercase tracking-wide">En Proceso</p>
-                    <p className="text-3xl font-bold text-yellow-900 mt-2">{stats.pending}</p>
-                    <p className="text-xs text-yellow-700 mt-1">Pendientes de revisión</p>
-                  </div>
-                  <div className="p-3 bg-yellow-600 rounded-xl">
-                    <FiClock className="text-white" size={24} />
-                  </div>
-                </div>
-              </Card>
-
-              <Card className="p-6 border-0 shadow-xl shadow-red-100/50 rounded-2xl bg-gradient-to-br from-red-50 via-red-100 to-red-200 border-l-4 border-red-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-red-800 uppercase tracking-wide">Rechazadas</p>
-                    <p className="text-3xl font-bold text-red-900 mt-2">{stats.rejected}</p>
-                    <p className="text-xs text-red-700 mt-1">Requieren corrección</p>
-                  </div>
-                  <div className="p-3 bg-red-600 rounded-xl">
-                    <FiAlertTriangle className="text-white" size={24} />
-                  </div>
-                </div>
-              </Card>
+              <StatsCard
+                title="Total Solicitudes"
+                value={stats.total}
+                subtitle="Gestiones activas"
+                icon={FiClipboard}
+                colors="from-blue-50 via-blue-100 to-blue-200"
+                borderColor="border-blue-500"
+                shadowColor="shadow-blue-100/50"
+                iconBg="bg-blue-600"
+                textColor="text-blue-800"
+                valueColor="text-blue-900"
+              />
+              <StatsCard
+                title="Aprobadas"
+                value={stats.approved}
+                subtitle={`${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito`}
+                icon={FiCheckCircle}
+                colors="from-green-50 via-green-100 to-green-200"
+                borderColor="border-green-500"
+                shadowColor="shadow-green-100/50"
+                iconBg="bg-green-600"
+                textColor="text-green-800"
+                valueColor="text-green-900"
+              />
+              <StatsCard
+                title="En Proceso"
+                value={stats.pending}
+                subtitle="Pendientes de revisión"
+                icon={FiClock}
+                colors="from-yellow-50 via-yellow-100 to-yellow-200"
+                borderColor="border-yellow-500"
+                shadowColor="shadow-yellow-100/50"
+                iconBg="bg-yellow-600"
+                textColor="text-yellow-800"
+                valueColor="text-yellow-900"
+              />
+              <StatsCard
+                title="Rechazadas"
+                value={stats.rejected}
+                subtitle="Requieren corrección"
+                icon={FiAlertTriangle}
+                colors="from-red-50 via-red-100 to-red-200"
+                borderColor="border-red-500"
+                shadowColor="shadow-red-100/50"
+                iconBg="bg-red-600"
+                textColor="text-red-800"
+                valueColor="text-red-900"
+              />
             </div>
 
             {/* Acciones Rápidas */}
@@ -146,17 +207,16 @@ const SolicitudesPage = () => {
                 {roleConfig.availableActions.map((action) => (
                   <Button
                     key={action.id}
-                    onClick={() => setActiveTab('my-requests')}
-                    className={`p-4 h-auto ${
-                      action.color === 'blue' ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800' :
-                      action.color === 'amber' ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800' :
-                      action.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800' :
-                      action.color === 'indigo' ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800' :
-                      'bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
-                    } text-white rounded-xl shadow-lg`}
+                    onClick={() => handleQuickAction(action.id)}
+                    className={`p-3 h-14 ${action.color === 'blue' ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800' :
+                        action.color === 'amber' ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800' :
+                          action.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800' :
+                            action.color === 'indigo' ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800' :
+                              'bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
+                      } text-white rounded-xl shadow-md`}
                   >
                     <div className="flex items-center gap-3">
-                      <action.icon size={20} />
+                      <action.icon size={16} />
                       <div className="text-left">
                         <div className="font-semibold">{action.label}</div>
                         <div className="text-xs opacity-90">{action.subtitle}</div>
@@ -166,6 +226,11 @@ const SolicitudesPage = () => {
                 ))}
               </div>
             </Card>
+
+            {/* Vista Específica del Rol */}
+            <div className="mt-8">
+              <roleConfig.viewComponent />
+            </div>
 
             {/* Actividad Reciente */}
             <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
@@ -261,30 +326,7 @@ const SolicitudesPage = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-slate-900">Mis Solicitudes</h2>
-                  <p className="text-slate-600 mt-1">Historial completo de tus gestiones</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-sm text-slate-600">
-                    {stats.total} solicitudes totales
-                  </div>
-                  {stats.pending > 0 && (
-                    <div className="flex items-center gap-2 text-yellow-600">
-                      <FiClock size={16} />
-                      <span className="text-sm font-medium">{stats.pending} pendientes</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </Card>
-
-            {/* Renderizar la vista específica del rol */}
-            <div className="space-y-6">
-              <roleConfig.viewComponent />
-            </div>
+            <UserRequestsView onCreateNew={handleQuickAction} />
           </motion.div>
         );
 
@@ -435,6 +477,148 @@ const SolicitudesPage = () => {
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Modales */}
+      <PermisoVacacionModal
+        open={permisosModalOpen}
+        onClose={() => setPermisosModalOpen(false)}
+        onSuccess={() => {
+          setPermisosModalOpen(false);
+          // Aquí podríamos recargar datos si fuera necesario
+        }}
+      />
+
+      <CreateRequestModal
+        open={createClienteModalOpen}
+        onClose={() => setCreateClienteModalOpen(false)}
+        onSubmit={async (data) => {
+          console.log('Crear cliente:', data);
+          setCreateClienteModalOpen(false);
+        }}
+        presetType="cliente"
+      />
+
+      <CreateRequestModal
+        open={createCompraModalOpen}
+        onClose={() => setCreateCompraModalOpen(false)}
+        onSubmit={async (data) => {
+          console.log('Crear compra:', data);
+          setCreateCompraModalOpen(false);
+        }}
+        presetType="compra"
+      />
+
+      <CreateRequestModal
+        open={createInspectionModalOpen}
+        onClose={() => setCreateInspectionModalOpen(false)}
+        onSubmit={async (data) => {
+          console.log('Crear inspección:', data);
+          setCreateInspectionModalOpen(false);
+        }}
+        presetType="inspection"
+      />
+
+      <CreateRequestModal
+        open={createRetiroModalOpen}
+        onClose={() => setCreateRetiroModalOpen(false)}
+        onSubmit={async (data) => {
+          console.log('Crear retiro:', data);
+          setCreateRetiroModalOpen(false);
+        }}
+        presetType="retiro"
+      />
+
+      {/* ✅ MODALES GLOBALES DETALLADOS */}
+      <PrivatePurchaseRequestModal
+        isOpen={privatePurchaseModalOpen}
+        onClose={() => closeModal('PRIVATE_PURCHASE')}
+      />
+
+      <BusinessCaseRequestModal
+        isOpen={businessCaseModalOpen}
+        onClose={() => closeModal('BUSINESS_CASE')}
+      />
+
+      <EquipmentRequestModal
+        isOpen={equipmentModalOpen}
+        onClose={() => closeModal('EQUIPMENT')}
+      />
+
+      <MaintenanceRequestModal
+        isOpen={maintenanceModalOpen}
+        onClose={() => closeModal('MAINTENANCE')}
+      />
+
+      {/* Modal de selección de tipo de compra */}
+      <Modal
+        isOpen={purchaseTypeSelectionModalOpen}
+        onClose={() => setPurchaseTypeSelectionModalOpen(false)}
+        title="Seleccionar Tipo de Compra"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-600 text-center">
+            ¿Qué tipo de requerimiento de compra deseas crear?
+          </p>
+
+          <div className="grid grid-cols-1 gap-3">
+            {/* Opción Compra Pública */}
+            <button
+              onClick={() => handlePurchaseTypeSelection('public')}
+              className="p-4 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors text-left group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-100 rounded-lg group-hover:bg-emerald-200 transition-colors">
+                  <FiShoppingCart className="text-emerald-600" size={20} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-emerald-900">Compra Pública</h3>
+                  <p className="text-sm text-emerald-700">
+                    Proceso formal vía Administración de Contratación Pública (ACP)
+                  </p>
+                </div>
+              </div>
+            </button>
+
+            {/* Opción Compra Privada */}
+            <button
+              onClick={() => handlePurchaseTypeSelection('private')}
+              className="p-4 border border-purple-200 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors text-left group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-100 rounded-lg group-hover:bg-purple-200 transition-colors">
+                  <FiBriefcase className="text-purple-600" size={20} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-purple-900">Compra Privada</h3>
+                  <p className="text-sm text-purple-700">
+                    Proceso directo con cliente privado y flujo interno
+                  </p>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button
+              variant="secondary"
+              onClick={() => setPurchaseTypeSelectionModalOpen(false)}
+            >
+              Cancelar
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal de compra pública reconstruido */}
+      <PublicPurchaseRequestModal
+        isOpen={publicPurchaseModalOpen}
+        onClose={() => setPublicPurchaseModalOpen(false)}
+        onSuccess={() => {
+          setPublicPurchaseModalOpen(false);
+          // Aquí podríamos recargar datos si fuera necesario
+        }}
+      />
     </div>
   );
 };

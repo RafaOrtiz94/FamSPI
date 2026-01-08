@@ -9,6 +9,7 @@ export const useRequestModals = () => {
   // Estados para cada tipo de modal
   const [clientModalOpen, setClientModalOpen] = useState(false);
   const [purchaseModalOpen, setPurchaseModalOpen] = useState(false);
+  const [newPublicPurchaseModalOpen, setNewPublicPurchaseModalOpen] = useState(false);
   const [privatePurchaseModalOpen, setPrivatePurchaseModalOpen] = useState(false);
   const [businessCaseModalOpen, setBusinessCaseModalOpen] = useState(false);
   const [maintenanceModalOpen, setMaintenanceModalOpen] = useState(false);
@@ -28,6 +29,9 @@ export const useRequestModals = () => {
         break;
       case 'PUBLIC_PURCHASE':
         setPurchaseModalOpen(true);
+        break;
+      case 'NEW_PUBLIC_PURCHASE':
+        setNewPublicPurchaseModalOpen(true);
         break;
       case 'PRIVATE_PURCHASE':
         setPrivatePurchaseModalOpen(true);
@@ -58,6 +62,9 @@ export const useRequestModals = () => {
       case 'PUBLIC_PURCHASE':
         setPurchaseModalOpen(false);
         break;
+      case 'NEW_PUBLIC_PURCHASE':
+        setNewPublicPurchaseModalOpen(false);
+        break;
       case 'PRIVATE_PURCHASE':
         setPrivatePurchaseModalOpen(false);
         break;
@@ -77,6 +84,7 @@ export const useRequestModals = () => {
         // Cerrar todos los modales
         setClientModalOpen(false);
         setPurchaseModalOpen(false);
+        setNewPublicPurchaseModalOpen(false);
         setPrivatePurchaseModalOpen(false);
         setBusinessCaseModalOpen(false);
         setMaintenanceModalOpen(false);
@@ -90,6 +98,7 @@ export const useRequestModals = () => {
   const closeAllModals = useCallback(() => {
     setClientModalOpen(false);
     setPurchaseModalOpen(false);
+    setNewPublicPurchaseModalOpen(false);
     setPrivatePurchaseModalOpen(false);
     setBusinessCaseModalOpen(false);
     setMaintenanceModalOpen(false);
@@ -102,6 +111,7 @@ export const useRequestModals = () => {
   const modalStates = {
     clientModalOpen,
     purchaseModalOpen,
+    newPublicPurchaseModalOpen,
     privatePurchaseModalOpen,
     businessCaseModalOpen,
     maintenanceModalOpen,

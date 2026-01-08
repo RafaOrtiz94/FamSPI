@@ -22,6 +22,7 @@ import {
   EquipmentRequestModal,
   BusinessCaseRequestModal
 } from "./RequestModals";
+import { NewPublicPurchaseRequestModal } from "../../../modules/comercial/components/NewPublicPurchaseRequestModal";
 
 /**
  * RequestActionCards Component
@@ -146,7 +147,7 @@ const RequestActionCard = ({
       onClick();
     } else {
       // Para tipos específicos, abrir modal en lugar de navegar
-      if (['PERMISSION', 'MAINTENANCE', 'PRIVATE_PURCHASE', 'EQUIPMENT', 'BUSINESS_CASE'].includes(type)) {
+      if (['PERMISSION', 'MAINTENANCE', 'PRIVATE_PURCHASE', 'NEW_PUBLIC_PURCHASE', 'EQUIPMENT', 'BUSINESS_CASE'].includes(type)) {
         openModal(type);
       } else {
         // Para otros tipos, navegar normalmente
@@ -253,7 +254,7 @@ const RequestActionButton = ({
       onClick();
     } else {
       // Para tipos específicos, abrir modal en lugar de navegar
-      if (['PERMISSION', 'MAINTENANCE', 'PRIVATE_PURCHASE', 'EQUIPMENT', 'BUSINESS_CASE'].includes(type)) {
+      if (['PERMISSION', 'MAINTENANCE', 'PRIVATE_PURCHASE', 'NEW_PUBLIC_PURCHASE', 'EQUIPMENT', 'BUSINESS_CASE'].includes(type)) {
         openModal(type);
       } else {
         // Para otros tipos, navegar normalmente
@@ -326,6 +327,7 @@ const RequestModalProvider = () => {
     permissionModalOpen,
     maintenanceModalOpen,
     privatePurchaseModalOpen,
+    newPublicPurchaseModalOpen,
     equipmentModalOpen,
     businessCaseModalOpen,
     closeModal
@@ -356,6 +358,15 @@ const RequestModalProvider = () => {
         onClose={() => closeModal('PRIVATE_PURCHASE')}
         onSuccess={() => {
           closeModal('PRIVATE_PURCHASE');
+          // Aquí puedes agregar lógica adicional como refrescar datos
+        }}
+      />
+
+      <NewPublicPurchaseRequestModal
+        isOpen={newPublicPurchaseModalOpen}
+        onClose={() => closeModal('NEW_PUBLIC_PURCHASE')}
+        onSuccess={() => {
+          closeModal('NEW_PUBLIC_PURCHASE');
           // Aquí puedes agregar lógica adicional como refrescar datos
         }}
       />

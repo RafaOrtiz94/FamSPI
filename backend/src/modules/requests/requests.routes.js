@@ -76,21 +76,6 @@ router.get(
   ctrl.listClientRequests
 );
 
-router.get(
-  "/new-client/summary",
-  verifyToken,
-  requireRole([
-    "backoffice_comercial",
-    "gerencia",
-    "comercial",
-    "jefe_comercial",
-    "acp_comercial",
-    "ti",
-    "jefe_ti",
-  ]),
-  ctrl.getClientRequestSummary,
-);
-
 // 🔍 DETALLE DE SOLICITUD DE NUEVO CLIENTE
 router.get(
   "/new-client/:id",
@@ -121,7 +106,6 @@ router.put(
   ctrl.updateClientRequest
 );
 
-
 /* ============================================================
    --- Flujo de Solicitudes Generales ---
    ============================================================ */
@@ -135,7 +119,7 @@ router.put(
 router.post(
   "/",
   verifyToken,
-  requireRole(["comercial"]),
+  requireRole(["jefe_comercial"]),
   upload.fields([
     { name: "files", maxCount: 10 },
     { name: "files[]", maxCount: 10 },

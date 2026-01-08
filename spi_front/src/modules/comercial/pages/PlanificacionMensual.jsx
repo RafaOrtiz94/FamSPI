@@ -11,31 +11,27 @@ import {
   FiFilter,
   FiSearch,
   FiRefreshCw,
-  FiMapPin,
-  FiUser,
-  FiTarget,
   FiBarChart2,
   FiActivity,
   FiZap,
-  FiUsers,
-  FiChevronDown,
-  FiChevronRight,
-  FiEye,
-  FiEdit3,
-  FiTrash2
+  FiEdit3
 } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
+import SectionCard from "../../../core/ui/components/SectionCard";
 import Button from "../../../core/ui/components/Button";
 import { useAuth } from "../../../core/auth/useAuth";
 import useSchedules from "../hooks/useSchedules";
-import ScheduleEditor from "../components/schedules/ScheduleEditor";
+import api from "../../../core/api";
+import SimpleScheduleManager from "../components/schedules/SimpleScheduleManager";
 import ScheduleStatusBadge from "../components/schedules/ScheduleStatusBadge";
 import ScheduleApprovalWidget from "../components/schedules/ScheduleApprovalWidget";
 import EditWarningModal from "../components/schedules/EditWarningModal";
+import ScheduleDetailModal from "../components/schedules/ScheduleDetailModal";
+import Modal from "../../../core/ui/components/Modal";
 import { RequestActionButton } from "../../../core/ui/components/RequestActionCards";
 
 const PlanificacionMensual = () => {
-  const { role, user } = useAuth();
+  const { role } = useAuth();
   const isManager = ["jefe_comercial", "gerencia", "gerencia_general"].includes(role);
   const {
     schedules,
@@ -49,19 +45,44 @@ const PlanificacionMensual = () => {
     remove,
     loading,
     error,
-  } = useSchedules({ skipLoad: isManager });
+  } = useSchedules({ skipLoad: false });
+
+  // Clientes para selector en visitas
+  const [clients, setClients] = useState([]);
+  useEffect(() => {
+    const fetchClients = async () => {
+      try {
+        const res = await api.get("/clients");
+        const payload = res.data?.data ?? res.data;
+        const parsedClients = Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.clients)
+          ? payload.clients
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : Array.isArray(payload)
+          ? payload
+          : [];
+        setClients(parsedClients);
+      } catch (err) {
+        console.warn("No se pudieron cargar clientes", err.message);
+      }
+    };
+    fetchClients();
+  }, []);
 
   // Estados principales
   const [editingLocked, setEditingLocked] = useState(false);
   const [unlockedScheduleId, setUnlockedScheduleId] = useState(null);
   const [showEditWarning, setShowEditWarning] = useState(false);
   const [scheduleToUnlock, setScheduleToUnlock] = useState(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedForDetail, setSelectedForDetail] = useState(null);
 
   // Estados de UI
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [activeTab, setActiveTab] = useState("overview");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Estadísticas calculadas
   const stats = useMemo(() => {
@@ -97,6 +118,15 @@ const PlanificacionMensual = () => {
     [loadScheduleDetail],
   );
 
+  const handleViewDetails = useCallback(
+    (schedule) => {
+      setSelectedForDetail(schedule);
+      setShowDetailModal(true);
+      loadScheduleDetail(schedule.id);
+    },
+    [loadScheduleDetail]
+  );
+
   const startEditing = useCallback(
     (schedule) => {
       setEditingLocked(false);
@@ -127,6 +157,21 @@ const PlanificacionMensual = () => {
     setShowEditWarning(false);
     setScheduleToUnlock(null);
   }, [scheduleToUnlock, startEditing]);
+
+  const handleManagerSelect = useCallback(
+    (schedule) => {
+      if (!schedule) return;
+      handleSelectSchedule(schedule);
+    },
+    [handleSelectSchedule],
+  );
+
+  const handleManagerRequestEdit = useCallback(
+    (schedule) => {
+      handleEditSchedule(schedule ?? activeSchedule);
+    },
+    [handleEditSchedule, activeSchedule],
+  );
 
   // Filtrar y buscar cronogramas
   const filteredSchedules = useMemo(() => {
@@ -208,7 +253,7 @@ const PlanificacionMensual = () => {
                 className="text-xs"
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleSelectSchedule(schedule);
+                  handleViewDetails(schedule);
                 }}
               >
                 Ver detalles
@@ -228,7 +273,7 @@ const PlanificacionMensual = () => {
           </motion.div>
         );
       }),
-    [filteredSchedules, activeSchedule?.id, handleEditSchedule, handleSelectSchedule],
+    [filteredSchedules, activeSchedule?.id, handleEditSchedule, handleSelectSchedule, handleViewDetails],
   );
 
   if (isManager) {
@@ -282,7 +327,7 @@ const PlanificacionMensual = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.1 }}
         >
-          <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+          <Card className="p-6 md:p-8 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
             <ScheduleApprovalWidget />
           </Card>
         </motion.div>
@@ -310,7 +355,9 @@ const PlanificacionMensual = () => {
           >
             {/* KPIs Principales */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <Card className="p-6 border-0 shadow-xl shadow-blue-100/50 rounded-2xl bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 border-l-4 border-blue-500">
+              <Card
+                className="p-6 md:p-8 border-0 shadow-xl shadow-blue-100/50 rounded-2xl bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 border-l-4 border-blue-500"
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-blue-800 uppercase tracking-wide">Total Cronogramas</p>
@@ -323,7 +370,9 @@ const PlanificacionMensual = () => {
                 </div>
               </Card>
 
-              <Card className="p-6 border-0 shadow-xl shadow-green-100/50 rounded-2xl bg-gradient-to-br from-green-50 via-green-100 to-green-200 border-l-4 border-green-500">
+              <Card
+                className="p-6 md:p-8 border-0 shadow-xl shadow-green-100/50 rounded-2xl bg-gradient-to-br from-green-50 via-green-100 to-green-200 border-l-4 border-green-500"
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-green-800 uppercase tracking-wide">Aprobados</p>
@@ -338,7 +387,9 @@ const PlanificacionMensual = () => {
                 </div>
               </Card>
 
-              <Card className="p-6 border-0 shadow-xl shadow-yellow-100/50 rounded-2xl bg-gradient-to-br from-yellow-50 via-yellow-100 to-yellow-200 border-l-4 border-yellow-500">
+              <Card
+                className="p-6 md:p-8 border-0 shadow-xl shadow-yellow-100/50 rounded-2xl bg-gradient-to-br from-yellow-50 via-yellow-100 to-yellow-200 border-l-4 border-yellow-500"
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-yellow-800 uppercase tracking-wide">En Proceso</p>
@@ -351,7 +402,9 @@ const PlanificacionMensual = () => {
                 </div>
               </Card>
 
-              <Card className="p-6 border-0 shadow-xl shadow-indigo-100/50 rounded-2xl bg-gradient-to-br from-indigo-50 via-indigo-100 to-indigo-200 border-l-4 border-indigo-500">
+              <Card
+                className="p-6 md:p-8 border-0 shadow-xl shadow-indigo-100/50 rounded-2xl bg-gradient-to-br from-indigo-50 via-indigo-100 to-indigo-200 border-l-4 border-indigo-500"
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-indigo-800 uppercase tracking-wide">Eficiencia</p>
@@ -368,7 +421,7 @@ const PlanificacionMensual = () => {
             </div>
 
             {/* Acciones Rápidas */}
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            <Card className="p-4 md:p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
               <div className="flex items-center justify-between mb-6">
                 <div>
                   <h3 className="text-xl font-bold text-slate-900">Acciones Rápidas</h3>
@@ -420,7 +473,7 @@ const PlanificacionMensual = () => {
             </Card>
 
             {/* Actividad Reciente */}
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            <Card className="p-4 md:p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
               <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 bg-slate-100 rounded-lg">
                   <FiActivity className="text-slate-600" size={20} />
@@ -484,7 +537,7 @@ const PlanificacionMensual = () => {
             className="space-y-6"
           >
             {/* Header de la sección */}
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            <SectionCard variant="base" className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-2xl font-bold text-slate-900">Gestión de Cronogramas</h2>
@@ -502,10 +555,10 @@ const PlanificacionMensual = () => {
                   )}
                 </div>
               </div>
-            </Card>
+            </SectionCard>
 
             {/* Filtros y búsqueda */}
-            <Card className="p-4 border-0 shadow-lg shadow-slate-100/60 rounded-2xl">
+            <SectionCard variant="compact" className="border-0 shadow-lg shadow-slate-100/60 rounded-2xl">
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1 relative">
                   <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={16} />
@@ -533,12 +586,15 @@ const PlanificacionMensual = () => {
                   </select>
                 </div>
               </div>
-            </Card>
+            </SectionCard>
 
             {/* Lista de cronogramas */}
             <div className="grid gap-4">
               {filteredSchedules.length === 0 ? (
-                <Card className="p-12 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+                <SectionCard
+                  variant="roomy"
+                  className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl"
+                >
                   <div className="text-center">
                     <FiCalendar className="mx-auto text-slate-300 mb-4" size={64} />
                     <h3 className="text-xl font-bold text-slate-900 mb-2">No se encontraron cronogramas</h3>
@@ -556,7 +612,7 @@ const PlanificacionMensual = () => {
                       Crear Primera Planificación
                     </Button>
                   </div>
-                </Card>
+                </SectionCard>
               ) : (
                 <div className="grid gap-4">
                   {scheduleCards}
@@ -573,7 +629,7 @@ const PlanificacionMensual = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <Card className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl overflow-hidden">
+            <SectionCard variant="base" className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl overflow-hidden">
               <div className="bg-gradient-to-r from-slate-700 to-slate-800 px-6 py-5">
                 <div className="flex items-center justify-between">
                   <div>
@@ -596,20 +652,23 @@ const PlanificacionMensual = () => {
                 </div>
               </div>
 
-              <div className="p-6">
-                <ScheduleEditor
-                  schedule={activeSchedule}
-                  editingLocked={editingLocked}
-                  onRequestEdit={() => handleEditSchedule(activeSchedule)}
+              <div className="p-0">
+                <SimpleScheduleManager
+                  schedules={schedules}
                   onCreate={create}
                   onAddVisit={addVisit}
                   onUpdateVisit={updateVisit}
                   onRemoveVisit={removeVisit}
                   onSubmit={submit}
                   onDelete={remove}
+                  editingLocked={editingLocked}
+                  onRequestEdit={handleManagerRequestEdit}
+                  onSelectSchedule={handleManagerSelect}
+                  activeSchedule={activeSchedule}
+                  clients={clients}
                 />
               </div>
-            </Card>
+            </SectionCard>
           </motion.div>
         );
 
@@ -620,7 +679,7 @@ const PlanificacionMensual = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            <SectionCard variant="roomy" className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
               <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 bg-indigo-100 rounded-lg">
                   <FiBarChart2 className="text-indigo-600" size={24} />
@@ -632,7 +691,7 @@ const PlanificacionMensual = () => {
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
+                <SectionCard variant="roomy" className="border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
                   <h3 className="text-lg font-bold text-slate-900 mb-4">Distribución por Estado</h3>
                   <div className="space-y-3">
                     <div className="flex justify-between items-center">
@@ -652,18 +711,18 @@ const PlanificacionMensual = () => {
                       <span className="text-sm font-bold text-red-600">{stats.rejected}</span>
                     </div>
                   </div>
-                </Card>
+                </SectionCard>
 
-                <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
+                <SectionCard variant="roomy" className="border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
                   <h3 className="text-lg font-bold text-slate-900 mb-4">Eficiencia por Mes</h3>
                   <div className="text-center py-8">
                     <FiTrendingUp className="mx-auto text-slate-300 mb-3" size={48} />
                     <p className="text-slate-500">Funcionalidad próximamente</p>
                     <p className="text-slate-400 text-sm mt-1">Análisis detallado por periodos</p>
                   </div>
-                </Card>
+                </SectionCard>
               </div>
-            </Card>
+            </SectionCard>
           </motion.div>
         );
 
@@ -764,6 +823,28 @@ const PlanificacionMensual = () => {
       </div>
 
       <EditWarningModal open={showEditWarning} onClose={() => setShowEditWarning(false)} onConfirm={confirmEdit} />
+
+      <Modal
+        open={showDetailModal}
+        onClose={() => setShowDetailModal(false)}
+        title="Detalle de Planificación"
+      >
+        {loading ? (
+          <div className="flex flex-col items-center justify-center p-12 text-slate-500">
+            <FiRefreshCw className="animate-spin mb-4" size={32} />
+            <p className="text-sm font-medium">Cargando detalles del cronograma...</p>
+          </div>
+        ) : activeSchedule && activeSchedule.id === selectedForDetail?.id ? (
+          <ScheduleDetailModal
+            schedule={activeSchedule}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center p-12 text-slate-300">
+            <FiCalendar size={48} className="mb-2" />
+            <p>Cargando datos...</p>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 };

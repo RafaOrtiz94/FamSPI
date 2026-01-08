@@ -11,6 +11,7 @@ Este workflow describe cómo agregar una sección de solicitudes estandarizada a
 - Los componentes compartidos en `src/modules/shared/solicitudes/` deben estar implementados
 - El módulo debe tener un dashboard funcional
 - Identificar los roles del módulo y sus permisos
+- Consultar la [Guía de Estándar Visual (STANDARDS.md)](./src/modules/shared/solicitudes/STANDARDS.md) para lineamientos de UX/UI
 
 ## Paso 1: Crear Estructura de Carpetas
 
@@ -123,17 +124,34 @@ const [Rol]ManagerSolicitudesView = () => {
       <BaseSolicitudesView
         actionCards={[modulo]ActionCards}
         onActionCardClick={(cardId) => openModal(cardId)}
-        enableFilters={true}
-        filterConfig={[modulo]FilterConfig}
-        filters={filters}
-        onFilterChange={setFilters}
-        onRefresh={reload}
-        enableGrid={true}
-        solicitudes={solicitudes}
-        loading={loading}
+        enableFilters={false} // Se suele usar false si se implementan Stat Widgets abajo
+        enableGrid={false}
       />
 
+      {/* Sección de Resumen (Visualmente impactante) */}
+      <section className="mt-8">
+        <div className="mb-4">
+          <h2 className="text-xl font-bold">Resumen de Solicitudes</h2>
+          <p className="text-sm text-gray-600">Consulta el historial rápido</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <RequestStatWidget
+            title="Solicitudes Tipo 1"
+            icon={FiIcon1}
+            color="blue"
+            onClick={() => handleViewList("tipo1", "Solicitudes Tipo 1")}
+          />
+          {/* ... más widgets */}
+        </div>
+      </section>
+
       {/* Modales */}
+      <RequestsListModal
+        open={!!viewType}
+        onClose={() => setViewType(null)}
+        type={viewType}
+        title={viewTitle}
+      />
       <TipoSolicitud1Modal
         open={isOpen("tipo-solicitud-1")}
         onClose={() => closeModal("tipo-solicitud-1")}

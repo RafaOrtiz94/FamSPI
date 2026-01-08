@@ -76,15 +76,26 @@ const sanitizePreferences = (preferences = {}) => {
 };
 
 const toDriveViewUrl = (driveId) =>
-  driveId ? `https://drive.google.com/uc?export=view&id=${driveId}` : null;
+  driveId ? `https://drive.google.com/thumbnail?id=${driveId}&sz=w300` : null;
 
 const normalizeAvatarUrl = (row) => {
-  if (row.avatar_url && row.avatar_url.startsWith("data:")) return row.avatar_url;
-  if (row.avatar_drive_id) return toDriveViewUrl(row.avatar_drive_id);
-  if (row.avatar_url && row.avatar_url.includes("drive.google.com/file/d/")) {
-    const match = row.avatar_url.match(/\/d\/([^/]+)/);
+  // Priorizar URL de Drive thumbnail para mejor performance
+  if (row.avatar_drive_id) {
+    return toDriveViewUrl(row.avatar_drive_id);
+  }
+
+  // Si no hay drive_id pero hay URL de Drive, extraer ID
+  if (row.avatar_url && row.avatar_url.includes("drive.google.com")) {
+    const match = row.avatar_url.match(/\/d\/([^/?]+)/);
     if (match?.[1]) return toDriveViewUrl(match[1]);
   }
+
+  // Usar data URI solo como último recurso (problemas de performance)
+  if (row.avatar_url && row.avatar_url.startsWith("data:")) {
+    return row.avatar_url;
+  }
+
+  // URL externa o null
   return row.avatar_url || null;
 };
 
@@ -234,7 +245,7 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
     const safeName = `profile-${userId}-${Date.now()}.${extension}`;
 
     const stream = new Readable();
-    stream._read = () => {};
+    stream._read = () => { };
     stream.push(file.buffer);
     stream.push(null);
 
@@ -262,13 +273,16 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
         .catch((err) => logger.warn({ err }, "No se pudo eliminar avatar anterior"));
     }
 
-    const directView = `https://drive.google.com/uc?export=view&id=${data.id}`;
+    // Usar thumbnail URL de Drive para mejor performance y compatibilidad
+    const driveThumbnailUrl = `https://drive.google.com/thumbnail?id=${data.id}&sz=w300`;
     const dataUri = buildDataUri();
     return {
-      // Guardamos un data URI para garantizar visualización inmediata,
-      // y el drive_id para usar la versión en Drive cuando esté disponible
-      avatar_url: dataUri || directView || data.webViewLink || data.webContentLink || null,
+      // Priorizar URL de Drive thumbnail para mejor performance,
+      // mantener data URI como fallback en caso de problemas de Drive
+      avatar_url: driveThumbnailUrl,
       avatar_drive_id: data.id,
+      // Incluir data URI como backup para casos donde Drive no esté disponible
+      avatar_data_uri: dataUri,
     };
   } catch (err) {
     logger.warn({ err }, "No se pudo subir avatar a Drive, guardando data URI en BD");
