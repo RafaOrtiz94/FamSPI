@@ -82,7 +82,7 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY current_stage
                 ORDER BY total DESC
                 LIMIT 10
-            `),
+            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
 
             // KPI: Solicitudes por estado
             client.query(`
@@ -91,7 +91,7 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY status
                 ORDER BY total DESC
                 LIMIT 10
-            `),
+            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
 
             // KPI: Clientes nuevos últimos 30 días (manejar tabla vacía)
             client.query(`
@@ -110,7 +110,7 @@ async function getCommercialSummary(options = {}) {
                 GROUP BY 1
                 ORDER BY 1
                 LIMIT 6
-            `),
+            `).catch(() => ({ rows: [] })), // Fallback si tabla no existe o está vacía
         ]);
 
         // Calcular métricas agregadas con mappings reales

@@ -8,9 +8,22 @@ import ComercialView from "../components/dashboard/ComercialView";
 import BackofficeView from "../components/dashboard/BackofficeView";
 import ACPComercialView from "../components/dashboard/ACPComercialView";
 
+// API
+import { getCommercialSummary } from "../../../core/api/dashboardApi";
+import { useApi } from "../../../core/hooks/useApi";
+
 const ComercialDashboard = () => {
   const { user } = useAuth();
-  const handleRefresh = () => { };
+
+  // API call for commercial summary
+  const { data: summaryData, execute: fetchSummary, loading: summaryLoading, error: summaryError } = useApi(
+    getCommercialSummary,
+    { globalLoader: false }
+  );
+
+  const handleRefresh = async () => {
+    await fetchSummary();
+  };
 
   const renderView = () => {
     const role = user?.role?.toLowerCase() || "";
@@ -43,6 +56,9 @@ const ComercialDashboard = () => {
     return (
       <ComercialView
         onRefresh={handleRefresh}
+        summaryData={summaryData}
+        summaryLoading={summaryLoading}
+        summaryError={summaryError}
       />
     );
   };
