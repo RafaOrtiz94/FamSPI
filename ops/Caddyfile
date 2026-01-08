@@ -1,0 +1,22 @@
+https://spi-dev.famproject.com.ec {
+    tls ops/certs/spi-dev.famproject.com.ec.pem ops/certs/spi-dev.famproject.com.ec-key.pem
+
+    # API routes - must be handled BEFORE SPA fallback
+    handle /api/* {
+        # Debug: Add backend identification header
+        header_up X-Forwarded-By "Caddy-Reverse-Proxy"
+        # Node.js backend runs on 192.168.100.121:3000 (different host than Caddy)
+        reverse_proxy http://192.168.100.121:3000
+    }
+
+    # SPA fallback - serves static files and handles client-side routing
+    handle {
+        root * spi_front/build
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
+
+http://spi-dev.famproject.com.ec {
+    redir https://{host}{uri} permanent
+}
