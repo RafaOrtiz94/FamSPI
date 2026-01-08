@@ -93,7 +93,7 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
         );
     }
 
-    const data = summaryData?.data || fallbackData;
+    const data = summaryData || fallbackData;
 
     // Chart configurations
     const bcStatusChartData = {
