@@ -3,8 +3,8 @@ https://spi-dev.famproject.com.ec {
 
     # API routes - must be handled BEFORE SPA fallback
     handle /api/* {
-        # Node.js backend runs on 192.168.100.121:3000 (different host than Caddy)
-        reverse_proxy http://192.168.100.121:3000 {
+        # Node.js backend runs on 192.168.100.171:3000 (different host than Caddy)
+        reverse_proxy http://192.168.100.171:3000 {
             # Debug: Add backend identification header
             header_up X-Forwarded-By "Caddy-Reverse-Proxy"
         }
