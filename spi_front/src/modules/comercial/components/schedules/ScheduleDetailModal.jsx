@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { FiCalendar, FiCheck, FiX, FiMapPin } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
+import { formatDateEC } from "../../../../core/utils/dateUtils";
 
 const groupByDate = (visits = []) => {
   return visits.reduce((acc, visit) => {
@@ -55,7 +56,7 @@ const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
           <div key={date} className="border border-gray-100 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
-                <FiCalendar className="text-gray-500" /> {date}
+                <FiCalendar className="text-gray-500" /> {date === "sin_fecha" ? "Fecha no disponible" : formatDateEC(date)}
               </p>
               <span className="text-xs text-gray-500">{visits.length} visitas</span>
             </div>
