@@ -21,6 +21,17 @@ GOOGLE_REDIRECT_URI=https://spi-dev.famproject.com.ec/api/v1/auth/google/callbac
 TRUST_PROXY=1
 ```
 
+### 2. **ops/Caddyfile** - IP del backend actualizada
+```caddyfile
+# ❌ ANTES (IP incorrecta)
+reverse_proxy http://192.168.100.121:3000
+
+# ✅ DESPUÉS (IP correcta actual)
+reverse_proxy http://192.168.100.171:3000 {
+    header_up X-Forwarded-By "Caddy-Reverse-Proxy"
+}
+```
+
 ### 2. **backend/src/modules/auth/auth.controller.js** - Debug logging
 ```javascript
 // 🔍 Debug logging for OAuth URL configuration (development only)
