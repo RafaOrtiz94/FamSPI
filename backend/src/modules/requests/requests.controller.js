@@ -12,6 +12,7 @@ const { asyncHandler } = require("../../middlewares/asyncHandler");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const logger = require("../../config/logger");
+const { normalizeRequestDates } = require("../../utils/date.serializer");
 
 // ============================================================
 // 📋 Listar solicitudes
@@ -36,7 +37,7 @@ exports.listRequests = asyncHandler(async (req, res) => {
   res.json({
     ok: true,
     message: "Listado de solicitudes obtenido correctamente",
-    data: result,
+    data: normalizeRequestDates(result),
   });
 });
 
@@ -252,7 +253,7 @@ exports.getDetail = asyncHandler(async (req, res) => {
   res.json({
     ok: true,
     message: "Detalle de solicitud obtenido correctamente",
-    data,
+    data: normalizeRequestDates(data),
   });
 });
 
@@ -396,7 +397,7 @@ exports.listClientRequests = asyncHandler(async (req, res) => {
   res.json({
     ok: true,
     message: "Listado de solicitudes de clientes obtenido.",
-    data: result,
+    data: normalizeRequestDates(result),
   });
 });
 
@@ -440,7 +441,7 @@ exports.getClientRequestById = asyncHandler(async (req, res) => {
   res.json({
     ok: true,
     message: "Detalle de solicitud obtenido.",
-    data: result,
+    data: normalizeRequestDates(result),
   });
 });
 
