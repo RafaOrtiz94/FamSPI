@@ -255,8 +255,8 @@ const googleCallback = async (req, res) => {
     const correlationId = uuidv4();
 
     // Set correlation ID in request context for this request
-    const { setContext } = require("../../utils/requestContext");
-    setContext({
+    const { updateContext } = require("../../utils/requestContext");
+    updateContext({
       correlation_id: correlationId,
       user_id: user.id,
       user_email: user.email,
