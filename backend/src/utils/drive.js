@@ -149,6 +149,34 @@ async function uploadBase64File(name, base64, mimeType = "image/png", parentId) 
   }
 }
 
+/** 📤 Subir archivo desde multer (file.buffer) */
+async function uploadFileToDrive(file, path) {
+  try {
+    const { data } = await drive.files.create({
+      supportsAllDrives: true,
+      requestBody: { name: path.split('/').pop() }, // Extract filename from path
+      media: { mimeType: file.mimetype, body: bufferToStream(file.buffer) },
+      fields: "id, name, mimeType, webViewLink, webContentLink",
+    });
+
+    // Make file publicly accessible
+    try {
+      await drive.permissions.create({
+        fileId: data.id,
+        supportsAllDrives: true,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (permErr) {
+      logger.warn({ permErr }, "No se pudo hacer público el archivo (se usa link por defecto)");
+    }
+
+    return data;
+  } catch (err) {
+    logger.error({ err }, "❌ uploadFileToDrive");
+    throw err;
+  }
+}
+
 /** 🧾 Exportar documento a PDF y subirlo */
 async function exportPdf(docId, targetFolderId, filename) {
   try {
@@ -184,5 +212,6 @@ module.exports = {
   copyTemplate,
   replaceTags,
   uploadBase64File,
+  uploadFileToDrive,
   exportPdf,
 };

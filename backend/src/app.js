@@ -17,6 +17,7 @@ const logger = require("./config/logger");
 const { helmetConfig, corsConfig, isProd } = require("./config/security");
 const mLogger = require("./middlewares/loggerMiddleware");
 const { auditMiddleware } = require("./middlewares/auditMiddleware");
+const { normalizeApiPayloads, logLegacyUsageStats } = require("./middlewares/apiNormalization");
 const { verifyToken } = require("./middlewares/auth");
 
 const app = express();
@@ -65,6 +66,7 @@ const ORIGIN_WHITELIST = new Set([
   "http://localhost:3000",
   "http://127.0.0.1:3001",
   "http://localhost:5173", // soporte para Vite
+  "https://spi-dev.famproject.com.ec", // dominio de producción LAN
 ]);
 
 const trustProxyValue =
@@ -156,7 +158,13 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // ======================================================
-// 🧾 4️⃣ Logger middleware global
+// 📋 4️⃣ Request Context middleware (correlation ID)
+// ======================================================
+const requestContextMiddleware = require("./middlewares/requestContext");
+app.use(requestContextMiddleware);
+
+// ======================================================
+// 🧾 5️⃣ Logger middleware global
 // ======================================================
 app.use(mLogger);
 
@@ -196,7 +204,27 @@ const {
 } = require("./modules/business-case/businessCase.routes");
 const notificationsRoutes = require("./modules/notifications/notifications.routes");
 const userProfileRoutes = require("./modules/user-profile/userProfile.routes");
+const userCertificationsRoutes = require("./modules/user-certifications/userCertifications.routes");
 const signatureRoutes = require("./modules/signature/signature.routes");
+const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
+
+// ======================================================
+// ⏰ Initialize Attendance Overtime Scheduler
+// ======================================================
+const { processAutomaticOvertime } = require("./jobs/attendanceOvertimeScheduler");
+
+// Run every 5 minutes (300,000 ms) in production, every 30 seconds in development
+const SCHEDULER_INTERVAL = process.env.NODE_ENV === 'production' ? 5 * 60 * 1000 : 30 * 1000;
+
+setInterval(async () => {
+  try {
+    await processAutomaticOvertime();
+  } catch (error) {
+    logger.error({ error }, "❌ Error in attendance overtime scheduler interval");
+  }
+}, SCHEDULER_INTERVAL);
+
+logger.info(`⏰ Attendance overtime scheduler initialized (interval: ${SCHEDULER_INTERVAL / 1000}s)`);
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
@@ -231,11 +259,35 @@ app.use((req, res, next) => {
 });
 
 // ======================================================
-// 🕵️ 9️⃣ Middleware de Auditoría Global
+// 🔄 9️⃣ API Normalization Middleware
+// ------------------------------------------------------
+// Normalizes field names between legacy and canonical formats
+// ======================================================
+app.use(normalizeApiPayloads);
+app.use(logLegacyUsageStats);
+
+// ======================================================
+// 🕵️ 🔟 Middleware de Auditoría Global
 // ------------------------------------------------------
 // Solo rutas autenticadas que modifiquen datos (POST, PUT, DELETE)
 // ======================================================
 app.use(auditMiddleware);
+
+// ======================================================
+// 🔍 API Normalization Stats Endpoint
+// ------------------------------------------------------
+// Endpoint to monitor legacy field usage during migration
+// ======================================================
+app.get("/api/v1/normalization/stats", (req, res) => {
+  const { getLegacyUsageStats } = require("./middlewares/apiNormalization");
+  const stats = getLegacyUsageStats();
+  res.json({
+    ok: true,
+    totalLegacyFields: stats.length,
+    stats: stats.slice(0, 50), // Limit response size
+    timestamp: new Date().toISOString()
+  });
+});
 
 // ======================================================
 // 🚦 🔟 Rutas privadas (ordenadas por dominio)
@@ -269,7 +321,9 @@ app.use("/api/v1/vacaciones", vacacionesRoutes);
 app.use("/api/v1/clients", clientsRoutes);
 app.use("/api/v1/schedules", schedulesRoutes);
 app.use("/api/v1/notifications", notificationsRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
 app.use("/api/v1/users/me/profile", userProfileRoutes);
+app.use("/api/v1/users", userCertificationsRoutes);
 app.use("/api", signatureRoutes);
 
 // ======================================================
