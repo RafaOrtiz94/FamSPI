@@ -12,11 +12,8 @@ import DashboardLayout from "../core/layout/DashboardLayout";
 // 🪪 Páginas públicas
 import Login from "../modules/shared/pages/Login";
 import LoginCallback from "../modules/shared/pages/LoginCallback";
-<<<<<<< Updated upstream
-=======
 import FirstLoginSignature from "../modules/shared/pages/FirstLoginSignature";
 import ActivationPending from "../modules/shared/pages/ActivationPending";
->>>>>>> Stashed changes
 import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
 
@@ -25,8 +22,6 @@ import DashboardGerencia from "../modules/gerencia/Dashboard";
 import DashboardFinanzas from "../modules/finanzas/Dashboard";
 import DashboardComercial from "../modules/comercial/pages/Dashboard";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
-<<<<<<< Updated upstream
-=======
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import ACPEquipmentPurchasesPage from "../modules/comercial/pages/ACPEquipmentPurchases";
 import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
@@ -36,7 +31,6 @@ import BusinessCaseWorkspace from "../modules/comercial/pages/BusinessCaseWorksp
 import ManualBCForm from "../modules/comercial/pages/ManualBCForm";
 import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
 import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
->>>>>>> Stashed changes
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
@@ -98,62 +92,55 @@ const AppRoutes = () => {
           {/* Dashboards principales */}
           <Route path="/dashboard/gerencia" element={<DashboardGerencia />} />
           <Route path="/dashboard/finanzas" element={<DashboardFinanzas />} />
-          <Route path="/dashboard/comercial" element={<DashboardComercial />} />
-<<<<<<< Updated upstream
-          <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
-=======
+<Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
-          {/* Subrutas Comercial */}
-          <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={["comercial", "jefe_comercial", "gerencia", "gerencia_general"]}
-              />
-            }
-          >
-            <Route path="/dashboard/comercial/solicitudes" element={<SolicitudesPage />} />
-            <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
-            <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
-            <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
-            <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
-          </Route>
+{/* Subrutas Comercial */}
+<Route
+  element={
+    <ProtectedRoute
+      allowedRoles={["comercial", "jefe_comercial", "gerencia", "gerencia_general"]}
+    />
+  }
+>
+  <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
+  <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
+  <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
+</Route>
 
-          <Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
-            <Route path="/dashboard/comercial/acp-compras" element={<ACPEquipmentPurchasesPage />} />
-          </Route>
+<Route element={<ProtectedRoute allowedRoles={["acp_comercial"]} />}>
+  <Route path="/dashboard/comercial/acp-compras" element={<ACPEquipmentPurchasesPage />} />
+</Route>
 
-          <Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
-            <Route path="/dashboard/comercial/aprobaciones-planificacion" element={<AprobacionCronogramas />} />
-          </Route>
+<Route element={<ProtectedRoute allowedRoles={["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"]} />}>
+  <Route path="/dashboard/comercial/aprobaciones-planificacion" element={<AprobacionCronogramas />} />
+</Route>
 
-          <Route
-            element={
-              <ProtectedRoute
-                allowedRoles={[
-                  "comercial",
-                  "acp_comercial",
-                  "jefe_comercial",
-                  "gerencia",
-                  "gerencia_general",
-                  "operaciones",
-                  "jefe_operaciones",
-                  "servicio_tecnico",
-                  "jefe_tecnico",
-                  "jefe_servicio_tecnico",
-                ]}
-              />
-            }
-          >
-            <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
-            <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
-            <Route path="/dashboard/business-case/:id/view" element={<UnifiedBCView />} />
-            {/* Wizard route removed - no longer accessible from UI */}
-            <Route path="/dashboard/business-case/workspace" element={<BusinessCaseWorkspace />} />
-            <Route path="/dashboard/business-case/workspace/:id" element={<BusinessCaseWorkspace />} />
-            <Route path="/dashboard/business-case/:id/manual-form" element={<ManualBCForm />} />
-          </Route>
-
->>>>>>> Stashed changes
+<Route
+  element={
+    <ProtectedRoute
+      allowedRoles={[
+        "comercial",
+        "acp_comercial",
+        "jefe_comercial",
+        "gerencia",
+        "gerencia_general",
+        "operaciones",
+        "jefe_operaciones",
+        "servicio_tecnico",
+        "jefe_tecnico",
+        "jefe_servicio_tecnico",
+      ]}
+    />
+  }
+>
+  <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
+  <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
+  <Route path="/dashboard/business-case/:id/view" element={<UnifiedBCView />} />
+  {/* Wizard route removed - no longer accessible from UI */}
+  <Route path="/dashboard/business-case/workspace" element={<BusinessCaseWorkspace />} />
+  <Route path="/dashboard/business-case/workspace/:id" element={<BusinessCaseWorkspace />} />
+  <Route path="/dashboard/business-case/:id/manual-form" element={<ManualBCForm />} />
+</Route>
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
           <Route path="/dashboard/ti" element={<DashboardTI />} />
@@ -178,16 +165,12 @@ const AppRoutes = () => {
           {/* Rutas compartidas */}
           <Route path="/requests" element={<RequestsPage />} />
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
-          <Route path="/documents" element={<DocumentsPage />} />
-        </Route>
-<<<<<<< Updated upstream
-=======
+    <Route path="/documents" element={<DocumentsPage />} />
+  </Route>
 
-        {/* Pantalla de activación pendiente - fuera del layout del dashboard */}
-        <Route path="/activation-pending" element={<ActivationPending />} />
-
->>>>>>> Stashed changes
-      </Route>
+  {/* Pantalla de activación pendiente - fuera del layout del dashboard */}
+  <Route path="/activation-pending" element={<ActivationPending />} />
+</Route>
 
       {/* =======================================
           🔁 REDIRECCIONES Y ERRORES
