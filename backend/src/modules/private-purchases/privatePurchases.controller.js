@@ -45,6 +45,11 @@ exports.sendOffer = async (req, res) => {
 };
 
 exports.uploadSignedOffer = async (req, res) => {
+  console.log("[PURCHASE_FLOW][FASE2][UPLOAD_SIGNED_OFFER]", {
+    purchaseId: req.params.id,
+    userId: req.user?.id,
+    userRole: req.user?.role
+  });
   const result = await service.registerSignedOffer(req.params.id, req.body, req.user);
   res.json({ ok: true, data: result });
 };
@@ -56,5 +61,73 @@ exports.registerClient = async (req, res) => {
 
 exports.forwardToACP = async (req, res) => {
   const result = await service.forwardToACP(req.params.id, req.user);
+  res.json({ ok: true, data: result });
+};
+
+// ===========================================
+// FASE 2: Nuevos endpoints para flujo completo
+// ===========================================
+
+exports.getTimeline = async (req, res) => {
+  const result = await service.getTimeline(req.params.id);
+  res.json({ ok: true, data: result });
+};
+
+exports.managerDecision = async (req, res) => {
+  const { decision, reason } = req.body;
+  const result = await service.managerDecision(req.params.id, { decision, reason }, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.submitCorrections = async (req, res) => {
+  const { reason, correctionDetails } = req.body;
+  const result = await service.submitCorrections(req.params.id, { reason, correctionDetails }, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.submitContract = async (req, res) => {
+  const result = await service.submitContract(req.params.id, req.body, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.requestDeliveryDates = async (req, res) => {
+  const result = await service.requestDeliveryDates(req.params.id, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.submitDeliveryDates = async (req, res) => {
+  const { deliveryDates, notes } = req.body;
+  const result = await service.submitDeliveryDates(req.params.id, { deliveryDates, notes }, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.markDispatchReady = async (req, res) => {
+  const result = await service.markDispatchReady(req.params.id, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.generateDeliveryAct = async (req, res) => {
+  const result = await service.generateDeliveryAct(req.params.id, req.body, req.user);
+  res.json({ ok: true, data: result });
+};
+
+// ===========================================
+// FUNCIONES PARA COMODATO
+// ===========================================
+
+exports.requestAcpAvailability = async (req, res) => {
+  const result = await service.requestAcpAvailability(req.params.id, req.user);
+  res.json({ ok: true, data: result });
+};
+
+exports.startBusinessCase = async (req, res) => {
+  const { businessCaseData } = req.body;
+  const result = await service.startBusinessCase(req.params.id, { businessCaseData }, req.user);
+  res.json({ ok: true, data: result });
+};
+
+// Validación auxiliar para debug
+exports.validateClientApproval = async (req, res) => {
+  const result = await service.validateClientApproval(await service.getPrivatePurchase(req.params.id));
   res.json({ ok: true, data: result });
 };

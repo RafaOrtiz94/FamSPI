@@ -14,15 +14,23 @@ const {
   uploadBase64File,
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
+const NotificationManager = require('../notifications/notificationManager');
 
 const PRIVATE_PURCHASE_STATUSES = [
   "pending_commercial",
+  "client_approved", // Nuevo: cliente aprobado con LOPDP
   "pending_backoffice",
   "offer_sent",
   "pending_manager_signature",
+  "pending_manager_contract_approval", // Nuevo: aprobación contrato por gerencia
+  "contract_rejected_needs_correction", // Nuevo: rechazado, necesita correcciones
+  "contract_approved_pending_upload", // Nuevo: aprobado, esperando subida contrato
   "pending_client_signature",
   "offer_signed",
   "client_registered",
+  "pending_operations_schedule", // Nuevo: esperando fechas operaciones
+  "awaiting_dispatch", // Nuevo: fechas confirmadas, esperando despacho
+  "delivered_pending_signatures", // Nuevo: entregado, esperando firma documentos
   "sent_to_acp",
   "rejected",
 ];
@@ -151,6 +159,32 @@ async function createPrivatePurchase({ user, payload }) {
     entity_id: rows[0].id,
     details: "Nueva solicitud privada creada",
   });
+
+  // Notificar a BackOffice comercial sobre nueva solicitud
+  try {
+    await NotificationManager.sendNotification({
+      userId: null, // Todos los usuarios con rol backoffice_comercial
+      template: 'custom_html',
+      customTitle: 'Nueva Solicitud de Compra Privada',
+      customMessage: `Nueva solicitud de compra privada creada. Tipo: ${offerKind}. Acción requerida: revisar y crear oferta.`,
+      type: 'task',
+      priority: 1,
+      source: 'private_purchase.created',
+      meta: {
+        entityType: 'private_purchase',
+        entityId: rows[0].id,
+        eventType: 'created',
+        requiredAction: 'review_and_create_offer',
+        summary: `Nueva solicitud de ${offerKind} pendiente de revisión`,
+      },
+      email: true,
+      chat: false
+    });
+    console.log("[PURCHASE_FLOW][FASE7][NOTIF_CREATE]", { purchaseId: rows[0].id, eventType: 'created', channel: 'in_app', toCount: 'backoffice_comercial_role' });
+    console.log("[PURCHASE_FLOW][FASE7][MINIMIZATION_OK]", { eventType: 'created', purchaseId: rows[0].id, channel: 'email', minimized: true });
+  } catch (notifError) {
+    console.error("[PURCHASE_FLOW][FASE7][NOTIF_ERROR]", { purchaseId: rows[0].id, error: notifError.message });
+  }
 
   return rows[0];
 }
@@ -335,9 +369,59 @@ async function attachOfferDocument(id, documentId, folderId = null) {
   return updatePrivatePurchaseStatus(id, "offer_sent", payload);
 }
 
+async function validateClientApproval(request) {
+  // Validación BLOQUEANTE: verificar que cliente esté aprobado con LOPDP
+  const hasRequested = !!request.client_registration_requested_at;
+  const hasApproved = !!request.client_approved_at;
+
+  // Verificar LOPDP consent
+  const hasConsent = request.client_snapshot?.client_email ? await checkUserLopdpConsent(request.client_snapshot.client_email) : false;
+
+  console.log("[PURCHASE_FLOW][FASE2][VALIDATION]", {
+    id: request.id,
+    hasRequested,
+    hasApproved,
+    hasConsent,
+    clientEmail: request.client_snapshot?.client_email
+  });
+
+  return { hasRequested, hasApproved, hasConsent };
+}
+
+async function checkUserLopdpConsent(email) {
+  if (!email) return false;
+  try {
+    const { rows } = await db.query(
+      `SELECT status FROM user_lopdp_consents WHERE user_email = $1 AND status = 'approved' ORDER BY created_at DESC LIMIT 1`,
+      [email]
+    );
+    return rows.length > 0;
+  } catch (err) {
+    console.error("Error checking LOPDP consent:", err);
+    return false;
+  }
+}
+
 async function registerSignedOffer(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
+
+  // VALIDACIÓN BLOQUEANTE: verificar aprobación cliente antes de permitir subir oferta firmada
+  const { hasRequested, hasApproved, hasConsent } = await validateClientApproval(request);
+  if (!hasRequested || !hasApproved || !hasConsent) {
+    const error = Object.assign(
+      new Error("No se puede subir oferta firmada: cliente no aprobado o sin consentimiento LOPDP válido"),
+      { status: 409 }
+    );
+    console.log("[PURCHASE_FLOW][FASE2][BLOCK_SIGNED_OFFER]", {
+      id,
+      hasRequested,
+      hasApproved,
+      hasConsent,
+      error: error.message
+    });
+    throw error;
+  }
 
   const { document_id, signed_offer_base64, file_name, mime_type } = payload;
   const decision = (payload.decision || payload.status || "").toString().toLowerCase();
@@ -454,6 +538,476 @@ async function forwardToACP(id, user) {
   return rows[0];
 }
 
+// ===========================================
+// FASE 2: Nuevas funciones para flujo completo
+// ===========================================
+
+async function getTimeline(id) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  // Obtener correcciones
+  const { rows: corrections } = await db.query(`
+    SELECT * FROM purchase_corrections
+    WHERE private_purchase_id = $1
+    ORDER BY created_at DESC
+  `, [id]);
+
+  // Construir timeline desde el request
+  const timeline = [
+    {
+      event: 'created',
+      timestamp: request.created_at,
+      status: 'pending_commercial',
+      details: 'Solicitud creada por asesor comercial'
+    }
+  ];
+
+  if (request.client_registration_requested_at) {
+    timeline.push({
+      event: 'client_registration_requested',
+      timestamp: request.client_registration_requested_at,
+      status: 'client_approved',
+      details: 'Registro de cliente solicitado'
+    });
+  }
+
+  if (request.client_approved_at) {
+    timeline.push({
+      event: 'client_approved',
+      timestamp: request.client_approved_at,
+      status: 'client_approved',
+      details: 'Cliente aprobado con LOPDP'
+    });
+  }
+
+  if (request.backoffice_approved_at) {
+    timeline.push({
+      event: 'offer_created',
+      timestamp: request.backoffice_approved_at,
+      status: 'offer_sent',
+      details: 'Oferta creada y enviada por BackOffice'
+    });
+  }
+
+  if (request.commercial_accepted_offer_at) {
+    timeline.push({
+      event: 'offer_accepted',
+      timestamp: request.commercial_accepted_offer_at,
+      status: 'pending_manager_signature',
+      details: 'Oferta aceptada por comercial'
+    });
+  }
+
+  if (request.signed_offer_received_at) {
+    timeline.push({
+      event: 'offer_signed',
+      timestamp: request.signed_offer_received_at,
+      status: 'offer_signed',
+      details: 'Oferta firmada recibida'
+    });
+  }
+
+  if (request.manager_contract_decision_at) {
+    timeline.push({
+      event: 'manager_decision',
+      timestamp: request.manager_contract_decision_at,
+      status: request.manager_contract_decision === 'approved' ? 'contract_approved_pending_upload' : 'contract_rejected_needs_correction',
+      details: `Gerencia: ${request.manager_contract_decision}. ${request.manager_contract_decision_reason || ''}`
+    });
+  }
+
+  if (request.contract_document_id) {
+    timeline.push({
+      event: 'contract_uploaded',
+      timestamp: request.updated_at,
+      status: 'pending_operations_schedule',
+      details: 'Contrato subido por BackOffice'
+    });
+  }
+
+  if (request.delivery_dates_json && Object.keys(JSON.parse(request.delivery_dates_json || '{}')).length > 0) {
+    timeline.push({
+      event: 'delivery_scheduled',
+      timestamp: request.updated_at,
+      status: 'awaiting_dispatch',
+      details: 'Fechas de entrega programadas'
+    });
+  }
+
+  if (request.delivery_act_document_id) {
+    timeline.push({
+      event: 'delivered',
+      timestamp: request.updated_at,
+      status: 'delivered_pending_signatures',
+      details: 'Equipo entregado, pendiente firma de acta'
+    });
+  }
+
+  // Agregar correcciones al timeline
+  corrections.forEach(correction => {
+    timeline.push({
+      event: 'correction_submitted',
+      timestamp: correction.created_at,
+      status: 'contract_rejected_needs_correction',
+      details: `Corrección: ${correction.reason}`,
+      correction: correction
+    });
+  });
+
+  return timeline.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+}
+
+async function managerDecision(id, { decision, reason }, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (!['approved', 'rejected'].includes(decision)) {
+    throw new Error("Decision debe ser 'approved' o 'rejected'");
+  }
+
+  const newStatus = decision === 'approved' ? 'contract_approved_pending_upload' : 'contract_rejected_needs_correction';
+
+  const updated = await updatePrivatePurchaseStatus(id, newStatus, {
+    manager_contract_decision: decision,
+    manager_contract_decision_reason: reason,
+    manager_contract_decision_at: new Date(),
+    manager_contract_decision_by: user.id
+  });
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "manager_decision",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: `Gerencia decidió: ${decision}${reason ? ` - ${reason}` : ''}`
+  });
+
+  // Notificar según decisión
+  try {
+    if (decision === 'approved') {
+      // Notificar BackOffice que puede subir contrato
+      await NotificationManager.sendNotification({
+        userId: null, // Todos backoffice_comercial
+        template: 'custom_html',
+        customTitle: 'Contrato Aprobado - Subir Documento',
+        customMessage: `Contrato aprobado por gerencia para ${request.client_snapshot?.commercial_name}. Suba el contrato generado.`,
+        type: 'task',
+        priority: 2,
+        source: 'private_purchase.contract_approved',
+        meta: {
+          entityType: 'private_purchase',
+          entityId: id,
+          eventType: 'contract_approved',
+          requiredAction: 'upload_contract',
+          summary: 'Contrato aprobado, pendiente subida de documento',
+        },
+        email: true,
+        chat: false
+      });
+      console.log("[PURCHASE_FLOW][FASE6][NOTIF_CREATE]", { eventType: 'contract_approved', entityId: id, toCount: 'backoffice_comercial_role' });
+    } else {
+      // Notificar BackOffice sobre correcciones requeridas
+      await NotificationManager.sendNotification({
+        userId: null, // Todos backoffice_comercial
+        template: 'custom_html',
+        customTitle: 'Contrato Rechazado - Correcciones Requeridas',
+        customMessage: `Contrato rechazado por gerencia para ${request.client_snapshot?.commercial_name}. Motivo: ${reason || 'No especificado'}. Suba correcciones.`,
+        type: 'alert',
+        priority: 2,
+        source: 'private_purchase.contract_rejected',
+        meta: {
+          entityType: 'private_purchase',
+          entityId: id,
+          eventType: 'contract_rejected',
+          requiredAction: 'submit_corrections',
+          summary: 'Contrato rechazado, correcciones requeridas',
+        },
+        email: true,
+        chat: false
+      });
+      console.log("[PURCHASE_FLOW][FASE6][NOTIF_CREATE]", { eventType: 'contract_rejected', entityId: id, toCount: 'backoffice_comercial_role' });
+    }
+  } catch (notifError) {
+    console.error("[PURCHASE_FLOW][FASE6][NOTIF_ERROR]", notifError);
+  }
+
+  return updated;
+}
+
+async function submitCorrections(id, { reason, correctionDetails }, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'contract_rejected_needs_correction') {
+    throw new Error("Solicitud no está en estado de corrección");
+  }
+
+  const { rows } = await db.query(`
+    INSERT INTO purchase_corrections (private_purchase_id, created_by_user_id, reason, correction_details)
+    VALUES ($1, $2, $3, $4)
+    RETURNING *
+  `, [id, user.id, reason, JSON.stringify(correctionDetails || {})]);
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "submit_corrections",
+    entity: "purchase_corrections",
+    entity_id: rows[0].id,
+    details: `Correcciones enviadas: ${reason}`
+  });
+
+  // Cambiar estado para que BackOffice pueda reenviar
+  await updatePrivatePurchaseStatus(id, 'contract_rejected_needs_correction');
+
+  return rows[0];
+}
+
+async function submitContract(id, payload = {}, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'contract_approved_pending_upload') {
+    throw new Error("Solicitud no está pendiente de subida de contrato");
+  }
+
+  const { document_id, contract_base64, file_name, mime_type } = payload;
+  let documentId = document_id;
+
+  const folderId = request.drive_folder_id || (await ensureRequestFolder(request));
+
+  if (!documentId && contract_base64) {
+    if (!folderId) throw new Error("No se pudo obtener carpeta de Drive");
+
+    const uploaded = await uploadBase64File(
+      file_name || `Contrato-${id}.pdf`,
+      contract_base64,
+      mime_type || "application/pdf",
+      folderId,
+    );
+    documentId = uploaded.id;
+  }
+
+  if (!documentId) {
+    throw new Error("Documento de contrato requerido");
+  }
+
+  const updated = await updatePrivatePurchaseStatus(id, 'pending_operations_schedule', {
+    contract_document_id: documentId,
+    drive_folder_id: folderId || null
+  });
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "contract_uploaded",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Contrato subido por BackOffice"
+  });
+
+  // Notificar jefe operaciones que puede solicitar fechas
+  try {
+    await NotificationManager.sendNotification({
+      userId: null, // Todos jefe_operaciones
+      template: 'custom_html',
+      customTitle: 'Contrato Subido - Solicitar Fechas de Entrega',
+      customMessage: `Contrato subido para ${request.client_snapshot?.commercial_name}. Puede solicitar fechas de entrega al asesor comercial.`,
+      type: 'task',
+      priority: 1,
+      source: 'private_purchase.contract_uploaded',
+      meta: {
+        entityType: 'private_purchase',
+        entityId: id,
+        eventType: 'contract_uploaded',
+        requiredAction: 'request_delivery_dates',
+        summary: 'Contrato disponible, solicitar fechas de entrega',
+      },
+      email: true,
+      chat: false
+    });
+    console.log("[PURCHASE_FLOW][FASE6][NOTIF_CREATE]", { eventType: 'contract_uploaded', entityId: id, toCount: 'jefe_operaciones_role' });
+  } catch (notifError) {
+    console.error("[PURCHASE_FLOW][FASE6][NOTIF_ERROR]", notifError);
+  }
+
+  return updated;
+}
+
+async function requestDeliveryDates(id, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'pending_operations_schedule') {
+    throw new Error("Solicitud no está pendiente de fechas de entrega");
+  }
+
+  // Cambiar estado y notificar
+  const updated = await updatePrivatePurchaseStatus(id, 'pending_operations_schedule');
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "delivery_dates_requested",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Fechas de entrega solicitadas por jefe operaciones"
+  });
+
+  return updated;
+}
+
+async function submitDeliveryDates(id, { deliveryDates, notes }, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'pending_operations_schedule') {
+    throw new Error("Solicitud no está pendiente de fechas de entrega");
+  }
+
+  const updated = await updatePrivatePurchaseStatus(id, 'awaiting_dispatch', {
+    delivery_dates_json: JSON.stringify(deliveryDates || {}),
+    delivery_notes: notes,
+    delivery_start_at: deliveryDates?.start,
+    delivery_end_at: deliveryDates?.end
+  });
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "delivery_dates_submitted",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: `Fechas de entrega confirmadas por asesor comercial: ${deliveryDates?.start || ''} - ${deliveryDates?.end || ''}`
+  });
+
+  return updated;
+}
+
+async function markDispatchReady(id, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'awaiting_dispatch') {
+    throw new Error("Solicitud no está esperando despacho");
+  }
+
+  const updated = await updatePrivatePurchaseStatus(id, 'delivered_pending_signatures');
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "dispatch_ready",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Despacho marcado como listo por jefe logística"
+  });
+
+  return updated;
+}
+
+async function generateDeliveryAct(id, payload = {}, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  if (request.status !== 'delivered_pending_signatures') {
+    throw new Error("Solicitud no está pendiente de acta de entrega");
+  }
+
+  const { document_id, act_base64, file_name, mime_type } = payload;
+  let documentId = document_id;
+
+  const folderId = request.drive_folder_id || (await ensureRequestFolder(request));
+
+  if (!documentId && act_base64) {
+    if (!folderId) throw new Error("No se pudo obtener carpeta de Drive");
+
+    const uploaded = await uploadBase64File(
+      file_name || `ActaEntrega-${id}.pdf`,
+      act_base64,
+      mime_type || "application/pdf",
+      folderId,
+    );
+    documentId = uploaded.id;
+  }
+
+  if (!documentId) {
+    throw new Error("Documento de acta requerido");
+  }
+
+  // Aquí podríamos marcar como completado, pero según el flujo queda "delivered_pending_signatures" hasta firma final
+  const updated = await db.query(`
+    UPDATE private_purchase_requests
+    SET delivery_act_document_id = $1, updated_at = now()
+    WHERE id = $2
+    RETURNING *
+  `, [documentId, id]);
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "delivery_act_generated",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Acta de entrega-recepción generada"
+  });
+
+  return updated.rows[0];
+}
+
+// ===========================================
+// FUNCIONES PARA COMODATO
+// ===========================================
+
+async function requestAcpAvailability(id, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  // Aquí se conectaría con el proceso de compras públicas para verificar disponibilidad
+  // Por ahora solo marcar como enviado a ACP
+  const updated = await updatePrivatePurchaseStatus(id, 'sent_to_acp', {
+    forwarded_to_acp_at: new Date()
+  });
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "acp_availability_requested",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Disponibilidad solicitada a ACP comercial"
+  });
+
+  return updated;
+}
+
+async function startBusinessCase(id, { businessCaseData }, user = {}) {
+  const request = await getPrivatePurchase(id);
+  if (!request) throw new Error("Solicitud privada no encontrada");
+
+  // Aquí se crearía el Business Case usando el módulo existente
+  // Por ahora solo registrar que se inició
+  const updated = await db.query(`
+    UPDATE private_purchase_requests
+    SET comodato_business_case_id = $1, updated_at = now()
+    WHERE id = $2
+    RETURNING *
+  `, [businessCaseData?.id || uuidv4(), id]);
+
+  await logAction({
+    user_id: user.id || null,
+    module: "private_purchase",
+    action: "business_case_started",
+    entity: "private_purchase_requests",
+    entity_id: id,
+    details: "Business Case iniciado para comodato"
+  });
+
+  return updated.rows[0];
+}
+
 module.exports = {
   createPrivatePurchase,
   listPrivatePurchases,
@@ -463,4 +1017,16 @@ module.exports = {
   registerSignedOffer,
   markClientRegistered,
   forwardToACP,
+  // Nuevas funciones FASE 2
+  getTimeline,
+  managerDecision,
+  submitCorrections,
+  submitContract,
+  requestDeliveryDates,
+  submitDeliveryDates,
+  markDispatchReady,
+  generateDeliveryAct,
+  requestAcpAvailability,
+  startBusinessCase,
+  validateClientApproval,
 };

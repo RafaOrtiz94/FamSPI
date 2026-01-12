@@ -22,6 +22,7 @@ import { useDashboard } from "../../core/hooks/useDashboard";
 import { getAuditoria } from "../../core/api/auditoriaApi";
 import { getRequests } from "../../core/api/requestsApi";
 import { logout } from "../../core/api";
+import PrivatePurchaseApprovalsWidget from "./components/PrivatePurchaseApprovalsWidget";
 
 import StatCard from "../../core/ui/patterns/StatCard";
 import ChartCard from "./components/ChartCard";
@@ -185,6 +186,10 @@ const Dashboard = () => {
 
         <div className="mb-6">
           <PermisosStatusWidget />
+        </div>
+
+        <div className="mb-6">
+          <PrivatePurchaseApprovalsWidget />
         </div>
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
