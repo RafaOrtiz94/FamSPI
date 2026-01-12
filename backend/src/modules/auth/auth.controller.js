@@ -236,6 +236,78 @@ const googleCallback = async (req, res) => {
       logger.warn("⚠️ No se pudo registrar la sesión en user_sessions: %s", sessionErr.message);
     }
 
+<<<<<<< Updated upstream
+=======
+    // 🔐 Seguridad: Verificar login fuera de horario
+    let offHoursCheck = isOffHours(new Date());
+
+    // TEST HOOK: Solo en desarrollo/sandbox para generar eventos de prueba
+    if (process.env.NODE_ENV !== 'production' && req.headers['x-security-test'] === '1') {
+      logger.warn('🚨 SECURITY TEST HOOK USED - Forcing off-hours detection');
+      offHoursCheck = {
+        isOffHours: true,
+        reason: 'offhours_test',
+        schedule: { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] }
+      };
+    }
+
+    const geoInfo = getGeoLocation(ip);
+
+    if (offHoursCheck.isOffHours) {
+      logger.warn(`🚨 Login fuera de horario detectado: ${email}`, {
+        correlationId,
+        reason: offHoursCheck.reason,
+        ip,
+        geo: geoInfo,
+        userAgent: req.headers["user-agent"]
+      });
+
+      // Notificar a TI sobre login fuera de horario
+      try {
+        await notifyTIAboutOffHoursLogin({
+          correlationId,
+          user,
+          offHoursCheck,
+          ip,
+          geo: geoInfo,
+          userAgent: req.headers["user-agent"]
+        });
+      } catch (notifyError) {
+        logger.warn(`⚠️ Error notificando a TI sobre login fuera de horario, pero login continúa: ${notifyError.message}`, {
+          correlationId,
+          userId: user.id,
+          userEmail: user.email
+        });
+      }
+    }
+
+    // Registrar login exitoso en auditoría - usando datos_nuevos (no contexto)
+    await logAction({
+      usuario_id: user.id,
+      usuario_email: user.email,
+      rol: user.role || "pendiente",
+      modulo: "auth",
+      accion: offHoursCheck.isOffHours ? "offhours_login" : "login_success",
+      descripcion: offHoursCheck.isOffHours ?
+        `Login exitoso fuera de horario (${offHoursCheck.reason})` :
+        "Login exitoso",
+      datos_nuevos: {
+        event: offHoursCheck.isOffHours ? "security.offhours_login" : "auth.login_success",
+        correlation_id: correlationId,
+        reason: offHoursCheck.reason,
+        schedule: offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] },
+        ip,
+        user_agent: req.headers["user-agent"],
+        geo_location: geoInfo,
+        off_hours_info: offHoursCheck,
+        session: {
+          user_email: user.email,
+          login_time_guess_iso: new Date().toISOString()
+        }
+      }
+    });
+
+>>>>>>> Stashed changes
     // Redirigir al frontend con tokens
     const redirectUrl = `${FRONTEND_URL}/login/callback#accessToken=${encodeURIComponent(
       accessToken

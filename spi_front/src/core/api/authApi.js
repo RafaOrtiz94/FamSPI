@@ -34,23 +34,17 @@ export const clearTokens = () => {
    ========================================================== */
 export const googleLogin = () => {
   try {
-    // CRA usa process.env.REACT_APP_*
-    const base = process.env.REACT_APP_API_BASE_URL;
+    // Para build con Caddy, usar URL relativa para que Caddy haga proxy
+    // Para desarrollo con npm start, usar la configuración del proxy setupProxy.js
+    const isProductionBuild = process.env.NODE_ENV === 'production';
 
-    if (!base) {
-      throw new Error("❌ Falta REACT_APP_API_BASE_URL en .env");
+    if (isProductionBuild) {
+      // En build, usar URL relativa - Caddy hará proxy de /api/*
+      return '/api/v1/auth/google';
+    } else {
+      // En desarrollo con npm start, usar setupProxy.js
+      return '/api/v1/auth/google';
     }
-
-    // Quitamos /api/v1 del final si está presente
-    const backendBase = base.replace(/\/api\/v1$/, "");
-
-    // Construimos la URL real al backend
-    const authUrl = `${backendBase}/api/v1/auth/google`;
-
-    console.log("🌐 URL de autenticación generada:", authUrl);
-
-    // 🔁 Retornamos la URL, no redirigimos aquí
-    return authUrl;
   } catch (err) {
     console.error("❌ Error generando URL de login:", err);
     alert("No se pudo conectar con el servidor de autenticación.");
@@ -137,3 +131,35 @@ export const refreshAccessToken = async () => {
     throw err;
   }
 };
+<<<<<<< Updated upstream
+=======
+
+/* ==========================================================
+   ✍️  Consentimiento interno LOPDP
+   ========================================================== */
+export const submitInternalLopdpConsent = async ({
+  signatureBase64,
+  pdfBase64,
+  notes,
+}) => {
+  const token = getAccessToken();
+  if (!token) throw new Error("No hay token activo");
+
+  const { data } = await api.post(
+    "/auth/lopdp/accept",
+    {
+      signature_base64: signatureBase64,
+      pdf_base64: pdfBase64,
+      notes,
+      accepted: true,
+    },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+
+  if (!data?.ok) throw new Error(data?.message || "No se pudo registrar la aceptación");
+  return data;
+};
+
+// Alias for consistency
+export const acceptInternalLopdp = submitInternalLopdpConsent;
+>>>>>>> Stashed changes

@@ -1,9 +1,15 @@
 import React from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiAlertTriangle } from "react-icons/fi";
 
 const NotFound = () => {
+  const location = useLocation();
+
+  // Log para diagnosticar si el 404 es del frontend
+  console.log('[WORKSPACE_DEBUG] 404 page hit, path=', location.pathname);
+  console.log('[WORKSPACE_DEBUG] 404 page hit, search=', location.search);
+  console.log('[WORKSPACE_DEBUG] 404 page hit, hash=', location.hash);
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 to-blue-600 dark:from-gray-900 dark:to-gray-800 text-white px-6 text-center">
       {/* Icono animado */}

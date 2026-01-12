@@ -84,7 +84,7 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         const res = await axios.post(
-          "/api/v1/auth/refresh",
+          "/auth/refresh",
           {},
           {
             headers: { "x-refresh-token": refreshToken },

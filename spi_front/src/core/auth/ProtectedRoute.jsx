@@ -125,11 +125,17 @@ export const RoleRedirect = () => {
     jefe_calidad: "/dashboard/calidad",
   };
 
+  // Check if user has pending role and redirect to activation page
+  if (role === 'pendiente' || scope === 'pendiente') {
+    console.log(`⏳ Usuario con rol pendiente [${role}/${scope}] → /activation-pending`);
+    return <Navigate to="/activation-pending" replace />;
+  }
+
   const target =
     roleRoutes[scope] ||
     roleRoutes[role] ||
     "/unauthorized";
-  console.log(`🎯 Redirigiendo según rol [${role}] → ${target}`);
+  console.log(`🎯 Redirigiendo según rol [${role}/${scope}] → ${target}`);
 
   return <Navigate to={target} replace />;
 };

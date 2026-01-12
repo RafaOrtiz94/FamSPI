@@ -1,0 +1,61 @@
+https://spi-dev.famproject.com.ec {
+	tls ops/certs/spi-dev.famproject.com.ec.pem ops/certs/spi-dev.famproject.com.ec-key.pem
+
+	# API routes - must be handled BEFORE SPA fallback
+	handle /api/* {
+		# Node.js backend runs on 192.168.0.161:3000 (different host than Caddy)
+		reverse_proxy http://192.168.0.161:3000 {
+			# Debug: Add backend identification header
+			header_up X-Forwarded-By "Caddy-Reverse-Proxy"
+		}
+	}
+
+	# SPA fallback - serves static files and handles client-side routing
+	handle {
+		root * spi_front/build
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
+
+http://spi-dev.famproject.com.ec {
+	redir https://{host}{uri} permanent
+}
+
+# Desarrollo local con build - localhost (Caddy en puerto 8080, backend en 3000)
+http://localhost:8080 {
+	# API routes - must be handled BEFORE SPA fallback
+	handle /api/* {
+		# Node.js backend runs on localhost:3000
+		reverse_proxy http://localhost:3000 {
+			# Debug: Add backend identification header
+			header_up X-Forwarded-By "Caddy-Reverse-Proxy"
+		}
+	}
+
+	# SPA fallback - serves static files and handles client-side routing
+	handle {
+		root * spi_front/build
+		try_files {path} {path}/ /index.html
+		file_server
+	}
+}
+
+# Desarrollo local con build - IP de red (Caddy en puerto 8080, backend en 3000)
+http://192.168.0.161:8080 {
+    # API routes - must be handled BEFORE SPA fallback
+    handle /api/* {
+        # Node.js backend runs on 192.168.1.9:3000
+        reverse_proxy http://192.168.0.161:3000 {
+            # Debug: Add backend identification header
+            header_up X-Forwarded-By "Caddy-Reverse-Proxy"
+        }
+    }
+
+    # SPA fallback - serves static files and handles client-side routing
+    handle {
+        root * spi_front/build
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}

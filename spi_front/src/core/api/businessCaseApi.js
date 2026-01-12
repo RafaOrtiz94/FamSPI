@@ -1,0 +1,377 @@
+import api from "./index";
+
+// ===== NORMALIZATION HELPERS =====
+
+/**
+ * Normalizes UI guidance response from backend
+ */
+export const normalizeUIGuidanceResponse = (response) => {
+  try {
+    const data = response?.data || response;
+
+    return {
+      businessCase: data.businessCase || null,
+      sectionOwnership: {
+        rules: data.sectionOwnership?.rules || {},
+        completionSummary: {
+          completedSections: data.sectionOwnership?.completionSummary?.completedSections ?? 0,
+          totalSections: data.sectionOwnership?.completionSummary?.totalSections ?? 0,
+          inProgressSections: data.sectionOwnership?.completionSummary?.inProgressSections ?? 0,
+          pendingSections: data.sectionOwnership?.completionSummary?.pendingSections ?? 0
+        }
+      },
+      permissions: {
+        canEdit: data.permissions?.canEdit ?? true,
+        canCompleteSections: data.permissions?.canCompleteSections ?? true,
+        canPromoteStage: data.permissions?.canPromoteStage ?? true,
+        canAddObservations: data.permissions?.canAddObservations ?? true
+      },
+      observationData: data.observationData || null,
+      workflowState: {
+        currentStage: data.workflowState?.currentStage || 'draft',
+        availableTransitions: data.workflowState?.availableTransitions || []
+      }
+    };
+  } catch (error) {
+    console.error('Error normalizing UI guidance response:', error);
+    return {
+      businessCase: null,
+      sectionOwnership: { rules: {} },
+      permissions: { canEdit: true, canCompleteSections: true, canPromoteStage: true, canAddObservations: true },
+      observationData: null,
+      workflowState: { currentStage: 'draft', availableTransitions: [] }
+    };
+  }
+};
+
+/**
+ * Normalizes section data for consistent shape across components
+ */
+export const normalizeSectionData = (sectionKey, rawData) => {
+  if (!rawData) return null;
+
+  // Safe number conversion
+  const safeNumber = (value, defaultValue = 0) => {
+    if (value === null || value === undefined || value === '') return defaultValue;
+    const num = Number(value);
+    return isNaN(num) ? defaultValue : num;
+  };
+
+  // Safe date parsing
+  const safeDate = (value) => {
+    if (!value) return null;
+    try {
+      const date = new Date(value);
+      return isNaN(date.getTime()) ? null : date;
+    } catch {
+      return null;
+    }
+  };
+
+  // Safe string trimming
+  const safeString = (value, defaultValue = '') => {
+    if (value === null || value === undefined) return defaultValue;
+    return String(value).trim();
+  };
+
+  // Safe boolean conversion
+  const safeBoolean = (value, defaultValue = false) => {
+    if (value === null || value === undefined) return defaultValue;
+    return Boolean(value);
+  };
+
+  // Safe array handling
+  const safeArray = (value, defaultValue = []) => {
+    if (!Array.isArray(value)) return defaultValue;
+    return value.filter(item => item !== null && item !== undefined);
+  };
+
+  const baseNormalized = {
+    id: rawData.id || null,
+    businessCaseId: rawData.business_case_id || rawData.businessCaseId || null,
+    createdAt: safeDate(rawData.created_at || rawData.createdAt),
+    updatedAt: safeDate(rawData.updated_at || rawData.updatedAt),
+    lastModified: safeDate(rawData.last_modified || rawData.lastModified)
+  };
+
+  // Section-specific normalization
+  switch (sectionKey) {
+    case 'general':
+    case 'client':
+      return {
+        ...baseNormalized,
+        clientName: safeString(rawData.client_name || rawData.clientName),
+        clientId: safeNumber(rawData.client_id || rawData.clientId),
+        contactPerson: safeString(rawData.contact_person || rawData.contactPerson),
+        contactEmail: safeString(rawData.contact_email || rawData.contactEmail),
+        contactPhone: safeString(rawData.contact_phone || rawData.contactPhone),
+        projectDescription: safeString(rawData.project_description || rawData.projectDescription),
+        urgencyLevel: safeString(rawData.urgency_level || rawData.urgencyLevel, 'medium'),
+        expectedDelivery: safeDate(rawData.expected_delivery || rawData.expectedDelivery)
+      };
+
+    case 'lab':
+      return {
+        ...baseNormalized,
+        labType: safeString(rawData.lab_type || rawData.labType),
+        operationalHours: safeNumber(rawData.operational_hours || rawData.operationalHours, 8),
+        weekendOperation: safeBoolean(rawData.weekend_operation || rawData.weekendOperation),
+        emergencyCapacity: safeBoolean(rawData.emergency_capacity || rawData.emergencyCapacity),
+        sampleVolume: safeNumber(rawData.sample_volume || rawData.sampleVolume),
+        complexityLevel: safeString(rawData.complexity_level || rawData.complexityLevel, 'medium'),
+        specialRequirements: safeString(rawData.special_requirements || rawData.specialRequirements)
+      };
+
+    case 'equipment':
+      return {
+        ...baseNormalized,
+        equipmentId: safeNumber(rawData.equipment_id || rawData.equipmentId),
+        equipmentName: safeString(rawData.equipment_name || rawData.equipmentName),
+        quantity: safeNumber(rawData.quantity, 1),
+        primaryEquipment: safeBoolean(rawData.primary_equipment || rawData.primaryEquipment, true),
+        backupEquipment: safeBoolean(rawData.backup_equipment || rawData.backupEquipment),
+        configuration: safeString(rawData.configuration),
+        specialSetup: safeString(rawData.special_setup || rawData.specialSetup)
+      };
+
+    case 'determinations':
+      return {
+        ...baseNormalized,
+        determinationId: safeNumber(rawData.determination_id || rawData.determinationId),
+        determinationName: safeString(rawData.determination_name || rawData.determinationName),
+        monthlyQuantity: safeNumber(rawData.monthly_quantity || rawData.monthlyQty, 0),
+        annualQuantity: safeNumber(rawData.annual_quantity || rawData.annualQty, 0),
+        peakHours: safeBoolean(rawData.peak_hours || rawData.peakHours),
+        statTests: safeBoolean(rawData.stat_tests || rawData.statTests)
+      };
+
+    case 'investments':
+      return {
+        ...baseNormalized,
+        itemName: safeString(rawData.item_name || rawData.itemName),
+        itemType: safeString(rawData.item_type || rawData.itemType),
+        cost: safeNumber(rawData.cost, 0),
+        quantity: safeNumber(rawData.quantity, 1),
+        supplier: safeString(rawData.supplier),
+        deliveryTime: safeNumber(rawData.delivery_time || rawData.deliveryTime, 30),
+        installationRequired: safeBoolean(rawData.installation_required || rawData.installationRequired)
+      };
+
+    case 'lis':
+      return {
+        ...baseNormalized,
+        systemType: safeString(rawData.system_type || rawData.systemType),
+        currentLis: safeString(rawData.current_lis || rawData.currentLis),
+        migrationRequired: safeBoolean(rawData.migration_required || rawData.migrationRequired),
+        interfaceCount: safeNumber(rawData.interface_count || rawData.interfaceCount, 0),
+        trainingHours: safeNumber(rawData.training_hours || rawData.trainingHours, 0),
+        goLiveSupport: safeBoolean(rawData.go_live_support || rawData.goLiveSupport),
+        equipmentInterfaces: safeArray(rawData.equipment_interfaces || rawData.equipmentInterfaces)
+      };
+
+    default:
+      // Generic normalization for unknown sections
+      return {
+        ...baseNormalized,
+        ...Object.keys(rawData).reduce((acc, key) => {
+          const value = rawData[key];
+          if (typeof value === 'number' || !isNaN(Number(value))) {
+            acc[key] = safeNumber(value);
+          } else if (typeof value === 'boolean') {
+            acc[key] = value;
+          } else if (Array.isArray(value)) {
+            acc[key] = safeArray(value);
+          } else {
+            acc[key] = safeString(value);
+          }
+          return acc;
+        }, {})
+      };
+  }
+};
+
+/**
+ * Autosave helper for sections
+ */
+class SectionAutosaveManager {
+  constructor(businessCaseId) {
+    this.businessCaseId = businessCaseId;
+    this.saveTimeouts = new Map();
+    this.savePromises = new Map();
+    this.debounceMs = 1200; // 1.2 seconds debounce
+  }
+
+  /**
+   * Autosave a section with debouncing
+   */
+  async autosaveSection(sectionKey, data) {
+    return new Promise((resolve, reject) => {
+      // Clear existing timeout for this section
+      if (this.saveTimeouts.has(sectionKey)) {
+        clearTimeout(this.saveTimeouts.get(sectionKey));
+      }
+
+      // Set new timeout
+      const timeoutId = setTimeout(async () => {
+        try {
+          // Prevent concurrent saves
+          if (this.savePromises.has(sectionKey)) {
+            await this.savePromises.get(sectionKey);
+          }
+
+          const savePromise = this._performSectionSave(sectionKey, data);
+          this.savePromises.set(sectionKey, savePromise);
+
+          const result = await savePromise;
+          this.savePromises.delete(sectionKey);
+          resolve(result);
+        } catch (error) {
+          this.savePromises.delete(sectionKey);
+          reject(error);
+        }
+      }, this.debounceMs);
+
+      this.saveTimeouts.set(sectionKey, timeoutId);
+    });
+  }
+
+  /**
+   * Force immediate save (bypass debounce)
+   */
+  async forceSaveSection(sectionKey, data) {
+    // Clear any pending debounced save
+    if (this.saveTimeouts.has(sectionKey)) {
+      clearTimeout(this.saveTimeouts.get(sectionKey));
+      this.saveTimeouts.delete(sectionKey);
+    }
+
+    // Wait for any ongoing save
+    if (this.savePromises.has(sectionKey)) {
+      await this.savePromises.get(sectionKey);
+    }
+
+    const savePromise = this._performSectionSave(sectionKey, data);
+    this.savePromises.set(sectionKey, savePromise);
+    try {
+      const result = await savePromise;
+      this.savePromises.delete(sectionKey);
+      return result;
+    } catch (error) {
+      this.savePromises.delete(sectionKey);
+      throw error;
+    }
+  }
+
+  /**
+   * Internal save implementation
+   */
+  async _performSectionSave(sectionKey, data) {
+    // This would call the appropriate backend endpoint based on section
+    // For now, we'll simulate the API calls
+    console.log(`Autosaving section ${sectionKey}:`, data);
+
+    // Simulate API delay
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Return normalized response
+    return {
+      success: true,
+      section: sectionKey,
+      savedAt: new Date(),
+      data: normalizeSectionData(sectionKey, data)
+    };
+  }
+
+  /**
+   * Cleanup timeouts on unmount
+   */
+  destroy() {
+    for (const timeoutId of this.saveTimeouts.values()) {
+      clearTimeout(timeoutId);
+    }
+    this.saveTimeouts.clear();
+    this.savePromises.clear();
+  }
+}
+
+/**
+ * Create autosave manager for a business case
+ */
+export const createAutosaveManager = (businessCaseId) => {
+  return new SectionAutosaveManager(businessCaseId);
+};
+
+
+/**
+ * List business cases with optional filters
+ * @param {Object} params - Filters (page, pageSize, status, client_name, q)
+ * @returns {Promise<Object>} List response
+ */
+export const listBusinessCases = async (params = {}) => {
+  const { data } = await api.get("/business-case", { params });
+  return data;
+};
+
+/**
+ * Create a new business case
+ * @param {Object} payload - Business case payload
+ * @returns {Promise<Object>} Created business case
+ */
+export const createBusinessCase = async (payload) => {
+  const { data } = await api.post("/business-case", payload);
+  return data.data || data;
+};
+
+/**
+ * Get a business case by ID
+ * @param {string} id - The business case ID
+ * @returns {Promise<Object>} Business case data
+ */
+export const getBusinessCase = async (id) => {
+  const { data } = await api.get(`/business-case/${id}`);
+  return data.data || data;
+};
+
+/**
+ * Get UI guidance data for a business case
+ * @param {string} businessCaseId - The business case ID
+ * @returns {Promise<Object>} UI guidance data
+ */
+export const getUIGuidance = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/ui-guidance`);
+  return data.data || data;
+};
+
+/**
+ * Refresh UI guidance data (useful for polling updates)
+ * @param {string} businessCaseId - The business case ID
+ * @returns {Promise<Object>} Fresh UI guidance data
+ */
+export const refreshUIGuidance = async (businessCaseId) => {
+  return await getUIGuidance(businessCaseId);
+};
+
+/**
+ * Record section completion for a business case
+ * @param {string} businessCaseId - The business case ID
+ * @param {string} section - The section to mark as complete
+ * @param {string} reason - Optional reason for completion
+ * @returns {Promise<Object>} Completion result
+ */
+export const recordSectionCompletion = async (businessCaseId, section, reason = null) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/ownership/complete`, {
+    section,
+    reason
+  });
+  return data.data || data;
+};
+
+/**
+ * Get data ownership information for a business case
+ * @param {string} businessCaseId - The business case ID
+ * @returns {Promise<Object>} Ownership information
+ */
+export const getDataOwnership = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/ownership`);
+  return data.data || data;
+};

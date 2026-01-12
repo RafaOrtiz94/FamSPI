@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { getAuditoria } from "../../../core/api/auditoriaApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import { formatDateTimeSafe } from "../../../shared/utils/dateUtils";
 
 export default function AuditoriaPreview({ limit = 100 }) {
   const [logs, setLogs] = useState([]);
@@ -77,9 +78,7 @@ export default function AuditoriaPreview({ limit = 100 }) {
                   </td>
                   <td className="px-4 py-2 text-neutral-500">{log.ip || "—"}</td>
                   <td className="px-4 py-2 text-neutral-500">
-                    {new Date(log.creado_en || log.created_at).toLocaleString(
-                      "es-EC"
-                    )}
+                    {formatDateTimeSafe(log.creado_en || log.created_at)}
                   </td>
                 </tr>
               ))}
