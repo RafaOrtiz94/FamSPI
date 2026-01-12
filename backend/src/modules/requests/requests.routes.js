@@ -25,25 +25,54 @@ const upload = multer({ storage: multer.memoryStorage() });
 // 🙏 RUTA PÚBLICA para que el cliente otorgue consentimiento LOPDP
 router.get("/public/consent/:token", ctrl.grantConsent);
 
+router.post(
+  "/new-client/consent-token",
+  verifyToken,
+  // requireRole eliminado para permitir acceso a todos los usuarios autenticados
+  ctrl.sendConsentEmailToken,
+);
+
+router.post(
+  "/new-client/consent-token/verify",
+  verifyToken,
+  // requireRole eliminado para permitir acceso a todos los usuarios autenticados
+  ctrl.verifyConsentEmailToken,
+);
+
 // 🧾 CREAR SOLICITUD DE NUEVO CLIENTE
 router.post(
   "/new-client",
   verifyToken,
-  requireRole(["comercial", "jefe_comercial"]),
   upload.fields([
     { name: "legal_rep_appointment_file", maxCount: 1 },
     { name: "ruc_file", maxCount: 1 },
     { name: "id_file", maxCount: 1 },
     { name: "operating_permit_file", maxCount: 1 },
+    { name: "consent_evidence_file", maxCount: 1 },
   ]),
   ctrl.createClientRequest
 );
 
-// 📋 LISTAR SOLICITUDES DE NUEVOS CLIENTES (para Backoffice)
+// 📋 LISTAR MIS SOLICITUDES DE NUEVOS CLIENTES (para cualquier usuario)
+router.get(
+  "/new-client/my",
+  verifyToken,
+  ctrl.listClientRequests // El service filtrará por created_by
+);
+
+// 📋 LISTAR TODAS LAS SOLICITUDES DE NUEVOS CLIENTES (para Backoffice)
 router.get(
   "/new-client",
   verifyToken,
-  requireRole(["backoffice_comercial", "gerencia"]),
+  requireRole([
+    "backoffice_comercial",
+    "gerencia",
+    "comercial",
+    "jefe_comercial",
+    "acp_comercial",
+    "ti",
+    "jefe_ti"
+  ]),
   ctrl.listClientRequests
 );
 
@@ -63,6 +92,19 @@ router.put(
   ctrl.processClientRequest
 );
 
+// ✏️ ACTUALIZAR SOLICITUD DE NUEVO CLIENTE (Corrección)
+router.put(
+  "/new-client/:id",
+  verifyToken,
+  upload.fields([
+    { name: "legal_rep_appointment_file", maxCount: 1 },
+    { name: "ruc_file", maxCount: 1 },
+    { name: "id_file", maxCount: 1 },
+    { name: "operating_permit_file", maxCount: 1 },
+    { name: "consent_evidence_file", maxCount: 1 },
+  ]),
+  ctrl.updateClientRequest
+);
 
 /* ============================================================
    --- Flujo de Solicitudes Generales ---
@@ -94,7 +136,24 @@ router.post(
 router.get(
   "/",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "acp_comercial",
+    "backoffice_comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.listRequests
 );
 
@@ -106,7 +165,24 @@ router.get(
 router.get(
   "/:id",
   verifyToken,
-  requireRole(["gerencia", "comercial", "tecnico", "finanzas"]),
+  requireRole([
+    "gerencia",
+    "comercial",
+    "acp_comercial",
+    "backoffice_comercial",
+    "tecnico",
+    "finanzas",
+    "calidad",
+    "jefe_calidad",
+    "jefe_servicio_tecnico",
+    "jefe_tecnico",
+    "operaciones",
+    "jefe_operaciones",
+    "ti",
+    "jefe_ti",
+    "talento_humano",
+    "jefe_talento_humano",
+  ]),
   ctrl.getDetail
 );
 

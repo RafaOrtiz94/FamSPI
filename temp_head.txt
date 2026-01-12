@@ -1,0 +1,240 @@
+import React, { useEffect, useMemo, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
+import { FiCalendar, FiCheckCircle, FiChevronDown, FiPlus, FiTrash2, FiUsers } from "react-icons/fi";
+import api from "../../../../core/api";
+import { useUI } from "../../../../core/ui/UIContext";
+import { useBusinessCaseWizard } from "../../pages/BusinessCaseWizard";
+
+const INITIAL_INTERFACE = { model: "", provider: "" };
+
+const numberOrNull = (value) => {
+  if (value === "" || value === null || value === undefined) return null;
+  const numeric = Number(value);
+  return Number.isNaN(numeric) ? null : numeric;
+};
+
+const SECTION_FIELDS = {
+  general: [
+    "client",
+    "clientType",
+    "contractingEntity",
+    "provinceCity",
+    "processCode",
+    "contractObject",
+    "notes",
+  ],
+  lab: [
+    "labWorkDaysPerWeek",
+    "labShiftsPerDay",
+    "labHoursPerShift",
+    "labQualityControlsPerShift",
+    "labControlLevels",
+    "labRoutineQCFrequency",
+    "labSpecialTests",
+    "labSpecialQCFrequency",
+  ],
+  lis: [
+    "lisIncludes",
+    "lisProvider",
+    "lisIncludesHardware",
+    "lisMonthlyPatients",
+    "lisInterfaceSystem",
+    "lisInterfaceProvider",
+    "lisInterfaceHardware",
+  ],
+  requirements: [
+    "requirementsDeadlineMonths",
+    "requirementsProjectedDeadlineMonths",
+    "deliveryType",
+    "effectiveDetermination",
+  ],
+};
+
+
+const LIS_PROVIDERS = [
+  { value: "orion", label: "Orion" },
+  { value: "cobas_infiniti", label: "Cobas Infinity" },
+];
+
+const SECTION_ORDER = ["general", "lab", "lis", "requirements"];
+
+const AccordionSection = ({
+  id,
+  title,
+  description,
+  isOpen,
+  onToggle,
+  statusBadge,
+  children,
+  onInteraction,
+}) => (
+  <div
+    className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+    onFocusCapture={() => onInteraction?.(id)}
+  >
+    <button
+      type="button"
+      onClick={() => onToggle(id)}
+      aria-expanded={isOpen}
+      aria-controls={`section-panel-${id}`}
+      className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left transition-colors hover:bg-gray-50 focus:outline-none"
+    >
+      <div>
+        <p className="text-sm font-semibold text-gray-900">{title}</p>
+        {description && <p className="text-xs text-gray-500">{description}</p>}
+      </div>
+      <div className="flex items-center gap-3">
+        {statusBadge}
+        <FiChevronDown
+          className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+        />
+      </div>
+    </button>
+    <div
+      id={`section-panel-${id}`}
+      className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}
+    >
+      <div className="px-6 pb-6 pt-0">{children}</div>
+    </div>
+  </div>
+);
+
+const Step1GeneralData = ({ onNext }) => {
+  const { state, updateState } = useBusinessCaseWizard();
+  const { showToast, showLoader, hideLoader } = useUI();
+  const [clients, setClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [interfaces, setInterfaces] = useState(() => {
+    if (Array.isArray(state.lisInterfaces) && state.lisInterfaces.length > 0) {
+      return state.lisInterfaces;
+    }
+    return [INITIAL_INTERFACE];
+  });
+
+  const defaultValues = useMemo(() => state.generalData, [state.generalData]);
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    control,
+    reset,
+    setValue,
+    formState: { errors },
+  } = useForm({ defaultValues });
+
+  const [naFields, setNaFields] = useState({});
+  const watchClient = watch("client");
+  const watchLisIncludes = useWatch({ control, name: "lisIncludes", defaultValue: false });
+  const watchLisIncludesHardware = watch("lisIncludesHardware");
+  const watchLisInterfaceHardware = watch("lisInterfaceHardware");
+  const [openSections, setOpenSections] = useState(() =>
+    SECTION_ORDER.reduce((acc, id) => {
+      acc[id] = id === "general";
+      return acc;
+    }, {}),
+  );
+
+  const sectionHasErrors = (sectionId) =>
+    SECTION_FIELDS[sectionId]?.some((field) => Boolean(errors[field])) ?? false;
+
+  const toggleSection = (sectionId) => {
+    setOpenSections((prev) => ({ ...prev, [sectionId]: !prev[sectionId] }));
+  };
+
+  const handleSectionInteraction = (sectionId) => {
+    setOpenSections((prev) => {
+      if (prev[sectionId]) return prev;
+      return { ...prev, [sectionId]: true };
+    });
+  };
+
+  const renderStatusBadge = (sectionId) => {
+    const hasError = sectionHasErrors(sectionId);
+    return (
+      <span className={`text-xs font-semibold ${hasError ? "text-rose-500" : "text-emerald-500"}`}>
+        {hasError ? "Requiere atención" : "Listo"}
+      </span>
+    );
+  };
+
+  const toggleNA = (field) => {
+    setNaFields((prev) => {
+      const next = { ...prev, [field]: !prev[field] };
+      setValue(field, next[field] ? "N/A" : "", { shouldDirty: true });
+      return next;
+    });
+  };
+
+  const isNA = (field) => Boolean(naFields[field]);
+
+  const renderNAButton = (field) => (
+    <button
+      type="button"
+      onClick={() => toggleNA(field)}
+      className="text-[11px] text-gray-400 hover:text-gray-600 px-1 rounded transition-colors"
+    >
+      N/A
+    </button>
+  );
+
+  const naInputClass = (field) =>
+    `border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 ${
+      isNA(field) ? "bg-gray-50 text-gray-500" : ""
+    }`;
+
+  useEffect(() => {
+    reset(defaultValues);
+  }, [defaultValues, reset]);
+
+  useEffect(() => {
+    SECTION_ORDER.forEach((sectionId) => {
+      const hasError = SECTION_FIELDS[sectionId]?.some((field) => Boolean(errors[field]));
+      if (hasError) {
+        setOpenSections((prev) => {
+          if (prev[sectionId]) return prev;
+          return { ...prev, [sectionId]: true };
+        });
+      }
+    });
+  }, [errors]);
+
+  useEffect(() => {
+    if (!state.bcType) return;
+    const mode = state.bcType === "comodato_publico" ? "monthly" : "annual";
+    if (state.calculationMode === mode) return;
+    updateState({ calculationMode: mode });
+  }, [state.bcType, state.calculationMode, updateState]);
+
+  useEffect(() => {
+    const fetchClients = async () => {
+      setLoadingClients(true);
+      try {
+        const res = await api.get("/clients");
+        const payload = res.data?.data ?? res.data;
+        const parsedClients = Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload?.clients)
+          ? payload.clients
+          : Array.isArray(payload?.data)
+          ? payload.data
+          : Array.isArray(payload)
+          ? payload
+          : [];
+        setClients(parsedClients);
+      } catch (err) {
+        console.warn("No se pudieron cargar clientes", err.message);
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+
+    fetchClients();
+  }, []);
+
+  useEffect(() => {
+    const naClientType = Boolean(naFields.clientType);
+    const naProvinceCity = Boolean(naFields.provinceCity);
+
+    if (!watchClient) {

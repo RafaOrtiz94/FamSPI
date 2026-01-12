@@ -1,5 +1,5 @@
 // src/modules/comercial/pages/Requests.jsx
-import React, { useEffect, useState, useCallback, useMemo, Fragment } from "react";
+import React, { useEffect, useState, useCallback, useMemo, Fragment, useRef } from "react";
 import { motion } from "framer-motion";
 import { Dialog, Transition } from "@headlessui/react";
 import {
@@ -40,19 +40,20 @@ const Requests = () => {
     errorMsg: "Error al cargar las solicitudes",
   });
 
-  const load = useCallback(async () => {
-    await fetchRequests({
+  const fetchRef = useRef(fetchRequests);
+  useEffect(() => {
+    fetchRef.current = fetchRequests;
+  }, [fetchRequests]);
+
+  useEffect(() => {
+    fetchRef.current({
       page: 1,
       pageSize: 20,
       mine: true,
       q: query,
       status: status === "all" ? undefined : status,
     });
-  }, [fetchRequests, query, status]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
+  }, [query, status]);
 
   const safeJSON = (txt) => {
     try {
@@ -110,7 +111,13 @@ const Requests = () => {
     try {
       await cancelRequest(req.id);
       showToast(`Solicitud #${req.id} cancelada`, "success");
-      await load();
+      await fetchRequests({
+        page: 1,
+        pageSize: 20,
+        mine: true,
+        q: query,
+        status: status === "all" ? undefined : status,
+      });
     } catch (e) {
       console.error(e);
       showToast("No se pudo cancelar la solicitud", "error");
@@ -131,7 +138,13 @@ const Requests = () => {
             Solicitudes Comerciales
           </h1>
           <button
-            onClick={load}
+            onClick={() => fetchRequests({
+              page: 1,
+              pageSize: 20,
+              mine: true,
+              q: query,
+              status: status === "all" ? undefined : status,
+            })}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
           >
             <FiRefreshCw /> Actualizar
@@ -144,7 +157,13 @@ const Requests = () => {
           onChange={setQuery}
           status={status}
           setStatus={setStatus}
-          onRefresh={load}
+          onRefresh={() => fetchRequests({
+            page: 1,
+            pageSize: 20,
+            mine: true,
+            q: query,
+            status: status === "all" ? undefined : status,
+          })}
         />
 
         {/* Listado */}
@@ -176,12 +195,13 @@ const Requests = () => {
               enterTo="opacity-100"
               leave="ease-in duration-200"
               leaveFrom="opacity-100"
-              leaveTo="opacity-0"
-            >
-              <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
-            </Transition.Child>
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          </Transition.Child>
 
-            <div className="fixed inset-0 flex items-center justify-center p-4">
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-start justify-center p-4 sm:p-6">
               <Transition.Child
                 as={Fragment}
                 enter="ease-out duration-300"
@@ -191,7 +211,7 @@ const Requests = () => {
                 leaveFrom="opacity-100 scale-100"
                 leaveTo="opacity-0 scale-95"
               >
-                <Dialog.Panel className="w-full max-w-2xl bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700">
+                <Dialog.Panel className="w-full max-w-2xl bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-200 dark:border-gray-700 max-h-[90vh] overflow-y-auto">
                   <Dialog.Title className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
                     Detalle de Solicitud
                   </Dialog.Title>
@@ -318,8 +338,9 @@ const Requests = () => {
                 </Dialog.Panel>
               </Transition.Child>
             </div>
-          </Dialog>
-        </Transition.Root>
+          </div>
+        </Dialog>
+      </Transition.Root>
       </motion.div>
     </DashboardLayout>
   );

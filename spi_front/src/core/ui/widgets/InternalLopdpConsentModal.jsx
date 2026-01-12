@@ -8,9 +8,6 @@ import { useAuth } from "../../auth/AuthContext";
 import { useUI } from "../UIContext";
 import { lopdpNoticeParagraphs, lopdpNoticeTitle, lopdpNoticeSubtitle } from "../legal/lopdpNoticeContent";
 
-// 🔒 LOPDP DUPLICITY PREVENTION: Track render instances
-let lopdpRenderCount = 0;
-
 const InternalLopdpConsentModal = ({ forceOpen = false }) => {
   const { user, reloadProfile } = useAuth();
   const { showToast } = useUI();

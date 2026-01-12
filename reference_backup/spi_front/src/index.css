@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 🌍 Configuración global */
+html {
+  scroll-behavior: smooth;
+  color-scheme: light dark; /* Respeta las preferencias del sistema */
+}
+
+body {
+  @apply bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-100 antialiased transition-colors duration-300 ease-in-out;
+}
+
+/* ✨ Scrollbar personalizado */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: rgba(100, 116, 139, 0.5); /* gray-500/50 */
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(59, 130, 246, 0.7); /* blue-500/70 */
+}
+
+/* 🧱 Utilidades para tarjetas y sombras */
+.card {
+  @apply bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 transition-all;
+}
+
+.card-hover {
+  @apply hover:shadow-lg hover:-translate-y-1 hover:border-blue-400 dark:hover:border-blue-600;
+}
+
+.shadow-soft {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.shadow-glow {
+  box-shadow: 0 0 20px rgba(37, 99, 235, 0.2);
+}
+
+/* 🕶️ Transiciones suaves */
+button,
+input,
+select,
+textarea {
+  @apply transition-all duration-200 ease-in-out;
+}
+
+/* 🩵 Efectos de enfoque (focus) */
+input:focus,
+select:focus,
+textarea:focus {
+  @apply ring-2 ring-blue-500 border-blue-500 outline-none;
+}
+
+/* 📱 Ajustes responsive */
+@media (max-width: 640px) {
+  body {
+    @apply text-sm;
+  }
+}

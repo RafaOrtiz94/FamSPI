@@ -17,9 +17,11 @@ const logger = require("./config/logger");
 const { helmetConfig, corsConfig, isProd } = require("./config/security");
 const mLogger = require("./middlewares/loggerMiddleware");
 const { auditMiddleware } = require("./middlewares/auditMiddleware");
+const { normalizeApiPayloads, logLegacyUsageStats } = require("./middlewares/apiNormalization");
 const { verifyToken } = require("./middlewares/auth");
 
 const app = express();
+app.set("etag", false); // evitar 304 con body cacheado en endpoints dinámicos
 
 const RATE_LIMIT_WINDOW_MS =
   parseInt(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, 10) || 15 * 60 * 1000;
@@ -64,6 +66,7 @@ const ORIGIN_WHITELIST = new Set([
   "http://localhost:3000",
   "http://127.0.0.1:3001",
   "http://localhost:5173", // soporte para Vite
+  "https://spi-dev.famproject.com.ec", // dominio de producción LAN
 ]);
 
 const trustProxyValue =
@@ -78,8 +81,8 @@ if (
     `${trustProxyValue}`.toLowerCase() === "true"
       ? true
       : Number.isNaN(Number(trustProxyValue))
-      ? trustProxyValue
-      : Number(trustProxyValue);
+        ? trustProxyValue
+        : Number(trustProxyValue);
 
   app.set("trust proxy", normalizedTrustProxy);
   logger.info(
@@ -155,7 +158,13 @@ app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 // ======================================================
-// 🧾 4️⃣ Logger middleware global
+// 📋 4️⃣ Request Context middleware (correlation ID)
+// ======================================================
+const requestContextMiddleware = require("./middlewares/requestContext");
+app.use(requestContextMiddleware);
+
+// ======================================================
+// 🧾 5️⃣ Logger middleware global
 // ======================================================
 app.use(mLogger);
 
@@ -168,22 +177,62 @@ const approvalRoutes = require("./modules/approvals/approvals.routes");
 const finRoutes = require("./modules/finanzas/finanzas.routes");
 const hrRoutes = require("./modules/talento_humano/hr.routes");
 const auditRoutes = require("./modules/auditoria/audit.routes");
+const auditPrepRoutes = require("./modules/audit-prep/auditPrep.routes");
 const managementRoutes = require("./modules/management/management.routes");
 const documentsRoutes = require("./modules/documents/documents.routes");
 const filesRoutes = require("./modules/files/files.routes");
 const servicioRoutes = require("./modules/servicio/servicio.routes");
+const technicalApplicationsRoutes = require("./modules/technical-applications/technicalApplications.routes");
 const mantenimientosRoutes = require("./modules/mantenimientos/mantenimientos.routes");
 const departmentsRoutes = require("./modules/departments/departments.routes");
 const usersRoutes = require("./modules/users/users.routes");
 const inventarioRoutes = require("./modules/inventario/inventario.routes");
+const attendanceRoutes = require("./modules/attendance/attendance.routes");
+const gmailRoutes = require("./modules/gmail/gmail.routes");
+const equipmentPurchaseRoutes = require("./modules/equipment-purchases/equipmentPurchases.routes");
+const personnelRequestsRoutes = require("./modules/personnel-requests/personnel-requests.routes");
+const permisosRoutes = require("./modules/permisos/permisos.routes");
+const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
+const clientsRoutes = require("./modules/clients/clients.routes");
+const schedulesRoutes = require("./modules/schedules/schedules.routes");
+const privatePurchasesRoutes = require("./modules/private-purchases/privatePurchases.routes");
+const {
+  businessCaseRoutes,
+  equipmentCatalogRoutes,
+  determinationsCatalogRoutes,
+  calculationTemplatesRoutes,
+} = require("./modules/business-case/businessCase.routes");
+const notificationsRoutes = require("./modules/notifications/notifications.routes");
+const userProfileRoutes = require("./modules/user-profile/userProfile.routes");
+const userCertificationsRoutes = require("./modules/user-certifications/userCertifications.routes");
+const signatureRoutes = require("./modules/signature/signature.routes");
+const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
+
+// ======================================================
+// ⏰ Initialize Attendance Overtime Scheduler
+// ======================================================
+const { processAutomaticOvertime } = require("./jobs/attendanceOvertimeScheduler");
+
+// Run every 5 minutes (300,000 ms) in production, every 30 seconds in development
+const SCHEDULER_INTERVAL = process.env.NODE_ENV === 'production' ? 5 * 60 * 1000 : 30 * 1000;
+
+setInterval(async () => {
+  try {
+    await processAutomaticOvertime();
+  } catch (error) {
+    logger.error({ error }, "❌ Error in attendance overtime scheduler interval");
+  }
+}, SCHEDULER_INTERVAL);
+
+logger.info(`⏰ Attendance overtime scheduler initialized (interval: ${SCHEDULER_INTERVAL / 1000}s)`);
 
 // ======================================================
 // ❤️ 6️⃣ Rutas públicas de salud
 // ======================================================
-app.get("/", (_req, res) => res.status(200).json({ 
-  ok: true, 
-  message: "SPI FAM API", 
-  version: require("../package.json").version 
+app.get("/", (_req, res) => res.status(200).json({
+  ok: true,
+  message: "SPI FAM API",
+  version: require("../package.json").version
 }));
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
@@ -197,8 +246,12 @@ app.use("/api/v1/auth", authRoutes);
 // ======================================================
 app.use((req, res, next) => {
   if (
+    req.path === "/ws" || // permitir conexiones de websocket/sondeos sin JWT para evitar ruido en logs
+    req.path.startsWith("/ws/") ||
     req.path.startsWith("/api/v1/auth/google") ||
-    req.path.startsWith("/health")
+    req.path.startsWith("/api/v1/gmail/auth/callback") ||
+    req.path.startsWith("/health") ||
+    req.path.startsWith("/api/verificar")
   ) {
     return next();
   }
@@ -206,11 +259,35 @@ app.use((req, res, next) => {
 });
 
 // ======================================================
-// 🕵️ 9️⃣ Middleware de Auditoría Global
+// 🔄 9️⃣ API Normalization Middleware
+// ------------------------------------------------------
+// Normalizes field names between legacy and canonical formats
+// ======================================================
+app.use(normalizeApiPayloads);
+app.use(logLegacyUsageStats);
+
+// ======================================================
+// 🕵️ 🔟 Middleware de Auditoría Global
 // ------------------------------------------------------
 // Solo rutas autenticadas que modifiquen datos (POST, PUT, DELETE)
 // ======================================================
 app.use(auditMiddleware);
+
+// ======================================================
+// 🔍 API Normalization Stats Endpoint
+// ------------------------------------------------------
+// Endpoint to monitor legacy field usage during migration
+// ======================================================
+app.get("/api/v1/normalization/stats", (req, res) => {
+  const { getLegacyUsageStats } = require("./middlewares/apiNormalization");
+  const stats = getLegacyUsageStats();
+  res.json({
+    ok: true,
+    totalLegacyFields: stats.length,
+    stats: stats.slice(0, 50), // Limit response size
+    timestamp: new Date().toISOString()
+  });
+});
 
 // ======================================================
 // 🚦 🔟 Rutas privadas (ordenadas por dominio)
@@ -221,13 +298,33 @@ app.use("/api/v1/finanzas", finRoutes);
 app.use("/api/v1/talento-humano", hrRoutes);
 app.use("/api/v1/departments", departmentsRoutes);
 app.use("/api/v1/auditoria", auditRoutes);
+app.use("/api/v1/audit-prep", auditPrepRoutes);
 app.use("/api/v1/management", managementRoutes);
 app.use("/api/v1/documents", documentsRoutes);
 app.use("/api/v1/files", filesRoutes);
 app.use("/api/v1/servicio", servicioRoutes);
+app.use("/api/v1/technical-applications", technicalApplicationsRoutes);
+app.use("/api/v1/business-case", businessCaseRoutes);
+app.use("/api/v1/equipment-catalog", equipmentCatalogRoutes);
+app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
+app.use("/api/v1/calculation-templates", calculationTemplatesRoutes);
 app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
+app.use("/api/v1/attendance", attendanceRoutes);
+app.use("/api/v1/gmail", gmailRoutes);
+app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
+app.use("/api/v1/private-purchases", privatePurchasesRoutes);
+app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
+app.use("/api/v1/permisos", permisosRoutes);
+app.use("/api/v1/vacaciones", vacacionesRoutes);
+app.use("/api/v1/clients", clientsRoutes);
+app.use("/api/v1/schedules", schedulesRoutes);
+app.use("/api/v1/notifications", notificationsRoutes);
+app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/users/me/profile", userProfileRoutes);
+app.use("/api/v1/users", userCertificationsRoutes);
+app.use("/api", signatureRoutes);
 
 // ======================================================
 // 🚑 11️⃣ Manejo global de errores

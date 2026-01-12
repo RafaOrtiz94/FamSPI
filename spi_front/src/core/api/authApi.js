@@ -1,5 +1,7 @@
 import api from "./index";
 
+console.log("DEBUG ENV →", process.env.REACT_APP_API_BASE_URL);
+
 /**
  * ==========================================================
  * 🔐 Auth API — SPI Fam (JWT Header-based)
@@ -131,8 +133,6 @@ export const refreshAccessToken = async () => {
     throw err;
   }
 };
-<<<<<<< Updated upstream
-=======
 
 /* ==========================================================
    ✍️  Consentimiento interno LOPDP
@@ -162,4 +162,3 @@ export const submitInternalLopdpConsent = async ({
 
 // Alias for consistency
 export const acceptInternalLopdp = submitInternalLopdpConsent;
->>>>>>> Stashed changes

@@ -1,0 +1,692 @@
+/**
+ * src/modules/attendance/attendance.controller.js
+ * -----------------------------------------------
+ * 📋 Attendance Tracking Controller
+ * - Clock in/out endpoints
+ * - Lunch break tracking
+ * - Attendance record management
+ * - Integration with user signatures
+ */
+
+const db = require("../../config/db");
+const logger = require("../../config/logger");
+
+/**
+ * 🕐 Clock In - Record entry time
+ * POST /api/attendance/clock-in
+ * Body: { location: "lat,lng" }
+ */
+const clockIn = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Check if already clocked in today
+    const existing = await db.query(
+      "SELECT id, entry_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (existing.rows.length > 0 && existing.rows[0].entry_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya has marcado entrada hoy",
+        data: existing.rows[0],
+      });
+    }
+
+    // Insert or update record
+    // We use a safe query that works even if columns don't exist yet (if migration failed), 
+    // but ideally migration is run. Assuming migration ran:
+    const result = await db.query(
+      `
+      INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (user_id, date) 
+      DO UPDATE SET entry_time = $3, entry_location = $4, updated_at = NOW()
+      RETURNING *;
+      `,
+      [userId, today, now, location || null]
+    );
+
+    logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${location}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: "Entrada registrada correctamente",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-in");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando entrada",
+    });
+  }
+};
+
+/**
+ * 🍽️ Clock Out for Lunch - Record lunch start time
+ * POST /api/attendance/clock-out-lunch
+ * Body: { location }
+ */
+const clockOutLunch = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Check if record exists
+    const existing = await db.query(
+      "SELECT id, entry_time, lunch_start_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (existing.rows.length === 0 || !existing.rows[0].entry_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Debes marcar entrada primero",
+      });
+    }
+
+    if (existing.rows[0].lunch_start_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya has marcado salida a almuerzo",
+        data: existing.rows[0],
+      });
+    }
+
+    // Update lunch start time and location
+    const result = await db.query(
+      `
+      UPDATE user_attendance_records
+      SET lunch_start_time = $1, lunch_start_location = $4, updated_at = NOW()
+      WHERE user_id = $2 AND date = $3
+      RETURNING *;
+      `,
+      [now, userId, today, location || null]
+    );
+
+    logger.info(`[ATTENDANCE] Lunch start: ${email} at ${now.toISOString()} loc: ${location}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: "Salida a almuerzo registrada",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-out-lunch");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando salida a almuerzo",
+    });
+  }
+};
+
+/**
+ * 🍽️ Clock In from Lunch - Record lunch end time
+ * POST /api/attendance/clock-in-lunch
+ * Body: { location }
+ */
+const clockInLunch = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Check if record exists
+    const existing = await db.query(
+      "SELECT id, lunch_start_time, lunch_end_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (existing.rows.length === 0 || !existing.rows[0].lunch_start_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Debes marcar salida a almuerzo primero",
+      });
+    }
+
+    if (existing.rows[0].lunch_end_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya has marcado regreso de almuerzo",
+        data: existing.rows[0],
+      });
+    }
+
+    // Update lunch end time and location
+    const result = await db.query(
+      `
+      UPDATE user_attendance_records
+      SET lunch_end_time = $1, lunch_end_location = $4, updated_at = NOW()
+      WHERE user_id = $2 AND date = $3
+      RETURNING *;
+      `,
+      [now, userId, today, location || null]
+    );
+
+    logger.info(`[ATTENDANCE] Lunch end: ${email} at ${now.toISOString()} loc: ${location}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: "Regreso de almuerzo registrado",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-in-lunch");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando regreso de almuerzo",
+    });
+  }
+};
+
+/**
+ * 🏁 Clock Out - Record exit time
+ * POST /api/attendance/clock-out
+ * Body: { location, isOvertime: boolean }
+ */
+const clockOut = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location, isOvertime } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Check if record exists
+    const existing = await db.query(
+      "SELECT id, entry_time, exit_time, overtime_hours FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (existing.rows.length === 0 || !existing.rows[0].entry_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Debes marcar entrada primero",
+      });
+    }
+
+    if (existing.rows[0].exit_time) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya has marcado salida",
+        data: existing.rows[0],
+      });
+    }
+
+    // Calculate worked hours and determine if overtime
+    const entryTime = new Date(existing.rows[0].entry_time);
+    let workedMs = now - entryTime;
+
+    // Subtract lunch break if exists
+    const lunchQuery = await db.query(
+      "SELECT lunch_start_time, lunch_end_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    if (lunchQuery.rows[0]?.lunch_start_time && lunchQuery.rows[0]?.lunch_end_time) {
+      const lunchStart = new Date(lunchQuery.rows[0].lunch_start_time);
+      const lunchEnd = new Date(lunchQuery.rows[0].lunch_end_time);
+      workedMs -= (lunchEnd - lunchStart);
+    }
+
+    const workedHours = workedMs / (1000 * 60 * 60);
+    const standardWorkHours = 8; // Jornada laboral estándar
+    const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+
+    // Update exit time, location, and overtime info
+    const result = await db.query(
+      `
+      UPDATE user_attendance_records
+      SET exit_time = $1, exit_location = $4, is_overtime = $5, overtime_hours = $6, total_hours = $7, updated_at = NOW()
+      WHERE user_id = $2 AND date = $3
+      RETURNING *;
+      `,
+      [now, userId, today, location || null, isOvertime || overtimeHours > 0, overtimeHours, workedHours]
+    );
+
+    const message = overtimeHours > 0
+      ? `Salida registrada. Has trabajado ${overtimeHours.toFixed(1)} horas extra.`
+      : "Salida registrada correctamente";
+
+    logger.info(`[ATTENDANCE] Clock out: ${email} at ${now.toISOString()} loc: ${location} overtime: ${overtimeHours.toFixed(2)}h`);
+
+    return res.status(200).json({
+      ok: true,
+      message,
+      data: result.rows[0],
+      overtime: overtimeHours > 0 ? {
+        hours: overtimeHours,
+        isSignificant: overtimeHours > 2 // Más de 2 horas extra es significativo
+      } : null
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-out");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando salida",
+    });
+  }
+};
+
+/**
+ * ⚠️ Register Exception (Salida Inesperada - Step 1/4)
+ * POST /api/attendance/exception
+ * Body: { type, description, location }
+ */
+const registerException = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { type, description, location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+    if (!type || !description) {
+      return res.status(400).json({ ok: false, message: "Tipo y descripción requeridos" });
+    }
+
+    // Check if there is already an active exception
+    const active = await db.query(
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
+      [userId]
+    );
+
+    if (active.rows.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya tienes una salida en curso. Complétala antes de iniciar otra."
+      });
+    }
+
+    // Step 1: Start (Exit Office)
+    const result = await db.query(
+      `
+      INSERT INTO attendance_exceptions (
+        user_id, date, type, description, 
+        start_time, start_location, 
+        status
+      )
+      VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $4, 'ACTIVE')
+      RETURNING *;
+      `,
+      [userId, type, description, location || null]
+    );
+
+    logger.info(`[ATTENDANCE] Exception Start: ${email} - ${type}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: "Salida registrada. Notifica cuando llegues a tu destino.",
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en register-exception");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando excepción",
+    });
+  }
+};
+
+/**
+ * 🔄 Update Exception Status (Steps 2, 3, 4)
+ * POST /api/attendance/exception/status
+ * Body: { status, location }
+ * Status: 'ON_SITE' (Llegada), 'RETURNING' (Salida Destino), 'COMPLETED' (Regreso Oficina)
+ */
+const updateExceptionStatus = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { status, location } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    // Get active exception
+    const active = await db.query(
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+
+    if (active.rows.length === 0) {
+      return res.status(404).json({ ok: false, message: "No tieens ninguna salida en curso" });
+    }
+
+    const exceptionId = active.rows[0].id;
+    let updateQuery = "";
+    let params = [];
+    let message = "";
+
+    if (status === 'ON_SITE') {
+      // Step 2: Arrival at Destination
+      updateQuery = "UPDATE attendance_exceptions SET status = 'ON_SITE', arrival_time = NOW(), arrival_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Llegada registrada. Notifica cuando salgas del destino.";
+    } else if (status === 'RETURNING') {
+      // Step 3: Leaving Destination
+      updateQuery = "UPDATE attendance_exceptions SET status = 'RETURNING', departure_time = NOW(), departure_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Salida de destino registrada. Notifica cuando regreses a la oficina.";
+    } else if (status === 'COMPLETED') {
+      // Step 4: Back at Office
+      updateQuery = "UPDATE attendance_exceptions SET status = 'COMPLETED', return_time = NOW(), return_location = $1 WHERE id = $2";
+      params = [location, exceptionId];
+      message = "Regreso a oficina registrado. Ciclo completado.";
+    } else {
+      return res.status(400).json({ ok: false, message: "Estado inválido" });
+    }
+
+    await db.query(updateQuery, params);
+
+    // Fetch updated record
+    const updated = await db.query("SELECT * FROM attendance_exceptions WHERE id = $1", [exceptionId]);
+
+    logger.info(`[ATTENDANCE] Exception Update: ${email} - ${status}`);
+
+    return res.status(200).json({
+      ok: true,
+      message,
+      data: updated.rows[0]
+    });
+
+  } catch (err) {
+    logger.error({ err }, "❌ Error en update-exception");
+    return res.status(500).json({ ok: false, message: "Error actualizando estado de excepción" });
+  }
+};
+
+/**
+ * 🔍 Get Active Exception
+ * GET /api/attendance/exception/active
+ */
+const getActiveException = async (req, res) => {
+  try {
+    const { id: userId } = req.user || {};
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const result = await db.query(
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      [userId]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows[0] || null
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error getting active exception");
+    return res.status(500).json({ ok: false, message: "Error" });
+  }
+};
+
+/**
+ * 📅 Get Today's Attendance - For current user
+ * GET /api/attendance/today
+ */
+const getToday = async (req, res) => {
+  try {
+    const { id: userId } = req.user || {};
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+
+    const result = await db.query(
+      "SELECT * FROM user_attendance_records WHERE user_id = $1 AND date = $2",
+      [userId, today]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows[0] || null,
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error obteniendo asistencia de hoy");
+    return res.status(500).json({
+      ok: false,
+      message: "Error obteniendo asistencia",
+    });
+  }
+};
+
+/**
+ * 👤 Get User Attendance - For specific date
+ * GET /api/attendance/user/:userId?date=YYYY-MM-DD
+ */
+const getUserAttendance = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { date } = req.query;
+
+    if (!date) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fecha requerida (formato: YYYY-MM-DD)",
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT 
+        a.*,
+        u.fullname,
+        u.email,
+        u.role
+      FROM user_attendance_records a
+      JOIN users u ON a.user_id = u.id
+      WHERE a.user_id = $1 AND a.date = $2
+      `,
+      [userId, date]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows[0] || null,
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error obteniendo asistencia de usuario");
+    return res.status(500).json({
+      ok: false,
+      message: "Error obteniendo asistencia",
+    });
+  }
+};
+
+/**
+ * 📊 Get Attendance Range - For reporting (calidad dashboard)
+ * GET /api/attendance/range?start=YYYY-MM-DD&end=YYYY-MM-DD&userId=123
+ */
+const getRange = async (req, res) => {
+  try {
+    const { start, end, userId } = req.query;
+
+    if (!start || !end) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fechas de inicio y fin requeridas",
+      });
+    }
+
+    let query = `
+      SELECT 
+        a.*,
+        u.fullname,
+        u.email,
+        u.role,
+        d.name AS department_name
+      FROM user_attendance_records a
+      JOIN users u ON a.user_id = u.id
+      LEFT JOIN departments d ON u.department_id = d.id
+      WHERE a.date BETWEEN $1 AND $2
+    `;
+
+    const params = [start, end];
+
+    if (userId) {
+      query += " AND a.user_id = $3";
+      params.push(userId);
+    }
+
+    query += " ORDER BY a.date DESC, u.fullname ASC";
+
+    const result = await db.query(query, params);
+
+    return res.status(200).json({
+      ok: true,
+      total: result.rows.length,
+      data: result.rows,
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error obteniendo rango de asistencia");
+    return res.status(500).json({
+      ok: false,
+      message: "Error obteniendo registros de asistencia",
+    });
+  }
+};
+
+/**
+ * ⏰ Mark Overtime - Register additional work time
+ * POST /api/attendance/overtime
+ * Body: { hours: number, reason: string, location: string }
+ */
+const markOvertime = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { hours, reason, location } = req.body;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    if (!hours || hours <= 0) {
+      return res.status(400).json({ ok: false, message: "Horas de overtime deben ser mayores a 0" });
+    }
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({ ok: false, message: "Razón requerida para overtime" });
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const now = new Date();
+
+    // Insert overtime record
+    const result = await db.query(
+      `
+      INSERT INTO attendance_overtime (
+        user_id, date, hours, reason, location, recorded_at
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING *;
+      `,
+      [userId, today, hours, reason.trim(), location || null, now]
+    );
+
+    logger.info(`[ATTENDANCE] Overtime marked: ${email} - ${hours}h - ${reason}`);
+
+    return res.status(200).json({
+      ok: true,
+      message: `Overtime de ${hours} horas registrado correctamente`,
+      data: result.rows[0],
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en mark-overtime");
+    return res.status(500).json({
+      ok: false,
+      message: "Error registrando overtime",
+    });
+  }
+};
+
+/**
+ * 📊 Get Overtime Records - Get overtime history
+ * GET /api/attendance/overtime?start=YYYY-MM-DD&end=YYYY-MM-DD
+ */
+const getOvertimeRecords = async (req, res) => {
+  try {
+    const { id: userId } = req.user || {};
+    const { start, end } = req.query;
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    if (!start || !end) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fechas de inicio y fin requeridas",
+      });
+    }
+
+    const result = await db.query(
+      `
+      SELECT * FROM attendance_overtime
+      WHERE user_id = $1 AND date BETWEEN $2 AND $3
+      ORDER BY date DESC, recorded_at DESC
+      `,
+      [userId, start, end]
+    );
+
+    // Calculate totals
+    const totalHours = result.rows.reduce((sum, record) => sum + parseFloat(record.hours), 0);
+    const totalRecords = result.rows.length;
+
+    return res.status(200).json({
+      ok: true,
+      data: result.rows,
+      summary: {
+        totalHours: totalHours.toFixed(2),
+        totalRecords,
+        period: { start, end }
+      }
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error obteniendo registros de overtime");
+    return res.status(500).json({
+      ok: false,
+      message: "Error obteniendo registros de overtime",
+    });
+  }
+};
+
+module.exports = {
+  clockIn,
+  clockOutLunch,
+  clockInLunch,
+  clockOut,
+  registerException,
+  updateExceptionStatus,
+  getActiveException,
+  getToday,
+  getUserAttendance,
+  getRange,
+  markOvertime,
+  getOvertimeRecords,
+};

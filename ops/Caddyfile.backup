@@ -1,0 +1,20 @@
+https://spi-dev.famproject.com.ec {
+    tls ops/certs/spi-dev.famproject.com.ec.pem ops/certs/spi-dev.famproject.com.ec-key.pem
+
+    # API routes - must be handled BEFORE SPA fallback
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy http://127.0.0.1:3000
+    }
+
+    # SPA fallback - serves static files and handles client-side routing
+    handle {
+        root * spi_front/build
+        try_files {path} {path}/ /index.html
+        file_server
+    }
+}
+
+http://spi-dev.famproject.com.ec {
+    redir https://{host}{uri} permanent
+}
