@@ -15,6 +15,8 @@ const {
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
 const NotificationManager = require('../notifications/notificationManager');
+const { drive } = require("../../config/google");
+const { resolveRequestDriveFolders } = require("../../utils/drivePaths");
 
 const PRIVATE_PURCHASE_STATUSES = [
   "pending_commercial",
@@ -46,6 +48,103 @@ const DRIVE_FOLDER_PREFIX = "ComprasPrivado";
 function driveViewLink(id) {
   if (!id) return null;
   return `https://drive.google.com/file/d/${id}/view`;
+}
+
+/**
+ * Resolver de carpeta compatible con legacy + nuevo root corporativo
+ * @param {Object} params - Parámetros para resolver carpeta
+ * @param {string} params.entityType - Tipo de entidad ('private_purchase')
+ * @param {string} params.entityId - ID de la entidad
+ * @param {string} params.legacyFolderId - ID de carpeta legacy (si existe)
+ * @param {Array} params.segmentsNewPath - Segmentos para nueva estructura corporativa
+ * @param {Object} params.user - Usuario para estructura comercial
+ * @returns {Object} { folderId, mode, isLegacy }
+ */
+async function resolveEntityFolder({
+  entityType,
+  entityId,
+  legacyFolderId,
+  segmentsNewPath,
+  user
+}) {
+  console.log("[PURCHASE_FLOW][DRIVE_FOLDER_RESOLVE]", {
+    entityType,
+    entityId,
+    hasLegacy: !!legacyFolderId,
+    hasNewPath: !!segmentsNewPath
+  });
+
+  // 1. Si existe carpeta legacy, validar accesibilidad
+  if (legacyFolderId) {
+    try {
+      // Verificar que la carpeta existe y es accesible
+      await drive.files.get({
+        fileId: legacyFolderId,
+        supportsAllDrives: true,
+        fields: 'id, name'
+      });
+
+      console.log("[PURCHASE_FLOW][DRIVE_FOLDER_RESOLVE]", {
+        entityType,
+        entityId,
+        mode: "legacy_reuse",
+        folderId: legacyFolderId,
+        ok: true
+      });
+
+      return {
+        folderId: legacyFolderId,
+        mode: "legacy_reuse",
+        isLegacy: true
+      };
+    } catch (error) {
+      console.warn("[PURCHASE_FLOW][DRIVE_FOLDER_RESOLVE]", {
+        entityType,
+        entityId,
+        mode: "legacy_inaccessible",
+        legacyFolderId,
+        error: error.message
+      });
+      // Continuar con creación de nueva carpeta
+    }
+  }
+
+  // 2. Crear nueva carpeta en estructura corporativa
+  try {
+    const clientName = segmentsNewPath?.[3] || 'Cliente-Desconocido';
+
+    const driveFolders = await resolveRequestDriveFolders({
+      requestId: entityId,
+      requestTypeCode: 'private_purchase',
+      requestTypeTitle: 'Compras Privadas',
+      departmentCode: 'Comercial',
+      departmentName: 'Comercial',
+      clientName,
+      user
+    });
+
+    console.log("[PURCHASE_FLOW][DRIVE_FOLDER_RESOLVE]", {
+      entityType,
+      entityId,
+      mode: "new_created",
+      folderId: driveFolders.requestFolderId,
+      ok: true
+    });
+
+    return {
+      folderId: driveFolders.requestFolderId,
+      mode: "new_created",
+      isLegacy: false
+    };
+  } catch (error) {
+    console.error("[PURCHASE_FLOW][DRIVE_FOLDER_RESOLVE]", {
+      entityType,
+      entityId,
+      mode: "creation_failed",
+      error: error.message
+    });
+    throw new Error(`No se pudo resolver carpeta para ${entityType}: ${error.message}`);
+  }
 }
 
 async function ensureRequestFolder(request, forceRecreate = false) {
@@ -100,8 +199,17 @@ async function createPrivatePurchase({ user, payload }) {
   const comodatoDocumentMime = payload.comodato_document_mime || null;
 
   const id = uuidv4();
-  const folderRequest = { id };
-  const folderId = await ensureRequestFolder(folderRequest, true);
+
+  // Resolver carpeta usando sistema compatible legacy + nuevo
+  const folderResolution = await resolveEntityFolder({
+    entityType: "private_purchase",
+    entityId: id,
+    legacyFolderId: null, // Nueva solicitud, no hay legacy
+    segmentsNewPath: ["Comercial", "Compras Privadas", clientSnapshot?.commercial_name || 'Cliente-Desconocido', `Solicitud-${id}`],
+    user
+  });
+
+  const folderId = folderResolution.folderId;
 
   let comodatoDocumentId = null;
   if (offerKind === "comodato" && comodatoDocumentBase64 && comodatoDocumentName) {
@@ -277,11 +385,16 @@ async function createOfferDocument(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
 
-  const folderId =
-    payload.folder_id ||
-    payload.folderId ||
-    (payload.folder_path ? await ensurePathFolder(payload.folder_path) : null) ||
-    (await ensureRequestFolder(request));
+  // Resolver carpeta usando sistema compatible legacy + nuevo
+  const folderResolution = await resolveEntityFolder({
+    entityType: "private_purchase",
+    entityId: id,
+    legacyFolderId: request.drive_folder_id, // Si ya existe, intentar reutilizar
+    segmentsNewPath: ["Comercial", "Compras Privadas", request.client_snapshot?.commercial_name || 'Cliente-Desconocido', `Solicitud-${id}`],
+    user
+  });
+
+  const folderId = folderResolution.folderId;
 
   // Caso 1: se entrega un archivo ya preparado (base64)
   if (payload.offer_base64) {
@@ -406,20 +519,59 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
 
-  // VALIDACIÓN BLOQUEANTE: verificar aprobación cliente antes de permitir subir oferta firmada
-  const { hasRequested, hasApproved, hasConsent } = await validateClientApproval(request);
-  if (!hasRequested || !hasApproved || !hasConsent) {
-    const error = Object.assign(
-      new Error("No se puede subir oferta firmada: cliente no aprobado o sin consentimiento LOPDP válido"),
-      { status: 409 }
+  // REGLA DURA FASE 2: Validar que existe client_request_id Y que está aprobado con LOPDP
+  let clientRequest = null;
+  let hasClientApproval = false;
+  let hasLopdpConsent = false;
+
+  if (request.client_request_id) {
+    // Obtener datos del client_request
+    const { rows } = await db.query(
+      `SELECT id, status, approval_status, approved_at, approved_by FROM client_requests WHERE id = $1`,
+      [request.client_request_id]
     );
-    console.log("[PURCHASE_FLOW][FASE2][BLOCK_SIGNED_OFFER]", {
-      id,
-      hasRequested,
-      hasApproved,
-      hasConsent,
-      error: error.message
-    });
+    clientRequest = rows[0];
+
+    if (clientRequest) {
+      // Verificar aprobación del cliente usando campos reales de BD
+      hasClientApproval = clientRequest.approval_status === 'approved' ||
+                         (clientRequest.approved_at && clientRequest.approved_by);
+
+      // Verificar consentimiento LOPDP usando tabla user_lopdp_consents
+      if (request.client_snapshot?.client_email) {
+        const { rows: consentRows } = await db.query(
+          `SELECT status FROM user_lopdp_consents WHERE user_email = $1 AND status = 'approved' ORDER BY created_at DESC LIMIT 1`,
+          [request.client_snapshot.client_email]
+        );
+        hasLopdpConsent = consentRows.length > 0;
+      }
+    }
+  }
+
+
+
+  // REGLA DURA: Bloquear si no cumple TODOS los requisitos
+  if (!request.client_request_id || !clientRequest) {
+    const error = Object.assign(
+      new Error("No se puede subir oferta firmada: cliente no registrado"),
+      { status: 409, code: "CLIENT_NOT_REGISTERED" }
+    );
+    throw error;
+  }
+
+  if (!hasClientApproval) {
+    const error = Object.assign(
+      new Error("No se puede subir oferta firmada: cliente no aprobado"),
+      { status: 409, code: "CLIENT_NOT_APPROVED" }
+    );
+    throw error;
+  }
+
+  if (!hasLopdpConsent) {
+    const error = Object.assign(
+      new Error("No se puede subir oferta firmada: cliente sin consentimiento LOPDP válido"),
+      { status: 409, code: "CLIENT_LOPDP_NOT_CONSENTED" }
+    );
     throw error;
   }
 
@@ -427,8 +579,16 @@ async function registerSignedOffer(id, payload = {}, user = {}) {
   const decision = (payload.decision || payload.status || "").toString().toLowerCase();
 
   let documentId = document_id;
-  const folderId =
-    request.drive_folder_id || (await ensureRequestFolder(request));
+  // Resolver carpeta usando sistema compatible legacy + nuevo
+  const folderResolution = await resolveEntityFolder({
+    entityType: "private_purchase",
+    entityId: id,
+    legacyFolderId: request.drive_folder_id, // Si ya existe, intentar reutilizar
+    segmentsNewPath: ["Comercial", "Compras Privadas", request.client_snapshot?.commercial_name || 'Cliente-Desconocido', `Solicitud-${id}`],
+    user
+  });
+
+  const folderId = folderResolution.folderId;
 
   if (decision === "reject") {
     const updated = await updatePrivatePurchaseStatus(id, "rejected", {
@@ -776,7 +936,16 @@ async function submitContract(id, payload = {}, user = {}) {
   const { document_id, contract_base64, file_name, mime_type } = payload;
   let documentId = document_id;
 
-  const folderId = request.drive_folder_id || (await ensureRequestFolder(request));
+  // Resolver carpeta usando sistema compatible legacy + nuevo
+  const folderResolution = await resolveEntityFolder({
+    entityType: "private_purchase",
+    entityId: id,
+    legacyFolderId: request.drive_folder_id, // Si ya existe, intentar reutilizar
+    segmentsNewPath: ["Comercial", "Compras Privadas", request.client_snapshot?.commercial_name || 'Cliente-Desconocido', `Solicitud-${id}`],
+    user
+  });
+
+  const folderId = folderResolution.folderId;
 
   if (!documentId && contract_base64) {
     if (!folderId) throw new Error("No se pudo obtener carpeta de Drive");
@@ -796,7 +965,7 @@ async function submitContract(id, payload = {}, user = {}) {
 
   const updated = await updatePrivatePurchaseStatus(id, 'pending_operations_schedule', {
     contract_document_id: documentId,
-    drive_folder_id: folderId || null
+    drive_folder_id: folderId
   });
 
   await logAction({
@@ -867,11 +1036,77 @@ async function submitDeliveryDates(id, { deliveryDates, notes }, user = {}) {
     throw new Error("Solicitud no está pendiente de fechas de entrega");
   }
 
-  const updated = await updatePrivatePurchaseStatus(id, 'awaiting_dispatch', {
+  // Validar fechas requeridas
+  if (!deliveryDates?.start || !deliveryDates?.end) {
+    throw new Error("Fechas de inicio y fin son requeridas");
+  }
+
+  // Crear eventos de calendario usando el servicio integrado
+  let calendarResult = null;
+  try {
+    const { createDeliveryEvents } = require("../calendar/calendar.service");
+
+    calendarResult = await createDeliveryEvents({
+      purchaseId: id,
+      clientName: request.client_snapshot?.commercial_name || request.client_snapshot?.client_name || 'Cliente',
+      deliveryStartAt: deliveryDates.start,
+      deliveryEndAt: deliveryDates.end
+    });
+
+    console.log('[FLOW_PRIVADA][FASE2][CALENDAR][HOOK]', {
+      purchaseId: id,
+      calendarSuccess: calendarResult?.success,
+      eventId: calendarResult?.eventId,
+      attendeesCount: calendarResult?.attendees?.length || 0
+    });
+
+  } catch (calendarError) {
+    console.error('[FLOW_PRIVADA][FASE2][CALENDAR][HOOK_ERROR]', {
+      purchaseId: id,
+      error: calendarError.message
+    });
+    // No fallar el proceso si el calendario falla
+  }
+
+  // Persistir schedule en tabla dedicada
+  const scheduleData = {
+    private_purchase_request_id: id,
+    delivery_start_at: deliveryDates.start,
+    delivery_end_at: deliveryDates.end,
+    calendar_event_ids: calendarResult?.success ? {
+      mainEventId: calendarResult.eventId,
+      htmlLink: calendarResult.htmlLink,
+      calendarId: calendarResult.calendarId,
+      attendees: calendarResult.attendees || [],
+      metadata: calendarResult.metadata
+    } : {},
+    created_by_user_id: user.id
+  };
+
+  await db.query(`
+    INSERT INTO purchase_delivery_schedules
+      (private_purchase_request_id, delivery_start_at, delivery_end_at, calendar_event_ids, created_by_user_id)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (private_purchase_request_id)
+    DO UPDATE SET
+      delivery_start_at = EXCLUDED.delivery_start_at,
+      delivery_end_at = EXCLUDED.delivery_end_at,
+      calendar_event_ids = EXCLUDED.calendar_event_ids,
+      updated_at = now()
+  `, [
+    scheduleData.private_purchase_request_id,
+    scheduleData.delivery_start_at,
+    scheduleData.delivery_end_at,
+    JSON.stringify(scheduleData.calendar_event_ids),
+    scheduleData.created_by_user_id
+  ]);
+
+  // Actualizar estado de la compra privada
+  const updated = await updatePrivatePurchaseStatus(id, 'calendar_events_created', {
     delivery_dates_json: JSON.stringify(deliveryDates || {}),
     delivery_notes: notes,
-    delivery_start_at: deliveryDates?.start,
-    delivery_end_at: deliveryDates?.end
+    delivery_start_at: deliveryDates.start,
+    delivery_end_at: deliveryDates.end
   });
 
   await logAction({
@@ -880,21 +1115,83 @@ async function submitDeliveryDates(id, { deliveryDates, notes }, user = {}) {
     action: "delivery_dates_submitted",
     entity: "private_purchase_requests",
     entity_id: id,
-    details: `Fechas de entrega confirmadas por asesor comercial: ${deliveryDates?.start || ''} - ${deliveryDates?.end || ''}`
+    details: `Fechas de entrega confirmadas por asesor comercial: ${deliveryDates.start} - ${deliveryDates.end}. Calendario: ${calendarResult?.success ? 'OK' : 'FALLÓ'}`
   });
 
-  return updated;
+  // Notificar a roles relevantes sobre las fechas programadas
+  try {
+    const NotificationManager = require('../notifications/notificationManager');
+
+    await NotificationManager.sendNotification({
+      userId: null, // Todos los roles relevantes
+      template: 'custom_html',
+      customTitle: 'Fechas de Entrega Programadas',
+      customMessage: `Fechas de entrega programadas para ${request.client_snapshot?.commercial_name}. Inicio: ${deliveryDates.start}, Fin: ${deliveryDates.end}. ${calendarResult?.success ? `Calendario actualizado.` : 'Calendario no disponible.'}`,
+      type: 'task',
+      priority: 2,
+      source: 'private_purchase.delivery_scheduled',
+      meta: {
+        entityType: 'private_purchase',
+        entityId: id,
+        eventType: 'delivery_scheduled',
+        calendarSuccess: calendarResult?.success || false,
+        htmlLink: calendarResult?.htmlLink,
+        summary: 'Entrega programada en calendario',
+      },
+      email: true,
+      chat: false
+    });
+
+    console.log('[FLOW_PRIVADA][FASE2][CALENDAR][NOTIFICATION]', {
+      purchaseId: id,
+      calendarSuccess: calendarResult?.success,
+      toRoles: ['jefe_operaciones', 'asesor_comercial', 'jefe_tecnico', 'jefe_logistica']
+    });
+
+  } catch (notifError) {
+    console.error('[FLOW_PRIVADA][FASE2][CALENDAR][NOTIF_ERROR]', notifError);
+  }
+
+  return {
+    ...updated,
+    schedule: scheduleData,
+    calendar: calendarResult?.success ? {
+      eventId: calendarResult.eventId,
+      htmlLink: calendarResult.htmlLink,
+      attendeesCount: calendarResult.attendees?.length || 0
+    } : null
+  };
 }
 
 async function markDispatchReady(id, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
 
-  if (request.status !== 'awaiting_dispatch') {
-    throw new Error("Solicitud no está esperando despacho");
+  if (request.status !== 'waiting_dispatch') {
+    throw new Error("Solicitud no está pendiente de despacho");
   }
 
-  const updated = await updatePrivatePurchaseStatus(id, 'delivered_pending_signatures');
+  // VALIDACIÓN PRECONDICIONES OBLIGATORIAS
+  const missingRequirements = [];
+  if (!request.contract_document_id) missingRequirements.push("contract_document_id");
+  if (!request.delivery_dates_json && !request.delivery_start_at) missingRequirements.push("delivery_dates_json");
+
+  if (missingRequirements.length > 0) {
+    const error = Object.assign(
+      new Error("No se puede marcar como listo para despacho: faltan prerrequisitos"),
+      { status: 409, code: "MISSING_REQUIREMENTS", requirements: missingRequirements }
+    );
+    console.log('[FLOW_PRIVADA][FASE2][DISPATCH][BLOCKED]', {
+      requestId: id,
+      status: request.status,
+      missingRequirements,
+      hasContract: !!request.contract_document_id,
+      hasDeliveryDates: !!(request.delivery_dates_json || request.delivery_start_at)
+    });
+    throw error;
+  }
+
+  const updated = await updatePrivatePurchaseStatus(id, 'dispatch_ready');
 
   await logAction({
     user_id: user.id || null,
@@ -905,6 +1202,46 @@ async function markDispatchReady(id, user = {}) {
     details: "Despacho marcado como listo por jefe logística"
   });
 
+  console.log('[FLOW_PRIVADA][FASE2][DISPATCH]', {
+    requestId: id,
+    from: 'waiting_dispatch',
+    to: 'dispatch_ready',
+    ok: true,
+    reason: 'Preconditions met'
+  });
+
+  // Notificar roles relevantes
+  try {
+    const NotificationManager = require('../notifications/notificationManager');
+
+    await NotificationManager.sendNotification({
+      userId: null, // Todos los roles relevantes
+      template: 'custom_html',
+      customTitle: 'Despacho Marcado como Listo',
+      customMessage: `El despacho está listo para ${request.client_snapshot?.commercial_name}. Proceder con la entrega.`,
+      type: 'task',
+      priority: 2,
+      source: 'private_purchase.dispatch_ready',
+      meta: {
+        entityType: 'private_purchase',
+        entityId: id,
+        eventType: 'dispatch_ready',
+        requiredAction: 'proceed_with_delivery',
+        summary: 'Despacho listo para entrega',
+      },
+      email: true,
+      chat: false
+    });
+
+    console.log('[FLOW_PRIVADA][FASE2][DISPATCH][NOTIFICATION]', {
+      requestId: id,
+      toRoles: ['jefe_operaciones', 'asesor_comercial']
+    });
+
+  } catch (notifError) {
+    console.error('[FLOW_PRIVADA][FASE2][DISPATCH][NOTIF_ERROR]', notifError);
+  }
+
   return updated;
 }
 
@@ -912,14 +1249,45 @@ async function generateDeliveryAct(id, payload = {}, user = {}) {
   const request = await getPrivatePurchase(id);
   if (!request) throw new Error("Solicitud privada no encontrada");
 
-  if (request.status !== 'delivered_pending_signatures') {
-    throw new Error("Solicitud no está pendiente de acta de entrega");
+  if (request.status !== 'dispatch_ready') {
+    throw new Error("Solicitud no está lista para despacho");
+  }
+
+  // VALIDACIÓN PRECONDICIONES OBLIGATORIAS
+  const missingRequirements = [];
+  if (!request.drive_folder_id) missingRequirements.push("drive_folder_id");
+  if (!request.contract_document_id) missingRequirements.push("contract_document_id");
+  if (!request.delivery_dates_json && !request.delivery_start_at) missingRequirements.push("delivery_dates_json");
+
+  if (missingRequirements.length > 0) {
+    const error = Object.assign(
+      new Error("No se puede generar acta de entrega: faltan prerrequisitos"),
+      { status: 409, code: "MISSING_REQUIREMENTS", requirements: missingRequirements }
+    );
+    console.log('[FLOW_PRIVADA][FASE2][DELIVERY_ACT][BLOCKED]', {
+      requestId: id,
+      status: request.status,
+      missingRequirements,
+      hasDriveFolder: !!request.drive_folder_id,
+      hasContract: !!request.contract_document_id,
+      hasDeliveryDates: !!(request.delivery_dates_json || request.delivery_start_at)
+    });
+    throw error;
   }
 
   const { document_id, act_base64, file_name, mime_type } = payload;
   let documentId = document_id;
 
-  const folderId = request.drive_folder_id || (await ensureRequestFolder(request));
+  // Resolver carpeta usando sistema compatible legacy + nuevo
+  const folderResolution = await resolveEntityFolder({
+    entityType: "private_purchase",
+    entityId: id,
+    legacyFolderId: request.drive_folder_id, // Si ya existe, intentar reutilizar
+    segmentsNewPath: ["Comercial", "Compras Privadas", request.client_snapshot?.commercial_name || 'Cliente-Desconocido', `Solicitud-${id}`],
+    user
+  });
+
+  const folderId = folderResolution.folderId;
 
   if (!documentId && act_base64) {
     if (!folderId) throw new Error("No se pudo obtener carpeta de Drive");
@@ -937,10 +1305,12 @@ async function generateDeliveryAct(id, payload = {}, user = {}) {
     throw new Error("Documento de acta requerido");
   }
 
-  // Aquí podríamos marcar como completado, pero según el flujo queda "delivered_pending_signatures" hasta firma final
+  // Actualizar BD con transaccionalidad
   const updated = await db.query(`
     UPDATE private_purchase_requests
-    SET delivery_act_document_id = $1, updated_at = now()
+    SET delivery_act_document_id = $1,
+        status = 'delivery_act_generated',
+        updated_at = now()
     WHERE id = $2
     RETURNING *
   `, [documentId, id]);
@@ -951,8 +1321,49 @@ async function generateDeliveryAct(id, payload = {}, user = {}) {
     action: "delivery_act_generated",
     entity: "private_purchase_requests",
     entity_id: id,
-    details: "Acta de entrega-recepción generada"
+    details: `Acta de entrega-recepción generada en Drive. Folder: ${folderId}`
   });
+
+  console.log('[FLOW_PRIVADA][FASE2][DELIVERY_ACT]', {
+    requestId: id,
+    delivery_act_document_id: documentId,
+    drive_folder_id: folderId,
+    from: 'dispatch_ready',
+    to: 'delivery_act_generated',
+    ok: true
+  });
+
+  // Notificar roles relevantes
+  try {
+    const NotificationManager = require('../notifications/notificationManager');
+
+    await NotificationManager.sendNotification({
+      userId: null, // Todos los roles relevantes
+      template: 'custom_html',
+      customTitle: 'Acta de Entrega Generada',
+      customMessage: `Acta de entrega generada para ${request.client_snapshot?.commercial_name}. Pendiente firma de recepción.`,
+      type: 'task',
+      priority: 1,
+      source: 'private_purchase.delivery_act_generated',
+      meta: {
+        entityType: 'private_purchase',
+        entityId: id,
+        eventType: 'delivery_act_generated',
+        requiredAction: 'review_delivery_act',
+        summary: 'Acta de entrega disponible para revisión',
+      },
+      email: true,
+      chat: false
+    });
+
+    console.log('[FLOW_PRIVADA][FASE2][DELIVERY_ACT][NOTIFICATION]', {
+      requestId: id,
+      toRoles: ['asesor_comercial', 'jefe_operaciones', 'backoffice_comercial']
+    });
+
+  } catch (notifError) {
+    console.error('[FLOW_PRIVADA][FASE2][DELIVERY_ACT][NOTIF_ERROR]', notifError);
+  }
 
   return updated.rows[0];
 }
@@ -1017,7 +1428,6 @@ module.exports = {
   registerSignedOffer,
   markClientRegistered,
   forwardToACP,
-  // Nuevas funciones FASE 2
   getTimeline,
   managerDecision,
   submitCorrections,

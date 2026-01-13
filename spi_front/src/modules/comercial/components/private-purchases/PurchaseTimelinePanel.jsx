@@ -15,10 +15,10 @@ const PurchaseTimelinePanel = ({ timelineData, compact = false }) => {
     if (!timelineData?.timeline) return {};
 
     const groups = {};
-    timelineData.timeline.forEach(event => {
-      const date = format(new Date(event.timestamp), 'yyyy-MM-dd');
+    timelineData.timeline.forEach(timelineEvent => {
+      const date = format(new Date(timelineEvent.timestamp), 'yyyy-MM-dd');
       if (!groups[date]) groups[date] = [];
-      groups[date].push(event);
+      groups[date].push(timelineEvent);
     });
 
     // Ordenar fechas descendente
@@ -56,7 +56,7 @@ const PurchaseTimelinePanel = ({ timelineData, compact = false }) => {
       case 'correction_submitted':
         return <FiAlertTriangle className="w-4 h-4 text-orange-500" />;
       case 'manager_decision':
-        return event.includes('approved') ?
+        return eventType?.includes('approved') ?
           <FiCheckCircle className="w-4 h-4 text-green-600" /> :
           <FiXCircle className="w-4 h-4 text-red-500" />;
       default:
@@ -145,29 +145,29 @@ const PurchaseTimelinePanel = ({ timelineData, compact = false }) => {
                 <div className="flex-1 h-px bg-gray-200" />
               </div>
 
-              <div className="space-y-2 ml-4">
-                {events.map((event, index) => (
+        <div className="space-y-2 ml-4">
+                {events.map((timelineEvent, index) => (
                   <div key={index} className="flex items-start space-x-3">
                     <div className="flex-shrink-0 mt-1">
-                      {getEventIcon(event.event)}
+                      {getEventIcon(timelineEvent.event)}
                     </div>
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center space-x-2">
                         <p className="text-sm font-medium text-gray-900">
-                          {event.event.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {timelineEvent.event.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
                         </p>
-                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(event.status)}`}>
-                          {event.status?.replace(/_/g, ' ') || 'N/A'}
+                        <span className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(timelineEvent.status)}`}>
+                          {timelineEvent.status?.replace(/_/g, ' ') || 'N/A'}
                         </span>
                       </div>
 
                       <p className="text-sm text-gray-600 mt-1">
-                        {event.details}
+                        {timelineEvent.details}
                       </p>
 
                       <p className="text-xs text-gray-400 mt-1">
-                        {format(new Date(event.timestamp), 'HH:mm:ss')}
+                        {format(new Date(timelineEvent.timestamp), 'HH:mm:ss')}
                       </p>
                     </div>
                   </div>

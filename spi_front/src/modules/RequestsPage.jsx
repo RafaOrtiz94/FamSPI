@@ -243,6 +243,13 @@ const RequestsPage = () => {
       setSubmitting(true);
       showLoader();
 
+      console.log("[REQUESTS_PAGE][FASE_DEBUG] Crear solicitud:", {
+        request_type_id,
+        type: createModal.type,
+        payload: formPayload,
+        files: formPayload.files?.length || 0
+      });
+
       const { files = [], ...payload } = formPayload;
       const payloadToSend = {
         ...payload,
@@ -251,12 +258,27 @@ const RequestsPage = () => {
 
       delete payloadToSend.observacion;
 
-      await createRequest({ request_type_id, payload: payloadToSend, files });
+      console.log("[REQUESTS_PAGE][FASE_DEBUG] Payload preparado:", {
+        request_type_id,
+        payload: payloadToSend,
+        filesCount: files.length
+      });
+
+      const result = await createRequest({ request_type_id, payload: payloadToSend, files });
+
+      console.log("[REQUESTS_PAGE][FASE_DEBUG] Respuesta del backend:", result);
+
       showToast("Solicitud enviada correctamente ✅", "success");
       await fetchRequests(defaultRequestParams);
       handleCloseCreate();
     } catch (err) {
-      console.error("❌ Error creando solicitud:", err);
+      console.error("[REQUESTS_PAGE][FASE_DEBUG] ❌ Error creando solicitud:", err);
+      console.error("[REQUESTS_PAGE][FASE_DEBUG] Error details:", {
+        message: err.message,
+        response: err.response?.data,
+        status: err.response?.status,
+        url: err.config?.url
+      });
       showToast("Error al enviar la solicitud.", "error");
     } finally {
       hideLoader();
@@ -494,18 +516,8 @@ const RequestsPage = () => {
       )}
 
       {/* ===== Modal de creación ===== */}
-      <Modal open={createModal.open} onClose={handleCloseCreate} title="Nueva Solicitud" maxWidth="max-w-2xl">
+      <Modal open={createModal.open} onClose={submitting ? undefined : handleCloseCreate} title="Nueva Solicitud" maxWidth="max-w-2xl">
         <div className="relative">
-          {submitting && (
-            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-white/85 dark:bg-gray-900/80 backdrop-blur-sm rounded-2xl">
-              <div className="w-full bg-blue-100 dark:bg-blue-900/40 h-2 rounded-full overflow-hidden">
-                <div className="h-full w-1/2 bg-blue-600 animate-pulse rounded-full"></div>
-              </div>
-              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
-                Enviando solicitud...
-              </p>
-            </div>
-          )}
           <form
             onSubmit={submitCreate}
             className={`space-y-4 ${submitting ? "opacity-50 pointer-events-none" : ""}`}

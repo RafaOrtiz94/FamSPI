@@ -1,17 +1,15 @@
 import React, { useEffect, useState } from "react";
-import { FiClipboard, FiCreditCard, FiUserPlus, FiTruck, FiUsers } from "react-icons/fi";
+import { FiClipboard, FiUserPlus, FiTruck, FiUsers } from "react-icons/fi";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/useAuth";
-import { createRequest, getClientRequests, getRequestById } from "../../../../core/api/requestsApi";
+import { getClientRequests, getRequestById, getClientRequestById } from "../../../../core/api/requestsApi";
 import { getDocumentsByRequest } from "../../../../core/api/documentsApi";
 import { getFilesByRequest } from "../../../../core/api/filesApi";
 import { createPrivatePurchase } from "../../../../core/api/privatePurchasesApi";
 import { getEquipmentPurchaseMeta } from "../../../../core/api/equipmentPurchasesApi";
 import Button from "../../../../core/ui/components/Button";
-import CreateRequestModal from "../CreateRequestModal";
 import Modal from "../../../../core/ui/components/Modal";
 import RequestDetailModal from "../RequestDetailModal";
-import ActionCard from "../../../../core/ui/patterns/ActionCard";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
@@ -90,8 +88,6 @@ const ComercialSolicitudesView = () => {
         )
         : statWidgets;
 
-    const [modalOpen, setModalOpen] = useState(false);
-    const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
     const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
@@ -140,7 +136,56 @@ const ComercialSolicitudesView = () => {
     const handleViewRequest = async (request) => {
         setDetail({ open: true, loading: true, data: null, error: null });
         try {
-            const requestData = await getRequestById(request.id);
+            const normalizeClientPayload = (raw) => {
+                const base = raw?.request || raw || {};
+                const payloadSource = base.payload || base;
+                const payload = typeof payloadSource === "string"
+                    ? (() => {
+                        try {
+                            return JSON.parse(payloadSource);
+                        } catch {
+                            return {};
+                        }
+                    })()
+                    : (payloadSource || {});
+                return { request: { ...base, payload }, documents: [], files: [] };
+            };
+
+            const shouldUseClientRequest =
+                viewType === "client_request" ||
+                request?.type === "client_request" ||
+                request?.type_code === "client_request" ||
+                request?.commercial_name ||
+                request?.ruc_cedula ||
+                request?.created_by;
+
+            if (shouldUseClientRequest) {
+                const requestData = await getClientRequestById(request.id);
+                setDetail({
+                    open: true,
+                    loading: false,
+                    data: normalizeClientPayload(requestData),
+                    error: null,
+                });
+                return;
+            }
+
+            let requestData = null;
+            try {
+                requestData = await getRequestById(request.id);
+            } catch (err) {
+                if (err?.response?.status === 404) {
+                    const fallbackData = await getClientRequestById(request.id);
+                    setDetail({
+                        open: true,
+                        loading: false,
+                        data: normalizeClientPayload(fallbackData),
+                        error: null,
+                    });
+                    return;
+                }
+                throw err;
+            }
             let documents = [];
             let files = [];
             try {
@@ -189,51 +234,8 @@ const ComercialSolicitudesView = () => {
     const [viewTitle, setViewTitle] = useState("");
     const [viewCustomFetcher, setViewCustomFetcher] = useState(null);
 
-    // Request action cards configuration
-    const requestActionCards = [
-        {
-            id: "inspection",
-            subtitle: "Inspecciones",
-            title: "Evalúa ambientes críticos",
-            description: "Agenda la visita del equipo técnico y genera automáticamente la F.ST-INS.",
-            color: "blue",
-            icon: FiClipboard,
-        },
-        {
-            id: "retiro",
-            subtitle: "Retiros",
-            title: "Coordina retiros y devoluciones",
-            description: "Gestiona la logística inversa para equipos en campo.",
-            color: "amber",
-            icon: FiTruck,
-        },
-    ];
-
-    const visibleActionCards = isBackofficeUser
-        ? requestActionCards.filter((card) => card.id !== "inspection" && card.id !== "retiro")
-        : requestActionCards;
-
     const handlePurchaseHandoffOpen = () => {
         setShowPurchaseHandoff(true);
-    };
-
-    const openRequestModal = (type) => {
-        setPresetRequestType(type);
-        setModalOpen(true);
-    };
-
-    const handleCreate = async (data) => {
-        showLoader();
-        try {
-            await createRequest(data);
-            showToast("Solicitud creada exitosamente", "success");
-            setModalOpen(false);
-        } catch (error) {
-            console.error("Error creando solicitud:", error);
-            showToast("Error al crear la solicitud", "error");
-        } finally {
-            hideLoader();
-        }
     };
 
     const handleViewList = (type, title, fetcher = null) => {
@@ -355,51 +357,9 @@ const ComercialSolicitudesView = () => {
         }
     };
 
-    const comercialActionCards = [
-        ...visibleActionCards,
-        {
-            id: "cliente",
-            subtitle: "Nuevo Cliente",
-            title: "Registrar Cliente",
-            color: "emerald",
-            icon: FiUserPlus,
-        },
-        {
-            id: "compra-total",
-            subtitle: "Compras",
-            title: "Requerimientos",
-            color: "indigo",
-            icon: FiCreditCard,
-        },
-        {
-            id: "vacaciones",
-            subtitle: "Talento Humano",
-            title: "Permisos y Vacaciones",
-            color: "orange",
-            icon: FiUsers,
-        }
-    ];
-
-    const handleActionClick = (id) => {
-        if (id === "vacaciones") {
-            setShowPermisoModal(true);
-            return;
-        }
-        if (id === "compra-total") {
-            setShowPurchaseTypeModal(true);
-            return;
-        }
-        const mappedType = id;
-        openRequestModal(mappedType);
-    };
-
     return (
         <div className="space-y-8">
             <BaseSolicitudesView
-                actionCards={comercialActionCards}
-                onActionCardClick={(card) => handleActionClick(card.id)}
-                createSectionTitle="Crear Nueva Solicitud"
-                createSectionSubtitle="Elige el flujo que necesitas según el tipo de gestión"
                 customSections={[
                     {
                         id: "resumen",
@@ -463,17 +423,6 @@ const ComercialSolicitudesView = () => {
                 title={viewTitle}
                 customFetcher={viewCustomFetcher}
                 onView={handleViewRequest}
-            />
-
-            {/* MODALES CREACION */}
-            <CreateRequestModal
-                open={modalOpen}
-                onClose={() => {
-                    setModalOpen(false);
-                    setPresetRequestType(null);
-                }}
-                onSubmit={handleCreate}
-                presetType={presetRequestType}
             />
 
             <RequestDetailModal

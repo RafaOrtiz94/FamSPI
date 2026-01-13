@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import { FiCreditCard, FiUserPlus, FiUsers } from "react-icons/fi";
-import { useUI } from "../../../../core/ui/UIContext";
-import { createRequest, getClientRequests } from "../../../../core/api/requestsApi";
-import CreateRequestModal from "../CreateRequestModal";
+import { getClientRequests } from "../../../../core/api/requestsApi";
 import Modal from "../../../../core/ui/components/Modal";
 import Button from "../../../../core/ui/components/Button";
 import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
@@ -12,9 +10,6 @@ import RequestsListModal from "../../../shared/solicitudes/components/RequestsLi
 import BaseSolicitudesView from "../../../shared/solicitudes/BaseSolicitudesView";
 
 const ACPComercialSolicitudesView = () => {
-    const { showToast, showLoader, hideLoader } = useUI();
-    const [modalOpen, setModalOpen] = useState(false);
-    const [presetRequestType, setPresetRequestType] = useState(null);
     const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
     const [showPermisoModal, setShowPermisoModal] = useState(false);
     const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
@@ -23,25 +18,6 @@ const ACPComercialSolicitudesView = () => {
     const [viewType, setViewType] = useState(null);
     const [viewTitle, setViewTitle] = useState("");
     const [viewCustomFetcher, setViewCustomFetcher] = useState(null);
-
-    const openRequestModal = (type) => {
-        setPresetRequestType(type);
-        setModalOpen(true);
-    };
-
-    const handleCreate = async (data) => {
-        showLoader();
-        try {
-            await createRequest(data);
-            showToast("Solicitud creada exitosamente", "success");
-            setModalOpen(false);
-        } catch (error) {
-            console.error("Error creando solicitud:", error);
-            showToast("Error al crear la solicitud", "error");
-        } finally {
-            hideLoader();
-        }
-    };
 
     const handlePurchaseHandoffOpen = () => {
         setShowPurchaseHandoff(true);
@@ -93,49 +69,9 @@ const ACPComercialSolicitudesView = () => {
         }
     ];
 
-    const acpActionCards = [
-        {
-            id: "cliente",
-            subtitle: "Clientes",
-            title: "Registrar Cliente",
-            color: "emerald",
-            icon: FiUserPlus,
-        },
-        {
-            id: "compra",
-            subtitle: "Compras",
-            title: "Requerimientos",
-            color: "indigo",
-            icon: FiCreditCard,
-        },
-        {
-            id: "vacaciones",
-            subtitle: "Talento Humano",
-            title: "Permisos y Vacaciones",
-            color: "orange",
-            icon: FiUsers,
-        }
-    ];
-
-    const handleActionClick = (id) => {
-        if (id === "vacaciones") {
-            setShowPermisoModal(true);
-            return;
-        }
-        if (id === "compra") {
-            setShowPurchaseTypeModal(true);
-            return;
-        }
-        openRequestModal(id);
-    };
-
     return (
         <>
             <BaseSolicitudesView
-                actionCards={acpActionCards}
-                onActionCardClick={(card) => handleActionClick(card.id)}
-                createSectionTitle="Crear Nueva Solicitud"
-                createSectionSubtitle="Selecciona el tipo de solicitud que deseas crear"
                 customSections={[
                     {
                         id: "historial",
@@ -196,17 +132,6 @@ const ACPComercialSolicitudesView = () => {
                 type={viewType}
                 title={viewTitle}
                 customFetcher={viewCustomFetcher}
-            />
-
-            {/* MODALES */}
-            <CreateRequestModal
-                open={modalOpen}
-                onClose={() => {
-                    setModalOpen(false);
-                    setPresetRequestType(null);
-                }}
-                onSubmit={handleCreate}
-                presetType={presetRequestType}
             />
         </>
     );

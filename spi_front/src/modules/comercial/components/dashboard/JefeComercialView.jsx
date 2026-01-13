@@ -5,7 +5,7 @@ import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequest
 import PersonnelRequestForm from "../../../../core/ui/widgets/PersonnelRequestForm";
 
 const JefeComercialView = ({ onRefresh }) => {
-  const [showPersonnelForm, setShowPersonnelForm] = useState(false);
+    const [showPersonnelForm, setShowPersonnelForm] = useState(false);
 
     return (
         <>
@@ -14,7 +14,7 @@ const JefeComercialView = ({ onRefresh }) => {
             =============================== */}
             <DashboardHeader
                 title="Dashboard Gerencia Comercial"
-                subtitle="GestiÃ³n y seguimiento del talento humano en el Ã¡rea comercial."
+                subtitle="Gestión y seguimiento del talento humano en el Área comercial."
                 actions={
                     <button
                         onClick={onRefresh}
@@ -23,9 +23,9 @@ const JefeComercialView = ({ onRefresh }) => {
                         Actualizar
                     </button>
                 }
-      />
+            />
 
-      {/* ==============================
+            {/* ==============================
           SOLICITUDES DE PERSONAL
       =============================== */}
             <section className="mt-6">
@@ -36,21 +36,21 @@ const JefeComercialView = ({ onRefresh }) => {
                 </Card>
             </section>
 
-      {/* ==============================
+            {/* ==============================
           MODAL: FORMULARIO SOLICITUD PERSONAL
       =============================== */}
-      {showPersonnelForm && (
-        <PersonnelRequestForm
+            {showPersonnelForm && (
+                <PersonnelRequestForm
                     onClose={() => setShowPersonnelForm(false)}
                     onSuccess={() => {
                         setShowPersonnelForm(false);
                         onRefresh?.();
                     }}
-        />
-      )}
+                />
+            )}
 
-    </>
-  );
+        </>
+    );
 };
 
 export default JefeComercialView;

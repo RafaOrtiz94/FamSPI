@@ -426,7 +426,7 @@ const updateExceptionStatus = async (req, res) => {
  * 📋 Get Active Exception - Get current user's active exception
  * GET /api/attendance/exception/active
  */
-const getActiveException = async (req, res) => {
+  const getActiveException = async (req, res) => {
   try {
     const { id: userId } = req.user || {};
     if (!userId) {
@@ -439,9 +439,21 @@ const getActiveException = async (req, res) => {
       [userId]
     );
 
+    const normalizedException = result.rows[0]
+      ? normalizeRow(result.rows[0], [
+          "timestamp",
+          "start_time",
+          "arrival_time",
+          "departure_time",
+          "return_time",
+          "created_at",
+          "updated_at",
+        ])
+      : null;
+
     return res.status(200).json({
       ok: true,
-      data: result.rows[0] || null,
+      data: normalizedException,
     });
   } catch (err) {
     logger.error({ err }, "❌ Error obteniendo excepción activa");

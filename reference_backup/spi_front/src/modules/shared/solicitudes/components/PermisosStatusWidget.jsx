@@ -203,17 +203,16 @@ const PermisosStatusWidget = () => {
         className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition"
       >
         <div
-          className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
-            solicitud.status === "approved"
+          className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${solicitud.status === "approved"
               ? "bg-green-500"
               : solicitud.status === "partially_approved"
-              ? "bg-blue-500"
-              : solicitud.status === "pending_final"
-              ? "bg-purple-500"
-              : solicitud.status === "rejected"
-              ? "bg-red-500"
-              : "bg-amber-400"
-          }`}
+                ? "bg-blue-500"
+                : solicitud.status === "pending_final"
+                  ? "bg-purple-500"
+                  : solicitud.status === "rejected"
+                    ? "bg-red-500"
+                    : "bg-amber-400"
+            }`}
         />
         <div className="flex items-start justify-between gap-3 mb-2">
           <div className="flex-1 min-w-0">
@@ -429,7 +428,7 @@ const PermisosStatusWidget = () => {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-blue-900">
-                  Accin requerida
+                  Acción requerida
                 </h3>
                 <p className="text-sm text-blue-700">
                   Tienes permisos aprobados parcialmente. Debes subir los documentos justificantes.
@@ -484,9 +483,8 @@ const PermisosStatusWidget = () => {
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
-                  className={`relative px-5 py-3 text-sm font-semibold transition-all ${
-                    isActive ? "text-blue-700" : "text-gray-500 hover:text-gray-800"
-                  }`}
+                  className={`relative px-5 py-3 text-sm font-semibold transition-all ${isActive ? "text-blue-700" : "text-gray-500 hover:text-gray-800"
+                    }`}
                 >
                   <Icon className="w-4 h-4 inline mr-2" />
                   {tab.label}

@@ -466,7 +466,7 @@ const NewClientRequestForm = ({
       }
       if (!formData.consent_email_token_id) {
         validationErrors.consent_email_token_id =
-          "Debes validar el código enviado al cliente antes de continuar.";
+          "Debes validar el código enviado al cliente antes de continuar. Una vez validado, presiona 'Enviar solicitud'.";
       }
     }
 
@@ -505,6 +505,10 @@ const NewClientRequestForm = ({
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+
+    // Verificación adicional: asegurar que el envío solo ocurre por acción explícita del usuario
+    console.log("[CLIENT_REQUEST_FORM] Enviando solicitud por acción del usuario");
+
     const validationErrors = validateForm();
     if (Object.keys(validationErrors).length) {
       setErrors(validationErrors);
@@ -515,6 +519,7 @@ const NewClientRequestForm = ({
     const selectedMethod = formData.consent_capture_method;
     setLoading(true);
     setProgressStep("validating");
+
     try {
       setProgressStep("uploading");
       const payload = { ...formData };
@@ -523,6 +528,8 @@ const NewClientRequestForm = ({
       }
 
       setProgressStep("submitting");
+      console.log("[CLIENT_REQUEST_FORM] Procesando envío con pantalla de carga visible");
+
       if (isEditing) {
         await updateClientRequest(initialData.id, payload, files);
         showToast("Solicitud corregida y reenviada correctamente.", "success");
@@ -534,9 +541,11 @@ const NewClientRequestForm = ({
             : "Solicitud registrada y el consentimiento quedó auditado con tu evidencia.";
         showToast(successCopy, "success");
       }
+
       setProgressStep("notifying");
       resetForm();
       onSuccess?.();
+
     } catch (error) {
       console.error("Error al crear solicitud de cliente:", error);
       const message = error.response?.data?.message || error.message || "Error al crear la solicitud";

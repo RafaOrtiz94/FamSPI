@@ -7,6 +7,7 @@ import { submitInternalLopdpConsent } from "../../api/authApi";
 import { useAuth } from "../../auth/AuthContext";
 import { useUI } from "../UIContext";
 import { lopdpNoticeParagraphs, lopdpNoticeTitle, lopdpNoticeSubtitle } from "../legal/lopdpNoticeContent";
+import LoadingOverlay from "../components/LoadingOverlay";
 
 const InternalLopdpConsentModal = ({ forceOpen = false }) => {
   const { user, reloadProfile } = useAuth();
@@ -185,6 +186,7 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
           </div>
         </motion.div>
       </div>
+      <LoadingOverlay message={submitting ? "Registrando consentimiento..." : ""} />
     </div>
   );
 };

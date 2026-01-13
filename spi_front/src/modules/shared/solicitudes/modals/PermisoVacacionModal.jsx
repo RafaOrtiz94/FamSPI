@@ -5,6 +5,7 @@ import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { createSolicitud, getVacationSummary } from "../../../../core/api/permisosApi";
+import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 
 /**
  * Modal unificado para solicitudes de permisos y vacaciones
@@ -14,7 +15,7 @@ import { createSolicitud, getVacationSummary } from "../../../../core/api/permis
  * 3. Confirmar y enviar
  */
 const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
-    const { showToast } = useUI();
+    const { showToast, showLoader, hideLoader } = useUI();
     const [step, setStep] = useState(1);
     const [loading, setLoading] = useState(false);
     const [tipoSolicitud, setTipoSolicitud] = useState(""); // 'permiso' o 'vacaciones'
@@ -79,6 +80,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const handleSubmit = async () => {
         setLoading(true);
+        showLoader();
         try {
             const payload = {
                 tipo_solicitud: tipoSolicitud,
@@ -111,6 +113,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             showToast(error.response?.data?.message || error.message || "Error al crear la solicitud", "error");
         } finally {
             setLoading(false);
+            hideLoader();
         }
     };
 
@@ -479,6 +482,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     <AnimatePresence>
       {open && (
         <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
+          <LoadingOverlay message={loading ? "Enviando solicitud..." : ""} />
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
           <div className="fixed inset-0 overflow-y-auto">
             <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">

@@ -105,6 +105,12 @@ const businessCaseLink = {
   path: "/dashboard/business-case",
 };
 
+const purchasesWorkspaceLink = {
+  name: "Workspace de Compras",
+  icon: FiShoppingCart,
+  path: "/dashboard/purchases/workspace",
+};
+
 const talentoLinks = [
   {
     name: "Gestión de Usuarios",
@@ -207,7 +213,20 @@ const getPriorityGroups = (scope, role, auditActive) => {
   else if (comercialScopes.includes(scope)) {
     groups.critical.push(...comercialLinks); // Solicitudes y clientes críticos
     groups.primary.push(planificacionLink); // Planificación mensual
-    groups.secondary.push(publicPurchasesLink, privatePurchasesLink, businessCaseLink);
+
+    // UNIFICACIÓN: Solo Workspace de Compras - Roles según AppRoutes.jsx
+    const workspaceAllowedRoles = [
+      "comercial", "jefe_comercial", "acp_comercial", "gerencia",
+      "gerencia_general", "jefe_operaciones", "jefe_logistica", "backoffice_comercial"
+    ];
+
+    if (workspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
+      groups.primary.unshift(purchasesWorkspaceLink); // Workspace primero en primary
+      console.log("[PURCHASES_WORKSPACE][FASE6][NAVBAR] workspace_visible", {
+        role: scope,
+        allowedRoles: workspaceAllowedRoles
+      });
+    }
 
     if (scope.includes("acp") || role.includes("acp")) {
       groups.primary.unshift(...acpLinks); // ACP pone compras primero
@@ -217,6 +236,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
       groups.primary.push(aprobacionesPlanLink);
     }
 
+    groups.secondary.push(businessCaseLink); // Business Case queda en secondary
     groups.admin.push(permisosLink);
   }
 
@@ -332,7 +352,16 @@ const GroupSeparator = () => (
   <div className="mx-1 h-6 w-px bg-gradient-to-b from-transparent via-slate-300 to-transparent dark:via-slate-600 sm:mx-2 sm:h-8" />
 );
 
-
+const renderGroup = (links, variant, onClick, isMobile) =>
+  links.map((link) => (
+    <NavButton
+      key={link.path}
+      link={link}
+      variant={variant}
+      mobile={isMobile}
+      onClick={onClick}
+    />
+  ));
 
 const NavigationBar = () => {
   const { user } = useAuth();
@@ -358,41 +387,41 @@ const NavigationBar = () => {
   return (
     <nav className="bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-700">
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
-          {/* Navigation Links - Desktop */}
-          <div className="hidden md:flex items-center space-x-1">
-            {/* Critical Group */}
-            {priorityGroups.critical.map((link) => (
-              <NavButton key={link.path} link={link} variant="critical" />
-            ))}
+        <div className="flex items-center justify-between h-16 gap-4">
+          <div className="flex items-center gap-2 text-xs md:text-sm">
+            <span className="text-lg font-semibold text-slate-900 dark:text-white">FamSPI</span>
+            <span className="hidden md:inline text-slate-500 dark:text-slate-300">Panel integrado</span>
+          </div>
 
-            {/* Primary Group */}
+          <div
+            className="hidden md:flex flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap py-2"
+            aria-label="Navegación principal"
+          >
+            <div className="flex items-center gap-1">
+              {renderGroup(priorityGroups.critical, "critical")}
+            </div>
             {priorityGroups.primary.length > 0 && (
               <>
-                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
-                {priorityGroups.primary.map((link) => (
-                  <NavButton key={link.path} link={link} variant="primary" />
-                ))}
+                <GroupSeparator />
+                <div className="flex items-center gap-1">
+                  {renderGroup(priorityGroups.primary, "primary")}
+                </div>
               </>
             )}
-
-            {/* Secondary Group */}
             {priorityGroups.secondary.length > 0 && (
               <>
-                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
-                {priorityGroups.secondary.map((link) => (
-                  <NavButton key={link.path} link={link} variant="secondary" />
-                ))}
+                <GroupSeparator />
+                <div className="flex items-center gap-1">
+                  {renderGroup(priorityGroups.secondary, "secondary")}
+                </div>
               </>
             )}
-
-            {/* Admin Group */}
             {priorityGroups.admin.length > 0 && (
               <>
-                <div className="w-px h-8 bg-gray-300 dark:bg-gray-600 mx-2" />
-                {priorityGroups.admin.map((link) => (
-                  <NavButton key={link.path} link={link} variant="admin" />
-                ))}
+                <GroupSeparator />
+                <div className="flex items-center gap-1">
+                  {renderGroup(priorityGroups.admin, "admin")}
+                </div>
               </>
             )}
           </div>
@@ -419,38 +448,26 @@ const NavigationBar = () => {
       {mobileMenuOpen && (
         <div className="md:hidden" id="mobile-menu">
           <div className="px-2 pt-2 pb-3 space-y-1 bg-gray-50 dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-            {/* Critical Group */}
-            {priorityGroups.critical.map((link) => (
-              <NavButton key={link.path} link={link} variant="critical" mobile onClick={closeMobileMenu} />
-            ))}
+            {renderGroup(priorityGroups.critical, "critical", closeMobileMenu, true)}
 
-            {/* Primary Group */}
             {priorityGroups.primary.length > 0 && (
               <>
                 <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
-                {priorityGroups.primary.map((link) => (
-                  <NavButton key={link.path} link={link} variant="primary" mobile onClick={closeMobileMenu} />
-                ))}
+                {renderGroup(priorityGroups.primary, "primary", closeMobileMenu, true)}
               </>
             )}
 
-            {/* Secondary Group */}
             {priorityGroups.secondary.length > 0 && (
               <>
                 <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
-                {priorityGroups.secondary.map((link) => (
-                  <NavButton key={link.path} link={link} variant="secondary" mobile onClick={closeMobileMenu} />
-                ))}
+                {renderGroup(priorityGroups.secondary, "secondary", closeMobileMenu, true)}
               </>
             )}
 
-            {/* Admin Group */}
             {priorityGroups.admin.length > 0 && (
               <>
                 <div className="border-t border-gray-200 dark:border-gray-600 my-2" />
-                {priorityGroups.admin.map((link) => (
-                  <NavButton key={link.path} link={link} variant="admin" mobile onClick={closeMobileMenu} />
-                ))}
+                {renderGroup(priorityGroups.admin, "admin", closeMobileMenu, true)}
               </>
             )}
           </div>
@@ -461,5 +478,6 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
+
 
 

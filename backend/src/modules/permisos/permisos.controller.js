@@ -1,4 +1,5 @@
 const permisosService = require("./permisos.service");
+const { normalizeRow } = require("../../utils/normalizers");
 const { uploadJustificante } = require("./permisos.drive");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() }); // Corrected multer storage
@@ -88,7 +89,18 @@ async function listarPendientes(req, res) {
   try {
     const { stage } = req.query;
     const result = await permisosService.listarPendientes({ stage, approver: req.user });
-    res.json({ ok: true, data: result });
+    const normalized = (result || []).map((row) =>
+      normalizeRow(row, [
+        "fecha_inicio",
+        "fecha_fin",
+        "fecha_regreso",
+        "aprobacion_parcial_at",
+        "aprobacion_final_at",
+        "created_at",
+        "updated_at",
+      ])
+    );
+    res.json({ ok: true, data: normalized });
   } catch (error) {
     console.error("Error listando pendientes:", error);
     res.status(500).json({ ok: false, message: error.message });
@@ -98,7 +110,18 @@ async function listarPendientes(req, res) {
 async function listarMias(req, res) {
   try {
     const result = await permisosService.listarPorUsuario({ user: req.user });
-    res.json({ ok: true, ...result });
+    const normalized = (result?.data || []).map((row) =>
+      normalizeRow(row, [
+        "fecha_inicio",
+        "fecha_fin",
+        "fecha_regreso",
+        "aprobacion_parcial_at",
+        "aprobacion_final_at",
+        "created_at",
+        "updated_at",
+      ])
+    );
+    res.json({ ok: true, ...result, data: normalized });
   } catch (error) {
     console.error("Error listando mis solicitudes:", error);
     res.status(500).json({ ok: false, message: error.message });

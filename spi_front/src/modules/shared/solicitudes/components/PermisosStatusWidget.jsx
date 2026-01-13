@@ -23,6 +23,8 @@ import {
   rechazar,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
+import { getActiveException, getTodayAttendance } from "../../../../core/api/attendanceApi";
+import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
 
@@ -49,6 +51,57 @@ const PermisosStatusWidget = () => {
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [selectedSolicitud, setSelectedSolicitud] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [activeException, setActiveException] = useState(null);
+  const [attendance, setAttendance] = useState(null);
+
+  const normalizeDateValue = (value) => {
+    if (!value) return null;
+    if (typeof value === "string" || typeof value === "number" || value instanceof Date) {
+      return value;
+    }
+    if (typeof value === "object") {
+      return value.value || value.date || value.timestamp || value.time || value.iso || null;
+    }
+    return value;
+  };
+
+  const normalizeSolicitudDates = (solicitud) => ({
+    ...solicitud,
+    fecha_inicio: normalizeDateValue(solicitud?.fecha_inicio),
+    fecha_fin: normalizeDateValue(solicitud?.fecha_fin),
+    created_at: normalizeDateValue(solicitud?.created_at),
+    updated_at: normalizeDateValue(solicitud?.updated_at),
+  });
+
+  const fetchActiveException = async () => {
+    try {
+      const response = await getActiveException();
+      if (response?.ok) {
+        setActiveException(response.data || null);
+      } else {
+        setActiveException(null);
+      }
+    } catch (error) {
+      console.error("Error fetching active exception:", error);
+      setActiveException(null);
+    }
+  };
+
+  const fetchAttendance = async () => {
+    try {
+      const response = await getTodayAttendance();
+      if (response?.data) {
+        setAttendance(response.data);
+      } else if (response?.ok && response?.data === undefined && response?.id) {
+        setAttendance(response);
+      } else {
+        setAttendance(null);
+      }
+    } catch (error) {
+      console.error("Error fetching attendance:", error);
+      setAttendance(null);
+    }
+  };
 
   const loadData = async () => {
     setLoading(true);
@@ -60,15 +113,21 @@ const PermisosStatusWidget = () => {
       }
       const [mineResp, pendingResp, finalResp] = await Promise.all(requests);
 
-      if (mineResp?.ok) setMisSolicitudes(mineResp.data || []);
+      if (mineResp?.ok) {
+        setMisSolicitudes((mineResp.data || []).map(normalizeSolicitudDates));
+      }
       if (pendingResp?.ok) {
-        const filtered = (pendingResp.data || []).filter((s) => s.user_email !== userEmail);
+        const filtered = (pendingResp.data || [])
+          .map(normalizeSolicitudDates)
+          .filter((s) => s.user_email !== userEmail);
         setPendientesParcial(filtered);
       } else {
         setPendientesParcial([]);
       }
       if (finalResp?.ok) {
-        const filtered = (finalResp.data || []).filter((s) => s.user_email !== userEmail);
+        const filtered = (finalResp.data || [])
+          .map(normalizeSolicitudDates)
+          .filter((s) => s.user_email !== userEmail);
         setPendientesFinal(filtered);
       } else {
         setPendientesFinal([]);
@@ -77,6 +136,7 @@ const PermisosStatusWidget = () => {
       console.error("Error loading permisos:", error);
       showToast("Error al cargar solicitudes", "error");
     } finally {
+      await Promise.all([fetchActiveException(), fetchAttendance()]);
       setLoading(false);
     }
   };
@@ -155,6 +215,54 @@ const PermisosStatusWidget = () => {
     () => misSolicitudes.filter((sol) => sol.status === "pending_final"),
     [misSolicitudes]
   );
+
+  const exceptionStatus = activeException?.status || "NONE";
+  const exceptionStepLabel =
+    {
+      ACTIVE: "En ruta",
+      ON_SITE: "En sitio",
+      RETURNING: "Regresando",
+      COMPLETED: "Completada",
+      NONE: "Sin salidas inesperadas",
+    }[exceptionStatus] || "Sin salidas inesperadas";
+
+  const exceptionTimeEntries = activeException
+    ? [
+        {
+          label: "Salida inesperada",
+          value: activeException.start_time,
+          colors: "bg-amber-50 border-amber-200 text-amber-800",
+          note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
+        },
+        {
+          label: "Llegada a destino",
+          value: activeException.arrival_time,
+          colors: "bg-orange-50 border-orange-200 text-orange-800",
+          note: exceptionStatus === "ON_SITE" ? "Llegaste" : "Pendiente",
+        },
+        {
+          label: "Salida del destino",
+          value: activeException.departure_time,
+          colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
+          note: exceptionStatus === "RETURNING" ? "Regresando" : "Pendiente",
+        },
+        {
+          label: "Regreso a oficina",
+          value: activeException.return_time,
+          colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
+          note: exceptionStatus === "COMPLETED" ? "Completado" : "Pendiente",
+        },
+      ]
+    : [];
+
+  const baseTimeEntries = [
+    ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
+    ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
+    ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
+    ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
+  ].map(([label, time, colors]) => ({ label, value: time, colors }));
+
+  const timeEntries = [...baseTimeEntries, ...exceptionTimeEntries];
 
   const tabs = useMemo(() => {
     const base = [
@@ -348,6 +456,43 @@ const PermisosStatusWidget = () => {
     );
   };
 
+  const renderAttendanceGrid = () => (
+    <motion.div
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="mb-6 rounded-2xl border border-gray-200 bg-gradient-to-br from-blue-50/60 to-white p-5 shadow-sm"
+    >
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Registro de tiempos</h3>
+          <p className="text-xs text-gray-500">Horario registrado hoy</p>
+        </div>
+        <p className="text-[10px] uppercase tracking-wider text-gray-500">
+          {attendance?.updated_at ? `Actualizado ${formatDateShort(attendance.updated_at)}` : "Sin registro"}
+        </p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {timeEntries.map((entry) => (
+          <div
+            key={`${entry.label}-${entry.value ?? "pending"}`}
+            className={`rounded-xl border ${entry.colors} p-3 shadow-sm`}
+          >
+            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-700/80">
+              {entry.label}
+            </div>
+            <div className="text-lg font-mono font-bold">{formatTimeSafe(entry.value)}</div>
+            {entry.note && (
+              <div className="text-[10px] uppercase tracking-wider text-slate-600/70 mt-1">
+                {entry.note}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </motion.div>
+  );
+
   const renderTabContent = () => {
     if (activeTab === "mine") {
       if (misSolicitudes.length === 0) {
@@ -416,6 +561,57 @@ const PermisosStatusWidget = () => {
 
   return (
     <>
+      {attendance && renderAttendanceGrid()}
+      {activeException && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -8 }}
+          className="mb-6"
+        >
+          <div className="rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50/80 to-white shadow-sm p-5">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-amber-100 rounded-xl text-amber-700 shadow-inner">
+                  <FiAlertCircle className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-amber-900 uppercase tracking-wide">
+                    Salida inesperada activa
+                  </p>
+                  <p className="text-xs font-semibold text-amber-800">{exceptionStepLabel}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-xs text-amber-600 uppercase tracking-wide">Tipo</p>
+                <p className="text-sm font-bold text-amber-900">
+                  {activeException.type ? activeException.type.replace(/_/g, " ") : "Sin definir"}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {exceptionTimeEntries.map((entry) => (
+                <div
+                  key={`${entry.label}-${entry.value ?? "pending"}`}
+                  className={`rounded-xl border ${entry.colors} p-3 shadow-sm`}
+                >
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-900/80">
+                    {entry.label}
+                  </div>
+                  <div className="text-lg font-mono font-bold">{formatTimeSafe(entry.value)}</div>
+                  {entry.note && (
+                    <div className="text-[10px] uppercase tracking-wider text-amber-900/60 mt-1">
+                      {entry.note}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+      )}
+
       {pendientesDeJustificante.length > 0 && (
         <motion.div
           initial={{ opacity: 0, y: -10 }}
@@ -429,7 +625,7 @@ const PermisosStatusWidget = () => {
               </div>
               <div>
                 <h3 className="text-lg font-bold text-blue-900">
-                  Accin requerida
+                  Accion requerida
                 </h3>
                 <p className="text-sm text-blue-700">
                   Tienes permisos aprobados parcialmente. Debes subir los documentos justificantes.

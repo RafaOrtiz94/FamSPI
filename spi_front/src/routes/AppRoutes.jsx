@@ -1,5 +1,6 @@
-import React from "react";
+import React, { Suspense, lazy } from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
+
 
 // 🧠 Contextos y protecciones
 import { ProtectedRoute } from "../core/auth/ProtectedRoute";
@@ -51,6 +52,11 @@ import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
 import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
 import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
+import OperacionesPrivatePurchases from "../modules/operaciones/pages/OperacionesPrivatePurchases";
+import LogisticaPrivatePurchases from "../modules/logistica/pages/LogisticaPrivatePurchases";
+
+// 🛒 Workspace de Compras Unificado
+import PurchasesWorkspace from "../modules/shared/purchases-workspace/PurchasesWorkspace";
 
 // 📋 Páginas de Talento Humano
 import Usuarios from "../modules/talento/pages/Usuarios";
@@ -70,6 +76,11 @@ import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
 import DocumentSigner from "../modules/signature/components/DocumentSigner";
 import DocumentVerification from "../modules/signature/pages/DocumentVerification";
 import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
+
+
+// Lazy loaded components
+const Solicitudes = lazy(() => import("../modules/talento/pages/Solicitudes"));
+const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
 
 const AppRoutes = () => {
   return (
@@ -188,9 +199,35 @@ const AppRoutes = () => {
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
           <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
 
+          {/* Subrutas Operaciones - Compras Privadas */}
+          <Route element={<ProtectedRoute allowedRoles={["jefe_operaciones"]} />}>
+            <Route path="/dashboard/operaciones/private-purchases" element={<OperacionesPrivatePurchases />} />
+          </Route>
+
+          {/* Subrutas Logística - Compras Privadas */}
+          <Route element={<ProtectedRoute allowedRoles={["jefe_logistica"]} />}>
+            <Route path="/dashboard/logistica/private-purchases" element={<LogisticaPrivatePurchases />} />
+          </Route>
+
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
           <Route path="/dashboard/talento-humano/departamentos" element={<Departamentos />} />
+          <Route
+            path="/dashboard/talento-humano/solicitudes"
+            element={
+              <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
+                <Solicitudes />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/dashboard/talento-humano/asistencia-reportes"
+            element={
+              <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
+                <AsistenciaReportes />
+              </Suspense>
+            }
+          />
           <Route path="/dashboard/talento-humano/permisos" element={<PermisosPage />} />
 
           {/* Auditoría (solo Gerencia y TI) */}
@@ -268,6 +305,26 @@ const AppRoutes = () => {
             <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
             <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
             <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+          </Route>
+
+          {/* 🛒 Workspace de Compras Unificado */}
+          <Route
+            element={(
+              <ProtectedRoute
+                allowedRoles={[
+                  "comercial",
+                  "jefe_comercial",
+                  "acp_comercial",
+                  "gerencia",
+                  "gerencia_general",
+                  "jefe_operaciones",
+                  "jefe_logistica",
+                  "backoffice_comercial",
+                ]}
+              />
+            )}
+          >
+            <Route path="/dashboard/purchases/workspace" element={<PurchasesWorkspace />} />
           </Route>
         </Route>
 

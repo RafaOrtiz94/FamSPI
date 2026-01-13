@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FiX, FiSave, FiUser, FiBriefcase, FiFileText, FiDollarSign } from 'react-icons/fi';
 import toast from 'react-hot-toast';
 import Button from '../components/Button';
 import { createPersonnelRequest } from '../../api/personnelRequestsApi';
+import { createPortal } from 'react-dom';
 
 const PersonnelRequestForm = ({ onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
@@ -83,7 +84,16 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
         if (currentStep > 1) setCurrentStep(currentStep - 1);
     };
 
-    return (
+    const [portalNode] = useState(() => document.createElement('div'));
+
+    useEffect(() => {
+        document.body.appendChild(portalNode);
+        return () => {
+            document.body.removeChild(portalNode);
+        };
+    }, [portalNode]);
+
+    return createPortal(
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
                 {/* Header */}
@@ -572,7 +582,8 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                     </div>
                 </form>
             </div>
-        </div>
+        </div>,
+        portalNode
     );
 };
 

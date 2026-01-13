@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { FiPlus, FiTrash2 } from "react-icons/fi";
 import Button from "./Button";
 import Modal from "./Modal";
+import ProcessingOverlay from "./ProcessingOverlay";
 import { useUI } from "../useUI";
 import api from "../../api/index";
 
@@ -376,25 +377,69 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     offer_kind: 'venta'
   });
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [progressStep, setProgressStep] = useState(null);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.client_snapshot?.commercial_name || !formData.equipment?.length) {
-      showToast("Completa el nombre del cliente y agrega al menos un equipo", "error");
-      return;
-    }
+  // Estados para equipos dinámicos
+  const [equipmentOptions, setEquipmentOptions] = useState([]);
+  const [loadingEquipment, setLoadingEquipment] = useState(false);
+  const [availableClients, setAvailableClients] = useState([]);
+  const [loadingClients, setLoadingClients] = useState(false);
 
-    setLoading(true);
-    try {
-      const payload = {
-        ...formData,
-        status: 'pending_commercial'
-      };
+  // Cargar clientes disponibles
+  useEffect(() => {
+    if (!isOpen) return;
 
-      const response = await api.post('/private-purchases', payload);
-      showToast("Solicitud de compra privada creada correctamente", "success");
-      onSuccess?.(response.data);
-      onClose();
+    const loadClients = async () => {
+      setLoadingClients(true);
+      try {
+        const response = await api.get('/clients');
+        setAvailableClients(Array.isArray(response.data) ? response.data : []);
+      } catch (error) {
+        console.error('Error loading clients for private purchase:', error);
+        showToast("Error al cargar clientes", "error");
+      } finally {
+        setLoadingClients(false);
+      }
+    };
+
+    loadClients();
+  }, [isOpen, showToast]);
+
+  // Cargar equipos disponibles
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadEquipment = async () => {
+      setLoadingEquipment(true);
+      try {
+        // Por ahora usamos datos mock hasta que se implemente el endpoint
+        const mockEquipment = [
+          { id: 1, nombre: 'Analizador Cobas C111', sku: 'COBAS-C111', modelo: 'C111' },
+          { id: 2, nombre: 'Centrífuga Eppendorf', sku: 'EPF-5430R', modelo: '5430R' },
+          { id: 3, nombre: 'Microscopio Olympus', sku: 'OLY-CX23', modelo: 'CX23' },
+          { id: 4, nombre: 'Incubadora Thermo', sku: 'THM-HERAcell', modelo: 'HERAcell' },
+          { id: 5, nombre: 'Balanza Precisa', sku: 'PRC-320-2M', modelo: '320-2M' }
+        ];
+        setEquipmentOptions(mockEquipment);
+
+        // TODO: Reemplazar con endpoint real cuando esté disponible
+        // const response = await api.get('/equipment-models');
+        // setEquipmentOptions(Array.isArray(response.data) ? response.data : []);
+      } catch (error) {
+        console.error('Error loading equipment for private purchase:', error);
+        showToast("Error al cargar equipos disponibles", "error");
+      } finally {
+        setLoadingEquipment(false);
+      }
+    };
+
+    loadEquipment();
+  }, [isOpen, showToast]);
+
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isOpen) {
       setFormData({
         client_snapshot: {
           commercial_name: '',
@@ -407,11 +452,55 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         notes: '',
         offer_kind: 'venta'
       });
+    }
+  }, [isOpen]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!formData.client_snapshot?.commercial_name || !formData.equipment?.length) {
+      showToast("Completa el nombre del cliente y agrega al menos un equipo", "error");
+      return;
+    }
+
+    setLoading(true);
+    setProgressStep("validating");
+
+    try {
+      setProgressStep("uploading");
+
+      const payload = {
+        ...formData,
+        status: 'pending_commercial'
+      };
+
+      setProgressStep("submitting");
+      const response = await api.post('/private-purchases', payload);
+
+      setProgressStep("notifying");
+      showToast("Solicitud de compra privada creada correctamente", "success");
+      onSuccess?.(response.data);
+      onClose();
+
+      // Reset form
+      setFormData({
+        client_snapshot: {
+          commercial_name: '',
+          client_email: '',
+          first_name: '',
+          last_name: '',
+          client_identifier: ''
+        },
+        equipment: [],
+        notes: '',
+        offer_kind: 'venta'
+      });
+
     } catch (error) {
       console.error('Error creating private purchase:', error);
       showToast("Error al crear la solicitud de compra privada", "error");
     } finally {
       setLoading(false);
+      setProgressStep(null);
     }
   };
 
@@ -457,8 +546,25 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     }));
   };
 
+  const submissionSteps = useMemo(
+    () => [
+      { id: "validating", label: "Validando datos de la solicitud" },
+      { id: "uploading", label: "Adjuntando archivos y documentos" },
+      { id: "submitting", label: "Creando solicitud de compra privada" },
+      { id: "notifying", label: "Finalizando proceso" },
+    ],
+    [],
+  );
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Solicitar Compra Privada">
+      {loading && (
+        <ProcessingOverlay
+          title="Creando solicitud de compra privada"
+          steps={submissionSteps}
+          activeStep={progressStep || "validating"}
+        />
+      )}
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Información del Cliente */}
         <div className="border-b pb-4">
@@ -468,15 +574,34 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Nombre comercial *
               </label>
-              <input
-                type="text"
-                name="client_snapshot.commercial_name"
+              <select
                 value={formData.client_snapshot.commercial_name}
-                onChange={handleChange}
+                onChange={(e) => {
+                  const selected = availableClients.find(c => c.commercial_name === e.target.value || c.nombre === e.target.value);
+                  setFormData(prev => ({
+                    ...prev,
+                    client_snapshot: {
+                      commercial_name: e.target.value,
+                      client_email: selected?.email || '',
+                      first_name: selected?.first_name || '',
+                      last_name: selected?.last_name || '',
+                      client_identifier: selected?.identifier || selected?.id || ''
+                    }
+                  }));
+                }}
+                disabled={loadingClients}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="Nombre de la empresa"
                 required
-              />
+              >
+                <option value="">
+                  {loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}
+                </option>
+                {availableClients.map((client) => (
+                  <option key={client.id} value={client.commercial_name || client.nombre || ""}>
+                    {client.commercial_name || client.nombre || `Cliente ${client.id}`}
+                  </option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -489,6 +614,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                 onChange={handleChange}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="cliente@empresa.com"
+                readOnly
               />
             </div>
           </div>
@@ -503,6 +629,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               onClick={addEquipment}
               size="sm"
               className="bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={loadingEquipment}
             >
               <FiPlus className="mr-1" size={14} />
               Agregar Equipo
@@ -518,19 +645,32 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               {formData.equipment.map((item, index) => (
                 <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
                   <div className="flex-1 grid grid-cols-2 gap-3">
-                    <input
-                      type="text"
-                      placeholder="Nombre del equipo"
+                    <select
                       value={item.name}
-                      onChange={(e) => updateEquipment(index, 'name', e.target.value)}
+                      onChange={(e) => {
+                        const selected = equipmentOptions.find(opt => opt.nombre === e.target.value || opt.name === e.target.value);
+                        updateEquipment(index, 'name', e.target.value);
+                        updateEquipment(index, 'sku', selected?.sku || selected?.modelo || '');
+                      }}
+                      disabled={loadingEquipment}
                       className="border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
+                    >
+                      <option value="">
+                        {loadingEquipment ? "Cargando equipos..." : "Selecciona equipo"}
+                      </option>
+                      {equipmentOptions.map((opt) => (
+                        <option key={opt.id || opt.unidad_id} value={opt.nombre || opt.name || ""}>
+                          {opt.nombre || opt.name || "Equipo"} ({opt.sku || opt.modelo || "Sin SKU"})
+                        </option>
+                      ))}
+                    </select>
                     <input
                       type="text"
                       placeholder="SKU/Modelo"
                       value={item.sku}
                       onChange={(e) => updateEquipment(index, 'sku', e.target.value)}
                       className="border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      readOnly
                     />
                   </div>
                   <select

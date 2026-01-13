@@ -19,6 +19,7 @@ import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import { useAuth } from "../../../core/auth/useAuth";
+import { useUI } from "../../../core/ui/UIContext";
 import { useRequestModals } from "../../../core/hooks/useRequestModals";
 import ACPComercialSolicitudesView from "../components/solicitudes/ACPComercialSolicitudesView";
 import ComercialSolicitudesView from "../components/solicitudes/ComercialSolicitudesView";
@@ -32,6 +33,7 @@ import {
 } from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
+import { createRequest } from "../../../core/api/requestsApi";
 
 // Importar configuraciones centralizadas
 import { REQUEST_TYPES_CONFIG } from '../config/requestConfig';
@@ -40,6 +42,7 @@ import StatsCard from '../components/shared/StatsCard';
 
 const SolicitudesPage = () => {
   const { user } = useAuth();
+  const { showToast, showLoader, hideLoader } = useUI();
   const [activeTab, setActiveTab] = useState("overview");
 
   // Hook para manejar modales
@@ -492,8 +495,32 @@ const SolicitudesPage = () => {
         open={createClienteModalOpen}
         onClose={() => setCreateClienteModalOpen(false)}
         onSubmit={async (data) => {
-          console.log('Crear cliente:', data);
-          setCreateClienteModalOpen(false);
+          try {
+            showLoader();
+            console.log('[SOLICITUDES_PAGE][CLIENTE] Enviando:', data);
+
+            const { files = [], ...payload } = data;
+            const payloadToSend = {
+              ...payload,
+              observaciones: payload.observacion,
+            };
+            delete payloadToSend.observacion;
+
+            const result = await createRequest({
+              request_type_id: "F.ST-22",
+              ...payloadToSend,
+              files
+            });
+
+            console.log('[SOLICITUDES_PAGE][CLIENTE] Respuesta:', result);
+            showToast("Solicitud de cliente enviada correctamente ✅", "success");
+            setCreateClienteModalOpen(false);
+          } catch (err) {
+            console.error('[SOLICITUDES_PAGE][CLIENTE] Error:', err);
+            showToast("Error al enviar solicitud de cliente", "error");
+          } finally {
+            hideLoader();
+          }
         }}
         presetType="cliente"
       />
@@ -502,8 +529,32 @@ const SolicitudesPage = () => {
         open={createCompraModalOpen}
         onClose={() => setCreateCompraModalOpen(false)}
         onSubmit={async (data) => {
-          console.log('Crear compra:', data);
-          setCreateCompraModalOpen(false);
+          try {
+            showLoader();
+            console.log('[SOLICITUDES_PAGE][COMPRA] Enviando:', data);
+
+            const { files = [], ...payload } = data;
+            const payloadToSend = {
+              ...payload,
+              observaciones: payload.observacion,
+            };
+            delete payloadToSend.observacion;
+
+            const result = await createRequest({
+              request_type_id: "F.ST-19",
+              ...payloadToSend,
+              files
+            });
+
+            console.log('[SOLICITUDES_PAGE][COMPRA] Respuesta:', result);
+            showToast("Solicitud de compra enviada correctamente ✅", "success");
+            setCreateCompraModalOpen(false);
+          } catch (err) {
+            console.error('[SOLICITUDES_PAGE][COMPRA] Error:', err);
+            showToast("Error al enviar solicitud de compra", "error");
+          } finally {
+            hideLoader();
+          }
         }}
         presetType="compra"
       />
@@ -512,8 +563,33 @@ const SolicitudesPage = () => {
         open={createInspectionModalOpen}
         onClose={() => setCreateInspectionModalOpen(false)}
         onSubmit={async (data) => {
-          console.log('Crear inspección:', data);
-          setCreateInspectionModalOpen(false);
+          try {
+            showLoader();
+            console.log('[SOLICITUDES_PAGE][INSPECCION] Enviando:', data);
+
+            const { files = [], ...payload } = data;
+            const payloadToSend = {
+              ...payload,
+              observaciones: payload.observacion,
+            };
+            delete payloadToSend.observacion;
+
+            // El backend espera que los campos estén directamente en el payload, no anidados
+            const result = await createRequest({
+              request_type_id: "F.ST-20",
+              ...payloadToSend, // Desestructurar para que los campos estén en el nivel superior
+              files
+            });
+
+            console.log('[SOLICITUDES_PAGE][INSPECCION] Respuesta:', result);
+            showToast("Solicitud de inspección enviada correctamente ✅", "success");
+            setCreateInspectionModalOpen(false);
+          } catch (err) {
+            console.error('[SOLICITUDES_PAGE][INSPECCION] Error:', err);
+            showToast("Error al enviar solicitud de inspección", "error");
+          } finally {
+            hideLoader();
+          }
         }}
         presetType="inspection"
       />
@@ -522,8 +598,32 @@ const SolicitudesPage = () => {
         open={createRetiroModalOpen}
         onClose={() => setCreateRetiroModalOpen(false)}
         onSubmit={async (data) => {
-          console.log('Crear retiro:', data);
-          setCreateRetiroModalOpen(false);
+          try {
+            showLoader();
+            console.log('[SOLICITUDES_PAGE][RETIRO] Enviando:', data);
+
+            const { files = [], ...payload } = data;
+            const payloadToSend = {
+              ...payload,
+              observaciones: payload.observacion,
+            };
+            delete payloadToSend.observacion;
+
+            const result = await createRequest({
+              request_type_id: "F.ST-21",
+              ...payloadToSend,
+              files
+            });
+
+            console.log('[SOLICITUDES_PAGE][RETIRO] Respuesta:', result);
+            showToast("Solicitud de retiro enviada correctamente ✅", "success");
+            setCreateRetiroModalOpen(false);
+          } catch (err) {
+            console.error('[SOLICITUDES_PAGE][RETIRO] Error:', err);
+            showToast("Error al enviar solicitud de retiro", "error");
+          } finally {
+            hideLoader();
+          }
         }}
         presetType="retiro"
       />

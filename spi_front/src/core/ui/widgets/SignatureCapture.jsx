@@ -98,12 +98,12 @@ const SignatureCapture = ({ onSignatureChange, width = 500, height = 200 }) => {
 
     return (
         <div className="signature-capture-container">
-            <div className="relative inline-block">
+            <div className="relative w-full" style={{ maxWidth: `${width}px` }}>
                 <canvas
                     ref={canvasRef}
                     width={width}
                     height={height}
-                    className="border-2 border-gray-300 rounded-lg cursor-crosshair bg-white touch-none"
+                    className="border-2 border-gray-300 rounded-lg cursor-crosshair bg-white touch-none w-full h-auto"
                     onMouseDown={startDrawing}
                     onMouseMove={draw}
                     onMouseUp={stopDrawing}

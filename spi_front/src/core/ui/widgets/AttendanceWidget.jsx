@@ -385,6 +385,44 @@ const AttendanceWidget = () => {
             NONE: "Sin salidas inesperadas",
         }[exceptionStatus] || "Sin salidas inesperadas";
 
+    const baseTimeEntries = [
+        ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
+        ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
+        ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
+        ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
+    ].map(([label, time, colors]) => ({ label, value: time, colors }));
+
+    const exceptionTimeEntries = hasActiveException
+        ? [
+              {
+                  label: "Salida inesperada",
+                  value: activeException.start_time,
+                  colors: "bg-amber-50 border-amber-200 text-amber-800",
+                  note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
+              },
+              {
+                  label: "Arribo a destino",
+                  value: activeException.arrival_time,
+                  colors: "bg-orange-50 border-orange-200 text-orange-800",
+                  note: activeException.status === "ON_SITE" ? "Llegaste" : "Pendiente",
+              },
+              {
+                  label: "Salida del destino",
+                  value: activeException.departure_time,
+                  colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
+                  note: activeException.status === "RETURNING" ? "Regresando" : "Pendiente",
+              },
+              {
+                  label: "Regreso a oficina",
+                  value: activeException.return_time,
+                  colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
+                  note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
+              },
+          ]
+        : [];
+
+    const timeEntries = [...baseTimeEntries, ...exceptionTimeEntries];
+
     const renderExceptionBanner = () => {
         if (!hasActiveException) return null;
         const items = [
@@ -566,21 +604,21 @@ const AttendanceWidget = () => {
                     Registro de Tiempos
                 </h4>
                 <div className="grid grid-cols-2 gap-4">
-                    {[
-                        ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
-                        ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
-                        ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
-                        ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
-                    ].map(([label, time, colors]) => (
+                    {timeEntries.map((entry) => (
                         <motion.div
-                            key={label}
+                            key={`${entry.label}-${entry.value ?? "pending"}`}
                             whileHover={{ y: -2, scale: 1.02 }}
-                            className={`rounded-xl border ${colors} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
+                            className={`rounded-xl border ${entry.colors} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
                         >
                             <div className="text-xs font-medium uppercase tracking-wider mb-1 opacity-75">
-                                {label}
+                                {entry.label}
                             </div>
-                            <div className="text-lg font-mono font-bold">{formatTime(time)}</div>
+                            <div className="text-lg font-mono font-bold">{formatTime(entry.value)}</div>
+                            {entry.note && (
+                                <div className="text-[11px] font-semibold tracking-wider text-slate-600 uppercase mt-1">
+                                    {entry.note}
+                                </div>
+                            )}
                         </motion.div>
                     ))}
                 </div>

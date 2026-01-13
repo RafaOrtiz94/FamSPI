@@ -18,7 +18,7 @@ const ComercialDashboard = () => {
   // API call for commercial summary
   const { data: summaryData, execute: fetchSummary, loading: summaryLoading, error: summaryError } = useApi(
     getCommercialSummary,
-    { globalLoader: false }
+    { globalLoader: false, transformResponse: (response) => response }
   );
 
   // Debug log in development

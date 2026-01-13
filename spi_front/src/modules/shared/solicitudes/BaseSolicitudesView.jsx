@@ -36,8 +36,8 @@ const BaseSolicitudesView = ({
     customSections = [],
 
     // Títulos
-    createSectionTitle = "Crear Nueva Solicitud",
-    createSectionSubtitle = "Selecciona el tipo de solicitud que deseas crear",
+    createSectionTitle = "Operaciones disponibles para tu rol",
+    createSectionSubtitle = "Accede a las acciones rápidas corporativas para avanzar tus procesos",
     filtersSectionTitle = "Buscar Solicitudes",
     filtersSectionSubtitle = "Filtra y encuentra solicitudes específicas",
     gridSectionTitle = "Todas las Solicitudes",
