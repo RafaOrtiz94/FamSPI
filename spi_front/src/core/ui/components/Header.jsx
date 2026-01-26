@@ -5,7 +5,6 @@ import { useAuth } from "../../auth/useAuth";
 import { useUI } from "../UIContext";
 import { FiSun, FiMoon, FiLogOut } from "react-icons/fi";
 import famLogo from "../../../assets/famproject_logo.png";
-import NotificationBell from "./NotificationBell";
 
 /* ============================================================
    🧭 Header — Estilo Empresarial Moderno
@@ -67,9 +66,6 @@ export default function Header() {
               <FiMoon className="text-accent" size={18} />
             )}
           </button>
-
-          {/* Notificaciones */}
-          <NotificationBell />
 
           {/* Perfil (link a Mi Perfil) */}
           <button

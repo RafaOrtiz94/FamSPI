@@ -93,14 +93,14 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
           <div className="flex items-center gap-2">
             <button
               onClick={prevPage}
-              className="rounded-full border border-gray-300 p-2 text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="rounded-full border border-gray-200 bg-white p-2 text-gray-600 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-600"
               aria-label="Anterior"
             >
               ‹
             </button>
             <button
               onClick={nextPage}
-              className="rounded-full border border-gray-300 p-2 text-gray-600 transition hover:bg-gray-100 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
+              className="rounded-full border border-gray-200 bg-white p-2 text-gray-600 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-600"
               aria-label="Siguiente"
             >
               ›
@@ -109,7 +109,7 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
         )}
       </div>
 
-      <div className="grid min-h-[28rem] grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+      <div className="grid min-h-[28rem] grid-cols-1 gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         {visibleItems.map((s) => {
           const { label, color, dot } = getStatusStyle(s.status);
           const payload =
@@ -156,37 +156,37 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
             <div
               key={s.id}
               onClick={() => onView?.(s)}
-              className="group relative flex min-h-[180px] cursor-pointer flex-col justify-between rounded-xl border border-gray-100 bg-white p-4 text-sm shadow-sm transition duration-200 hover:-translate-y-0.5 hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+              className="group relative flex min-h-[200px] cursor-pointer flex-col justify-between rounded-2xl border border-gray-100 bg-white p-5 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg dark:border-gray-200/20 dark:bg-gray-800/80"
             >
               <span
-                className={`absolute right-3 top-3 h-2.5 w-2.5 rounded-full shadow-sm ${dot}`}
+                className={`absolute right-4 top-4 h-3 w-3 rounded-full shadow-md ${dot}`}
                 aria-hidden
               />
 
               <div className="flex items-start justify-between gap-3">
-                <div className="space-y-1">
+                <div className="space-y-2">
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     #{s.id} · {s.type_title || "Solicitud"}
                   </p>
-                  <p className="text-base font-semibold text-gray-900 dark:text-white line-clamp-1">
+                  <p className="text-base font-bold text-gray-900 dark:text-white line-clamp-1 tracking-tight">
                     {requester}
                   </p>
-                  <p className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400">
-                    <FiClock className="text-gray-400" />
+                  <p className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-gray-400">
+                    <FiClock className="text-gray-400 w-3 h-3" />
                     {createdAt}
                   </p>
                 </div>
                 <span
-                  className={`rounded-full border px-2 py-[2px] text-xs font-semibold ${color}`}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${color} border-opacity-30`}
                 >
                   {label}
                 </span>
               </div>
 
-              <div className="mt-4 space-y-3">
+              <div className="mt-5 space-y-4">
                 <div className="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-300">
-                    <FiCpu />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 text-white shadow-md">
+                    <FiCpu className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Equipo principal</p>
@@ -195,8 +195,8 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
                 </div>
 
                 <div className="flex items-center gap-3 text-gray-700 dark:text-gray-200">
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gray-50 text-gray-600 dark:bg-gray-900/40 dark:text-gray-200">
-                    <FiUser />
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-gray-500 to-gray-600 text-white shadow-md">
+                    <FiUser className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">Asignado a</p>
@@ -205,9 +205,9 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
                 </div>
               </div>
 
-              <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              <div className="mt-5 flex items-center justify-between border-t border-gray-100 pt-4 text-xs text-gray-500 dark:border-gray-700 dark:text-gray-400">
                 <div className="flex items-center gap-2">
-                  <FiActivity className="text-blue-500" />
+                  <FiActivity className="text-blue-500 w-3 h-3" />
                   <span className="text-xs font-semibold text-blue-600 dark:text-blue-300">{label}</span>
                 </div>
                 <button
@@ -216,10 +216,10 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
                     e.stopPropagation();
                     onView?.(s);
                   }}
-                  className="flex items-center gap-1 rounded-full border border-gray-200 px-3 py-1 text-xs font-semibold text-gray-700 transition hover:border-gray-300 hover:text-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:border-gray-500"
+                  className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-600"
                   aria-label="Ver detalle"
                 >
-                  <FiInfo /> Más info
+                  <FiInfo className="w-3 h-3" /> Más info
                 </button>
               </div>
             </div>
@@ -233,9 +233,9 @@ const SolicitudesGrid = ({ items = [], onView, onCancel }) => {
             <button
               key={idx}
               onClick={() => setPage(idx)}
-              className={`h-2 w-8 rounded-full transition ${
+              className={`h-2 w-8 rounded-full transition-all duration-200 ${
                 idx === page
-                  ? "bg-primary"
+                  ? "bg-blue-500 shadow-sm"
                   : "bg-gray-300 dark:bg-gray-700 hover:bg-gray-400 dark:hover:bg-gray-600"
               }`}
               aria-label={`Ir a la página ${idx + 1}`}

@@ -77,11 +77,19 @@ async function sendReminderEmail(row) {
   // Enviar notificación (BD + Email + Chat) si hay usuario, o solo Email si no
   if (userId) {
     try {
-      await notificationManager.notifyMaintenanceDue(userId, equipmentName, {
-        maintenance_id: row.id,
-        maintenance_type: row.tipo,
-        responsible: row.responsable,
-        due_date: humanDate
+      await notificationManager.sendNotification({
+        userId,
+        template: 'maintenance_due',
+        data: {
+          equipment_name: equipmentName,
+          maintenance_id: row.id,
+          maintenance_type: row.tipo,
+          responsible: row.responsable,
+          due_date: humanDate
+        },
+        email: true,
+        chat: true,
+        source: 'maintenance_scheduler'
       });
     } catch (error) {
       logger.error('Error creando notificación de mantenimiento:', error);

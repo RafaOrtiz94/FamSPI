@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw, FiShoppingCart, FiBriefcase, FiUser } from "react-icons/fi";
+import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw, FiShoppingCart, FiBriefcase, FiUser, FiBarChart2 } from "react-icons/fi";
 import { Doughnut, Bar } from "react-chartjs-2";
 import {
     Chart as ChartJS,
@@ -46,6 +46,64 @@ const LoadingChartState = () => (
     <div className="flex items-center justify-center h-full">
         <div className="animate-pulse text-gray-500 text-sm">Cargando gráfico...</div>
     </div>
+);
+
+const quickAccessLinks = [
+    {
+        label: "Crear Solicitud",
+        description: "Compra de equipos",
+        icon: FiShoppingCart,
+        action: { type: "modal", target: "purchaseType" },
+        color: "from-indigo-500 via-indigo-600 to-indigo-700",
+    },
+    {
+        label: "Clientes",
+        description: "Gestión desde navegación",
+        icon: FiUsers,
+        action: { type: "navigate", target: "/dashboard/comercial/clientes" },
+        color: "from-emerald-500 via-emerald-600 to-emerald-700",
+    },
+    {
+        label: "Solicitudes",
+        description: "Historial completo",
+        icon: FiClipboard,
+        action: { type: "navigate", target: "/dashboard/comercial/solicitudes" },
+        color: "from-sky-500 via-sky-600 to-sky-700",
+    },
+    {
+        label: "Business Case",
+        description: "Inicia y completa tu caso",
+        icon: FiFileText,
+        action: { type: "navigate", target: "/dashboard/business-case" },
+        color: "from-orange-500 via-orange-600 to-orange-700",
+    },
+    {
+        label: "Planificación",
+        description: "Cronograma mensual",
+        icon: FiCalendar,
+        action: { type: "navigate", target: "/dashboard/comercial/planificacion" },
+        color: "from-purple-500 via-purple-600 to-purple-700",
+    },
+];
+
+const QuickAccessCard = ({ label, description, Icon, colorClasses, onClick }) => (
+    <Card className="p-0">
+        <button
+            className="w-full h-full rounded-2xl border border-transparent bg-gradient-to-br from-white/80 to-white shadow-sm transition hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-indigo-300"
+            onClick={onClick}
+            type="button"
+        >
+            <div className="flex items-center gap-3 p-4">
+                <div className={`flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br ${colorClasses} text-white shadow-md`}>
+                    <Icon size={22} />
+                </div>
+                <div>
+                    <p className="text-sm font-bold text-gray-900">{label}</p>
+                    <p className="text-xs text-gray-500">{description}</p>
+                </div>
+            </div>
+        </button>
+    </Card>
 );
 
 const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError }) => {
@@ -146,176 +204,242 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
 
     return (
         <>
-            <DashboardHeader
-                title="Panel de control para asesores comerciales"
-                actions={
-                    <Button
-                        variant="secondary"
-                        icon={FiRefreshCw}
-                        onClick={onRefresh}
-                        disabled={summaryLoading}
-                    >
-                        {summaryLoading ? 'Actualizando...' : 'Actualizar'}
-                    </Button>
-                }
-            />
+            {/* iOS Style Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-8">
+                <div>
+                    <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-2">
+                        Panel Comercial
+                    </h1>
+                    <p className="text-gray-600 text-sm">
+                        Resumen de tu actividad comercial
+                    </p>
+                </div>
+                <Button
+                    variant="ghost"
+                    icon={FiRefreshCw}
+                    onClick={onRefresh}
+                    disabled={summaryLoading}
+                    className="mt-4 sm:mt-0"
+                    size="sm"
+                >
+                    {summaryLoading ? 'Actualizando...' : 'Actualizar'}
+                </Button>
+            </div>
 
-            {/* KPIs Section */}
-            <section className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
-                <StatCard
-                    label="Total Business Cases"
-                    value={summaryLoading ? '...' : data.kpis.totalBC}
-                    icon={FiFileText}
-                    color="blue"
-                />
-                <StatCard
-                    label="BC Activos"
-                    value={summaryLoading ? '...' : data.kpis.bcActivos}
-                    icon={FiCheckSquare}
-                    color="emerald"
-                />
-                <StatCard
-                    label="Solicitudes Pendientes"
-                    value={summaryLoading ? '...' : data.kpis.solicitudesPendientes}
-                    icon={FiClipboard}
-                    color="amber"
-                />
-                <StatCard
-                    label="Clientes Nuevos (30d)"
-                    value={summaryLoading ? '...' : data.kpis.clientesNuevos30d}
-                    icon={FiUsers}
-                    color="violet"
-                />
+            {/* iOS Style KPIs - Optimized for iPhone 13 */}
+            <section className="grid grid-cols-2 gap-3 mb-8">
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-blue-50 rounded-xl">
+                            <FiFileText className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <span className="text-xs text-gray-500">Total</span>
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">
+                        {summaryLoading ? '...' : data.kpis.totalBC}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">Business Cases</div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-emerald-50 rounded-xl">
+                            <FiCheckSquare className="w-4 h-4 text-emerald-600" />
+                        </div>
+                        <span className="text-xs text-gray-500">Activos</span>
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">
+                        {summaryLoading ? '...' : data.kpis.bcActivos}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">BC Activos</div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-amber-50 rounded-xl">
+                            <FiClipboard className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <span className="text-xs text-gray-500">Pendientes</span>
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">
+                        {summaryLoading ? '...' : data.kpis.solicitudesPendientes}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">Solicitudes</div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-2">
+                        <div className="p-2 bg-violet-50 rounded-xl">
+                            <FiUsers className="w-4 h-4 text-violet-600" />
+                        </div>
+                        <span className="text-xs text-gray-500">Nuevos</span>
+                    </div>
+                    <div className="text-2xl font-bold text-gray-900">
+                        {summaryLoading ? '...' : data.kpis.clientesNuevos30d}
+                    </div>
+                    <div className="text-xs text-gray-600 mt-1">Clientes (30d)</div>
+                </div>
             </section>
 
-            {/* Charts Section */}
-            <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                <ChartCard title="Estado de Business Cases">
-                    <div className="h-64">
+            {/* iOS Style Charts - Optimized for Mobile */}
+            <section className="space-y-6 mb-8">
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-semibold text-gray-900">Estado de Business Cases</h3>
+                        <div className="p-2 bg-blue-50 rounded-xl">
+                            <FiFileText className="w-4 h-4 text-blue-600" />
+                        </div>
+                    </div>
+                    <div className="h-48">
                         {summaryLoading ? (
                             <LoadingChartState />
                         ) : data.charts.bcStatus.hasData ? (
                             <Doughnut
                                 data={bcStatusChartData}
-                                options={chartOptions}
+                                options={{
+                                    ...chartOptions,
+                                    plugins: {
+                                        ...chartOptions.plugins,
+                                        legend: {
+                                            position: 'bottom',
+                                            labels: {
+                                                boxWidth: 12,
+                                                font: {
+                                                    size: 10
+                                                }
+                                            }
+                                        }
+                                    }
+                                }}
                                 aria-label="Gráfico circular mostrando distribución de estados de Business Cases"
                             />
                         ) : (
                             <EmptyChartState message="No hay Business Cases para mostrar" />
                         )}
                     </div>
-                </ChartCard>
+                </div>
 
-                <ChartCard title="Solicitudes por Mes">
-                    <div className="h-64">
+                <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100">
+                    <div className="flex items-center justify-between mb-6">
+                        <h3 className="text-lg font-semibold text-gray-900">Solicitudes por Mes</h3>
+                        <div className="p-2 bg-indigo-50 rounded-xl">
+                            <FiClipboard className="w-4 h-4 text-indigo-600" />
+                        </div>
+                    </div>
+                    <div className="h-48">
                         {summaryLoading ? (
                             <LoadingChartState />
                         ) : data.charts.requestsMonthly.hasData ? (
                             <Bar
                                 data={monthlyRequestsChartData}
-                                options={chartOptions}
+                                options={{
+                                    ...chartOptions,
+                                    scales: {
+                                        x: {
+                                            ticks: {
+                                                maxRotation: 45,
+                                                minRotation: 45,
+                                                font: {
+                                                    size: 10
+                                                }
+                                            }
+                                        },
+                                        y: {
+                                            ticks: {
+                                                font: {
+                                                    size: 10
+                                                }
+                                            }
+                                        }
+                                    }
+                                }}
                                 aria-label="Gráfico de barras mostrando evolución mensual de solicitudes"
                             />
                         ) : (
                             <EmptyChartState message="No hay datos de solicitudes mensuales" />
                         )}
                     </div>
-                </ChartCard>
+                </div>
             </section>
 
-            {/* Navigation Cards Section */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Accesos Rápidos</h2>
-                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-                    {/* 🎯 ACCESO DIRECTO: Crear Solicitud de Compra */}
-                    <Card className="p-0">
-                        <button
-                            className="w-full text-left p-4 cursor-pointer hover:shadow-lg hover:border-indigo-300 transition-all duration-200 border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100"
-                            onClick={() => setShowPurchaseTypeModal(true)}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="p-3 bg-indigo-500 rounded-lg text-white shadow-sm">
-                                    <FiShoppingCart size={20} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-bold text-gray-900">Crear Solicitud</p>
-                                    <p className="text-xs text-gray-600 font-medium">Compra de equipos</p>
-                                </div>
+            {/* iOS Springboard Navigation - Enhanced for iPhone 13 */}
+            <section className="mb-8">
+                <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-xl font-bold text-gray-900 tracking-tight">Accesos Rápidos</h2>
+                    <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-full">
+                        {new Date().toLocaleDateString('es-ES', { 
+                            day: 'numeric',
+                            month: 'short'
+                        })}
+                    </div>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-3">
+                    {/* 🛒 Crear Solicitud */}
+                    <div className="group cursor-pointer" onClick={() => setShowPurchaseTypeModal(true)}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-blue-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-blue-500/25 transition-shadow">
+                                <FiShoppingCart className="w-5 h-5 text-white" />
                             </div>
-                        </button>
-                    </Card>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Crear</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Solicitud</span>
+                        </div>
+                    </div>
 
-                    {/* 👉 Clientes */}
-                    <Card className="p-0">
-                        <button
-                            className="w-full text-left p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                            onClick={() => navigate("/dashboard/comercial/clientes")}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-green-50 rounded-md text-green-600">
-                                    <FiUsers size={18} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">Clientes</p>
-                                    <p className="text-xs text-gray-500">Gestión desde navegación</p>
-                                </div>
+                    {/* 👥 Clientes */}
+                    <div className="group cursor-pointer" onClick={() => navigate("/dashboard/comercial/clientes")}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-green-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-green-500 to-green-600 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-green-500/25 transition-shadow">
+                                <FiUsers className="w-5 h-5 text-white" />
                             </div>
-                        </button>
-                    </Card>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Clientes</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Gestión</span>
+                        </div>
+                    </div>
 
-                    {/* 👉 Solicitudes */}
-                    <Card className="p-0">
-                        <button
-                            className="w-full text-left p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                            onClick={() => navigate("/dashboard/comercial/solicitudes")}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-blue-50 rounded-md text-blue-600">
-                                    <FiClipboard size={18} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">Todas las Solicitudes</p>
-                                    <p className="text-xs text-gray-500">Historial completo</p>
-                                </div>
+                    {/* 📋 Solicitudes */}
+                    <div className="group cursor-pointer" onClick={() => navigate("/dashboard/comercial/solicitudes")}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-blue-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-blue-400 to-blue-500 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-blue-400/25 transition-shadow">
+                                <FiClipboard className="w-5 h-5 text-white" />
                             </div>
-                        </button>
-                    </Card>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Solicitudes</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Historial</span>
+                        </div>
+                    </div>
 
-                    {/* 👉 Business Case */}
-                    <Card className="p-0">
-                        <button
-                            className="w-full text-left p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                            onClick={() => navigate("/dashboard/business-case")}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-orange-50 rounded-md text-orange-600">
-                                    <FiFileText size={18} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">Business Case</p>
-                                    <p className="text-xs text-gray-500">Inicia y completa tu caso</p>
-                                </div>
+                    {/* 📊 Business Case */}
+                    <div className="group cursor-pointer" onClick={() => navigate("/dashboard/business-case")}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-orange-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-orange-500/25 transition-shadow">
+                                <FiFileText className="w-5 h-5 text-white" />
                             </div>
-                        </button>
-                    </Card>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Business</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Case</span>
+                        </div>
+                    </div>
 
-                    {/* 👉 Planificación */}
-                    <Card className="p-0">
-                        <button
-                            className="w-full text-left p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-                            onClick={() => navigate("/dashboard/comercial/planificacion")}
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-purple-50 rounded-md text-purple-600">
-                                    <FiCalendar size={18} />
-                                </div>
-                                <div>
-                                    <p className="text-sm font-semibold text-gray-900">Planificación</p>
-                                    <p className="text-xs text-gray-500">Cronograma mensual</p>
-                                </div>
+                    {/* 📅 Planificación */}
+                    <div className="group cursor-pointer" onClick={() => navigate("/dashboard/comercial/planificacion")}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-purple-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-purple-500/25 transition-shadow">
+                                <FiCalendar className="w-5 h-5 text-white" />
                             </div>
-                        </button>
-                    </Card>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Planificación</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Cronograma</span>
+                        </div>
+                    </div>
+
+                    {/* 📊 Analytics (Additional for better grid layout) */}
+                    <div className="group cursor-pointer" onClick={() => navigate("/dashboard/comercial/analytics")}>
+                        <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-indigo-100/50 group-active:scale-95">
+                            <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:shadow-indigo-500/25 transition-shadow">
+                                <FiBarChart2 className="w-5 h-5 text-white" />
+                            </div>
+                            <span className="text-xs font-semibold text-gray-900 text-center leading-tight">Analytics</span>
+                            <span className="text-[10px] text-gray-500 text-center leading-tight">Métricas</span>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -327,12 +451,7 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
                 onSelect={handlePurchaseTypeSelection}
             />
 
-            {/* PURCHASE HANDOFF MODAL */}
-            <PurchaseHandoffWidget
-                isOpen={showPurchaseHandoff}
-                onOpenChange={setShowPurchaseHandoff}
-                hideButton={true}
-            />
+
         </>
     );
 };

@@ -1,4 +1,12 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   listNotifications,
   markNotificationAsRead,
@@ -16,6 +24,39 @@ export const NotificationProvider = ({ children }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const lastSeenIdsRef = useRef(new Set());
+  const hasLoadedRef = useRef(false);
+  const refreshTimerRef = useRef(null);
+  const lastSoundAtRef = useRef(0);
+
+  const playNotificationSound = useCallback(() => {
+    try {
+      const now = Date.now();
+      if (now - lastSoundAtRef.current < 2500) return; // evita spam
+      lastSoundAtRef.current = now;
+
+      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(660, audioContext.currentTime);
+      gainNode.gain.setValueAtTime(0.0001, audioContext.currentTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.02);
+      gainNode.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.5);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.6);
+      oscillator.onended = () => {
+        audioContext.close();
+      };
+    } catch (err) {
+      console.warn("No se pudo reproducir sonido de notificación", err);
+    }
+  }, []);
 
   const refresh = useCallback(
     async (status) => {
@@ -24,9 +65,25 @@ export const NotificationProvider = ({ children }) => {
       setError(null);
       try {
         const { list, unread } = await listNotifications(status);
-        setNotifications(list);
-        setUnreadCount(unread || list.filter((n) => n.status !== "read").length);
-        return { list, unread };
+        const normalizedList = Array.isArray(list) ? list : [];
+        setNotifications(normalizedList);
+        setUnreadCount(unread || normalizedList.filter((n) => n.status !== "read").length);
+
+        const newHighPriority = normalizedList.filter(
+          (n) =>
+            n.status !== "read" &&
+            n.priority >= 2 &&
+            !lastSeenIdsRef.current.has(n.id)
+        );
+
+        if (hasLoadedRef.current && newHighPriority.length > 0) {
+          playNotificationSound();
+          showToast?.("Nueva notificación importante", "warning");
+        }
+
+        lastSeenIdsRef.current = new Set(normalizedList.map((n) => n.id));
+        hasLoadedRef.current = true;
+        return { list: normalizedList, unread };
       } catch (err) {
         console.error("Error cargando notificaciones", err);
         setError("No se pudieron obtener las notificaciones");
@@ -35,12 +92,33 @@ export const NotificationProvider = ({ children }) => {
         setLoading(false);
       }
     },
-    [isAuthenticated]
+    [isAuthenticated, playNotificationSound, showToast]
   );
 
   useEffect(() => {
     refresh();
-  }, [refresh]);
+
+    if (!isAuthenticated) {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+      return;
+    }
+
+    if (!refreshTimerRef.current) {
+      refreshTimerRef.current = setInterval(() => {
+        refresh();
+      }, 30000);
+    }
+
+    return () => {
+      if (refreshTimerRef.current) {
+        clearInterval(refreshTimerRef.current);
+        refreshTimerRef.current = null;
+      }
+    };
+  }, [refresh, isAuthenticated]);
 
   const markAsRead = useCallback(
     async (id) => {
@@ -87,10 +165,15 @@ export const NotificationProvider = ({ children }) => {
       setNotifications((prev) => [notification, ...prev]);
       if (notification.status !== "read") {
         setUnreadCount((prev) => prev + 1);
-        showToast?.(notification.title || "Nueva notificación", "info");
+        if (notification.priority >= 2) {
+          playNotificationSound();
+          showToast?.(notification.title || "Notificación importante", "warning");
+        } else {
+          showToast?.(notification.title || "Nueva notificación", "info");
+        }
       }
     },
-    [showToast]
+    [playNotificationSound, showToast]
   );
 
   const value = useMemo(

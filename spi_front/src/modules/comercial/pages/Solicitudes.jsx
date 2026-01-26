@@ -166,19 +166,20 @@ const SolicitudesPage = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            {/* KPIs Principales - Componente Reutilizable */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {/* KPIs Principales - iOS Style - Responsive */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 sm:gap-4">
               <StatsCard
                 title="Total Solicitudes"
                 value={stats.total}
                 subtitle="Gestiones activas"
                 icon={FiClipboard}
                 colors="from-blue-50 via-blue-100 to-blue-200"
-                borderColor="border-blue-500"
-                shadowColor="shadow-blue-100/50"
-                iconBg="bg-blue-600"
+                borderColor="border-blue-500/30"
+                shadowColor="shadow-blue-100/30"
+                iconBg="bg-gradient-to-br from-blue-500 to-blue-600"
                 textColor="text-blue-800"
                 valueColor="text-blue-900"
+                className="rounded-2xl border-0 shadow-lg"
               />
               <StatsCard
                 title="Aprobadas"
@@ -186,11 +187,12 @@ const SolicitudesPage = () => {
                 subtitle={`${stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito`}
                 icon={FiCheckCircle}
                 colors="from-green-50 via-green-100 to-green-200"
-                borderColor="border-green-500"
-                shadowColor="shadow-green-100/50"
-                iconBg="bg-green-600"
+                borderColor="border-green-500/30"
+                shadowColor="shadow-green-100/30"
+                iconBg="bg-gradient-to-br from-green-500 to-green-600"
                 textColor="text-green-800"
                 valueColor="text-green-900"
+                className="rounded-2xl border-0 shadow-lg"
               />
               <StatsCard
                 title="En Proceso"
@@ -198,11 +200,12 @@ const SolicitudesPage = () => {
                 subtitle="Pendientes de revisión"
                 icon={FiClock}
                 colors="from-yellow-50 via-yellow-100 to-yellow-200"
-                borderColor="border-yellow-500"
-                shadowColor="shadow-yellow-100/50"
-                iconBg="bg-yellow-600"
+                borderColor="border-yellow-500/30"
+                shadowColor="shadow-yellow-100/30"
+                iconBg="bg-gradient-to-br from-yellow-500 to-yellow-600"
                 textColor="text-yellow-800"
                 valueColor="text-yellow-900"
+                className="rounded-2xl border-0 shadow-lg"
               />
               <StatsCard
                 title="Rechazadas"
@@ -210,43 +213,46 @@ const SolicitudesPage = () => {
                 subtitle="Requieren corrección"
                 icon={FiAlertTriangle}
                 colors="from-red-50 via-red-100 to-red-200"
-                borderColor="border-red-500"
-                shadowColor="shadow-red-100/50"
-                iconBg="bg-red-600"
+                borderColor="border-red-500/30"
+                shadowColor="shadow-red-100/30"
+                iconBg="bg-gradient-to-br from-red-500 to-red-600"
                 textColor="text-red-800"
                 valueColor="text-red-900"
+                className="rounded-2xl border-0 shadow-lg"
               />
             </div>
 
-            {/* Acciones Rápidas */}
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            {/* Accesos rápidos - iOS Style */}
+            <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
               <div className="flex items-center justify-between mb-6">
                 <div>
-                  <h3 className="text-xl font-bold text-slate-900">Acciones Rápidas</h3>
-                  <p className="text-slate-600 mt-1">
+                  <h3 className="text-xl font-bold text-gray-900 tracking-tight">Accesos rápidos</h3>
+                  <p className="text-gray-600 mt-1 text-sm">
                     {roleConfig.isACP ? 'Operaciones disponibles para ACP Comercial' : 'Operaciones disponibles para tu rol'}
                   </p>
                 </div>
-
               </div>
 
-              <div className={`grid gap-4 ${roleConfig.isACP ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5'}`}>
+              <div className={`grid gap-3 ${roleConfig.isACP ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
                 {roleConfig.availableActions.map((action) => (
                   <Button
                     key={action.id}
                     onClick={() => handleQuickAction(action.id)}
-                    className={`p-3 h-14 ${action.color === 'blue' ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800' :
-                      action.color === 'amber' ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800' :
-                        action.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800' :
-                          action.color === 'indigo' ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800' :
-                            'bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
-                      } text-white rounded-xl shadow-md`}
+                    className={`p-4 h-16 transition-all duration-200 rounded-xl border-0 shadow-sm hover:shadow-md active:scale-95 ${
+                      action.color === 'blue' ? 'bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700' :
+                      action.color === 'amber' ? 'bg-gradient-to-br from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700' :
+                      action.color === 'emerald' ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700' :
+                      action.color === 'indigo' ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700' :
+                      'bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'
+                    }`}
                   >
-                    <div className="flex items-center gap-3">
-                      <action.icon size={16} />
-                      <div className="text-left">
-                        <div className="font-semibold">{action.label}</div>
-                        <div className="text-xs opacity-90">{action.subtitle}</div>
+                    <div className="flex items-center gap-3 w-full">
+                      <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                        <action.icon size={16} className="text-white" />
+                      </div>
+                      <div className="text-left flex-1 min-w-0">
+                        <div className="font-semibold text-white text-sm leading-tight truncate">{action.label}</div>
+                        <div className="text-white/80 text-xs leading-tight truncate">{action.subtitle}</div>
                       </div>
                     </div>
                   </Button>
@@ -261,61 +267,63 @@ const SolicitudesPage = () => {
               </div>
             )}
 
-            {/* Actividad Reciente */}
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-slate-100 rounded-lg">
-                  <FiActivity className="text-slate-600" size={20} />
-                </div>
-                <div>
-                  <h3 className="text-xl font-bold text-slate-900">Actividad Reciente</h3>
-                  <p className="text-slate-600 mt-1">Últimas actualizaciones en tus solicitudes</p>
+            {/* Actividad Reciente - iOS Style Unificado */}
+            <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-gradient-to-br from-gray-600 to-gray-700 rounded-lg shadow-sm">
+                    <FiActivity className="text-white" size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900 tracking-tight">Actividad Reciente</h3>
+                    <p className="text-gray-600 mt-1 text-sm">Últimas actualizaciones en tus solicitudes</p>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 }}
-                  className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="flex items-center justify-between p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200/60 hover:bg-gradient-to-br hover:from-indigo-100 hover:to-indigo-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="p-2 bg-white rounded-lg">
+                    <div className="p-2 bg-white rounded-lg shadow-sm">
                       <FiCreditCard className="text-indigo-600" size={16} />
                     </div>
                     <div>
-                      <p className="font-semibold text-slate-900">
+                      <p className="font-semibold text-gray-900 text-sm">
                         Requerimiento de Equipos
                       </p>
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs text-gray-600">
                         Aprobado hace 2 días
                       </p>
                     </div>
                   </div>
-                  <FiCheckCircle className="text-green-600" size={20} />
+                  <FiCheckCircle className="text-green-600" size={18} />
                 </motion.div>
 
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.2 }}
-                  className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                  className="flex items-center justify-between p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200/60 hover:bg-gradient-to-br hover:from-orange-100 hover:to-orange-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                 >
                   <div className="flex items-center gap-4">
-                    <div className="p-2 bg-white rounded-lg">
+                    <div className="p-2 bg-white rounded-lg shadow-sm">
                       <FiUsers className="text-orange-600" size={16} />
                     </div>
                     <div>
-                      <p className="font-semibold text-slate-900">
+                      <p className="font-semibold text-gray-900 text-sm">
                         Permiso de Vacaciones
                       </p>
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs text-gray-600">
                         En proceso de aprobación
                       </p>
                     </div>
                   </div>
-                  <FiClock className="text-yellow-600" size={20} />
+                  <FiClock className="text-yellow-600" size={18} />
                 </motion.div>
 
                 {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
@@ -323,22 +331,22 @@ const SolicitudesPage = () => {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                    className="flex items-center justify-between p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200/60 hover:bg-gradient-to-br hover:from-blue-100 hover:to-blue-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="p-2 bg-white rounded-lg">
+                      <div className="p-2 bg-white rounded-lg shadow-sm">
                         <FiClipboard className="text-blue-600" size={16} />
                       </div>
                       <div>
-                        <p className="font-semibold text-slate-900">
+                        <p className="font-semibold text-gray-900 text-sm">
                           Inspección Técnica
                         </p>
-                        <p className="text-sm text-slate-600">
+                        <p className="text-xs text-gray-600">
                           Programada para mañana
                         </p>
                       </div>
                     </div>
-                    <FiTarget className="text-blue-600" size={20} />
+                    <FiTarget className="text-blue-600" size={18} />
                   </motion.div>
                 )}
               </div>
@@ -366,54 +374,54 @@ const SolicitudesPage = () => {
             animate={{ opacity: 1, y: 0 }}
             className="space-y-6"
           >
-            <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+            <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
               <div className="flex items-center gap-3 mb-6">
-                <div className="p-2 bg-indigo-100 rounded-lg">
-                  <FiBarChart2 className="text-indigo-600" size={24} />
+                <div className="p-2 bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-lg shadow-sm">
+                  <FiBarChart2 className="text-white" size={24} />
                 </div>
                 <div>
-                  <h2 className="text-2xl font-bold text-slate-900">Análisis y Estadísticas</h2>
-                  <p className="text-slate-600 mt-1">Métricas detalladas de tu rendimiento en solicitudes</p>
+                  <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Análisis y Estadísticas</h2>
+                  <p className="text-gray-600 mt-1 text-sm">Métricas detalladas de tu rendimiento en solicitudes</p>
                 </div>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">Distribución por Tipo</h3>
+                <Card className="p-6 border-0 shadow-md shadow-gray-100/40 rounded-2xl bg-white">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">Distribución por Tipo</h3>
                   <div className="space-y-3">
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-slate-700">Clientes</span>
-                      <span className="text-sm font-bold text-emerald-600">15</span>
+                    <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                      <span className="text-sm font-medium text-gray-700">Clientes</span>
+                      <span className="text-sm font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">15</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-slate-700">Compras</span>
-                      <span className="text-sm font-bold text-indigo-600">12</span>
+                    <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                      <span className="text-sm font-medium text-gray-700">Compras</span>
+                      <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">12</span>
                     </div>
-                    <div className="flex justify-between items-center">
-                      <span className="text-sm font-medium text-slate-700">Permisos</span>
-                      <span className="text-sm font-bold text-orange-600">8</span>
+                    <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                      <span className="text-sm font-medium text-gray-700">Permisos</span>
+                      <span className="text-sm font-bold text-orange-600 bg-orange-50 px-2 py-1 rounded-full">8</span>
                     </div>
                     {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
                       <>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-slate-700">Inspecciones</span>
-                          <span className="text-sm font-bold text-blue-600">6</span>
+                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm font-medium text-gray-700">Inspecciones</span>
+                          <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-full">6</span>
                         </div>
-                        <div className="flex justify-between items-center">
-                          <span className="text-sm font-medium text-slate-700">Retiros</span>
-                          <span className="text-sm font-bold text-amber-600">4</span>
+                        <div className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                          <span className="text-sm font-medium text-gray-700">Retiros</span>
+                          <span className="text-sm font-bold text-amber-600 bg-amber-50 px-2 py-1 rounded-full">4</span>
                         </div>
                       </>
                     )}
                   </div>
                 </Card>
 
-                <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-2xl">
-                  <h3 className="text-lg font-bold text-slate-900 mb-4">Tiempo de Respuesta</h3>
+                <Card className="p-6 border-0 shadow-md shadow-gray-100/40 rounded-2xl bg-white">
+                  <h3 className="text-lg font-bold text-gray-900 mb-4">Tiempo de Respuesta</h3>
                   <div className="text-center py-8">
-                    <FiTrendingUp className="mx-auto text-slate-300 mb-3" size={48} />
-                    <p className="text-slate-500">Funcionalidad próximamente</p>
-                    <p className="text-slate-400 text-sm mt-1">Análisis de tiempos de proceso</p>
+                    <FiTrendingUp className="mx-auto text-gray-300 mb-3" size={48} />
+                    <p className="text-gray-500 text-sm">Funcionalidad próximamente</p>
+                    <p className="text-gray-400 text-xs mt-1">Análisis de tiempos de proceso</p>
                   </div>
                 </Card>
               </div>
@@ -428,39 +436,39 @@ const SolicitudesPage = () => {
 
   return (
     <div className="bg-slate-50">
-      {/* Header Principal */}
+      {/* Header Principal - iOS Style */}
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white border-b border-slate-200 rounded-t-3xl"
+        className="bg-white border-b border-gray-200/60 rounded-t-3xl shadow-sm"
       >
         <div className="px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
             <div className="flex items-center gap-4">
-              <div className="p-3 bg-indigo-100 rounded-xl">
-                <FiClipboard className="text-indigo-600" size={28} />
+              <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-md">
+                <FiClipboard className="text-white" size={28} />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-slate-900">Solicitudes</h1>
-                <p className="text-slate-600 mt-1">
+                <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Solicitudes</h1>
+                <p className="text-gray-600 mt-1 text-sm">
                   {roleConfig.isACP ? 'Gestión ACP - Solicitudes y requerimientos' : 'Gestión comercial - Solicitudes y seguimiento'}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200/60">
               <div className="text-right">
-                <p className="text-sm font-medium text-slate-900">{stats.total} Solicitudes</p>
-                <p className="text-xs text-slate-600">
+                <p className="text-sm font-semibold text-gray-900">{stats.total} Solicitudes</p>
+                <p className="text-xs text-gray-600">
                   {stats.approved} aprobadas • {stats.pending} pendientes
                 </p>
               </div>
             </div>
           </div>
 
-          {/* Navigation Tabs */}
-          <div className="border-b border-slate-100">
-            <div className="flex space-x-1">
+          {/* Navigation Tabs - iOS Style */}
+          <div className="border-b border-gray-200/60 pb-2">
+            <div className="flex space-x-1 overflow-x-auto scrollbar-hide -mx-2 px-2">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -470,17 +478,19 @@ const SolicitudesPage = () => {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`
-                      flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2
+                      flex items-center gap-2 px-5 py-3 text-sm font-semibold rounded-xl transition-all duration-200 min-w-max
                       ${isActive
-                        ? 'bg-indigo-50 text-indigo-700 border-indigo-500 -mb-px'
-                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
+                        ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
+                        : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm'
                       }
                     `}
                   >
-                    <Icon size={16} />
-                    {tab.label}
+                    <Icon size={16} className={isActive ? 'text-white' : 'text-gray-500'} />
+                    <span className="hidden sm:inline">{tab.label}</span>
                     {tab.id === 'overview' && stats.total > 0 && (
-                      <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded-full ml-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                        isActive ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-600'
+                      }`}>
                         {stats.total}
                       </span>
                     )}
@@ -492,8 +502,8 @@ const SolicitudesPage = () => {
         </div>
       </motion.div>
 
-      {/* Contenido Principal */}
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* Contenido Principal - Responsive */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}

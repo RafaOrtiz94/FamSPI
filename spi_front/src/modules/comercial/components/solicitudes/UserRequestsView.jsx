@@ -161,21 +161,23 @@ const UserRequestsView = ({ onCreateNew }) => {
   }
 
   return (
-    <div className="space-y-8">
-      {/* Resumen general */}
-      <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
+    <div className="space-y-6 md:space-y-8">
+      {/* Resumen general - iOS Style */}
+      <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl bg-white">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h3 className="text-xl font-bold text-slate-900">Resumen de Solicitudes</h3>
-            <p className="text-slate-600 mt-1">Estado de tus gestiones por tipo</p>
+            <h3 className="text-xl font-bold text-slate-900 tracking-tight">Resumen de Solicitudes</h3>
+            <p className="text-slate-600 mt-1 text-sm">Estado de tus gestiones por tipo</p>
+          </div>
+          <div className="text-xs text-slate-500 bg-slate-50 px-2 py-1 rounded-full">
+            {new Date().toLocaleDateString('es-ES', { 
+              day: 'numeric',
+              month: 'short'
+            })}
           </div>
         </div>
 
-        <div className={`grid gap-4 ${
-          roleConfig.availableTypes.length === 3 ? 'grid-cols-1 md:grid-cols-3' :
-          roleConfig.availableTypes.length === 5 ? 'grid-cols-2 md:grid-cols-3 lg:grid-cols-5' :
-          'grid-cols-2 md:grid-cols-3 lg:grid-cols-5'
-        }`}>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           {Object.entries(REQUEST_TYPES_CONFIG)
             .filter(([type]) => roleConfig.availableTypes.includes(type))
             .map(([type, config]) => {
@@ -183,25 +185,31 @@ const UserRequestsView = ({ onCreateNew }) => {
             const Icon = config.icon;
 
             return (
-              <div key={type} className="text-center">
-                <div className={`inline-flex items-center justify-center w-12 h-12 rounded-xl mb-2 ${
-                  config.color === 'emerald' ? 'bg-emerald-100 text-emerald-600' :
-                  config.color === 'indigo' ? 'bg-indigo-100 text-indigo-600' :
-                  config.color === 'blue' ? 'bg-blue-100 text-blue-600' :
-                  config.color === 'amber' ? 'bg-amber-100 text-amber-600' :
-                  'bg-orange-100 text-orange-600'
-                }`}>
-                  <Icon className="w-6 h-6" />
+              <div key={type} className="group cursor-pointer text-center">
+                <div className={`w-12 h-12 bg-gradient-to-br ${
+                  config.color === 'emerald' ? 'from-emerald-500 to-emerald-600' :
+                  config.color === 'indigo' ? 'from-indigo-500 to-indigo-600' :
+                  config.color === 'blue' ? 'from-blue-500 to-blue-600' :
+                  config.color === 'amber' ? 'from-amber-500 to-amber-600' :
+                  'from-orange-500 to-orange-600'
+                } rounded-xl flex items-center justify-center shadow-md mb-2 mx-auto group-hover:${
+                  config.color === 'emerald' ? 'shadow-emerald-500/25' :
+                  config.color === 'indigo' ? 'shadow-indigo-500/25' :
+                  config.color === 'blue' ? 'shadow-blue-500/25' :
+                  config.color === 'amber' ? 'shadow-amber-500/25' :
+                  'shadow-orange-500/25'
+                } transition-shadow duration-300`}>
+                  <Icon className="w-5 h-5 text-white" />
                 </div>
-                <div className="text-2xl font-bold text-slate-900">{requestsOfType.length}</div>
-                <div className="text-xs text-slate-600">{config.title.split(' ')[0]}</div>
+                <div className="text-lg font-bold text-slate-900">{requestsOfType.length}</div>
+                <div className="text-xs text-slate-600 font-medium">{config.title.split(' ')[0]}</div>
               </div>
             );
           })}
         </div>
       </Card>
 
-      {/* Solicitudes por tipo */}
+      {/* Solicitudes por tipo - iOS Style */}
       {Object.entries(REQUEST_TYPES_CONFIG)
         .filter(([type]) => roleConfig.availableTypes.includes(type))
         .map(([type, config]) => {
@@ -209,28 +217,29 @@ const UserRequestsView = ({ onCreateNew }) => {
         const Icon = config.icon;
 
         return (
-          <Card key={type} className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl overflow-hidden">
-            <div className="p-6 border-b border-slate-100">
+          <Card key={type} className="border-0 shadow-xl shadow-slate-100/60 rounded-2xl overflow-hidden bg-white">
+            {/* Header iOS Style */}
+            <div className="p-6 border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <div className={`p-2 rounded-lg ${
-                    config.color === 'emerald' ? 'bg-emerald-100 text-emerald-600' :
-                    config.color === 'indigo' ? 'bg-indigo-100 text-indigo-600' :
-                    config.color === 'blue' ? 'bg-blue-100 text-blue-600' :
-                    config.color === 'amber' ? 'bg-amber-100 text-amber-600' :
-                    'bg-orange-100 text-orange-600'
-                  }`}>
-                    <Icon className="w-5 h-5" />
+                  <div className={`w-10 h-10 bg-gradient-to-br ${
+                    config.color === 'emerald' ? 'from-emerald-500 to-emerald-600' :
+                    config.color === 'indigo' ? 'from-indigo-500 to-indigo-600' :
+                    config.color === 'blue' ? 'from-blue-500 to-blue-600' :
+                    config.color === 'amber' ? 'from-amber-500 to-amber-600' :
+                    'from-orange-500 to-orange-600'
+                  } rounded-xl flex items-center justify-center shadow-md`}>
+                    <Icon className="w-5 h-5 text-white" />
                   </div>
                   <div>
-                    <h3 className="text-lg font-bold text-slate-900">{config.title}</h3>
+                    <h3 className="text-lg font-bold text-slate-900 tracking-tight">{config.title}</h3>
                     <p className="text-sm text-slate-600">{requestsOfType.length} solicitudes</p>
                   </div>
                 </div>
 
                 <Button
                   onClick={() => onCreateNew && onCreateNew(type)}
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 hover:text-slate-900 shadow-sm hover:shadow-md transition-all duration-200"
                   size="sm"
                 >
                   <FiPlus className="w-4 h-4" />
@@ -239,37 +248,38 @@ const UserRequestsView = ({ onCreateNew }) => {
               </div>
             </div>
 
+            {/* Content iOS Style */}
             <div className="p-6">
               {requestsOfType.length === 0 ? (
                 <div className="text-center py-8">
-                  <Icon className="w-12 h-12 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-500">{config.emptyMessage}</p>
+                  <Icon className="w-12 h-12 text-slate-300 mx-auto mb-3 opacity-50" />
+                  <p className="text-slate-500 text-sm">{config.emptyMessage}</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {requestsOfType.slice(0, 5).map((request) => (
                     <motion.div
                       key={request.id}
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="flex items-center justify-between p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer group"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 hover:border-slate-200 hover:shadow-md transition-all duration-200 cursor-pointer group"
                       onClick={() => {
                         // Aquí iría la lógica para ver el detalle
                         console.log('Ver detalle de solicitud:', request);
                       }}
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h4 className="font-semibold text-slate-900 truncate">
+                        <div className="flex items-center gap-3 mb-2">
+                          <h4 className="font-semibold text-slate-900 truncate text-sm">
                             {request.title}
                           </h4>
-                          <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status)}`}>
+                          <div className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(request.status)} border border-current border-opacity-20`}>
                             {getStatusIcon(request.status)}
                             {request.status || 'Pendiente'}
                           </div>
                         </div>
                         {request.description && (
-                          <p className="text-sm text-slate-600 truncate mb-1">
+                          <p className="text-xs text-slate-600 truncate mb-1">
                             {request.description}
                           </p>
                         )}
@@ -278,8 +288,8 @@ const UserRequestsView = ({ onCreateNew }) => {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <Button size="sm" variant="ghost">
+                      <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <Button size="sm" variant="ghost" className="text-slate-400 hover:text-slate-600">
                           <FiEye className="w-4 h-4" />
                         </Button>
                       </div>
@@ -288,7 +298,7 @@ const UserRequestsView = ({ onCreateNew }) => {
 
                   {requestsOfType.length > 5 && (
                     <div className="text-center pt-2">
-                      <Button variant="ghost" size="sm">
+                      <Button variant="ghost" size="sm" className="text-slate-600 hover:text-slate-900">
                         Ver todas ({requestsOfType.length})
                       </Button>
                     </div>

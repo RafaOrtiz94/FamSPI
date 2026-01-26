@@ -8,7 +8,6 @@ const {
 } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
-const notificationManager = require("../notifications/notificationManager");
 const documents = require("../documents/document.service");
 const files = require("../files/file.service");
 
@@ -177,8 +176,7 @@ async function createMantenimiento({
         nextConflictMessage = `Existe un mantenimiento activo el ${formatHumanDate(
           nextDateIso
         )} (#${futureConflict.id}).`;
-        await notifyConflict({
-          userId: responsable_id,
+        await notifyConflictEmail({
           email: responsable_email,
           equipoLabel,
           fecha: nextDateIso,
@@ -364,34 +362,6 @@ async function sign({ id, user_id, base64, tag }) {
 }
 
 /**
- * Firma avanzada y sellado institucional sobre el PDF final del mantenimiento
- */
-async function signAdvanced({ id, user, consentText, roleAtSign, authorizedRole, sessionId, ip, userAgent }) {
-  const { rows } = await db.query(
-    `SELECT id FROM documents WHERE request_id=$1 ORDER BY created_at DESC LIMIT 1`,
-    [id]
-  );
-  const doc = rows[0];
-  if (!doc) {
-    const err = new Error("Documento no encontrado para mantenimiento");
-    err.status = 404;
-    throw err;
-  }
-
-  // Delegamos el flujo completo a los servicios existentes para asegurar trazabilidad legal
-  return documents.applyAdvancedSignature({
-    documentId: doc.id,
-    user,
-    consentText,
-    roleAtSign,
-    authorizedRole,
-    sessionId,
-    ip,
-    userAgent,
-  });
-}
-
-/**
  * Aprobar mantenimiento (gerencia)
  */
 async function approve({ id, approver_id }) {
@@ -437,7 +407,6 @@ module.exports = {
   listMantenimientos,
   getDetail,
   sign,
-  signAdvanced,
   approve,
   exportPdf,
 };

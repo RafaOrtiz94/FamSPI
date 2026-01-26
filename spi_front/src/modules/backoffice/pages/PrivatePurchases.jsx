@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
   FiChevronDown,
   FiClock,
@@ -86,6 +87,7 @@ const statusLookup = STATUS_DEFINITIONS.reduce((acc, def) => {
 const formatDate = (value) => formatDateTimeEC(value, "Sin fecha");
 
 const PrivatePurchasesPage = () => {
+  const location = useLocation();
   const { showToast } = useUI();
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
@@ -407,6 +409,18 @@ const PrivatePurchasesPage = () => {
       setSelectedId(requests[0].id);
     }
   }, [requests, selectedId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const purchaseId = params.get("purchaseId");
+    if (!purchaseId || !requests.length) return;
+
+    const target = requests.find((req) => String(req.id) === String(purchaseId));
+    if (!target) return;
+
+    setSelectedId(target.id);
+    setDetailModalRequest(target);
+  }, [location.search, requests]);
 
   useEffect(() => {
     if (!lastUpdatedRequestId) return;
@@ -1544,7 +1558,7 @@ const PrivatePurchasesPage = () => {
                       }`}
                     onClick={() => setSelectedId(req.id)}
                   >
-                                        {/* Header compacto */}
+                    {/* Header compacto */}
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1">
                         <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -1602,7 +1616,7 @@ const PrivatePurchasesPage = () => {
                         {expanded ? 'Mostrar menos' : 'Mostrar mas'}
                       </Button>
                     </div>
-{/* Acciones usando el componente PrivatePurchaseActions */}
+                    {/* Acciones usando el componente PrivatePurchaseActions */}
                     <PrivatePurchaseActions
                       request={req}
                       isBackofficeUser={isBackofficeUser}
@@ -1673,7 +1687,7 @@ const PrivatePurchasesPage = () => {
                     />
 
                     {/* Indicador de mÃƒÂ¡s acciones */}
-                    
+
 
                     {/* Contenido expandido */}
                     {expanded && (

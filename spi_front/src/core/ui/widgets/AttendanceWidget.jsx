@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp, FiPlus } from "react-icons/fi";
 import confetti from "canvas-confetti";
@@ -46,6 +46,7 @@ const AttendanceWidget = () => {
     const [locationLoading, setLocationLoading] = useState(false);
     const [cachedLocation, setCachedLocation] = useState(null);
     const [locationTimestamp, setLocationTimestamp] = useState(null);
+    const [widgetModalOpen, setWidgetModalOpen] = useState(false);
 
     useEffect(() => {
         const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -94,86 +95,86 @@ const AttendanceWidget = () => {
         await Promise.all([loadAttendance(), fetchException()]);
     };
 
-        /**
-         * Optimized geolocation with caching, retry logic, and performance improvements
-         * - Uses cached location if recent (< 10 minutes)
-         * - Fast mode first (low accuracy, 5s timeout), fallback to high accuracy
-         * - Non-blocking with loading indicators
-         * - Allows attendance without location when geolocation fails
-         */
-        const getLocation = async (showErrors = true) => {
-            // Check cache first (10 minutes validity)
-            const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
-            if (cachedLocation && locationTimestamp &&
-                (Date.now() - locationTimestamp) < CACHE_DURATION) {
-                return cachedLocation;
-            }
+    /**
+     * Optimized geolocation with caching, retry logic, and performance improvements
+     * - Uses cached location if recent (< 10 minutes)
+     * - Fast mode first (low accuracy, 5s timeout), fallback to high accuracy
+     * - Non-blocking with loading indicators
+     * - Allows attendance without location when geolocation fails
+     */
+    const getLocation = async (showErrors = true) => {
+        // Check cache first (10 minutes validity)
+        const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
+        if (cachedLocation && locationTimestamp &&
+            (Date.now() - locationTimestamp) < CACHE_DURATION) {
+            return cachedLocation;
+        }
 
-            if (!navigator.geolocation) {
-                if (showErrors) {
-                    showToast("Geolocalización no soportada por el navegador", "warning");
-                }
-                return null;
+        if (!navigator.geolocation) {
+            if (showErrors) {
+                showToast("Geolocalización no soportada por el navegador", "warning");
             }
+            return null;
+        }
 
-            const getPosition = (options) =>
-                new Promise((resolve, reject) => {
-                    navigator.geolocation.getCurrentPosition(resolve, reject, options);
-                });
+        const getPosition = (options) =>
+            new Promise((resolve, reject) => {
+                navigator.geolocation.getCurrentPosition(resolve, reject, options);
+            });
+
+        try {
+            setLocationLoading(true);
+
+            // Try fast mode first (5 seconds, low accuracy)
+            const fastOptions = {
+                enableHighAccuracy: false,
+                timeout: 5000,
+                maximumAge: 300000 // 5 minutes cache
+            };
 
             try {
-                setLocationLoading(true);
+                const pos = await getPosition(fastOptions);
+                const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
+                setCachedLocation(loc);
+                setLocationTimestamp(Date.now());
+                return loc;
+            } catch (fastError) {
+                console.warn("Fast geolocation failed, trying high accuracy mode:", fastError);
 
-                // Try fast mode first (5 seconds, low accuracy)
-                const fastOptions = {
-                    enableHighAccuracy: false,
-                    timeout: 5000,
-                    maximumAge: 300000 // 5 minutes cache
+                // Fallback to high accuracy mode (8 seconds timeout)
+                const highAccuracyOptions = {
+                    enableHighAccuracy: true,
+                    timeout: 8000,
+                    maximumAge: 180000 // 3 minutes cache
                 };
 
-                try {
-                    const pos = await getPosition(fastOptions);
-                    const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
-                    setCachedLocation(loc);
-                    setLocationTimestamp(Date.now());
-                    return loc;
-                } catch (fastError) {
-                    console.warn("Fast geolocation failed, trying high accuracy mode:", fastError);
-
-                    // Fallback to high accuracy mode (8 seconds timeout)
-                    const highAccuracyOptions = {
-                        enableHighAccuracy: true,
-                        timeout: 8000,
-                        maximumAge: 180000 // 3 minutes cache
-                    };
-
-                    const pos = await getPosition(highAccuracyOptions);
-                    const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
-                    setCachedLocation(loc);
-                    setLocationTimestamp(Date.now());
-                    return loc;
-                }
-            } catch (err) {
-                console.error("Geolocation error:", err);
-
-                // Handle different error types gracefully
-                if (showErrors) {
-                    let msg = "No se pudo obtener ubicación.";
-                    if (err.code === 1) {
-                        msg = "Permiso de ubicación denegado. El registro continuará sin ubicación.";
-                    } else if (err.code === 2) {
-                        msg = "Ubicación no disponible. El registro continuará sin ubicación.";
-                    } else if (err.code === 3) {
-                        msg = "Tiempo de espera agotado. El registro continuará sin ubicación.";
-                    }
-                    showToast(msg, "warning");
-                }
-
-                return null; // Allow attendance without location
-            } finally {
-                setLocationLoading(false);
+                const pos = await getPosition(highAccuracyOptions);
+                const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
+                setCachedLocation(loc);
+                setLocationTimestamp(Date.now());
+                return loc;
             }
-        };
+        } catch (err) {
+            console.error("Geolocation error:", err);
+
+            // Handle different error types gracefully
+            if (showErrors) {
+                let msg = "No se pudo obtener ubicación.";
+                if (err.code === 1) {
+                    msg = "Permiso de ubicación denegado. El registro continuará sin ubicación.";
+                } else if (err.code === 2) {
+                    msg = "Ubicación no disponible. El registro continuará sin ubicación.";
+                } else if (err.code === 3) {
+                    msg = "Tiempo de espera agotado. El registro continuará sin ubicación.";
+                }
+                showToast(msg, "warning");
+            }
+
+            return null; // Allow attendance without location
+        } finally {
+            setLocationLoading(false);
+        }
+    };
     const formatTime = (ts) => {
         if (process.env.NODE_ENV !== "production") {
             console.log("[AttendanceWidget] formatTime called with:", ts, "type:", typeof ts);
@@ -394,31 +395,31 @@ const AttendanceWidget = () => {
 
     const exceptionTimeEntries = hasActiveException
         ? [
-              {
-                  label: "Salida inesperada",
-                  value: activeException.start_time,
-                  colors: "bg-amber-50 border-amber-200 text-amber-800",
-                  note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
-              },
-              {
-                  label: "Arribo a destino",
-                  value: activeException.arrival_time,
-                  colors: "bg-orange-50 border-orange-200 text-orange-800",
-                  note: activeException.status === "ON_SITE" ? "Llegaste" : "Pendiente",
-              },
-              {
-                  label: "Salida del destino",
-                  value: activeException.departure_time,
-                  colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
-                  note: activeException.status === "RETURNING" ? "Regresando" : "Pendiente",
-              },
-              {
-                  label: "Regreso a oficina",
-                  value: activeException.return_time,
-                  colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
-                  note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
-              },
-          ]
+            {
+                label: "Salida inesperada",
+                value: activeException.start_time,
+                colors: "bg-amber-50 border-amber-200 text-amber-800",
+                note: activeException.type ? activeException.type.replace(/_/g, " ").toUpperCase() : "Sin motivo",
+            },
+            {
+                label: "Arribo a destino",
+                value: activeException.arrival_time,
+                colors: "bg-orange-50 border-orange-200 text-orange-800",
+                note: activeException.status === "ON_SITE" ? "Llegaste" : "Pendiente",
+            },
+            {
+                label: "Salida del destino",
+                value: activeException.departure_time,
+                colors: "bg-yellow-50 border-yellow-200 text-yellow-800",
+                note: activeException.status === "RETURNING" ? "Regresando" : "Pendiente",
+            },
+            {
+                label: "Regreso a oficina",
+                value: activeException.return_time,
+                colors: "bg-emerald-50 border-emerald-200 text-emerald-800",
+                note: activeException.status === "COMPLETED" ? "Completado" : "Pendiente",
+            },
+        ]
         : [];
 
     const timeEntries = [...baseTimeEntries, ...exceptionTimeEntries];
@@ -549,10 +550,13 @@ const AttendanceWidget = () => {
         );
     };
 
-    return (
+    const quickEntryTime = attendance?.entry_time ? formatTime(attendance.entry_time) : null;
+    const quickBadgeText = quickEntryTime ? `${status.text} · ${quickEntryTime}` : status.text;
+
+    const renderWidgetContent = () => (
         <Card className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/20 backdrop-blur-xl shadow-xl shadow-blue-500/10 border border-white/50 p-6">
             {/* Header Section */}
-            <div className="flex justify-between items-start mb-6 pb-4 border-b border-gray-100/80">
+            <div className="flex flex-col gap-4 mb-6 pb-4 border-b border-gray-100/80 md:flex-row md:items-start md:justify-between">
                 <div className="flex items-center gap-4">
                     <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/15 to-indigo-500/15 shadow-sm">
                         {status.icon}
@@ -603,7 +607,7 @@ const AttendanceWidget = () => {
                     <FiClock className="text-gray-600" size={16} />
                     Registro de Tiempos
                 </h4>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     {timeEntries.map((entry) => (
                         <motion.div
                             key={`${entry.label}-${entry.value ?? "pending"}`}
@@ -643,12 +647,12 @@ const AttendanceWidget = () => {
                             className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-xl shadow-blue-500/25 transform hover:scale-[1.02] transition-all duration-200"
                         >
                             {loading ? "⏳ Registrando..." :
-                             locationLoading ? "📍 Obteniendo ubicación..." :
-                             attendance?.lunch_start_time && !attendance?.lunch_end_time
-                                ? "🍽️ Regresar de Almuerzo"
-                                : attendance?.lunch_end_time
-                                    ? "🏁 Finalizar Jornada"
-                                    : "🍽️ Salir a Almuerzo"}
+                                locationLoading ? "📍 Obteniendo ubicación..." :
+                                    attendance?.lunch_start_time && !attendance?.lunch_end_time
+                                        ? "🍽️ Regresar de Almuerzo"
+                                        : attendance?.lunch_end_time
+                                            ? "🏁 Finalizar Jornada"
+                                            : "🍽️ Salir a Almuerzo"}
                         </Button>
                     ) : (
                         <Button
@@ -657,8 +661,8 @@ const AttendanceWidget = () => {
                             className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-xl shadow-emerald-500/25 transform hover:scale-[1.02] transition-all duration-200"
                         >
                             {loading ? "⏳ Registrando entrada..." :
-                             locationLoading ? "📍 Obteniendo ubicación..." :
-                             "🚀 Marcar Entrada"}
+                                locationLoading ? "📍 Obteniendo ubicación..." :
+                                    "🚀 Marcar Entrada"}
                         </Button>
                     )}
                 </div>
@@ -868,6 +872,32 @@ const AttendanceWidget = () => {
                 </div>
             </Modal>
         </Card>
+    );
+
+    return (
+        <>
+            <div className="fixed bottom-20 right-4 z-[50] flex flex-col items-end gap-2 sm:bottom-24 sm:right-6">
+                <span className="px-3 py-1 rounded-full bg-white/90 text-xs font-semibold text-blue-900 border border-white/60 shadow-sm">
+                    {quickBadgeText}
+                </span>
+                <button
+                    onClick={() => setWidgetModalOpen(true)}
+                    className="relative flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/40 transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
+                    aria-label="Abrir asistencia"
+                >
+                    <span className="absolute inset-0 -z-10 rounded-full bg-blue-500/40 animate-ping" aria-hidden="true" />
+                    <FiClock className="w-6 h-6" />
+                </button>
+            </div>
+            <Modal
+                isOpen={widgetModalOpen}
+                onClose={() => setWidgetModalOpen(false)}
+                title="Asistencia"
+                className="max-w-lg mx-4"
+            >
+                {renderWidgetContent()}
+            </Modal>
+        </>
     );
 };
 

@@ -9,7 +9,6 @@ const logger = require("../../config/logger");
 const audit = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const requestsService = require("../requests/requests.service");
-const notificationManager = require("../notifications/notificationManager");
 
 const MAIL_ENABLED = process.env.DISABLE_MAIL !== "true";
 const REQUEST_TYPE_LABELS = {
@@ -127,50 +126,37 @@ async function approve(request_id, approver_id) {
     // Notificación (no bloqueante)
     if (MAIL_ENABLED) {
       setImmediate(() => {
+        const recipients = [
+          requestInfo?.requester_email,
+          approverEmail,
+        ].filter(Boolean);
         const detailLink = `${FRONTEND_URL}/dashboard/servicio-tecnico?request=${request_id}`;
         const requestTitle = getRequestLabel(
           requestInfo?.request_code,
           requestInfo?.request_title
         );
-
+        const requesterName =
+          requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
         const scheduleHint =
           requestInfo?.request_code === "F.ST-20"
-            ? "Siguiente paso: agenda la visita de inspección y asigna técnico para coordinar con el cliente."
+            ? "<p><strong>Siguiente paso:</strong> agenda la visita de inspección y asigna técnico para coordinar con el cliente.</p>"
             : "";
 
-        const sender = approverEmail ? {
-          from: approverEmail,
-          name: approverName,
-          replyTo: approverEmail,
-          delegatedUser: approverEmail,
+        sendMail({
+          to: recipients.length ? recipients : process.env.SMTP_FROM,
+          subject: `Solicitud #${request_id} aprobada`,
+          html: `
+            <h2>Solicitud aprobada</h2>
+            <p><b>${requestTitle}</b> (#${request_id}) fue aprobada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
+            <p>Solicitante: <b>${requesterName}</b></p>
+            ${scheduleHint}
+            <p>Revisa el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+          `,
+          from: approverEmail ? { email: approverEmail, name: approverName } : undefined,
+          replyTo: approverEmail || undefined,
+          senderName: approverName || undefined,
+          delegatedUser: approverEmail || undefined,
           gmailUserId: approver_id,
-          cc: approverEmail // Copia al aprobador
-        } : { cc: approverEmail };
-
-        notificationManager.sendNotification({
-          userId: requestInfo.requester_id,
-          template: 'request_approved',
-          data: {
-            requestId: request_id,
-            requestTitle: requestTitle,
-            approverName: approverName || approverEmail || "Aprobador",
-            extraInfo: scheduleHint,
-            link: detailLink
-          },
-          email: true,
-          chat: false,
-          priority: 2,
-          source: 'requests.approval',
-          meta: {
-            requestId: request_id,
-            approverId: approver_id,
-            action: 'approved'
-          },
-          sender: approverEmail ? {
-            name: approverName,
-            replyTo: approverEmail,
-            gmailUserId: approver_id
-          } : undefined
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de aprobación");
         });
@@ -259,45 +245,33 @@ async function reject(request_id, approver_id, note = null) {
 
     if (MAIL_ENABLED) {
       setImmediate(() => {
+        const recipients = [
+          requestInfo?.requester_email,
+          approverEmail,
+        ].filter(Boolean);
         const detailLink = `${FRONTEND_URL}/dashboard/servicio-tecnico?request=${request_id}`;
         const requestTitle = getRequestLabel(
           requestInfo?.request_code,
           requestInfo?.request_title
         );
+        const requesterName =
+          requestInfo?.requester_name || requestInfo?.requester_email || "Solicitante";
 
-        const sender = approverEmail ? {
-          from: approverEmail,
-          name: approverName,
-          replyTo: approverEmail,
-          delegatedUser: approverEmail,
-          gmailUserId: approver_id
-        } : null;
-
-        notificationManager.sendNotification({
-          userId: requestInfo.requester_id,
-          template: 'request_rejected',
-          data: {
-            requestId: request_id,
-            requestTitle: requestTitle,
-            approverName: approverName || approverEmail || "Aprobador",
-            reason: note || "sin especificar",
-            link: detailLink
-          },
-          email: true,
-          chat: false,
-          priority: 3,
-          source: 'requests.rejection',
-          meta: {
-            requestId: request_id,
-            approverId: approver_id,
-            action: 'rejected',
-            reason: note
-          },
-          sender: approverEmail ? {
-            name: approverName,
-            replyTo: approverEmail,
-            gmailUserId: approver_id
-          } : undefined
+        sendMail({
+          to: recipients.length ? recipients : process.env.SMTP_FROM,
+          subject: `Solicitud #${request_id} rechazada`,
+          html: `
+            <h2>Solicitud rechazada</h2>
+            <p><b>${requestTitle}</b> (#${request_id}) fue rechazada por <b>${approverName || approverEmail || "Aprobador"}</b>.</p>
+            <p>Solicitante: <b>${requesterName}</b></p>
+            <p>Motivo: ${note || "sin especificar"}</p>
+            <p>Revisa el detalle en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+          `,
+          from: approverEmail ? { email: approverEmail, name: approverName } : undefined,
+          replyTo: approverEmail || undefined,
+          senderName: approverName || undefined,
+          delegatedUser: approverEmail || undefined,
+          gmailUserId: approver_id,
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de rechazo");
         });

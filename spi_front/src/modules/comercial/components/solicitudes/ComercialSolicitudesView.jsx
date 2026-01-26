@@ -387,16 +387,51 @@ const ComercialSolicitudesView = () => {
                         title: "Resumen de Solicitudes",
                         subtitle: "Consulta el historial de solicitudes por tipo",
                         content: (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                                {visibleStatWidgets.map(widget => (
-                                    <RequestStatWidget
-                                        key={widget.id}
-                                        title={widget.title}
-                                        icon={widget.icon}
-                                        color={widget.color}
-                                        onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
-                                    />
-                                ))}
+                            <div className="space-y-6">
+                                {/* iOS Springboard Navigation - Enhanced for iPhone 13 */}
+                                <div className="flex items-center justify-between">
+                                    <h3 className="text-lg font-bold text-gray-900 tracking-tight">Accesos Rápidos</h3>
+                                    <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-full">
+                                        {new Date().toLocaleDateString('es-ES', { 
+                                            day: 'numeric',
+                                            month: 'short'
+                                        })}
+                                    </div>
+                                </div>
+                                
+                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                    {visibleStatWidgets.map(widget => (
+                                        <div 
+                                            key={widget.id}
+                                            className="group cursor-pointer"
+                                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
+                                        >
+                                            <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-blue-100/50 group-active:scale-95">
+                                                <div className={`w-12 h-12 bg-gradient-to-br ${
+                                                    widget.color === 'emerald' ? 'from-emerald-500 to-emerald-600' :
+                                                    widget.color === 'blue' ? 'from-blue-500 to-blue-600' :
+                                                    widget.color === 'amber' ? 'from-amber-500 to-amber-600' :
+                                                    widget.color === 'orange' ? 'from-orange-500 to-orange-600' :
+                                                    'from-blue-500 to-blue-600'
+                                                } rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:${
+                                                    widget.color === 'emerald' ? 'shadow-emerald-500/25' :
+                                                    widget.color === 'blue' ? 'shadow-blue-500/25' :
+                                                    widget.color === 'amber' ? 'shadow-amber-500/25' :
+                                                    widget.color === 'orange' ? 'shadow-orange-500/25' :
+                                                    'shadow-blue-500/25'
+                                                } transition-shadow`}>
+                                                    <widget.icon className="w-5 h-5 text-white" />
+                                                </div>
+                                                <span className="text-xs font-semibold text-gray-900 text-center leading-tight">
+                                                    {widget.title.split(' ')[0]}
+                                                </span>
+                                                <span className="text-[10px] text-gray-500 text-center leading-tight">
+                                                    {widget.title.split(' ').slice(1).join(' ')}
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )
                     }
@@ -413,13 +448,21 @@ const ComercialSolicitudesView = () => {
                 <div className="space-y-3">
                     <p>¿El cliente pertenece a la red pública o es un cliente privado?</p>
                     <div className="flex flex-wrap gap-3">
-                        <Button variant="secondary" onClick={() => handlePurchaseTypeSelection("public")}>
-                            Público
-                        </Button>
-                        <Button variant="primary" onClick={() => handlePurchaseTypeSelection("private")}>
-                            Privado
-                        </Button>
-                    </div>
+                                    <Button 
+                                        variant="secondary" 
+                                        onClick={() => handlePurchaseTypeSelection("public")}
+                                        className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-600"
+                                    >
+                                        Público
+                                    </Button>
+                                    <Button 
+                                        variant="primary" 
+                                        onClick={() => handlePurchaseTypeSelection("private")}
+                                        className="rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:from-blue-600 hover:to-blue-700 hover:shadow-md active:scale-95"
+                                    >
+                                        Privado
+                                    </Button>
+                                </div>
                 </div>
             </Modal>
 
@@ -465,33 +508,33 @@ const ComercialSolicitudesView = () => {
                         <h3 className="text-lg font-semibold text-gray-900 mb-4">Información del Cliente</h3>
                         <div className="grid gap-4 md:grid-cols-2">
                             <input
-                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                 placeholder="Nombres"
                                 value={privateForm.firstName}
                                 onChange={(e) => setPrivateForm(prev => ({ ...prev, firstName: e.target.value }))}
                             />
                             <input
-                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                 placeholder="Apellidos"
                                 value={privateForm.lastName}
                                 onChange={(e) => setPrivateForm(prev => ({ ...prev, lastName: e.target.value }))}
                             />
                         </div>
                         <input
-                            className="w-full mt-4 rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                            className="w-full mt-4 rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                             placeholder="Nombre Comercial"
                             value={privateForm.clientName}
                             onChange={(e) => setPrivateForm(prev => ({ ...prev, clientName: e.target.value }))}
                         />
                         <div className="grid gap-4 md:grid-cols-2 mt-4">
                             <input
-                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                 placeholder="RUC / Cédula"
                                 value={privateForm.clientIdentifier}
                                 onChange={(e) => setPrivateForm(prev => ({ ...prev, clientIdentifier: e.target.value }))}
                             />
                             <input
-                                className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                 placeholder="Correo de contacto"
                                 value={privateForm.clientEmail}
                                 onChange={(e) => setPrivateForm(prev => ({ ...prev, clientEmail: e.target.value }))}
@@ -501,7 +544,7 @@ const ComercialSolicitudesView = () => {
                             <label className="flex flex-col text-sm text-gray-600 gap-1">
                                 Tipo de cliente
                                 <select
-                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                     value={privateForm.clientType}
                                     onChange={(e) => setPrivateForm(prev => ({ ...prev, clientType: e.target.value }))}
                                 >
@@ -524,8 +567,8 @@ const ComercialSolicitudesView = () => {
                                     <div
                                         key={equipment.id}
                                         onClick={() => toggleEquipment(equipment.id)}
-                                        className={`rounded-2xl border p-4 transition cursor-pointer ${
-                                            selected ? "border-blue-500 bg-blue-50" : "border-gray-200 bg-white"
+                                        className={`rounded-2xl border p-4 transition-all duration-200 cursor-pointer shadow-sm ${
+                                            selected ? "border-blue-500 bg-blue-50 shadow-blue-100" : "border-gray-200 bg-white hover:shadow-md hover:border-gray-300"
                                         }`}
                                     >
                                         <div className="flex items-center justify-between">
@@ -546,8 +589,8 @@ const ComercialSolicitudesView = () => {
                                                 <span>Tipo:</span>
                                                 <button
                                                     type="button"
-                                                    className={`rounded-full px-2 py-1 ${
-                                                        selected.type === "new" ? "bg-blue-600 text-white" : "border border-gray-300"
+                                                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                                                        selected.type === "new" ? "bg-blue-600 text-white shadow-sm" : "border border-gray-300 bg-white hover:bg-gray-50"
                                                     }`}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -558,8 +601,8 @@ const ComercialSolicitudesView = () => {
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    className={`rounded-full px-2 py-1 ${
-                                                        selected.type === "cu" ? "bg-blue-600 text-white" : "border border-gray-300"
+                                                    className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ${
+                                                        selected.type === "cu" ? "bg-blue-600 text-white shadow-sm" : "border border-gray-300 bg-white hover:bg-gray-50"
                                                     }`}
                                                     onClick={(e) => {
                                                         e.stopPropagation();
@@ -591,7 +634,7 @@ const ComercialSolicitudesView = () => {
                                 type="date"
                                 value={offerValidity}
                                 onChange={(e) => setOfferValidity(e.target.value)}
-                                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                             />
                             <p className="text-xs text-gray-500">
                                 Vigencia sugerida: 5 años desde la fecha actual.
@@ -602,7 +645,7 @@ const ComercialSolicitudesView = () => {
                             <label className="flex flex-col text-sm text-gray-600 gap-1">
                                 Tipo de oferta
                                 <select
-                                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                     value={offerKind}
                                     onChange={(e) => setOfferKind(e.target.value)}
                                 >
@@ -621,7 +664,7 @@ const ComercialSolicitudesView = () => {
                                         type="file"
                                         accept=".pdf,.png,.jpg,.jpeg"
                                         onChange={(e) => setComodatoFile(e.target.files?.[0] || null)}
-                                        className="rounded-lg border border-dashed border-gray-300 px-3 py-2 text-sm"
+                                        className="rounded-xl border border-dashed border-gray-300 px-4 py-3 text-sm bg-gray-50 transition-all duration-200 hover:border-blue-300 hover:bg-blue-50/50 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 dark:border-gray-600 dark:bg-gray-700/50 dark:text-white dark:hover:border-blue-400 dark:focus:border-blue-400"
                                     />
                                 </label>
                             </div>
@@ -632,7 +675,7 @@ const ComercialSolicitudesView = () => {
                                 Notas adicionales
                                 <textarea
                                     rows={3}
-                                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm shadow-sm transition-all duration-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 focus:shadow-blue-100 resize-none dark:border-gray-600 dark:bg-gray-700 dark:text-white dark:focus:border-blue-400 dark:focus:ring-blue-400/20"
                                     placeholder="Información adicional sobre la solicitud..."
                                     value={privateForm.notes}
                                     onChange={(e) => setPrivateForm(prev => ({ ...prev, notes: e.target.value }))}
@@ -642,12 +685,17 @@ const ComercialSolicitudesView = () => {
                     </div>
 
                     <div className="flex justify-end gap-3 pt-4">
-                        <Button variant="secondary" onClick={closePrivateModal}>
+                        <Button 
+                            variant="secondary" 
+                            onClick={closePrivateModal}
+                            className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 transition-all duration-200 hover:border-gray-300 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:border-gray-500 dark:hover:bg-gray-600"
+                        >
                             Cancelar
                         </Button>
                         <Button
                             onClick={handlePrivateSubmit}
                             disabled={!privateForm.clientName || selectedEquipment.length === 0}
+                            className="rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-200 hover:from-blue-600 hover:to-blue-700 hover:shadow-md active:scale-95 disabled:from-gray-400 disabled:to-gray-500 disabled:cursor-not-allowed"
                         >
                             Crear solicitud privada
                         </Button>
