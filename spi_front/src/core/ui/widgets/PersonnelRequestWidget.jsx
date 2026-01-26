@@ -3,6 +3,7 @@ import { FiUsers, FiPlus, FiClock, FiCheckCircle, FiXCircle, FiAlertCircle } fro
 import toast from 'react-hot-toast';
 import Card from '../components/Card';
 import Button from '../components/Button';
+import { formatDateSafe } from '../../../shared/utils/dateUtils';
 import PersonnelRequestForm from './PersonnelRequestForm';
 import { getPersonnelRequests } from '../../api/personnelRequestsApi';
 
@@ -23,7 +24,7 @@ const PersonnelRequestWidget = () => {
             const response = await getPersonnelRequests({ my_requests: true, pageSize: 5 });
             setRequests(response.data || []);
 
-            // Calcular estadísticas
+            // Calcular estadisticas
             const newStats = {
                 pendientes: 0,
                 en_revision: 0,
@@ -31,9 +32,21 @@ const PersonnelRequestWidget = () => {
                 rechazadas: 0,
             };
 
-            response.data?.forEach(req => {
-                if (newStats.hasOwnProperty(req.status)) {
-                    newStats[req.status]++;
+            const statusMap = {
+                pendiente: 'pendientes',
+                pending: 'pendientes',
+                en_revision: 'en_revision',
+                en_revision_hh: 'en_revision',
+                aprobada: 'aprobadas',
+                approved: 'aprobadas',
+                rechazada: 'rechazadas',
+                rejected: 'rechazadas',
+            };
+
+            (response.data || []).forEach((req) => {
+                const key = statusMap[req.status] || null;
+                if (key && Object.prototype.hasOwnProperty.call(newStats, key)) {
+                    newStats[key] += 1;
                 }
             });
 
@@ -57,7 +70,7 @@ const PersonnelRequestWidget = () => {
     const getStatusBadge = (status) => {
         const badges = {
             pendiente: { color: 'bg-yellow-100 text-yellow-800', icon: FiClock, label: 'Pendiente' },
-            en_revision: { color: 'bg-blue-100 text-blue-800', icon: FiAlertCircle, label: 'En Revisión' },
+            en_revision: { color: 'bg-blue-100 text-blue-800', icon: FiAlertCircle, label: 'En Revision' },
             aprobada: { color: 'bg-green-100 text-green-800', icon: FiCheckCircle, label: 'Aprobada' },
             rechazada: { color: 'bg-red-100 text-red-800', icon: FiXCircle, label: 'Rechazada' },
             en_proceso: { color: 'bg-purple-100 text-purple-800', icon: FiClock, label: 'En Proceso' },
@@ -118,14 +131,14 @@ const PersonnelRequestWidget = () => {
                     </Button>
                 </div>
 
-                {/* Estadísticas rápidas */}
+                {/* Estadisticas rapidas */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
                     <div className="bg-yellow-50 rounded-lg p-3">
                         <p className="text-xs text-yellow-600 font-medium">Pendientes</p>
                         <p className="text-2xl font-bold text-yellow-700">{stats.pendientes}</p>
                     </div>
                     <div className="bg-blue-50 rounded-lg p-3">
-                        <p className="text-xs text-blue-600 font-medium">En Revisión</p>
+                        <p className="text-xs text-blue-600 font-medium">En Revision</p>
                         <p className="text-2xl font-bold text-blue-700">{stats.en_revision}</p>
                     </div>
                     <div className="bg-green-50 rounded-lg p-3">
@@ -161,7 +174,7 @@ const PersonnelRequestWidget = () => {
                                                 {request.position_title}
                                             </h5>
                                             <p className="text-xs text-gray-600 mt-0.5">
-                                                {request.request_number} • {new Date(request.created_at).toLocaleDateString('es-EC')}
+                                                {request.request_number} - {formatDateSafe(request.created_at)}
                                             </p>
                                         </div>
                                         {getStatusBadge(request.status)}
@@ -182,13 +195,7 @@ const PersonnelRequestWidget = () => {
                     )}
                 </div>
 
-                {requests.length > 0 && (
-                    <div className="mt-4 text-center">
-                        <button className="text-sm text-blue-600 hover:text-blue-700 font-medium">
-                            Ver todas las solicitudes →
-                        </button>
-                    </div>
-                )}
+                
             </Card>
 
             {showForm && (

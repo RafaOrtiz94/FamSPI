@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FiUsers, FiSettings, FiRefreshCw, FiClipboard } from "react-icons/fi";
+import { FiUsers, FiSettings, FiRefreshCw, FiClipboard, FiCalendar } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -94,7 +94,7 @@ const TalentoDashboard = () => {
       </div>
 
       {/* Navegación a secciones especializadas */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mt-6">
         <ActionCard
           icon={FiUsers}
           subtitle="Administración"
@@ -115,6 +115,13 @@ const TalentoDashboard = () => {
           title="Ver Solicitudes"
           color="orange"
           onClick={() => navigate("/dashboard/talento-humano/solicitudes")}
+        />
+        <ActionCard
+          icon={FiCalendar}
+          subtitle="Permisos"
+          title="Permisos y vacaciones"
+          color="teal"
+          onClick={() => navigate("/dashboard/talento-humano/permisos")}
         />
         <ActionCard
           icon={FiRefreshCw}

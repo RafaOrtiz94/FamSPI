@@ -40,6 +40,7 @@ const PermisosStatusWidget = () => {
   );
   const isGerencia = role.includes("gerencia");
   const isApprover = isJefe || isGerencia;
+  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero"].includes(scope);
 
   const [activeTab, setActiveTab] = useState("mine");
   const [misSolicitudes, setMisSolicitudes] = useState([]);
@@ -136,7 +137,9 @@ const PermisosStatusWidget = () => {
       console.error("Error loading permisos:", error);
       showToast("Error al cargar solicitudes", "error");
     } finally {
-      await Promise.all([fetchActiveException(), fetchAttendance()]);
+      if (!isTalentRole) {
+        await Promise.all([fetchActiveException(), fetchAttendance()]);
+      }
       setLoading(false);
     }
   };
@@ -302,6 +305,7 @@ const PermisosStatusWidget = () => {
     const { showActions = false, showUser = false, showDocs = false } = options;
     const shouldShowDocs = (showActions || showDocs) && hasJustificantes(solicitud);
     const requiresUpload = solicitud.status === "partially_approved" && !showActions;
+    const isVacation = solicitud.tipo_solicitud === "vacaciones";
 
     return (
       <motion.div
@@ -403,11 +407,19 @@ const PermisosStatusWidget = () => {
                   <Button
                     size="sm"
                     variant="primary"
-                    onClick={() => handleAprobarParcial(solicitud.id)}
+                    onClick={() =>
+                      isVacation
+                        ? handleAprobarFinal(solicitud.id)
+                        : handleAprobarParcial(solicitud.id)
+                    }
                     disabled={actionLoading === solicitud.id}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
                   >
-                    {actionLoading === solicitud.id ? "..." : "Aprobar parcial"}
+                    {actionLoading === solicitud.id
+                      ? "..."
+                      : isVacation
+                      ? "Aprobar definitiva"
+                      : "Aprobar parcial"}
                   </Button>
                   <Button
                     size="sm"
@@ -561,7 +573,7 @@ const PermisosStatusWidget = () => {
 
   return (
     <>
-      {attendance && renderAttendanceGrid()}
+      {!isTalentRole && attendance && renderAttendanceGrid()}
       {activeException && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}

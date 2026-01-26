@@ -27,13 +27,14 @@ import UserRequestsView from "../components/solicitudes/UserRequestsView";
 import {
   MaintenanceRequestModal,
   PrivatePurchaseRequestModal,
-  PublicPurchaseRequestModal,
   EquipmentRequestModal,
   BusinessCaseRequestModal
 } from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
 import { createRequest } from "../../../core/api/requestsApi";
+import PurchaseTypeSelector from "../../../shared/purchases/PurchaseTypeSelector";
+import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
 
 // Importar configuraciones centralizadas
 import { REQUEST_TYPES_CONFIG } from '../config/requestConfig';
@@ -59,7 +60,10 @@ const SolicitudesPage = () => {
   const [createInspectionModalOpen, setCreateInspectionModalOpen] = useState(false);
   const [createRetiroModalOpen, setCreateRetiroModalOpen] = useState(false);
   const [purchaseTypeSelectionModalOpen, setPurchaseTypeSelectionModalOpen] = useState(false);
-  const [publicPurchaseModalOpen, setPublicPurchaseModalOpen] = useState(false);
+  const [newPurchaseModalOpen, setNewPurchaseModalOpen] = useState(false);
+  const [newPurchaseMode, setNewPurchaseMode] = useState('acp_required');
+  const [newPurchaseSource, setNewPurchaseSource] = useState('dashboard');
+  const [newPurchaseIntent, setNewPurchaseIntent] = useState('provider_handoff');
   const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
   const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
   const [permisosModalOpen, setPermisosModalOpen] = useState(false);
@@ -68,16 +72,26 @@ const SolicitudesPage = () => {
   const roleConfig = useMemo(() => {
     const roleName = (user?.role_name || user?.role || "").toLowerCase();
     const isACP = roleName.includes('acp');
+    const isBackofficeCommercial = roleName === "backoffice_comercial";
 
     const baseActions = ["cliente", "compra", "permisos"];
     const acpActions = ["cliente", "compra", "permisos"];
+    const backofficeCommercialActions = ["cliente", "compra", "permisos"];
     const fullActions = ["inspection", "retiro", ...baseActions];
 
-    const availableActionIds = isACP ? acpActions : fullActions;
+    let availableActionIds;
+    if (isBackofficeCommercial) {
+      availableActionIds = backofficeCommercialActions;
+    } else if (isACP) {
+      availableActionIds = acpActions;
+    } else {
+      availableActionIds = fullActions;
+    }
 
     return {
       isACP,
-      viewComponent: isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView,
+      isBackofficeCommercial,
+      viewComponent: isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView),
       availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean)
     };
   }, [user]);
@@ -115,21 +129,31 @@ const SolicitudesPage = () => {
 
   // Función para manejar selección de tipo de compra
   const handlePurchaseTypeSelection = useCallback((type) => {
-    setPurchaseTypeSelectionModalOpen(false);
-    if (type === 'public') {
-      // Abrir modal de creación de solicitud de compra pública
-      setPublicPurchaseModalOpen(true);
-    } else if (type === 'private') {
-      // Abrir modal de compra privada
+    console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][PURCHASE_TYPE_SELECTED]', {
+      type,
+      timestamp: new Date().toISOString()
+    });
+
+    if (type === 'private') {
+      // Abrir modal específico para proceso de compra privada/comodato
       openModal('PRIVATE_PURCHASE');
+      console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][OPENING_PRIVATE_PURCHASE_PROCESS_MODAL]');
+    } else if (type === 'public') {
+      // Abrir modal de compra pública usando NewPurchaseRequestModal
+      setNewPurchaseMode('acp_required');
+      setNewPurchaseSource('solicitudes_publicas');
+      setNewPurchaseIntent('public_purchase');
+      setNewPurchaseModalOpen(true);
+      console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][OPENING_PUBLIC_PURCHASE_MODAL]');
     }
   }, [openModal]);
 
-  // Componentes de Tabs
+  // Componentes de Tabs - Filtrar según rol
   const tabs = [
     { id: 'overview', label: 'Vista General', icon: FiBarChart2 },
     { id: 'my-requests', label: 'Mis Solicitudes', icon: FiList },
-    { id: 'analytics', label: 'Análisis', icon: FiActivity }
+    // Ocultar análisis/planning para usuarios backoffice_comercial
+    ...(roleConfig.isBackofficeCommercial ? [] : [{ id: 'analytics', label: 'Análisis', icon: FiActivity }])
   ];
 
   // Contenido de cada tab
@@ -212,10 +236,10 @@ const SolicitudesPage = () => {
                     key={action.id}
                     onClick={() => handleQuickAction(action.id)}
                     className={`p-3 h-14 ${action.color === 'blue' ? 'bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800' :
-                        action.color === 'amber' ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800' :
-                          action.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800' :
-                            action.color === 'indigo' ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800' :
-                              'bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
+                      action.color === 'amber' ? 'bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-700 hover:to-amber-800' :
+                        action.color === 'emerald' ? 'bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-700 hover:to-emerald-800' :
+                          action.color === 'indigo' ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-700 hover:to-indigo-800' :
+                            'bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800'
                       } text-white rounded-xl shadow-md`}
                   >
                     <div className="flex items-center gap-3">
@@ -231,9 +255,11 @@ const SolicitudesPage = () => {
             </Card>
 
             {/* Vista Específica del Rol */}
-            <div className="mt-8">
-              <roleConfig.viewComponent />
-            </div>
+            {roleConfig.viewComponent && (
+              <div className="mt-8">
+                <roleConfig.viewComponent />
+              </div>
+            )}
 
             {/* Actividad Reciente */}
             <Card className="p-6 border-0 shadow-xl shadow-slate-100/60 rounded-2xl">
@@ -292,7 +318,7 @@ const SolicitudesPage = () => {
                   <FiClock className="text-yellow-600" size={20} />
                 </motion.div>
 
-                {!roleConfig.isACP && (
+                {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
                   <motion.div
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
@@ -367,7 +393,7 @@ const SolicitudesPage = () => {
                       <span className="text-sm font-medium text-slate-700">Permisos</span>
                       <span className="text-sm font-bold text-orange-600">8</span>
                     </div>
-                    {!roleConfig.isACP && (
+                    {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
                       <>
                         <div className="flex justify-between items-center">
                           <span className="text-sm font-medium text-slate-700">Inspecciones</span>
@@ -527,8 +553,23 @@ const SolicitudesPage = () => {
 
       <CreateRequestModal
         open={createCompraModalOpen}
-        onClose={() => setCreateCompraModalOpen(false)}
+        onClose={() => {
+          console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][MODAL_CLOSE]', {
+            modalType: 'CreateRequestModal',
+            presetType: 'compra',
+            timestamp: new Date().toISOString()
+          });
+          setCreateCompraModalOpen(false);
+        }}
         onSubmit={async (data) => {
+          console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][FORM_SUBMIT]', {
+            modalType: 'CreateRequestModal',
+            presetType: 'compra',
+            formType: 'compra_general',
+            hasData: !!data,
+            timestamp: new Date().toISOString()
+          });
+
           try {
             showLoader();
             console.log('[SOLICITUDES_PAGE][COMPRA] Enviando:', data);
@@ -631,7 +672,21 @@ const SolicitudesPage = () => {
       {/* ✅ MODALES GLOBALES DETALLADOS */}
       <PrivatePurchaseRequestModal
         isOpen={privatePurchaseModalOpen}
-        onClose={() => closeModal('PRIVATE_PURCHASE')}
+        onClose={() => {
+          console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][MODAL_CLOSE]', {
+            modalType: 'PrivatePurchaseRequestModal',
+            timestamp: new Date().toISOString()
+          });
+          closeModal('PRIVATE_PURCHASE');
+        }}
+        onSuccess={(data) => {
+          console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][FORM_SUBMIT]', {
+            modalType: 'PrivatePurchaseRequestModal',
+            formType: 'compra_privada_proceso',
+            hasData: !!data,
+            timestamp: new Date().toISOString()
+          });
+        }}
       />
 
       <BusinessCaseRequestModal
@@ -649,73 +704,25 @@ const SolicitudesPage = () => {
         onClose={() => closeModal('MAINTENANCE')}
       />
 
-      {/* Modal de selección de tipo de compra */}
-      <Modal
+      {/* COMPONENTE UNIFICADO PARA SELECCIÓN DE TIPO DE COMPRA */}
+      <PurchaseTypeSelector
         isOpen={purchaseTypeSelectionModalOpen}
         onClose={() => setPurchaseTypeSelectionModalOpen(false)}
-        title="Seleccionar Tipo de Compra"
-        maxWidth="max-w-md"
-      >
-        <div className="space-y-4">
-          <p className="text-sm text-gray-600 text-center">
-            ¿Qué tipo de requerimiento de compra deseas crear?
-          </p>
+        origin="solicitudes"
+        onSelect={handlePurchaseTypeSelection}
+      />
 
-          <div className="grid grid-cols-1 gap-3">
-            {/* Opción Compra Pública */}
-            <button
-              onClick={() => handlePurchaseTypeSelection('public')}
-              className="p-4 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors text-left group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-emerald-100 rounded-lg group-hover:bg-emerald-200 transition-colors">
-                  <FiShoppingCart className="text-emerald-600" size={20} />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-emerald-900">Compra Pública</h3>
-                  <p className="text-sm text-emerald-700">
-                    Proceso formal vía Administración de Contratación Pública (ACP)
-                  </p>
-                </div>
-              </div>
-            </button>
-
-            {/* Opción Compra Privada */}
-            <button
-              onClick={() => handlePurchaseTypeSelection('private')}
-              className="p-4 border border-purple-200 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors text-left group"
-            >
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 rounded-lg group-hover:bg-purple-200 transition-colors">
-                  <FiBriefcase className="text-purple-600" size={20} />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-purple-900">Compra Privada</h3>
-                  <p className="text-sm text-purple-700">
-                    Proceso directo con cliente privado y flujo interno
-                  </p>
-                </div>
-              </div>
-            </button>
-          </div>
-
-          <div className="flex justify-end pt-4">
-            <Button
-              variant="secondary"
-              onClick={() => setPurchaseTypeSelectionModalOpen(false)}
-            >
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Modal de compra pública reconstruido */}
-      <PublicPurchaseRequestModal
-        isOpen={publicPurchaseModalOpen}
-        onClose={() => setPublicPurchaseModalOpen(false)}
-        onSuccess={() => {
-          setPublicPurchaseModalOpen(false);
+      {/* Modal unificado de compra pública/privada */}
+      <NewPurchaseRequestModal
+        isOpen={newPurchaseModalOpen}
+        onOpenChange={setNewPurchaseModalOpen}
+        mode={newPurchaseMode}
+        source={newPurchaseSource}
+        intent={newPurchaseIntent}
+        hideButton={true}
+        onSuccess={(result) => {
+          console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][PURCHASE_SUCCESS]', result);
+          setNewPurchaseModalOpen(false);
           // Aquí podríamos recargar datos si fuera necesario
         }}
       />

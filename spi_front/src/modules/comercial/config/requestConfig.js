@@ -178,12 +178,21 @@ export const formatDate = (dateString) => {
 export const getAvailableActions = (user) => {
   const roleName = (user?.role_name || user?.role || "").toLowerCase();
   const isACP = roleName.includes('acp');
+  const isBackofficeCommercial = roleName === "backoffice_comercial";
 
   const baseActions = ["cliente", "compra", "permisos"];
   const acpActions = ["cliente", "compra", "permisos"];
+  const backofficeCommercialActions = ["cliente", "compra", "permisos"];
   const fullActions = ["inspection", "retiro", ...baseActions];
 
-  const availableActionIds = isACP ? acpActions : fullActions;
+  let availableActionIds;
+  if (isBackofficeCommercial) {
+    availableActionIds = backofficeCommercialActions;
+  } else if (isACP) {
+    availableActionIds = acpActions;
+  } else {
+    availableActionIds = fullActions;
+  }
 
   return availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean);
 };
@@ -195,4 +204,3 @@ export const getRequestViewComponent = (user) => {
   // Aquí se podría importar dinámicamente si fuera necesario
   return isACP ? 'ACPComercialSolicitudesView' : 'ComercialSolicitudesView';
 };
-

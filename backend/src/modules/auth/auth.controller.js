@@ -29,7 +29,8 @@ const { isOffHours } = require("../../utils/offHoursPolicy");
 const { getGeoLocation } = require("../../utils/geoip");
 const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
 const { logAction } = require("../../utils/audit");
-const { v4: uuidv4 } = require('uuid');
+// Use crypto.randomUUID() (Node.js 18+ native)
+const { randomUUID } = require('crypto');
 
 const SCOPES = ["profile", "email"];
 const ROLE_META = {
@@ -186,15 +187,51 @@ const googleCallback = async (req, res) => {
       return res.redirect(`${FRONTEND_URL}/login?error=${msg}`);
     }
 
-    // Buscar o crear usuario
-    const existing = await db.query(
+    // Buscar o crear usuario (prioriza google_id para evitar duplicados)
+    const existingByGoogle = await db.query(
+      "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE google_id = $1 LIMIT 1",
+      [googleId]
+    );
+    const existingByEmail = await db.query(
       "SELECT id, email, fullname, role, department_id, lopdp_internal_status FROM users WHERE email = $1 LIMIT 1",
       [email]
     );
     let user;
 
-    if (existing.rows.length === 0) {
-      logger.info(`🆕 Creando nuevo usuario: ${email}`);
+    if (existingByGoogle.rows.length > 0) {
+      logger.info("Actualizando usuario por google_id: " + email);
+      const upd = await db.query(
+        `
+        UPDATE users
+        SET email = $1,
+            fullname = $2,
+            updated_at = NOW(),
+            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
+            lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+        WHERE google_id = $3
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+        `,
+        [email, fullname, googleId, "ti"]
+      );
+      user = upd.rows[0];
+    } else if (existingByEmail.rows.length > 0) {
+      logger.info("Actualizando usuario existente: " + email);
+      const upd = await db.query(
+        `
+        UPDATE users
+        SET google_id = $1,
+            fullname = $2,
+            updated_at = NOW(),
+            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
+            lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
+        WHERE email = $3
+        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
+        `,
+        [googleId, fullname, email, "ti"]
+      );
+      user = upd.rows[0];
+    } else {
+      logger.info("Creando nuevo usuario: " + email);
       const ins = await db.query(
         `
         INSERT INTO users (
@@ -212,22 +249,6 @@ const googleCallback = async (req, res) => {
         [googleId, email, fullname, data.given_name || "Usuario", "pendiente", "comercial"]
       );
       user = ins.rows[0];
-    } else {
-      logger.info(`🔄 Actualizando usuario existente: ${email}`);
-      const upd = await db.query(
-        `
-        UPDATE users
-        SET google_id = $1,
-            fullname = $2,
-            updated_at = NOW(),
-            department_id = COALESCE(department_id, (SELECT id FROM departments WHERE code = $4 LIMIT 1)),
-      lopdp_internal_status = COALESCE(lopdp_internal_status, 'pending')
-        WHERE email = $3
-        RETURNING id, email, fullname, role, department_id, lopdp_internal_status;
-        `,
-        [googleId, fullname, email, "ti"]
-      );
-      user = upd.rows[0];
     }
 
     const roleValue = user.role || "pendiente";
@@ -252,7 +273,7 @@ const googleCallback = async (req, res) => {
     };
 
     // Generar correlation ID para tracking de sesión
-    const correlationId = uuidv4();
+    const correlationId = randomUUID();
 
     // Set correlation ID in request context for this request
     const { updateContext } = require("../../utils/requestContext");
@@ -290,7 +311,7 @@ const googleCallback = async (req, res) => {
       offHoursCheck = {
         isOffHours: true,
         reason: 'offhours_test',
-        schedule: { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] }
+        schedule: { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1, 2, 3, 4, 5] }
       };
     }
 
@@ -338,7 +359,7 @@ const googleCallback = async (req, res) => {
         event: offHoursCheck.isOffHours ? "security.offhours_login" : "auth.login_success",
         correlation_id: correlationId,
         reason: offHoursCheck.reason,
-        schedule: offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] },
+        schedule: offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1, 2, 3, 4, 5] },
         ip,
         user_agent: req.headers["user-agent"],
         geo_location: geoInfo,

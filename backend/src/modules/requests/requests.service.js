@@ -7,7 +7,6 @@
 
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { v4: uuidv4 } = require("uuid");
 const { drive, docs } = require("../../config/google");
 const QRCode = require("qrcode");
 const { Readable } = require("stream");
@@ -29,6 +28,14 @@ const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 const { captureSerial, cambiarEstadoUnidad, assignUnidad, normalizeDetalleValue } = require("../inventario/inventario.service");
 const requestSchemas = require("./requestSchemas");
+
+// Helper function for UUID generation
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 const FRONTEND_URL = (process.env.FRONTEND_URL || "http://localhost:3001").replace(
   /\$\/$/, ""
@@ -147,11 +154,11 @@ function buildConsentDeclarationText({ request, token }) {
   const sealCode =
     tokenId && request?.id
       ? crypto
-          .createHash("sha256")
-          .update(`${tokenId}:${request.id}:${formattedDate}`)
-          .digest("hex")
-          .slice(0, 16)
-          .toUpperCase()
+        .createHash("sha256")
+        .update(`${tokenId}:${request.id}:${formattedDate}`)
+        .digest("hex")
+        .slice(0, 16)
+        .toUpperCase()
       : "N/A";
 
   return `
@@ -228,7 +235,7 @@ async function shareDriveFilePublic(fileId) {
 
 function bufferToStream(buffer) {
   const readable = new Readable();
-  readable._read = () => {};
+  readable._read = () => { };
   readable.push(buffer);
   readable.push(null);
   return readable;
@@ -399,7 +406,7 @@ async function sendConsentEmailToken({ user, client_email, recipient_email, clie
     throw buildHttpError("Debes ingresar el correo del cliente antes de enviar el código.");
   }
   const friendlyName = (client_name || "").trim();
-  const tokenId = uuidv4();
+  const tokenId = generateUUID();
   const code = String(Math.floor(100000 + Math.random() * 900000));
   const codeHash = hashConsentEmailCode(tokenId, code);
   const expiresAt = new Date(Date.now() + CONSENT_EMAIL_TOKEN_TTL_MS);
@@ -764,17 +771,49 @@ async function createRequest({
   payload,
   files = [],
 }) {
+  logger.info({
+    requester_id,
+    request_type_id,
+    payload_keys: Object.keys(payload || {}),
+    files_count: files?.length || 0
+  }, "🚀 [FLUJO_SOLICITUDES] INICIANDO creación de solicitud");
+
   if (!requester_id || !request_type_id) {
+    logger.error({
+      requester_id,
+      request_type_id
+    }, "❌ [FLUJO_SOLICITUDES] Parámetros obligatorios faltantes");
     throw new Error("Faltan parámetros obligatorios: requester_id o request_type_id");
   }
+
+  logger.info({
+    request_type_id
+  }, "🔍 [FLUJO_SOLICITUDES] Resolviendo tipo de solicitud");
+
   const typeId = await resolveRequestTypeId(request_type_id);
   const version = 1;
-  const request_group_id = uuidv4();
+  const request_group_id = generateUUID();
   const typeRow = await getRequestType(typeId);
-  if (!typeRow) throw new Error("Tipo de solicitud no válido");
+  if (!typeRow) {
+    logger.error({
+      request_type_id,
+      resolved_typeId: typeId
+    }, "❌ [FLUJO_SOLICITUDES] Tipo de solicitud no válido");
+    throw new Error("Tipo de solicitud no válido");
+  }
+
+  logger.info({
+    type_code: typeRow.code,
+    type_title: typeRow.title
+  }, "✅ [FLUJO_SOLICITUDES] Tipo de solicitud resuelto");
 
   const code = String(typeRow.code || "").toUpperCase();
   const schemaKey = resolveSchemaKey(code);
+
+  logger.info({
+    schema_key: schemaKey,
+    payload_size: JSON.stringify(payload || {}).length
+  }, "🔧 [FLUJO_SOLICITUDES] Preparando validación de payload");
 
   const { normalizedPayload, schema } = normalizePayload(schemaKey, payload);
   const validate = ajv.compile(schema);
@@ -791,12 +830,49 @@ async function createRequest({
       originalPayload: payload,
       errors: validate.errors,
     };
-    logger.warn(validationDetails, "⚠️ Validación AJV fallida al crear solicitud");
+    logger.warn(validationDetails, "⚠️ [FLUJO_SOLICITUDES] Validación AJV fallida");
     const err = new Error(`Datos de solicitud inválidos(${schemaKey}): ${errors} `);
     err.validationErrors = validate.errors;
     err.schemaKey = schemaKey;
     err.normalizedPayload = normalizedPayload;
     throw err;
+  }
+
+  logger.info({
+    schema_key: schemaKey
+  }, "✅ [FLUJO_SOLICITUDES] Validación de payload exitosa");
+
+  if (schemaKey === "retiro") {
+    const clientId = resolveClientIdFromPayload(normalizedPayload);
+    if (!clientId) {
+      throw buildHttpError("Debes seleccionar un cliente para la solicitud de retiro.");
+    }
+
+    const entries = buildEquipmentEntries(normalizedPayload);
+    if (!entries.length) {
+      throw buildHttpError("Debes seleccionar al menos un equipo vinculado al cliente.");
+    }
+
+    const unidadIds = Array.from(
+      new Set(
+        entries
+          .map((entry) => Number(entry.unidad_id))
+          .filter((id) => Number.isFinite(id) && id > 0),
+      ),
+    );
+
+    if (!unidadIds.length) {
+      throw buildHttpError("Debes seleccionar equipos válidos vinculados al cliente.");
+    }
+
+    const { rows } = await db.query(
+      `SELECT id FROM public.equipos_unidad WHERE id = ANY($1) AND cliente_id = $2`,
+      [unidadIds, clientId],
+    );
+
+    if (rows.length !== unidadIds.length) {
+      throw buildHttpError("Todos los equipos deben estar vinculados al cliente seleccionado.");
+    }
   }
 
   let requesterRole = null;
@@ -816,6 +892,12 @@ async function createRequest({
 
   const isJefeComercial = (requesterRole || "").toLowerCase() === "jefe_comercial";
 
+  console.log('FASE2: Creando solicitud comercial', {
+    requester_id,
+    requester_email,
+    request_type: code,
+    cliente: normalizedPayload?.nombre_cliente,
+  });
   logger.info(
     {
       requester_id,
@@ -1496,46 +1578,180 @@ async function syncEquipmentFromRequest({ requestId, status, client = db }) {
   return true;
 }
 
-async function updateRequestStatus(id, status, client = db) {
+async function updateRequestStatus(id, status, client = db, options = {}) {
+  const { userId, reason } = options;
+
+  logger.info({
+    request_id: id,
+    new_status: status,
+    user_id: userId,
+    reason: reason
+  }, "🚀 [FLUJO_SOLICITUDES] INICIANDO actualización de estado");
+
+  // Obtener estado anterior
+  const { rows: currentRows } = await client.query(
+    `SELECT status, request_type_id, requester_id FROM requests WHERE id = $1`,
+    [id]
+  );
+
+  const oldStatus = currentRows[0]?.status;
+  const requestTypeId = currentRows[0]?.request_type_id;
+  const requesterId = currentRows[0]?.requester_id;
+
+  logger.info({
+    request_id: id,
+    old_status: oldStatus,
+    new_status: status,
+    request_type_id: requestTypeId,
+    requester_id: requesterId
+  }, "📊 [FLUJO_SOLICITUDES] Estado anterior obtenido");
+
   const { rows } = await client.query(
     `UPDATE requests SET status=$1, updated_at=now() WHERE id=$2 RETURNING *`,
     [status, id]
   );
   const updated = rows[0];
+
   if (updated) {
+    logger.info({
+      request_id: id,
+      old_status: oldStatus,
+      new_status: status,
+      updated_at: updated.updated_at
+    }, "✅ [FLUJO_SOLICITUDES] Estado actualizado exitosamente");
+
     // Enviar notificaciones automáticas
     setImmediate(async () => {
       try {
+        logger.info({
+          request_id: id,
+          new_status: status
+        }, "📧 [FLUJO_SOLICITUDES] Preparando notificaciones automáticas");
+
         const { rows: requestRows } = await db.query(
-          `SELECT r.*, u.email as requester_email, u.id as requester_id
+          `SELECT r.*, u.email as requester_email, u.id as requester_id, rt.title as request_title, rt.code as request_code
            FROM requests r
            LEFT JOIN users u ON r.requester_id = u.id
+           LEFT JOIN request_types rt ON rt.id = r.request_type_id
            WHERE r.id = $1`,
           [updated.id]
         );
         const requestData = requestRows[0];
 
         if (requestData && requestData.requester_id) {
+          logger.info({
+            request_id: id,
+            requester_id: requestData.requester_id,
+            requester_email: requestData.requester_email
+          }, "👤 [FLUJO_SOLICITUDES] Datos del solicitante obtenidos");
+
+          // Notificación de cambio de estado
+          if (oldStatus && oldStatus !== status) {
+            logger.info({
+              request_id: id,
+              from_status: oldStatus,
+              to_status: status
+            }, "🔄 [FLUJO_SOLICITUDES] Enviando notificación de cambio de estado");
+
+            await notificationManager.sendNotification({
+              userId: requestData.requester_id,
+              template: 'request_status_changed',
+              data: {
+                request_id: updated.id,
+                request_title: requestData.request_title || getRequestLabel(requestData.request_code),
+                from_status: oldStatus,
+                to_status: status,
+                changed_by: userId || 'Sistema',
+                reason: reason || ''
+              },
+              email: true,
+              chat: false,
+              priority: 1,
+              source: 'requests.status_change',
+              meta: {
+                requestId: updated.id,
+                fromStatus: oldStatus,
+                toStatus: status,
+                changedBy: userId
+              }
+            });
+          }
+
+          // Notificaciones específicas por estado final
           if (status.toLowerCase().includes('aprob')) {
+            logger.info({
+              request_id: id,
+              status: status
+            }, "✅ [FLUJO_SOLICITUDES] Solicitud aprobada - enviando notificación de aprobación");
+
             await notificationManager.notifyRequestApproved(requestData.requester_id, updated.id, {
               request_type: requestData.request_type_id,
               approved_at: new Date().toISOString()
             });
           } else if (status.toLowerCase().includes('rechaz')) {
+            logger.info({
+              request_id: id,
+              status: status
+            }, "❌ [FLUJO_SOLICITUDES] Solicitud rechazada - enviando notificación de rechazo");
+
             await notificationManager.notifyRequestRejected(requestData.requester_id, updated.id, {
               request_type: requestData.request_type_id,
               rejected_at: new Date().toISOString()
             });
+          } else if (status.toLowerCase().includes('complet')) {
+            logger.info({
+              request_id: id,
+              status: status
+            }, "🏁 [FLUJO_SOLICITUDES] Solicitud completada - enviando notificación de completación");
+
+            await notificationManager.sendNotification({
+              userId: requestData.requester_id,
+              template: 'request_completed',
+              data: {
+                request_id: updated.id,
+                request_title: requestData.request_title || getRequestLabel(requestData.request_code),
+                completed_at: new Date().toISOString()
+              },
+              email: true,
+              chat: false,
+              priority: 1,
+              source: 'requests.completed',
+              meta: {
+                requestId: updated.id,
+                completedAt: new Date().toISOString()
+              }
+            });
           }
         }
+
+        logger.info({
+          request_id: id,
+          status: status
+        }, "✅ [FLUJO_SOLICITUDES] Notificaciones automáticas enviadas");
+
       } catch (error) {
-        logger.error('Error enviando notificación automática:', error);
+        logger.error({
+          error: error.message,
+          request_id: id,
+          status: status
+        }, "❌ [FLUJO_SOLICITUDES] Error enviando notificaciones automáticas");
         // No lanzamos error para no detener el flujo
       }
 
       syncEquipmentFromRequest({ requestId: updated.id, status: updated.status, client });
+
+      logger.info({
+        request_id: id,
+        status: status
+      }, "🔄 [FLUJO_SOLICITUDES] Sincronización de equipos completada");
     });
+  } else {
+    logger.warn({
+      request_id: id,
+      attempted_status: status
+    }, "⚠️ [FLUJO_SOLICITUDES] No se pudo actualizar el estado - solicitud no encontrada");
   }
+
   return updated;
 }
 
@@ -1639,6 +1855,175 @@ async function cancelRequest({ id, user_id }) {
   return true;
 }
 
+async function assignRequest(requestId, assignerId, assigneeId, note = null) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    // Verificar que la solicitud existe y está en estado asignable
+    const { rows: [request] } = await client.query(
+      `SELECT r.*, u.email as requester_email, rt.title as request_title, rt.code as request_code
+       FROM requests r
+       LEFT JOIN users u ON r.requester_id = u.id
+       LEFT JOIN request_types rt ON rt.id = r.request_type_id
+       WHERE r.id = $1`,
+      [requestId]
+    );
+
+    if (!request) {
+      throw new Error("Solicitud no encontrada");
+    }
+
+    // Obtener datos del asignador y asignado
+    const { rows: assignerData } = await client.query(
+      "SELECT email, fullname, name FROM users WHERE id = $1",
+      [assignerId]
+    );
+
+    const { rows: assigneeData } = await client.query(
+      "SELECT email, fullname, name FROM users WHERE id = $1",
+      [assigneeId]
+    );
+
+    if (!assignerData[0] || !assigneeData[0]) {
+      throw new Error("Usuario asignador o asignado no encontrado");
+    }
+
+    const assigner = assignerData[0];
+    const assignee = assigneeData[0];
+
+    // Actualizar asignación en la solicitud (si hay campo para esto)
+    // Nota: Puede que necesites agregar un campo assigned_to a la tabla requests
+
+    await client.query("COMMIT");
+
+    // Notificar al usuario asignado
+    await notificationManager.sendNotification({
+      userId: assigneeId,
+      template: 'request_assigned',
+      data: {
+        request_id: requestId,
+        request_title: request.request_title || getRequestLabel(request.request_code),
+        assigner_name: assigner.fullname || assigner.name || assigner.email,
+        assignee_name: assignee.fullname || assignee.name || assignee.email,
+        note: note || ''
+      },
+      email: true,
+      chat: false,
+      priority: 1,
+      source: 'requests.assignment',
+      meta: {
+        requestId,
+        assignerId,
+        assigneeId,
+        note
+      }
+    });
+
+    return {
+      request_id: requestId,
+      assigned_to: assigneeId,
+      assigned_by: assignerId
+    };
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error({ error, requestId, assignerId, assigneeId }, "Error asignando solicitud");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function addComment(requestId, userId, comment, isInternal = false) {
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    // Verificar que la solicitud existe
+    const { rows: [request] } = await client.query(
+      `SELECT r.*, rt.title as request_title, rt.code as request_code
+       FROM requests r
+       LEFT JOIN request_types rt ON rt.id = r.request_type_id
+       WHERE r.id = $1`,
+      [requestId]
+    );
+
+    if (!request) {
+      throw new Error("Solicitud no encontrada");
+    }
+
+    // Obtener datos del usuario que comenta
+    const { rows: commenterData } = await client.query(
+      "SELECT email, fullname, name FROM users WHERE id = $1",
+      [userId]
+    );
+
+    if (!commenterData[0]) {
+      throw new Error("Usuario no encontrado");
+    }
+
+    const commenter = commenterData[0];
+
+    // Aquí podrías guardar el comentario en una tabla comments si existe
+    // Por ahora, solo notificamos
+
+    await client.query("COMMIT");
+
+    // Preparar preview del comentario (primeros 100 caracteres)
+    const commentPreview = comment.length > 100
+      ? comment.substring(0, 100) + "..."
+      : comment;
+
+    // Notificar a involucrados (solicitante y otros)
+    const recipients = [request.requester_id];
+
+    // Si hay asignado, agregarlo también
+    // if (request.assigned_to) recipients.push(request.assigned_to);
+
+    // Notificar a cada destinatario
+    for (const recipientId of recipients) {
+      if (recipientId === userId) continue; // No notificar al propio comentarista
+
+      await notificationManager.sendNotification({
+        userId: recipientId,
+        template: 'request_comment_added',
+        data: {
+          request_id: requestId,
+          request_title: request.request_title || getRequestLabel(request.request_code),
+          commenter_name: commenter.fullname || commenter.name || commenter.email,
+          comment_preview: commentPreview,
+          is_internal: isInternal
+        },
+        email: !isInternal, // No enviar email para comentarios internos
+        chat: false,
+        priority: 0,
+        source: 'requests.comment',
+        meta: {
+          requestId,
+          commenterId: userId,
+          isInternal,
+          commentLength: comment.length
+        }
+      });
+    }
+
+    return {
+      request_id: requestId,
+      commenter_id: userId,
+      comment_length: comment.length,
+      is_internal: isInternal
+    };
+
+  } catch (error) {
+    await client.query("ROLLBACK");
+    logger.error({ error, requestId, userId }, "Error agregando comentario");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 async function resubmit({ id, user_id, payload }) {
   const { rows } = await db.query(
     `SELECT r.*, rt.code AS type_code
@@ -1719,6 +2104,13 @@ async function resubmit({ id, user_id, payload }) {
  */
 
 async function createClientRequest(user, rawData = {}, rawFiles = {}) {
+  logger.info({
+    user_email: user?.email,
+    user_id: user?.id,
+    data_keys: Object.keys(rawData || {}),
+    files_count: Object.keys(rawFiles || {}).length
+  }, "🚀 [FLUJO_CLIENTES] INICIANDO creación de solicitud de cliente");
+
   const data = Object.fromEntries(
     Object.entries(rawData || {}).map(([key, value]) => [
       key,
@@ -1726,19 +2118,36 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
     ]),
   );
 
+  logger.info({
+    client_type: data.client_type,
+    commercial_name: data.commercial_name,
+    client_email: data.client_email,
+    consent_capture_method: data.consent_capture_method
+  }, "📋 [FLUJO_CLIENTES] Datos de solicitud procesados");
+
   const booleanFields = ["data_processing_consent"];
   booleanFields.forEach((field) => {
     if (data[field] === "true") data[field] = true;
     if (data[field] === "false") data[field] = false;
   });
 
+  logger.info({
+    data_processing_consent: data.data_processing_consent
+  }, "🔒 [FLUJO_CLIENTES] Consentimiento de procesamiento de datos");
+
   const validate = ajv.getSchema('newClient');
   if (!validate(data)) {
+    logger.error({
+      validation_errors: validate.errors,
+      data_keys: Object.keys(data)
+    }, "❌ [FLUJO_CLIENTES] Validación AJV fallida");
     const error = new Error("Datos de solicitud inválidos.");
     error.validationErrors = validate.errors;
     error.status = 400;
     throw error;
   }
+
+  logger.info("✅ [FLUJO_CLIENTES] Validación de datos exitosa");
 
   const consentCaptureMethod = (data.consent_capture_method || "email_link").toLowerCase();
   const consentCaptureDetails = data.consent_capture_details?.trim() || null;
@@ -2038,24 +2447,64 @@ async function getClientRequestById(id, user) {
 }
 
 async function processClientRequest({ id, user, action, rejection_reason }) {
+  logger.info({
+    request_id: id,
+    user_email: user?.email,
+    action: action,
+    has_rejection_reason: !!rejection_reason
+  }, "🚀 [FLUJO_CLIENTES] INICIANDO procesamiento de solicitud de cliente");
+
   const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
   const request = rows[0];
   if (!request) {
+    logger.error({
+      request_id: id
+    }, "❌ [FLUJO_CLIENTES] Solicitud no encontrada");
     const error = new Error("Solicitud no encontrada.");
     error.status = 404;
     throw error;
   }
+
+  logger.info({
+    request_id: id,
+    current_status: request.status,
+    client_name: request.commercial_name,
+    consent_status: request.lopdp_consent_status
+  }, "📊 [FLUJO_CLIENTES] Estado actual de la solicitud");
+
   if (request.status !== 'pending_approval' && request.status !== 'pending_consent') {
+    logger.warn({
+      request_id: id,
+      current_status: request.status,
+      action: action
+    }, "⚠️ [FLUJO_CLIENTES] Solicitud ya procesada");
     const error = new Error(`La solicitud ya ha sido procesada (estado: ${request.status}).`);
     error.status = 400;
     throw error;
   }
+
   const newStatus = action === 'approve' ? 'approved' : 'rejected';
+
+  logger.info({
+    request_id: id,
+    new_status: newStatus,
+    action: action
+  }, "🔄 [FLUJO_CLIENTES] Determinando nuevo estado");
+
   if (newStatus === 'approved' && request.lopdp_consent_status !== 'granted') {
+    logger.error({
+      request_id: id,
+      consent_status: request.lopdp_consent_status
+    }, "❌ [FLUJO_CLIENTES] Intento de aprobación sin consentimiento LOPDP");
     const error = new Error("No se puede aprobar una solicitud sin el consentimiento LOPDP del cliente.");
     error.status = 400;
     throw error;
   }
+
+  logger.info({
+    request_id: id,
+    new_status: newStatus
+  }, "✅ [FLUJO_CLIENTES] Validaciones pasadas - procediendo con actualización");
   const approvalStatus = newStatus === 'approved' ? 'aprobado' : 'rechazado';
   const approvedBy = newStatus === 'approved' ? user?.id || null : null;
   const approvedAt = newStatus === 'approved' ? new Date() : null;
@@ -2336,6 +2785,8 @@ module.exports = {
   updateRequestStatus,
   cancelRequest,
   resubmit,
+  assignRequest,
+  addComment,
   createClientRequest,
   listClientRequests,
   getClientRequestSummary,

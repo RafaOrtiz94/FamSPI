@@ -38,17 +38,19 @@ exports.getInventario = asyncHandler(async (req, res) => {
 exports.getEquiposDisponibles = asyncHandler(async (req, res) => {
   const { estado, serial_pendiente, cliente_id, incluir_no_asignados } = req.query;
 
+  const includeUnassigned = String(incluir_no_asignados || "").toLowerCase() === "true";
   const normalizedClientId = cliente_id === "" ? null : cliente_id;
+  const shouldBypassClientFilter = includeUnassigned && (cliente_id === undefined || cliente_id === null || cliente_id === "");
+  const clientFilter = shouldBypassClientFilter ? undefined : normalizedClientId;
 
   const filters = {
     estado: estado || undefined,
     serial_pendiente,
-    cliente_id: normalizedClientId !== undefined ? normalizedClientId : null,
+    cliente_id: clientFilter,
   };
 
   let equipos = await getAllInventario(filters);
 
-  const includeUnassigned = String(incluir_no_asignados || "").toLowerCase() === "true";
   if (includeUnassigned && cliente_id) {
     const unassigned = await getAllInventario({
       estado: estado || undefined,

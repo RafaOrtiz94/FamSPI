@@ -8,7 +8,6 @@ const calculationEngine = require('./calculationEngine.service');
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 const investmentsService = require('./investments.service');
-const { isComodato } = require('./businessCase.service');
 
 /**
  * Calcula el consumo de una determinación usando el motor flexible
@@ -346,7 +345,7 @@ async function calculateBusinessCase(businessCaseId) {
 
     // 0. Obtener datos del BC para determinar tipo y modo de cálculo
     const bcResult = await db.query(
-        `SELECT * FROM equipment_purchase_requests WHERE id = $1`,
+        `SELECT * FROM v_business_cases WHERE business_case_id = $1`,
         [businessCaseId]
     );
 

@@ -9,6 +9,7 @@ const logger = require("../../config/logger");
 const audit = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const requestsService = require("../requests/requests.service");
+const notificationManager = require("../notifications/notificationManager");
 
 const MAIL_ENABLED = process.env.DISABLE_MAIL !== "true";
 const REQUEST_TYPE_LABELS = {
@@ -131,7 +132,7 @@ async function approve(request_id, approver_id) {
           requestInfo?.request_code,
           requestInfo?.request_title
         );
-        
+
         const scheduleHint =
           requestInfo?.request_code === "F.ST-20"
             ? "Siguiente paso: agenda la visita de inspección y asigna técnico para coordinar con el cliente."
@@ -146,12 +147,30 @@ async function approve(request_id, approver_id) {
           cc: approverEmail // Copia al aprobador
         } : { cc: approverEmail };
 
-        notificationManager.notifyRequestApproved(requestInfo.requester_id, request_id, {
-          request_title: requestTitle,
-          approver_name: approverName || approverEmail || "Aprobador",
-          extra_info: scheduleHint,
-          link: detailLink,
-          sender
+        notificationManager.sendNotification({
+          userId: requestInfo.requester_id,
+          template: 'request_approved',
+          data: {
+            requestId: request_id,
+            requestTitle: requestTitle,
+            approverName: approverName || approverEmail || "Aprobador",
+            extraInfo: scheduleHint,
+            link: detailLink
+          },
+          email: true,
+          chat: false,
+          priority: 2,
+          source: 'requests.approval',
+          meta: {
+            requestId: request_id,
+            approverId: approver_id,
+            action: 'approved'
+          },
+          sender: approverEmail ? {
+            name: approverName,
+            replyTo: approverEmail,
+            gmailUserId: approver_id
+          } : undefined
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de aprobación");
         });
@@ -254,12 +273,31 @@ async function reject(request_id, approver_id, note = null) {
           gmailUserId: approver_id
         } : null;
 
-        notificationManager.notifyRequestRejected(requestInfo.requester_id, request_id, {
-          request_title: requestTitle,
-          approver_name: approverName || approverEmail || "Aprobador",
-          extra_info: note ? `Motivo: ${note}` : "Motivo: sin especificar",
-          link: detailLink,
-          sender
+        notificationManager.sendNotification({
+          userId: requestInfo.requester_id,
+          template: 'request_rejected',
+          data: {
+            requestId: request_id,
+            requestTitle: requestTitle,
+            approverName: approverName || approverEmail || "Aprobador",
+            reason: note || "sin especificar",
+            link: detailLink
+          },
+          email: true,
+          chat: false,
+          priority: 3,
+          source: 'requests.rejection',
+          meta: {
+            requestId: request_id,
+            approverId: approver_id,
+            action: 'rejected',
+            reason: note
+          },
+          sender: approverEmail ? {
+            name: approverName,
+            replyTo: approverEmail,
+            gmailUserId: approver_id
+          } : undefined
         }).catch((mailErr) => {
           logger.warn({ mailErr }, "No se pudo enviar notificación de rechazo");
         });

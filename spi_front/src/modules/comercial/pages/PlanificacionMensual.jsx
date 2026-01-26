@@ -14,7 +14,11 @@ import {
   FiBarChart2,
   FiActivity,
   FiZap,
-  FiEdit3
+  FiEdit3,
+  FiChevronRight,
+  FiGrid3X3,
+  FiList,
+  FiTrendingDown
 } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import SectionCard from "../../../core/ui/components/SectionCard";
@@ -57,12 +61,12 @@ const PlanificacionMensual = () => {
         const parsedClients = Array.isArray(payload?.items)
           ? payload.items
           : Array.isArray(payload?.clients)
-          ? payload.clients
-          : Array.isArray(payload?.data)
-          ? payload.data
-          : Array.isArray(payload)
-          ? payload
-          : [];
+            ? payload.clients
+            : Array.isArray(payload?.data)
+              ? payload.data
+              : Array.isArray(payload)
+                ? payload
+                : [];
         setClients(parsedClients);
       } catch (err) {
         console.warn("No se pudieron cargar clientes", err.message);
@@ -355,66 +359,58 @@ const PlanificacionMensual = () => {
           >
             {/* KPIs Principales */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-              <Card
-                className="p-6 md:p-8 border-0 shadow-xl shadow-blue-100/50 rounded-2xl bg-gradient-to-br from-blue-50 via-blue-100 to-blue-200 border-l-4 border-blue-500"
-              >
+              <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-xl bg-gradient-to-br from-slate-50 to-white border-l-4 border-slate-500 hover:shadow-xl hover:shadow-slate-200/60 transition-all duration-200">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-blue-800 uppercase tracking-wide">Total Cronogramas</p>
-                    <p className="text-3xl font-bold text-blue-900 mt-2">{stats.total}</p>
-                    <p className="text-xs text-blue-700 mt-1">Planificaciones activas</p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-slate-600 uppercase tracking-wider">Total Cronogramas</p>
+                    <p className="text-3xl font-bold text-slate-900">{stats.total}</p>
+                    <p className="text-xs text-slate-500">Planificaciones activas</p>
                   </div>
-                  <div className="p-3 bg-blue-600 rounded-xl">
-                    <FiCalendar className="text-white" size={24} />
+                  <div className="p-3 bg-slate-600 rounded-lg">
+                    <FiCalendar className="text-white" size={20} />
                   </div>
                 </div>
               </Card>
 
-              <Card
-                className="p-6 md:p-8 border-0 shadow-xl shadow-green-100/50 rounded-2xl bg-gradient-to-br from-green-50 via-green-100 to-green-200 border-l-4 border-green-500"
-              >
+              <Card className="p-6 border-0 shadow-lg shadow-emerald-100/50 rounded-xl bg-gradient-to-br from-emerald-50 to-white border-l-4 border-emerald-500 hover:shadow-xl hover:shadow-emerald-200/60 transition-all duration-200">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-green-800 uppercase tracking-wide">Aprobados</p>
-                    <p className="text-3xl font-bold text-green-900 mt-2">{stats.approved}</p>
-                    <p className="text-xs text-green-700 mt-1">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-emerald-600 uppercase tracking-wider">Aprobados</p>
+                    <p className="text-3xl font-bold text-emerald-900">{stats.approved}</p>
+                    <p className="text-xs text-emerald-600">
                       {stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}% de éxito
                     </p>
                   </div>
-                  <div className="p-3 bg-green-600 rounded-xl">
-                    <FiCheckCircle className="text-white" size={24} />
+                  <div className="p-3 bg-emerald-600 rounded-lg">
+                    <FiCheckCircle className="text-white" size={20} />
                   </div>
                 </div>
               </Card>
 
-              <Card
-                className="p-6 md:p-8 border-0 shadow-xl shadow-yellow-100/50 rounded-2xl bg-gradient-to-br from-yellow-50 via-yellow-100 to-yellow-200 border-l-4 border-yellow-500"
-              >
+              <Card className="p-6 border-0 shadow-lg shadow-amber-100/50 rounded-xl bg-gradient-to-br from-amber-50 to-white border-l-4 border-amber-500 hover:shadow-xl hover:shadow-amber-200/60 transition-all duration-200">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-yellow-800 uppercase tracking-wide">En Proceso</p>
-                    <p className="text-3xl font-bold text-yellow-900 mt-2">{stats.pending + stats.drafts}</p>
-                    <p className="text-xs text-yellow-700 mt-1">Pendientes de aprobación</p>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-amber-600 uppercase tracking-wider">En Proceso</p>
+                    <p className="text-3xl font-bold text-amber-900">{stats.pending + stats.drafts}</p>
+                    <p className="text-xs text-amber-600">Pendientes de aprobación</p>
                   </div>
-                  <div className="p-3 bg-yellow-600 rounded-xl">
-                    <FiClock className="text-white" size={24} />
+                  <div className="p-3 bg-amber-600 rounded-lg">
+                    <FiClock className="text-white" size={20} />
                   </div>
                 </div>
               </Card>
 
-              <Card
-                className="p-6 md:p-8 border-0 shadow-xl shadow-indigo-100/50 rounded-2xl bg-gradient-to-br from-indigo-50 via-indigo-100 to-indigo-200 border-l-4 border-indigo-500"
-              >
+              <Card className="p-6 border-0 shadow-lg shadow-indigo-100/50 rounded-xl bg-gradient-to-br from-indigo-50 to-white border-l-4 border-indigo-500 hover:shadow-xl hover:shadow-indigo-200/60 transition-all duration-200">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm font-semibold text-indigo-800 uppercase tracking-wide">Eficiencia</p>
-                    <p className="text-3xl font-bold text-indigo-900 mt-2">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-indigo-600 uppercase tracking-wider">Eficiencia</p>
+                    <p className="text-3xl font-bold text-indigo-900">
                       {stats.total > 0 ? Math.round((stats.approved / stats.total) * 100) : 0}%
                     </p>
-                    <p className="text-xs text-indigo-700 mt-1">Tasa de aprobación</p>
+                    <p className="text-xs text-indigo-600">Tasa de aprobación</p>
                   </div>
-                  <div className="p-3 bg-indigo-600 rounded-xl">
-                    <FiZap className="text-white" size={24} />
+                  <div className="p-3 bg-indigo-600 rounded-lg">
+                    <FiZap className="text-white" size={20} />
                   </div>
                 </div>
               </Card>
@@ -773,18 +769,20 @@ const PlanificacionMensual = () => {
                   <button
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    aria-label={`Ver ${tab.label.toLowerCase()}${tab.id === 'overview' && stats.total > 0 ? ` (${stats.total} planificaciones)` : ''}`}
                     className={`
-                      flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2
+                      flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-white
                       ${isActive
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-500 -mb-px'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'
                       }
                     `}
                   >
-                    <Icon size={16} />
+                    <Icon size={16} aria-hidden="true" />
                     {tab.label}
                     {tab.id === 'overview' && stats.total > 0 && (
-                      <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded-full ml-1">
+                      <span className="bg-indigo-100 text-indigo-600 text-xs px-2 py-0.5 rounded-full ml-1" aria-label={`${stats.total} planificaciones totales`}>
                         {stats.total}
                       </span>
                     )}

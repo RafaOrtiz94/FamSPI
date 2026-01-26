@@ -10,7 +10,6 @@ import Card from "../../../../core/ui/components/Card";
 
 import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
 import PendingApprovals from "../../components/PendingApprovals";
-import PersonnelRequestWidget from "../../../../core/ui/widgets/PersonnelRequestWidget";
 import AttendanceWidget from "../../../../core/ui/widgets/AttendanceWidget";
 import PermisosStatusWidget from "../../../shared/solicitudes/components/PermisosStatusWidget";
 
@@ -44,9 +43,8 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
                 }
             />
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="mb-6">
                 <AttendanceWidget />
-                <PersonnelRequestWidget />
             </div>
 
             <div className="mb-6">

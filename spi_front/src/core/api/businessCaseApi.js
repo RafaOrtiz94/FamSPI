@@ -1,4 +1,5 @@
 import api from "./index";
+import logger from "../utils/logger";
 
 // ===== NORMALIZATION HELPERS =====
 
@@ -308,8 +309,32 @@ export const createAutosaveManager = (businessCaseId) => {
  * @returns {Promise<Object>} List response
  */
 export const listBusinessCases = async (params = {}) => {
-  const { data } = await api.get("/business-case", { params });
-  return data;
+  const startTime = Date.now();
+  const { page = 1, pageSize = 20, status, client_name, q } = params;
+
+  logger.apiCall("GET", "/business-case", { params });
+  logger.businessCaseFlow("CONSULTA", "Consultando lista de Business Cases", {
+    page,
+    pageSize,
+    filters: { status, client_name, q }
+  });
+
+  try {
+    const { data } = await api.get("/business-case", { params });
+    logger.performance("Consulta de Business Cases", startTime);
+    logger.success("✅ Lista de Business Cases obtenida exitosamente", {
+      count: data?.items?.length || data?.length || 0,
+      page,
+      pageSize
+    });
+    return data;
+  } catch (error) {
+    logger.error("❌ Error consultando lista de Business Cases", error, {
+      params,
+      responseStatus: error?.response?.status
+    });
+    throw error;
+  }
 };
 
 /**
@@ -318,8 +343,33 @@ export const listBusinessCases = async (params = {}) => {
  * @returns {Promise<Object>} Created business case
  */
 export const createBusinessCase = async (payload) => {
-  const { data } = await api.post("/business-case", payload);
-  return data.data || data;
+  const startTime = Date.now();
+
+  logger.apiCall("POST", "/business-case", {
+    payload_keys: Object.keys(payload || {})
+  });
+
+  logger.businessCaseFlow("CREACIÓN", "Creando nuevo Business Case", {
+    client_name: payload?.client_name,
+    bc_purchase_type: payload?.bc_purchase_type,
+    payload_size: JSON.stringify(payload || {}).length
+  });
+
+  try {
+    const { data } = await api.post("/business-case", payload);
+    logger.performance("Creación de Business Case", startTime);
+    logger.success("✅ Business Case creado exitosamente", {
+      business_case_id: data?.data?.id || data?.id,
+      client_name: payload?.client_name
+    });
+    return data.data || data;
+  } catch (error) {
+    logger.error("❌ Error creando Business Case", error, {
+      payload_keys: Object.keys(payload || {}),
+      responseStatus: error?.response?.status
+    });
+    throw error;
+  }
 };
 
 /**
@@ -328,8 +378,28 @@ export const createBusinessCase = async (payload) => {
  * @returns {Promise<Object>} Business case data
  */
 export const getBusinessCase = async (id) => {
-  const { data } = await api.get(`/business-case/${id}`);
-  return data.data || data;
+  const startTime = Date.now();
+
+  logger.apiCall("GET", `/business-case/${id}`);
+  logger.businessCaseFlow("CONSULTA_DETALLE", "Consultando detalle de Business Case", {
+    business_case_id: id
+  });
+
+  try {
+    const { data } = await api.get(`/business-case/${id}`);
+    logger.performance("Consulta de Business Case por ID", startTime);
+    logger.success("✅ Detalle de Business Case obtenido exitosamente", {
+      business_case_id: id,
+      client_name: data?.data?.client_name || data?.client_name
+    });
+    return data.data || data;
+  } catch (error) {
+    logger.error("❌ Error consultando detalle de Business Case", error, {
+      business_case_id: id,
+      responseStatus: error?.response?.status
+    });
+    throw error;
+  }
 };
 
 /**

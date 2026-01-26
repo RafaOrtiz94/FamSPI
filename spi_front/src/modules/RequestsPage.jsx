@@ -386,7 +386,7 @@ const RequestsPage = () => {
         </Card>
 
         <Card className="flex items-center justify-between">
-          <PurchaseHandoffWidget />
+          <PurchaseHandoffWidget hideButton={true} />
         </Card>
 
         <Card className="flex items-center justify-between">

@@ -21,6 +21,14 @@ export const getMisSolicitudes = async () => {
 };
 
 /**
+ * Resumen por colaborador (talento humano)
+ */
+export const getResumenColaboradores = async () => {
+  const response = await api.get("/permisos/resumen-colaboradores");
+  return response.data;
+};
+
+/**
  * Listar solicitudes pendientes (para jefes)
  */
 export const getPendientes = async (stage = "pending") => {

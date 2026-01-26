@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../core/ui/components/Card';
 import { Button } from '../../../core/ui/components/Button';
 import { Select } from '../../../core/ui/components/Select';
@@ -6,13 +6,24 @@ import { Badge } from '../../../core/ui/components/Badge';
 import { Alert, AlertDescription } from '../../../core/ui/components/Alert';
 import { Spinner } from '../../../core/ui/components/Spinner';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../../../core/ui/components/Table';
+import Modal from '../../../core/ui/components/Modal';
 
-// Importar componentes reutilizables del módulo comercial
+// Importar componentes reutilizables del modulo comercial
 import PurchaseTimelinePanel from '../../comercial/components/private-purchases/PurchaseTimelinePanel';
 import DocumentChecklist from '../../comercial/components/private-purchases/DocumentChecklist';
+import { formatDateEC } from '../../../core/utils/dateUtils';
 
 // Importar API wrapper
-import { privatePurchasesApi } from '../../comercial/api/privatePurchasesApi';
+import {
+  getPrivatePurchaseById,
+  getPrivatePurchaseTimeline,
+  getPrivatePurchaseDocuments,
+  getPrivatePurchasesByRole,
+  markPrivatePurchaseEquipmentArrived,
+  requestDeliveryDates,
+  uploadPrivatePurchaseDeliveryGuides,
+  updatePrivatePurchaseOperationsDetails,
+} from '../../../core/api/privatePurchasesApi';
 
 const OperacionesPrivatePurchases = () => {
   const [purchases, setPurchases] = useState([]);
@@ -21,20 +32,47 @@ const OperacionesPrivatePurchases = () => {
   const [showDetail, setShowDetail] = useState(false);
   const [statusFilter, setStatusFilter] = useState('');
   const [error, setError] = useState(null);
+  const [operationsForm, setOperationsForm] = useState({
+    includesStarterKit: false,
+    notes: '',
+    estimatedArrivalAt: '',
+    saving: false
+  });
+  const [guideFiles, setGuideFiles] = useState([]);
+  const [guideUploadState, setGuideUploadState] = useState({
+    uploading: false,
+    error: null
+  });
 
   // Estados relevantes para operaciones
   const operationStatuses = [
+    'contract_available',
+    'delivery_dates_requested',
+    'delivery_dates_submitted',
     'calendar_events_created',
     'waiting_dispatch',
     'dispatch_ready',
+    'delivery_act_draft_ready',
+    'delivery_act_tech_assigned',
+    'delivery_act_logistics_signed',
     'delivery_act_generated',
-    'delivered_pending_signatures',
     'delivered_signed'
   ];
 
   useEffect(() => {
     loadPurchases();
   }, [statusFilter]);
+
+  const fileToBase64Payload = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      const base64 = typeof result === 'string' ? result.split(',')[1] || '' : '';
+      resolve(base64);
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 
   const loadPurchases = async () => {
     try {
@@ -46,13 +84,10 @@ const OperacionesPrivatePurchases = () => {
         role: 'jefe_operaciones'
       });
 
-      const params = {};
-      if (statusFilter) {
-        params.status = statusFilter;
-      }
-
-      const response = await privatePurchasesApi.getList(params);
-      setPurchases(response.data || []);
+      const response = await getPrivatePurchasesByRole('jefe_operaciones');
+      const data = response || [];
+      const filtered = statusFilter ? data.filter((item) => item.status === statusFilter) : data;
+      setPurchases(filtered);
     } catch (err) {
       console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
         action: 'load_list_error',
@@ -74,12 +109,21 @@ const OperacionesPrivatePurchases = () => {
       });
 
       // Obtener detalles completos
-      const detailResponse = await privatePurchasesApi.getDetail(purchase.id);
-      const timelineResponse = await privatePurchasesApi.getTimeline(purchase.id);
+      const detailResponse = await getPrivatePurchaseById(purchase.id);
+      const timelineResponse = await getPrivatePurchaseTimeline(purchase.id);
+      const documentsResponse = await getPrivatePurchaseDocuments(purchase.id);
 
       setSelectedPurchase({
-        ...detailResponse.data,
-        timeline: timelineResponse.data
+        ...detailResponse,
+        timeline: timelineResponse?.events || [],
+        checklist: timelineResponse?.checklist || [],
+        documents: documentsResponse || []
+      });
+      setOperationsForm({
+        includesStarterKit: Boolean(detailResponse?.includes_starter_kit),
+        notes: detailResponse?.operations_notes || '',
+        estimatedArrivalAt: detailResponse?.estimated_arrival_at ? String(detailResponse.estimated_arrival_at).slice(0, 10) : '',
+        saving: false
       });
       setShowDetail(true);
     } catch (err) {
@@ -93,55 +137,206 @@ const OperacionesPrivatePurchases = () => {
     }
   };
 
-  const handleRequestDates = async (purchaseId) => {
+  const handleSaveOperationsDetails = async () => {
+    if (!selectedPurchase) return;
     try {
-      console.log('[FLOW_PRIVADA_UI][FASE2][OPS]', {
-        action: 'request_dates',
-        requestId: purchaseId,
-        role: 'jefe_operaciones'
+      setOperationsForm((prev) => ({ ...prev, saving: true }));
+      await updatePrivatePurchaseOperationsDetails(selectedPurchase.id, {
+        includes_starter_kit: operationsForm.includesStarterKit,
+        operations_notes: operationsForm.notes,
+        estimated_arrival_at: operationsForm.estimatedArrivalAt || null
       });
-
-      await privatePurchasesApi.requestDeliveryDates(purchaseId);
-
-      // Recargar lista para reflejar cambios
+      setOperationsForm((prev) => ({ ...prev, saving: false }));
       await loadPurchases();
-
-      alert('Fechas solicitadas exitosamente');
+      const detailResponse = await getPrivatePurchaseById(selectedPurchase.id);
+      setSelectedPurchase((prev) => ({
+        ...prev,
+        ...detailResponse
+      }));
+      alert('Detalles de operaciones guardados');
     } catch (err) {
       console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
-        action: 'request_dates_error',
-        requestId: purchaseId,
+        action: 'save_operations_details_error',
+        requestId: selectedPurchase?.id,
         error: err.message,
         role: 'jefe_operaciones'
       });
-      alert('Error al solicitar fechas: ' + err.message);
+      setOperationsForm((prev) => ({ ...prev, saving: false }));
+      alert('Error guardando detalles: ' + err.message);
+    }
+  };
+
+  const handleGuideFilesChange = (event) => {
+    const files = Array.from(event.target.files || []);
+    setGuideFiles(files);
+    setGuideUploadState((prev) => ({ ...prev, error: null }));
+  };
+
+  const handleUploadGuides = async () => {
+    if (!selectedPurchase || guideFiles.length === 0) {
+      setGuideUploadState((prev) => ({ ...prev, error: 'Seleccione al menos una guia' }));
+      return;
+    }
+    try {
+      setGuideUploadState({ uploading: true, error: null });
+      const guidesPayload = [];
+      for (const file of guideFiles) {
+        const base64 = await fileToBase64Payload(file);
+        if (!base64) {
+          throw new Error('No se pudo leer el archivo');
+        }
+        guidesPayload.push({
+          file_base64: base64,
+          file_name: file.name,
+          mime_type: file.type || 'application/pdf'
+        });
+      }
+
+      await uploadPrivatePurchaseDeliveryGuides(selectedPurchase.id, guidesPayload);
+      setGuideFiles([]);
+      setGuideUploadState({ uploading: false, error: null });
+      const refreshedDocs = await getPrivatePurchaseDocuments(selectedPurchase.id);
+      setSelectedPurchase((prev) => ({
+        ...prev,
+        documents: refreshedDocs || []
+      }));
+      await loadPurchases();
+      alert('Guias cargadas correctamente');
+    } catch (err) {
+      console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
+        action: 'upload_guides_error',
+        requestId: selectedPurchase?.id,
+        error: err.message
+      });
+      setGuideUploadState({ uploading: false, error: err.message });
+      alert('Error subiendo guias: ' + err.message);
+    }
+  };
+
+  const handleRequestDeliveryDates = async () => {
+    if (!selectedPurchase) return;
+    try {
+      await requestDeliveryDates(selectedPurchase.id);
+      await loadPurchases();
+      const detailResponse = await getPrivatePurchaseById(selectedPurchase.id);
+      setSelectedPurchase((prev) => ({
+        ...prev,
+        ...detailResponse
+      }));
+      alert('Solicitud de fecha de entrega enviada a comercial');
+    } catch (err) {
+      console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
+        action: 'request_delivery_dates_error',
+        requestId: selectedPurchase?.id,
+        error: err.message
+      });
+      alert('Error solicitando fechas: ' + err.message);
+    }
+  };
+
+  const handleMarkEquipmentArrived = async () => {
+    if (!selectedPurchase) return;
+    try {
+      await markPrivatePurchaseEquipmentArrived(selectedPurchase.id);
+      await loadPurchases();
+      const detailResponse = await getPrivatePurchaseById(selectedPurchase.id);
+      setSelectedPurchase((prev) => ({
+        ...prev,
+        ...detailResponse
+      }));
+      alert('Equipo marcado como recibido');
+    } catch (err) {
+      console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
+        action: 'mark_equipment_arrived_error',
+        requestId: selectedPurchase?.id,
+        error: err.message
+      });
+      alert('Error marcando llegada: ' + err.message);
     }
   };
 
   const getStatusBadgeVariant = (status) => {
     const variants = {
-      'calendar_events_created': 'blue',
+      'contract_available': 'blue',
+      'delivery_dates_requested': 'yellow',
+      'delivery_dates_submitted': 'teal',
+      'calendar_events_created': 'teal',
       'waiting_dispatch': 'yellow',
       'dispatch_ready': 'orange',
+      'delivery_act_draft_ready': 'amber',
+      'delivery_act_tech_assigned': 'yellow',
+      'delivery_act_logistics_signed': 'blue',
       'delivery_act_generated': 'purple',
-      'delivered_pending_signatures': 'cyan',
       'delivered_signed': 'green'
     };
     return variants[status] || 'gray';
   };
 
+  const getStatusLabel = (status) => {
+    const labels = {
+      contract_available: 'Contrato firmado',
+      delivery_dates_requested: 'Fechas solicitadas',
+      delivery_dates_submitted: 'Fechas definidas',
+      calendar_events_created: 'Calendario generado',
+      waiting_dispatch: 'Esperando despacho',
+      dispatch_ready: 'Despacho listo',
+      delivery_act_draft_ready: 'Acta en borrador',
+      delivery_act_tech_assigned: 'Tecnico asignado',
+      delivery_act_logistics_signed: 'Acta firmada por logistica',
+      delivery_act_generated: 'Acta generada',
+      delivered_signed: 'Entrega confirmada'
+    };
+    return labels[status] || status?.replace(/_/g, ' ');
+  };
+
+  const getDocumentLabel = (docType) => {
+    const labels = {
+      CLIENT_ID: 'Documento de identidad',
+      RUC: 'RUC del cliente',
+      OPERATING_PERMIT: 'Permiso de funcionamiento',
+      LEGAL_REP_APPOINTMENT: 'Nombramiento representante legal',
+      APPROVAL_LETTER: 'Oficio/acta de aprobacion',
+      LOPDP_RECORD: 'Registro consentimiento LOPDP',
+      LOPDP_EVIDENCE: 'Evidencia consentimiento LOPDP',
+      OFFER: 'Oferta enviada',
+      SIGNED_OFFER: 'Oferta firmada',
+      CONTRACT_DRAFT: 'Borrador del contrato',
+      CONTRACT_CLIENT_SIGNED: 'Contrato firmado por cliente',
+      CONTRACT_SIGNED: 'Contrato firmado',
+      DELIVERY_GUIDE: 'Guia de despacho',
+      DELIVERY_ACT_LOGISTICS_SIGNED: 'Acta firmada por logistica',
+      DELIVERY_ACT: 'Acta de entrega',
+      COMODATO: 'Documento comodato'
+    };
+    return labels[docType] || docType?.replace(/_/g, ' ');
+  };
   const formatClientName = (purchase) => {
     const snapshot = purchase.client_snapshot || {};
     return snapshot.commercial_name || snapshot.client_name || 'Cliente desconocido';
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    return new Date(dateString).toLocaleDateString('es-EC');
+  const formatDate = (dateString) => formatDateEC(dateString, '-');
+  const formatDateFallback = (dateString) => (dateString ? formatDateEC(dateString, '-') : 'Pendiente');
+  const filterDocumentsByType = (docs, types) => {
+    if (!Array.isArray(docs)) return [];
+    return docs.filter((doc) => types.includes(doc.doc_type));
   };
-
-  const canRequestDates = (purchase) => {
-    return purchase.status === 'pending_operations_schedule';
+  const canEditOperationsDetails = (purchase, hasGuides) => {
+    return [
+      'contract_available',
+      'delivery_dates_requested',
+      'delivery_dates_submitted',
+      'calendar_events_created',
+      'waiting_dispatch',
+      'dispatch_ready'
+    ].includes(purchase?.status) && hasGuides;
+  };
+  const canUploadGuides = (purchase) => {
+    return [
+      'contract_available',
+      'waiting_dispatch',
+      'dispatch_ready'
+    ].includes(purchase?.status);
   };
 
   if (loading) {
@@ -152,6 +347,10 @@ const OperacionesPrivatePurchases = () => {
       </div>
     );
   }
+
+  const guideDocuments = filterDocumentsByType(selectedPurchase?.documents, ['DELIVERY_GUIDE']);
+  const coreDocuments = filterDocumentsByType(selectedPurchase?.documents, ['SIGNED_OFFER', 'CONTRACT_SIGNED']);
+  const hasGuides = guideDocuments.length > 0;
 
   return (
     <div className="space-y-6">
@@ -168,7 +367,7 @@ const OperacionesPrivatePurchases = () => {
               <option value="">Todos los estados</option>
               {operationStatuses.map(status => (
                 <option key={status} value={status}>
-                  {status.replace(/_/g, ' ').toUpperCase()}
+                  {getStatusLabel(status)}
                 </option>
               ))}
             </Select>
@@ -190,7 +389,7 @@ const OperacionesPrivatePurchases = () => {
                 <TableHead>ID</TableHead>
                 <TableHead>Cliente</TableHead>
                 <TableHead>Estado</TableHead>
-                <TableHead>Última actualización</TableHead>
+                <TableHead>Ultima actualizacion</TableHead>
                 <TableHead>Acciones</TableHead>
               </TableRow>
             </TableHeader>
@@ -203,7 +402,7 @@ const OperacionesPrivatePurchases = () => {
                   <TableCell>{formatClientName(purchase)}</TableCell>
                   <TableCell>
                     <Badge variant={getStatusBadgeVariant(purchase.status)}>
-                      {purchase.status.replace(/_/g, ' ')}
+                      {getStatusLabel(purchase.status)}
                     </Badge>
                   </TableCell>
                   <TableCell>{formatDate(purchase.updated_at)}</TableCell>
@@ -216,14 +415,6 @@ const OperacionesPrivatePurchases = () => {
                       >
                         Ver detalle
                       </Button>
-                      {canRequestDates(purchase) && (
-                        <Button
-                          size="sm"
-                          onClick={() => handleRequestDates(purchase.id)}
-                        >
-                          Solicitar fechas
-                        </Button>
-                      )}
                     </div>
                   </TableCell>
                 </TableRow>
@@ -240,56 +431,219 @@ const OperacionesPrivatePurchases = () => {
       </Card>
 
       {/* Panel de detalle */}
-      {showDetail && selectedPurchase && (
-        <Card>
-          <CardHeader>
-            <CardTitle>
-              Detalle de Compra: {selectedPurchase.id.slice(0, 8)}...
-            </CardTitle>
-            <Button
-              variant="outline"
-              onClick={() => setShowDetail(false)}
-            >
-              Cerrar
-            </Button>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Información básica */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <h4 className="font-semibold mb-2">Cliente</h4>
-                <p>{formatClientName(selectedPurchase)}</p>
+      <Modal
+        open={showDetail && Boolean(selectedPurchase)}
+        onClose={() => setShowDetail(false)}
+        title={selectedPurchase ? `Detalle de compra ${selectedPurchase.id.slice(0, 8)}...` : 'Detalle de compra'}
+        maxWidth="max-w-6xl"
+      >
+        {selectedPurchase && (
+          <div className="space-y-6">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-xs text-gray-500">Cliente</p>
+                <p className="text-sm font-semibold text-gray-900">{formatClientName(selectedPurchase)}</p>
               </div>
-              <div>
-                <h4 className="font-semibold mb-2">Estado</h4>
-                <Badge variant={getStatusBadgeVariant(selectedPurchase.status)}>
-                  {selectedPurchase.status.replace(/_/g, ' ')}
-                </Badge>
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-xs text-gray-500">Estado actual</p>
+                <div className="mt-1">
+                  <Badge variant={getStatusBadgeVariant(selectedPurchase.status)}>
+                    {getStatusLabel(selectedPurchase.status)}
+                  </Badge>
+                </div>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-xs text-gray-500">Fecha tentativa</p>
+                <p className="text-sm text-gray-700">{formatDateFallback(selectedPurchase.estimated_arrival_at)}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-3">
+                <p className="text-xs text-gray-500">Ultima actualizacion</p>
+                <p className="text-sm text-gray-700">{formatDate(selectedPurchase.updated_at)}</p>
               </div>
             </div>
 
-            {/* Timeline */}
-            <div>
-              <h4 className="font-semibold mb-4">Timeline del Proceso</h4>
-              <PurchaseTimelinePanel
-                timeline={selectedPurchase.timeline || []}
-                className="max-h-64"
-              />
-            </div>
+            <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)]">
+              <div className="space-y-6">
+                {selectedPurchase.status === 'contract_available' && (
+                  <div className="rounded-xl border border-gray-200 bg-white p-4">
+                    <h4 className="font-semibold mb-2">Solicitud de fecha de entrega</h4>
+                    <Button
+                      variant="primary"
+                      onClick={handleRequestDeliveryDates}
+                      disabled={!selectedPurchase.equipment_arrived_at}
+                    >
+                      Solicitar fecha de entrega
+                    </Button>
+                    {!selectedPurchase.equipment_arrived_at && (
+                      <p className="text-xs text-orange-600 mt-2">
+                        Marca la llegada del equipo para habilitar esta solicitud.
+                      </p>
+                    )}
+                  </div>
+                )}
 
-            {/* Documentos */}
-            <div>
-              <h4 className="font-semibold mb-4">Documentos</h4>
-              <DocumentChecklist
-                purchase={selectedPurchase}
-                readonly={true}
-              />
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                  <div>
+                    <h4 className="font-semibold mb-2">Guias de despacho</h4>
+                    <p className="text-sm text-gray-500">
+                      Sube una o varias guias en PDF o imagen antes de continuar.
+                    </p>
+                  </div>
+                  <input
+                    type="file"
+                    multiple
+                    accept="application/pdf,image/*"
+                    onChange={handleGuideFilesChange}
+                    disabled={!canUploadGuides(selectedPurchase)}
+                  />
+                  {guideFiles.length > 0 && (
+                    <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                      {guideFiles.map((file) => (
+                        <span
+                          key={file.name}
+                          className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1"
+                        >
+                          {file.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {guideDocuments.length > 0 && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                      {guideDocuments.map((doc) => (
+                        <a
+                          key={`${doc.doc_type}-${doc.drive_file_id}`}
+                          href={doc.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+                        >
+                          <span>
+                            {getDocumentLabel(doc.doc_type)}
+                            {doc.doc_name ? ` - ${doc.doc_name}` : ''}
+                          </span>
+                          <span className="text-blue-600">Ver</span>
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                  {guideUploadState.error && (
+                    <p className="text-sm text-red-600">{guideUploadState.error}</p>
+                  )}
+                  <div>
+                    <Button
+                      onClick={handleUploadGuides}
+                      disabled={guideUploadState.uploading || !canUploadGuides(selectedPurchase)}
+                    >
+                      {guideUploadState.uploading ? 'Subiendo guias...' : 'Subir guias'}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
+                  <h4 className="font-semibold">Detalles para operaciones</h4>
+                  {!hasGuides && (
+                    <p className="text-sm text-orange-600">
+                      Sube al menos una guia para habilitar esta seccion.
+                    </p>
+                  )}
+                  <div className="flex items-center space-x-3">
+                    <input
+                      id="includes-starter-kit"
+                      type="checkbox"
+                      checked={operationsForm.includesStarterKit}
+                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, includesStarterKit: e.target.checked }))}
+                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
+                    />
+                    <label htmlFor="includes-starter-kit">Incluye kit de arranque</label>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Fecha tentativa de llegada</label>
+                    <input
+                      type="date"
+                      className="w-full border rounded-md p-2 text-sm"
+                      value={operationsForm.estimatedArrivalAt}
+                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, estimatedArrivalAt: e.target.value }))}
+                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides) || Boolean(selectedPurchase.equipment_arrived_at)}
+                    />
+                    {selectedPurchase.equipment_arrived_at && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Fecha tentativa bloqueada porque el equipo ya llego.
+                      </p>
+                    )}
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Observaciones</label>
+                    <textarea
+                      className="w-full border rounded-md p-2"
+                      rows={3}
+                      value={operationsForm.notes}
+                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, notes: e.target.value }))}
+                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-3">
+                    <Button
+                      onClick={handleSaveOperationsDetails}
+                      disabled={operationsForm.saving || !canEditOperationsDetails(selectedPurchase, hasGuides)}
+                    >
+                      {operationsForm.saving ? 'Guardando...' : 'Guardar detalles'}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={handleMarkEquipmentArrived}
+                      disabled={!hasGuides || Boolean(selectedPurchase.equipment_arrived_at)}
+                    >
+                      {selectedPurchase.equipment_arrived_at ? 'Equipo recibido' : 'Marcar equipo recibido'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <h4 className="font-semibold mb-4">Linea de tiempo del proceso</h4>
+                  <PurchaseTimelinePanel requestId={selectedPurchase.id} compact />
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <h4 className="font-semibold mb-3">Documentos clave</h4>
+                  {coreDocuments.length ? (
+                    <div className="grid grid-cols-1 gap-2">
+                      {coreDocuments.map((doc) => (
+                        <a
+                          key={`${doc.doc_type}-${doc.drive_file_id}`}
+                          href={doc.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+                        >
+                          <span>
+                            {getDocumentLabel(doc.doc_type)}
+                            {doc.doc_name ? ` - ${doc.doc_name}` : ''}
+                          </span>
+                          <span className="text-blue-600">Ver</span>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-500">Contrato firmado y oferta firmada aun no disponibles.</p>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4">
+                  <h4 className="font-semibold mb-3">Documentos requeridos</h4>
+                  <DocumentChecklist checklist={selectedPurchase.checklist || []} readOnly={true} />
+                </div>
+              </div>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        )}
+      </Modal>
+
     </div>
   );
 };
 
 export default OperacionesPrivatePurchases;
+

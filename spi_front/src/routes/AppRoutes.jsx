@@ -44,10 +44,13 @@ import ServicioAplicaciones from "../modules/servicio/pages/Aplicaciones";
 import ServicioDesinfeccion from "../modules/servicio/pages/Desinfeccion";
 import ServicioAsistencia from "../modules/servicio/pages/Asistencia";
 import ServicioVerificacionEquipos from "../modules/servicio/pages/VerificacionEquipos";
+import ServicioPrivatePurchaseDeliveries from "../modules/servicio/pages/PrivatePurchaseDeliveries";
+import TecnicoPrivatePurchases from "../modules/servicio/pages/TecnicoPrivatePurchases";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
 import DashboardOperaciones from "../modules/operaciones/Dashboard";
 import DashboardCalidad from "../modules/calidad/Dashboard";
+import DashboardLogistica from "../modules/logistica/Dashboard";
 import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
 import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
@@ -105,7 +108,9 @@ const AppRoutes = () => {
           <ProtectedRoute
             allowedRoles={[
               "gerencia",
+              "gerencia_general",
               "finanzas",
+              "jefe_financiero",
               "comercial",
               "jefe_comercial",
               "backoffice_comercial",
@@ -116,6 +121,7 @@ const AppRoutes = () => {
               "talento_humano",
               "ti",
               "operaciones",
+              "jefe_logistica",
               "calidad",
             ]}
           />
@@ -192,9 +198,16 @@ const AppRoutes = () => {
           <Route path="/dashboard/servicio-tecnico/desinfeccion" element={<ServicioDesinfeccion />} />
           <Route path="/dashboard/servicio-tecnico/asistencia" element={<ServicioAsistencia />} />
           <Route path="/dashboard/servicio-tecnico/verificacion" element={<ServicioVerificacionEquipos />} />
+          <Route
+            element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
+          >
+            <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<ServicioPrivatePurchaseDeliveries />} />
+            <Route path="/dashboard/servicio-tecnico/compras-privadas" element={<TecnicoPrivatePurchases />} />
+          </Route>
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
           <Route path="/dashboard/ti" element={<DashboardTI />} />
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
+          <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
           <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />

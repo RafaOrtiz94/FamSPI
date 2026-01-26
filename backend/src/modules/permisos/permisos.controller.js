@@ -128,6 +128,55 @@ async function listarMias(req, res) {
   }
 }
 
+async function listarResumenColaboradores(req, res) {
+  try {
+    const role = (req.user?.role || "").toLowerCase();
+    const allowed = new Set([
+      "talento_humano",
+      "jefe_talento_humano",
+      "jefe_financiero",
+      "gerencia",
+      "gerencia_general",
+      "gerente_general",
+      "director",
+      "admin",
+      "administrador",
+    ]);
+
+    if (!allowed.has(role)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para ver este resumen" });
+    }
+
+    const result = await permisosService.listarResumenColaboradores();
+    const normalized = result.map((row) => ({
+      ...row,
+      permisos: {
+        ...row.permisos,
+        items: (row.permisos.items || []).map((item) =>
+          normalizeRow(item, [
+            "fecha_inicio",
+            "fecha_fin",
+            "aprobacion_parcial_at",
+            "aprobacion_final_at",
+            "created_at",
+          ])
+        ),
+      },
+      vacaciones: {
+        ...row.vacaciones,
+        items: (row.vacaciones.items || []).map((item) =>
+          normalizeRow(item, ["fecha_inicio", "fecha_fin", "created_at"])
+        ),
+      },
+    }));
+
+    res.json({ ok: true, data: normalized });
+  } catch (error) {
+    console.error("Error listando resumen de colaboradores:", error);
+    res.status(500).json({ ok: false, message: error.message });
+  }
+}
+
 module.exports = {
   create,
   aprobarParcial,
@@ -136,5 +185,6 @@ module.exports = {
   rechazar,
   listarPendientes,
   listarMias,
+  listarResumenColaboradores,
   upload,
 };

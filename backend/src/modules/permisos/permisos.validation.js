@@ -48,17 +48,52 @@ async function validatePermisoPersonal({ user_email, duracion_horas, fecha_inici
   return { valid: true, justificantes_requeridos: ["evidencia_general"], es_recuperable: false };
 }
 
-function validatePermisoSalud(dias) {
-  const diasNum = Number(dias || 0);
-  if (diasNum < 4) {
+function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin }) {
+  if (!fecha_inicio || !fecha_fin) {
+    throw new Error("Las fechas de inicio y fin son obligatorias para el permiso de salud");
+  }
+
+  const start = new Date(fecha_inicio);
+  const end = new Date(fecha_fin);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Las fechas de inicio o fin no son validas");
+  }
+  if (end < start) {
+    throw new Error("La fecha de fin no puede ser anterior a la fecha de inicio");
+  }
+
+  const horasNum = Number(duracion_horas || 0);
+  const diasNumInput = Number(duracion_dias || 0);
+  const hasHoras = Number.isFinite(horasNum) && horasNum > 0;
+  const hasDiasInput = Number.isFinite(diasNumInput) && diasNumInput > 0;
+
+  let diasNum = diasNumInput;
+
+  if (!hasHoras && !hasDiasInput) {
+    const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+    diasNum = diff >= 0 ? diff + 1 : 0;
+  } else if (hasHoras && !hasDiasInput) {
+    diasNum = 0;
+  }
+
+  if (!hasHoras && !(Number.isFinite(diasNum) && diasNum > 0)) {
+    throw new Error("Debe indicar horas o dias para el permiso de salud");
+  }
+
+  if (diasNum > 0 && diasNum < 4) {
     return { valid: true, justificantes_requeridos: ["certificado_medico"], requiere_tramite_iess: false };
   }
-  return {
-    valid: true,
-    justificantes_requeridos: ["certificado_medico_iess"],
-    requiere_tramite_iess: true,
-    mensaje: "Debe realizar trámite de subsidios en el IESS",
-  };
+
+  if (diasNum >= 4) {
+    return {
+      valid: true,
+      justificantes_requeridos: ["certificado_medico_iess"],
+      requiere_tramite_iess: true,
+      mensaje: "Debe realizar tramite de subsidios en el IESS",
+    };
+  }
+
+  return { valid: true, justificantes_requeridos: ["certificado_medico"], requiere_tramite_iess: false };
 }
 
 function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
@@ -79,14 +114,14 @@ function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
 }
 
 async function validatePermisoRequest(data) {
-  const { tipo_permiso, duracion_horas, duracion_dias, fecha_inicio } = data;
+  const { tipo_permiso, duracion_horas, duracion_dias, fecha_inicio, fecha_fin } = data;
   switch (tipo_permiso) {
     case "estudios":
       return validatePermisoEstudios(duracion_horas);
     case "personal":
       return validatePermisoPersonal({ user_email: data.user_email, duracion_horas, fecha_inicio });
     case "salud":
-      return validatePermisoSalud(duracion_dias);
+      return validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin });
     case "calamidad":
       return validatePermisoCalamidad({ subtipo_calamidad: data.subtipo_calamidad, duracion_dias });
     default:
@@ -103,3 +138,4 @@ module.exports = {
   getStartOfWeek,
   getEndOfWeek,
 };
+

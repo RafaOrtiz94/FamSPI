@@ -55,6 +55,11 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (currentStep < 4) {
+            nextStep();
+            return;
+        }
+        if (loading) return;
 
         // Validaciones básicas
         if (!formData.position_title || !formData.education_level || !formData.main_responsibilities || !formData.justification) {
@@ -82,6 +87,14 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
 
     const prevStep = () => {
         if (currentStep > 1) setCurrentStep(currentStep - 1);
+    };
+
+    const handleFormKeyDown = (e) => {
+        if (e.key !== "Enter") return;
+        if (currentStep >= 4) return;
+        if (e.target?.tagName === "TEXTAREA") return;
+        e.preventDefault();
+        nextStep();
     };
 
     const [portalNode] = useState(() => document.createElement('div'));
@@ -130,7 +143,7 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                     </div>
                 </div>
 
-                <form onSubmit={handleSubmit}>
+                <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown}>
                     <div className="px-6 py-6">
                         {/* Paso 1: Información del Puesto */}
                         {currentStep === 1 && (

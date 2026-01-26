@@ -13,8 +13,8 @@ const fs = require("fs");
 const { createLogger, format, transports } = require("winston");
 require("winston-daily-rotate-file");
 
-// Crear carpeta logs si no existe
-const logDir = path.join(__dirname, "../../logs");
+// Crear carpeta logs si no existe (usar /tmp para compatibilidad con Cloud Run)
+const logDir = path.join("/tmp", "logs");
 if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
 
 const consoleFormat = format.combine(

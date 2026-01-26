@@ -8,11 +8,11 @@ import { useUI } from "../../core/ui/useUI";
 import { useCreatePurchaseRequest } from "./useCreatePurchaseRequest";
 import { getPurchaseMeta } from "./purchaseRequestsApi";
 
-// Submission steps for progress overlay
-const submissionSteps = [
+// Submission steps for progress overlay - dynamic based on mode
+const getSubmissionSteps = (isPrivateDirect) => [
     { id: "validating", label: "Validando información" },
     { id: "preparing", label: "Preparando solicitud" },
-    { id: "submitting", label: "Enviando a ACP" },
+    { id: "submitting", label: isPrivateDirect ? "Creando solicitud privada" : "Enviando a ACP" },
 ];
 
 // LIS Options per mode (legacy support)
@@ -47,6 +47,8 @@ const NewPurchaseRequestModal = ({
     intent = 'provider_handoff',
     onSuccess
 }) => {
+    // Determinar si es modo privado directo
+    const isPrivateDirect = mode === 'private_direct';
     const { showToast } = useUI();
     const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
     const [loading, setLoading] = useState(false);
@@ -82,18 +84,24 @@ const NewPurchaseRequestModal = ({
     // Dynamic LIS options based on mode
     const lisOptions = LIS_OPTIONS_BY_MODE[mode] || LIS_OPTIONS_BY_MODE.acp_required;
 
-    // Dynamic titles and texts based on source
-    const modalTitle = source === 'solicitudes_publicas'
-        ? "Nueva Solicitud de Compra Pública"
-        : "Solicitud de compra";
+    // Dynamic titles and texts based on source and mode
+    const modalTitle = isPrivateDirect
+        ? "Nueva Solicitud de Compra Privada"
+        : source === 'solicitudes_publicas'
+            ? "Nueva Solicitud de Compra Pública"
+            : "Solicitud de compra";
 
-    const buttonText = source === 'solicitudes_publicas'
-        ? "Crear Solicitud Pública"
-        : "Enviar a ACP";
+    const buttonText = isPrivateDirect
+        ? "Crear Solicitud Privada"
+        : source === 'solicitudes_publicas'
+            ? "Crear Solicitud Pública"
+            : "Enviar a ACP";
 
-    const successMessage = source === 'solicitudes_publicas'
-        ? "Solicitud de compra pública creada correctamente"
-        : "Solicitud enviada al ACP Comercial";
+    const successMessage = isPrivateDirect
+        ? "Solicitud de compra privada creada correctamente"
+        : source === 'solicitudes_publicas'
+            ? "Solicitud de compra pública creada correctamente"
+            : "Solicitud enviada al ACP Comercial";
 
     // Use the shared hook for creating purchase requests
     const { submitRequest } = useCreatePurchaseRequest();
@@ -167,8 +175,8 @@ const NewPurchaseRequestModal = ({
             return;
         }
 
-        // ACP validation - always required
-        if (!form.assignedTo) {
+        // ACP validation - only required for public purchases
+        if (!isPrivateDirect && !form.assignedTo) {
             showToast("Debes asignar la solicitud a un ACP Comercial", "warning");
             return;
         }
@@ -268,8 +276,8 @@ const NewPurchaseRequestModal = ({
                         <ProcessingOverlay
                             className="z-[1010]"
                             title="Procesando solicitud de compra"
-                            steps={submissionSteps}
-                            activeStep={progressStep || submissionSteps[submissionSteps.length - 1].id}
+                            steps={getSubmissionSteps(isPrivateDirect)}
+                            activeStep={progressStep || getSubmissionSteps(isPrivateDirect)[getSubmissionSteps(isPrivateDirect).length - 1].id}
                         />
                     )}
                     <Dialog open onClose={() => setIsOpen(false)} className="fixed inset-0 z-[999]">
@@ -326,8 +334,8 @@ const NewPurchaseRequestModal = ({
                                             </select>
                                         </div>
 
-                                        {/* ACP Assignment - always required */}
-                                        {form.clientId && (
+                                        {/* ACP Assignment - only for public purchases */}
+                                        {form.clientId && !isPrivateDirect && (
                                             <div>
                                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                                     Asignar a
@@ -455,7 +463,11 @@ const NewPurchaseRequestModal = ({
                                                 rows={form.requiresLis ? 3 : 4}
                                                 value={form.notes}
                                                 onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
-                                                placeholder="Añade contexto relevante para el ACP Comercial"
+                                                placeholder={
+                                                    isPrivateDirect
+                                                        ? "Añade contexto relevante para la gestión directa con el cliente"
+                                                        : "Añade contexto relevante para el ACP Comercial"
+                                                }
                                             />
                                         </div>
                                     </div>

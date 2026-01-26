@@ -4,8 +4,6 @@
 
 /**
  * Mode configurations for purchase request modals
- *
- * NOTE: Only acp_required is supported since backend doesn't support auto-assignment
  */
 export const PURCHASE_MODES = {
     acp_required: {
@@ -18,7 +16,7 @@ export const PURCHASE_MODES = {
             assignedToRequired: true,
             equipmentRequired: true,
             clientRequired: true,
-            acpAutoAssign: false // Backend doesn't support auto-assignment
+            acpAutoAssign: false
         },
 
         // UI configuration
@@ -37,9 +35,38 @@ export const PURCHASE_MODES = {
         defaults: {
             assignedTo: 'first_available' // Auto-select first ACP
         }
-    }
+    },
 
-    // REMOVED: acp_optional_autoassign - Backend doesn't support auto-assignment
+    private_direct: {
+        id: 'private_direct',
+        label: 'Compra Privada Directa',
+        description: 'Gestión directa con cliente privado sin proceso ACP',
+
+        // Validation rules
+        validations: {
+            assignedToRequired: false,
+            equipmentRequired: true,
+            clientRequired: true,
+            acpAutoAssign: false
+        },
+
+        // UI configuration
+        ui: {
+            acpLabel: null, // No ACP assignment for private purchases
+            acpPlaceholder: null,
+            acpRequired: false,
+            acpHelpText: null,
+            lisLabel: 'El cliente requiere LIS',
+            lisOptions: ['Cobas Infinity', 'Orion'],
+            buttonText: 'Crear Solicitud Privada',
+            successMessage: 'Solicitud de compra privada creada correctamente'
+        },
+
+        // Default values
+        defaults: {
+            assignedTo: null // No default assignment
+        }
+    }
 };
 
 /**

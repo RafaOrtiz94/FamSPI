@@ -257,6 +257,8 @@ const NewClientRequestForm = ({
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
+    const fieldValue = type === "checkbox" ? checked : value;
+
     setFormData((prev) => {
       const nextValue = type === "checkbox" ? checked : value;
       const nextState = { ...prev, [name]: nextValue };
@@ -306,9 +308,10 @@ const NewClientRequestForm = ({
     if (name === "operating_permit_status" && value !== "has_it") {
       setFiles((prev) => ({ ...prev, operating_permit_file: null }));
     }
+    // Solo resetear token si no está verificado aún
     if (name === "client_email" || name === "consent_recipient_email") {
       const normalized = value.trim().toLowerCase();
-      if (consentTokenState.lastEmail && normalized !== consentTokenState.lastEmail) {
+      if (consentTokenState.lastEmail && normalized !== consentTokenState.lastEmail && consentTokenState.status !== "verified") {
         resetConsentTokenFlow();
       }
     }
@@ -417,6 +420,7 @@ const NewClientRequestForm = ({
         delete next.consent_email_token_id;
         return next;
       });
+
       showToast("Código validado correctamente.", "success");
     } catch (error) {
       console.error("Error al validar token", error);
@@ -506,9 +510,6 @@ const NewClientRequestForm = ({
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    // Verificación adicional: asegurar que el envío solo ocurre por acción explícita del usuario
-    console.log("[CLIENT_REQUEST_FORM] Enviando solicitud por acción del usuario");
-
     const validationErrors = validateForm();
     if (Object.keys(validationErrors).length) {
       setErrors(validationErrors);
@@ -528,7 +529,6 @@ const NewClientRequestForm = ({
       }
 
       setProgressStep("submitting");
-      console.log("[CLIENT_REQUEST_FORM] Procesando envío con pantalla de carga visible");
 
       if (isEditing) {
         await updateClientRequest(initialData.id, payload, files);

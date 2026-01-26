@@ -86,14 +86,29 @@ function mapBusinessCase(row) {
 
 async function assertModernBusinessCase(id) {
   const { rows } = await db.query(
-    `SELECT uses_modern_system, bc_system_type FROM equipment_purchase_requests WHERE id = $1`,
+    `SELECT uses_modern_system, bc_system_type FROM v_business_cases WHERE business_case_id = $1`,
     [id],
   );
 
   if (!rows.length) {
-    const error = new Error("Business Case no encontrado");
-    error.status = 404;
-    throw error;
+    const { rows: legacyRows } = await db.query(
+      `SELECT uses_modern_system, bc_system_type FROM equipment_purchase_requests WHERE id = $1`,
+      [id],
+    );
+
+    if (!legacyRows.length) {
+      const error = new Error("Business Case no encontrado");
+      error.status = 404;
+      throw error;
+    }
+
+    if (!legacyRows[0].uses_modern_system || legacyRows[0].bc_system_type !== "modern") {
+      const error = new Error("BC legacy no soportado");
+      error.status = 400;
+      throw error;
+    }
+
+    return legacyRows[0];
   }
 
   if (!rows[0].uses_modern_system || rows[0].bc_system_type !== "modern") {
@@ -106,6 +121,14 @@ async function assertModernBusinessCase(id) {
 }
 
 async function createBusinessCase(data, user) {
+  logger.info({
+    user_email: user?.email,
+    user_id: user?.id,
+    client_name: data.client_name,
+    client_id: data.client_id,
+    bc_purchase_type: data.bc_purchase_type || 'public'
+  }, "🚀 [FLUJO_BUSINESS_CASE] INICIANDO creación de Business Case");
+
   const {
     client_name,
     client_id,
@@ -126,12 +149,30 @@ async function createBusinessCase(data, user) {
     modern_bc_metadata = {},
   } = data;
 
+  logger.info({
+    bc_purchase_type,
+    bc_duration_years,
+    bc_equipment_cost,
+    status,
+    bc_stage
+  }, "📋 [FLUJO_BUSINESS_CASE] Datos del Business Case procesados");
+
   // Auto-determine bc_stage based on comodato type if not provided
   const defaultStage = bc_purchase_type === 'comodato_publico' ? 'pending_comercial' : 'pending_backoffice';
   const finalStage = bc_stage || defaultStage;
 
+  logger.info({
+    bc_stage_provided: bc_stage,
+    default_stage: defaultStage,
+    final_stage: finalStage
+  }, "🎯 [FLUJO_BUSINESS_CASE] Etapa del Business Case determinada");
+
   // Manual ID generation: Column is UUID and has no default, so we generate one.
   const nextId = require('crypto').randomUUID();
+
+  logger.info({
+    generated_id: nextId
+  }, "🆔 [FLUJO_BUSINESS_CASE] ID único generado");
 
   const insertQuery = `
     INSERT INTO equipment_purchase_requests (
@@ -205,6 +246,33 @@ async function createBusinessCase(data, user) {
   } catch (error) {
     logger.warn({ error: error.message }, "No se pudo crear carpeta en Drive para el BC");
   }
+
+  // NOTIFICACIÓN: Crear Business Case
+  setImmediate(async () => {
+    try {
+      const notificationManager = require('../notifications/notificationManager');
+      await notificationManager.sendNotification({
+        userId: user?.id,
+        template: 'bc_created',
+        data: {
+          business_case_id: returnedId,
+          client_name: client_name || 'Cliente no especificado'
+        },
+        email: false,
+        chat: false,
+        priority: 1,
+        source: 'business_case.created',
+        meta: {
+          businessCaseId: returnedId,
+          createdBy: user?.id,
+          clientName: client_name
+        }
+      });
+    } catch (notificationError) {
+      logger.warn({ notificationError, businessCaseId: returnedId }, 'Error enviando notificación de creación BC');
+      // No lanzamos error para no afectar la creación exitosa
+    }
+  });
 
   const bcResult = await db.query(`SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`, [returnedId]);
   return mapBusinessCase(bcResult.rows[0]);
@@ -316,7 +384,16 @@ async function listBusinessCases(filters = {}) {
 }
 
 async function updateBusinessCase(id, data) {
+  logger.info({
+    business_case_id: id,
+    fields_to_update: Object.keys(data || {})
+  }, "🚀 [FLUJO_BUSINESS_CASE] INICIANDO actualización de Business Case");
+
   await assertModernBusinessCase(id);
+
+  logger.info({
+    business_case_id: id
+  }, "✅ [FLUJO_BUSINESS_CASE] Validación de Business Case moderno exitosa");
 
   const allowedFields = [
     "client_name",
@@ -351,8 +428,16 @@ async function updateBusinessCase(id, data) {
   });
 
   if (!sets.length) {
+    logger.info({
+      business_case_id: id
+    }, "⚠️ [FLUJO_BUSINESS_CASE] No hay campos para actualizar - retornando datos actuales");
     return getBusinessCaseById(id);
   }
+
+  logger.info({
+    business_case_id: id,
+    fields_being_updated: sets.map(s => s.split(' = ')[0])
+  }, "📝 [FLUJO_BUSINESS_CASE] Campos que serán actualizados");
 
   values.push(id);
 
@@ -362,7 +447,17 @@ async function updateBusinessCase(id, data) {
     WHERE id = $${values.length}
   `;
 
+  logger.info({
+    business_case_id: id,
+    update_query_preview: `UPDATE ... SET ${sets.join(", ")}, updated_at = now() WHERE id = $${values.length}`
+  }, "🔄 [FLUJO_BUSINESS_CASE] Ejecutando actualización en base de datos");
+
   await db.query(query, values);
+
+  logger.info({
+    business_case_id: id
+  }, "✅ [FLUJO_BUSINESS_CASE] Actualización exitosa - obteniendo datos actualizados");
+
   return getBusinessCaseById(id);
 }
 

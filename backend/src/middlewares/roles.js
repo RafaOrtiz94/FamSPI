@@ -65,6 +65,28 @@ const normalizeRoleName = (value) =>
     .toLowerCase()
     .replace(/[\s-]+/g, "_");
 
+const collectUserRoles = (user = {}) => {
+  const roles = new Set();
+  const pushRole = (value) => {
+    const normalized = normalizeRoleName(value);
+    if (normalized) roles.add(normalized);
+  };
+
+  pushRole(user.role);
+  pushRole(user.scope);
+  pushRole(user.role_name);
+
+  if (Array.isArray(user.roles)) {
+    user.roles.forEach(pushRole);
+  }
+
+  if (Array.isArray(user.scopes)) {
+    user.scopes.forEach(pushRole);
+  }
+
+  return roles;
+};
+
 function expandRoles(allowed = []) {
   const expanded = new Set();
   allowed.forEach((role) => {
@@ -85,18 +107,27 @@ function requireRole(allowedRoles = []) {
       return res.status(401).json({ ok: false, error: "No autenticado." });
     }
 
-    const role = normalizeRoleName(req.user.role || req.user.scope || req.user.role_name);
-    if (role && SUPER_ROLES.has(role)) {
-      return next();
+    const candidates = collectUserRoles(req.user);
+    for (const role of candidates) {
+      if (SUPER_ROLES.has(role)) {
+        return next();
+      }
+      if (expanded.has(role)) {
+        return next();
+      }
     }
-    if (!role || !expanded.has(role)) {
+
+    if (candidates.size === 0) {
       return res.status(403).json({
         ok: false,
         error: `Acceso denegado. Roles permitidos: ${Array.from(expanded).join(", ")}`,
       });
     }
 
-    next();
+    return res.status(403).json({
+      ok: false,
+      error: `Acceso denegado. Roles permitidos: ${Array.from(expanded).join(", ")}`,
+    });
   };
 }
 

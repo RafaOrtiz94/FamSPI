@@ -25,7 +25,7 @@ async function getUserEmailsByRoles(roles) {
     );
     return rows.map(row => row.email);
   } catch (error) {
-    console.error('[FLOW_PRIVADA][FASE2][CALENDAR][ERROR]', 'Error obteniendo emails por roles:', error);
+    console.error('[FLOW_PRIVADA][BE][FASE4][CALENDAR][ATTENDEES_RESOLVE][ERR]', 'Error obteniendo emails por roles:', error);
     return [];
   }
 }
@@ -42,7 +42,7 @@ async function getUserEmailsByRoles(roles) {
  */
 async function createDeliveryEvent({ purchaseId, clientName, startAt, endAt, attendees = [] }) {
   try {
-    console.log('[FLOW_PRIVADA][FASE2][CALENDAR]', {
+    console.log('[FLOW_PRIVADA][BE][FASE4][CALENDAR][ATTENDEES_RESOLVE][OK]', {
       purchaseId,
       clientName,
       startAt,
@@ -67,6 +67,7 @@ async function createDeliveryEvent({ purchaseId, clientName, startAt, endAt, att
       reminders: {
         useDefault: false,
         overrides: [
+          { method: 'email', minutes: 10 * 24 * 60 }, // 10 dias antes
           { method: 'email', minutes: 24 * 60 }, // 24 horas antes
           { method: 'popup', minutes: 60 } // 1 hora antes
         ]
@@ -87,7 +88,7 @@ async function createDeliveryEvent({ purchaseId, clientName, startAt, endAt, att
       sendUpdates: 'none' // No enviar emails automáticos, usamos NotificationManager
     });
 
-    console.log('[FLOW_PRIVADA][FASE2][CALENDAR][SUCCESS]', {
+    console.log('[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][OK]', {
       purchaseId,
       eventId: response.data.id,
       htmlLink: response.data.htmlLink
@@ -101,7 +102,7 @@ async function createDeliveryEvent({ purchaseId, clientName, startAt, endAt, att
     };
 
   } catch (error) {
-    console.error('[FLOW_PRIVADA][FASE2][CALENDAR][ERROR]', {
+    console.error('[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][ERR]', {
       purchaseId,
       error: error.message,
       details: error.response?.data
@@ -124,17 +125,27 @@ async function createDeliveryEvent({ purchaseId, clientName, startAt, endAt, att
 async function createDeliveryEvents({ purchaseId, clientName, deliveryStartAt, deliveryEndAt }) {
   try {
     // Obtener emails de roles relevantes
-    const requiredRoles = ['jefe_operaciones', 'asesor_comercial', 'jefe_tecnico', 'jefe_logistica'];
+    const requiredRoles = [
+      'asesor_comercial',
+      'comercial',
+      'jefe_comercial',
+      'backoffice_comercial',
+      'acp_comercial',
+      'gerencia_general',
+      'gerente_general',
+      'jefe_operaciones',
+      'jefe_logistica'
+    ];
     const attendees = await getUserEmailsByRoles(requiredRoles);
 
-    console.log('[FLOW_PRIVADA][FASE2][CALENDAR]', {
+    console.log('[FLOW_PRIVADA][BE][FASE4][CALENDAR][SKIP_ALREADY_EXISTS]', {
       purchaseId,
       roles: requiredRoles,
       attendeesFound: attendees.length
     });
 
     if (attendees.length === 0) {
-      console.warn('[FLOW_PRIVADA][FASE2][CALENDAR][WARNING]', 'No se encontraron emails para roles requeridos');
+      console.warn('[FLOW_PRIVADA][BE][FASE4][CALENDAR][ATTENDEES_RESOLVE][ERR]', 'No se encontraron emails para roles requeridos');
     }
 
     // Crear el evento principal de entrega
@@ -165,7 +176,7 @@ async function createDeliveryEvents({ purchaseId, clientName, deliveryStartAt, d
     };
 
   } catch (error) {
-    console.error('[FLOW_PRIVADA][FASE2][CALENDAR][CREATE_ERROR]', {
+    console.error('[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][ERR]', {
       purchaseId,
       error: error.message
     });

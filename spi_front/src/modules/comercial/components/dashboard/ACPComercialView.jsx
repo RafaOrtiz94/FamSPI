@@ -40,15 +40,15 @@ const ACPComercialView = ({ onRefresh }) => {
 
         <Card
           className="p-4 cursor-pointer hover:shadow-sm transition border border-gray-200"
-          onClick={() => navigate("/dashboard/comercial/equipment-purchases")}
+          onClick={() => navigate("/dashboard/purchases/workspace")}
         >
           <div className="flex items-center gap-3">
             <div className="p-2 bg-cyan-50 rounded-md text-cyan-600">
               <FiFileText size={18} />
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-900">Procesos de compra</p>
-              <p className="text-xs text-gray-500">Seguimiento de equipos</p>
+              <p className="text-sm font-semibold text-gray-900">Centro de Compras</p>
+              <p className="text-xs text-gray-500">Públicas y Privadas Unificadas</p>
             </div>
           </div>
         </Card>

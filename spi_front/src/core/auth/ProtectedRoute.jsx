@@ -19,15 +19,31 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
   const toastShownRef = useRef(false);
   const lopdpToastShownRef = useRef(false);
   const location = useLocation();
-  const normalizedAllowed = allowedRoles.map((r) => r.toLowerCase());
-  const userRole = (user?.role || "").toLowerCase();
-  const userScope = (user?.scope || userRole).toLowerCase();
+  const normalizedAllowed = allowedRoles.map((r) => String(r || "").toLowerCase());
+  const userRoleRaw = user?.role ?? "";
+  const userRolesList = Array.isArray(userRoleRaw)
+    ? userRoleRaw
+    : String(userRoleRaw)
+        .split(",")
+        .map((r) => r.trim())
+        .filter(Boolean);
+  const scopeRaw = user?.scope ?? userRoleRaw;
+  const scopesList = Array.isArray(scopeRaw)
+    ? scopeRaw
+    : String(scopeRaw)
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+  const normalizedUserRoles = userRolesList.map((r) => r.toLowerCase());
+  const normalizedScopes = scopesList.map((s) => s.toLowerCase());
+  const userRole = normalizedUserRoles[0] || "";
+  const userScope = normalizedScopes[0] || userRole;
   const hasPermission =
     normalizedAllowed.length === 0 ||
-    normalizedAllowed.includes(userScope) ||
-    normalizedAllowed.includes(userRole) ||
-    userScope === "gerencia" ||
-    userRole === "gerencia";
+    normalizedAllowed.some((role) => normalizedUserRoles.includes(role)) ||
+    normalizedAllowed.some((role) => normalizedScopes.includes(role)) ||
+    normalizedScopes.includes("gerencia") ||
+    normalizedUserRoles.includes("gerencia");
   const lopdpPending = (user?.lopdp_internal_status || "").toLowerCase() !== "granted";
 
   useEffect(() => {
@@ -107,10 +123,12 @@ export const RoleRedirect = () => {
   const scope = (user.scope || role).toLowerCase();
   const roleRoutes = {
     gerencia: "/dashboard/gerencia",
+    gerencia_general: "/dashboard/gerencia",
     gerente_general: "/dashboard/gerencia",
     director: "/dashboard/gerencia",
     finanzas: "/dashboard/finanzas",
     jefe_finanzas: "/dashboard/finanzas",
+    jefe_financiero: "/dashboard/finanzas",
     comercial: "/dashboard/comercial",
     jefe_comercial: "/dashboard/comercial",
     backoffice_comercial: "/dashboard/comercial",
@@ -127,6 +145,8 @@ export const RoleRedirect = () => {
     jefe_ti: "/dashboard/ti",
     operaciones: "/dashboard/operaciones",
     jefe_operaciones: "/dashboard/operaciones",
+    logistica: "/dashboard/logistica",
+    jefe_logistica: "/dashboard/logistica",
     calidad: "/dashboard/calidad",
     jefe_calidad: "/dashboard/calidad",
   };

@@ -1,7 +1,14 @@
-const { v4: uuidv4 } = require("uuid");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
+
+// Helper function for UUID generation
+const generateUUID = () => {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
 
 /**
  * Servicio: DigitalSealService
@@ -45,7 +52,7 @@ class DigitalSealService {
       const year = new Date().getFullYear();
       const sequence = Math.floor(Math.random() * 9000 + 1000);
       const sealCode = `SPI-${year}-ADV-${sequence}`;
-      const verificationToken = uuidv4();
+      const verificationToken = generateUUID();
 
       const insertRes = await pgClient.query(
         `INSERT INTO document_seals (

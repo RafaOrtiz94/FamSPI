@@ -26,4 +26,7 @@ router.get("/pendientes", controller.listarPendientes);
 // Listar mis solicitudes
 router.get("/mis-solicitudes", controller.listarMias);
 
+// Resumen por colaborador (talento humano / gerencia)
+router.get("/resumen-colaboradores", controller.listarResumenColaboradores);
+
 module.exports = router;

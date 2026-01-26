@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
-import { createSolicitud, getVacationSummary } from "../../../../core/api/permisosApi";
+import { createSolicitud, getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 
 /**
@@ -22,6 +22,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [tipoPermiso, setTipoPermiso] = useState(""); // 'estudios', 'personal', 'salud', 'calamidad'
     const [subtipoCalamidad, setSubtipoCalamidad] = useState(""); // 'fallecimiento', 'accidente', 'desastre'
     const [vacationSummary, setVacationSummary] = useState(null);
+    const [approvedVacationDays, setApprovedVacationDays] = useState(0);
+    const [pendingVacationDays, setPendingVacationDays] = useState(0);
+    const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
+    const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
 
     const [formData, setFormData] = useState({
         // Común
@@ -45,11 +49,61 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         }
     }, [open, tipoSolicitud]);
 
+    useEffect(() => {
+        if (tipoPermiso !== "salud") {
+            setSaludDuracionTipo("dias");
+        }
+    }, [tipoPermiso]);
+
+    useEffect(() => {
+        if (vacacionMedioDia) {
+            setFormData((prev) => ({
+                ...prev,
+                duracion_dias: 0.5,
+                duracion_horas: 4,
+                fecha_fin: prev.fecha_inicio || prev.fecha_fin,
+            }));
+        } else {
+            setFormData((prev) => ({
+                ...prev,
+                duracion_dias: prev.duracion_dias === 0.5 ? "" : prev.duracion_dias,
+                duracion_horas: prev.duracion_horas === 4 ? "" : prev.duracion_horas,
+            }));
+        }
+    }, [vacacionMedioDia]);
+
     const loadVacationSummary = async () => {
         try {
-            const response = await getVacationSummary();
-            if (response.ok) {
-                setVacationSummary(response.data);
+            const [summaryResp, mineResp] = await Promise.all([
+                getVacationSummary(),
+                getMisSolicitudes(),
+            ]);
+            if (summaryResp.ok) {
+                setVacationSummary(summaryResp.data);
+            }
+            if (mineResp?.ok) {
+                const vacationRows = mineResp.data || [];
+                const approvedDays = vacationRows
+                    .filter((req) =>
+                        req.tipo_solicitud === "vacaciones" &&
+                        (req.status === "approved" || req.status === "aprobado")
+                    )
+                    .reduce((acc, req) => acc + calculateDays(req), 0);
+                const pendingDays = vacationRows
+                    .filter((req) =>
+                        req.tipo_solicitud === "vacaciones" &&
+                        (req.status === "pending" || req.status === "pendiente" || req.status === "pending_final" || req.status === "partially_approved")
+                    )
+                    .reduce((acc, req) => acc + calculateDays(req), 0);
+                setApprovedVacationDays(approvedDays);
+                setPendingVacationDays(pendingDays);
+
+                console.info("[VACACIONES][RESUMEN][FRONT]", {
+                    summary: summaryResp?.data,
+                    approvedDays,
+                    pendingDays,
+                    totalRows: vacationRows.length
+                });
             }
         } catch (error) {
             console.error("Error loading vacation summary:", error);
@@ -61,6 +115,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setTipoSolicitud("");
         setTipoPermiso("");
         setSubtipoCalamidad("");
+        setSaludDuracionTipo("dias");
+        setVacacionMedioDia(false);
         setFormData({
             fecha_inicio: "",
             fecha_fin: "",
@@ -92,6 +148,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 if (tipoPermiso === "calamidad") {
                     payload.subtipo_calamidad = subtipoCalamidad;
                 }
+                if (tipoPermiso === "salud" && saludDuracionTipo === "horas") {
+                    payload.duracion_dias = "";
+                }
+                if (tipoPermiso === "salud" && saludDuracionTipo === "dias") {
+                    payload.duracion_horas = "";
+                }
+            }
+
+            if (tipoSolicitud === "vacaciones" && vacacionMedioDia) {
+                payload.duracion_dias = 0.5;
+                payload.duracion_horas = 4;
+                payload.fecha_fin = payload.fecha_inicio;
             }
 
             const response = await createSolicitud(payload);
@@ -117,10 +185,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         }
     };
 
-    const calculateDays = () => {
-        if (!formData.fecha_inicio || !formData.fecha_fin) return 0;
-        const start = new Date(formData.fecha_inicio);
-        const end = new Date(formData.fecha_fin);
+    const calculateDays = (source = formData) => {
+        const explicitDays = Number(source?.duracion_dias ?? source?.days);
+        if (Number.isFinite(explicitDays) && explicitDays > 0) {
+            return explicitDays;
+        }
+
+        const startValue = source?.fecha_inicio || source?.start_date;
+        const endValue = source?.fecha_fin || source?.end_date;
+        if (!startValue || !endValue) return 0;
+
+        const start = new Date(startValue);
+        const end = new Date(endValue);
         const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
         return diff >= 0 ? diff + 1 : 0;
     };
@@ -179,7 +255,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         return null;
     };
 
-    const renderPermisoForm = () => (
+    const renderPermisoForm = () => {
+        const isSalud = tipoPermiso === "salud";
+        const usesHoras =
+            tipoPermiso === "estudios" ||
+            tipoPermiso === "personal" ||
+            (isSalud && saludDuracionTipo === "horas");
+
+        return (
         <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900">Tipo de Permiso</h3>
 
@@ -252,13 +335,36 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             {tipoPermiso && (
                 <>
+                    {isSalud && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
+                            <select
+                                value={saludDuracionTipo}
+                                onChange={(e) => setSaludDuracionTipo(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="dias">Días</option>
+                                <option value="horas">Horas</option>
+                            </select>
+                        </div>
+                    )}
+
                     <div className="grid grid-cols-2 gap-4">
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Fecha</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                {isSalud ? "Fecha desde" : "Fecha"}
+                            </label>
                             <input
                                 type="date"
                                 value={formData.fecha_inicio}
-                                onChange={(e) => setFormData({ ...formData, fecha_inicio: e.target.value })}
+                                onChange={(e) => {
+                                    const value = e.target.value;
+                                    setFormData((prev) => ({
+                                        ...prev,
+                                        fecha_inicio: value,
+                                        ...(isSalud ? {} : { fecha_fin: "" }),
+                                    }));
+                                }}
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                 required
                             />
@@ -266,22 +372,16 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                         <div>
                             <label className="block text-sm font-medium text-gray-700 mb-2">
-                                {tipoPermiso === "estudios" || tipoPermiso === "personal" ? "Horas" : "Días"}
+                                {usesHoras ? "Horas" : "Días"}
                             </label>
                             <input
                                 type="number"
-                                step={tipoPermiso === "estudios" || tipoPermiso === "personal" ? "0.5" : "1"}
-                                value={
-                                    tipoPermiso === "estudios" || tipoPermiso === "personal"
-                                        ? formData.duracion_horas
-                                        : formData.duracion_dias
-                                }
+                                step={usesHoras ? "0.5" : "1"}
+                                value={usesHoras ? formData.duracion_horas : formData.duracion_dias}
                                 onChange={(e) =>
                                     setFormData({
                                         ...formData,
-                                        [tipoPermiso === "estudios" || tipoPermiso === "personal"
-                                            ? "duracion_horas"
-                                            : "duracion_dias"]: e.target.value,
+                                        [usesHoras ? "duracion_horas" : "duracion_dias"]: e.target.value,
                                     })
                                 }
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
@@ -291,6 +391,20 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             />
                         </div>
                     </div>
+
+                    {isSalud && (
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
+                            <input
+                                type="date"
+                                value={formData.fecha_fin}
+                                onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
+                                min={formData.fecha_inicio || undefined}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                required
+                            />
+                        </div>
+                    )}
 
                     <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-xs text-blue-700">
@@ -317,11 +431,27 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             )}
         </div>
     );
+    };
 
     const renderVacacionesForm = () => {
         const days = calculateDays();
-        const remaining = vacationSummary?.remaining || 0;
-        const canSubmit = days > 0 && days <= remaining;
+        const toNumber = (value) => {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : 0;
+        };
+
+        const summaryRemaining = vacationSummary?.remaining;
+        const summaryAllowance = toNumber(vacationSummary?.allowance) || 15;
+        const summaryTaken = toNumber(vacationSummary?.taken);
+        const summaryPending = toNumber(vacationSummary?.pending);
+        const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
+            ? toNumber(summaryRemaining)
+            : summaryAllowance - summaryTaken - summaryPending;
+        const remaining = Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays);
+        const usedDisplay = summaryTaken + approvedVacationDays;
+        const pendingDisplay = summaryPending + pendingVacationDays;
+        const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
+        const canSubmit = days > 0 && days <= remaining && hasDates;
 
         return (
             <div className="space-y-4">
@@ -331,22 +461,35 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="grid grid-cols-4 gap-3">
                         <div className="p-3 bg-blue-50 rounded-lg text-center">
                             <p className="text-xs text-blue-600 font-medium">Asignados</p>
-                            <p className="text-xl font-bold text-blue-700">{vacationSummary.allowance}</p>
+                            <p className="text-xl font-bold text-blue-700">{summaryAllowance}</p>
                         </div>
                         <div className="p-3 bg-green-50 rounded-lg text-center">
                             <p className="text-xs text-green-600 font-medium">Disponibles</p>
-                            <p className="text-xl font-bold text-green-700">{vacationSummary.remaining}</p>
+                            <p className="text-xl font-bold text-green-700">{remaining}</p>
                         </div>
                         <div className="p-3 bg-amber-50 rounded-lg text-center">
                             <p className="text-xs text-amber-600 font-medium">Usados</p>
-                            <p className="text-xl font-bold text-amber-700">{vacationSummary.taken}</p>
+                            <p className="text-xl font-bold text-amber-700">{usedDisplay}</p>
                         </div>
                         <div className="p-3 bg-purple-50 rounded-lg text-center">
                             <p className="text-xs text-purple-600 font-medium">Pendientes</p>
-                            <p className="text-xl font-bold text-purple-700">{vacationSummary.pending}</p>
+                            <p className="text-xl font-bold text-purple-700">{pendingDisplay}</p>
                         </div>
                     </div>
                 )}
+
+                <div className="flex items-center gap-2">
+                    <input
+                        id="vacacion-medio-dia"
+                        type="checkbox"
+                        checked={vacacionMedioDia}
+                        onChange={(e) => setVacacionMedioDia(e.target.checked)}
+                        className="h-4 w-4 text-emerald-600 border-gray-300 rounded"
+                    />
+                    <label htmlFor="vacacion-medio-dia" className="text-sm text-gray-700">
+                        Medio día (4h)
+                    </label>
+                </div>
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -354,7 +497,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         <input
                             type="date"
                             value={formData.fecha_inicio}
-                            onChange={(e) => setFormData({ ...formData, fecha_inicio: e.target.value })}
+                            onChange={(e) => {
+                                const value = e.target.value;
+                                setFormData((prev) => ({
+                                    ...prev,
+                                    fecha_inicio: value,
+                                    ...(vacacionMedioDia ? { fecha_fin: value } : {}),
+                                }));
+                            }}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
                             required
                         />
@@ -364,9 +514,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         <label className="block text-sm font-medium text-gray-700 mb-2">Fecha de Fin *</label>
                         <input
                             type="date"
-                            value={formData.fecha_fin}
+                            value={vacacionMedioDia ? formData.fecha_inicio : formData.fecha_fin}
                             onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
                             min={formData.fecha_inicio}
+                            disabled={vacacionMedioDia}
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
                             required
                         />
@@ -390,7 +541,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className={`text-sm font-medium ${canSubmit ? "text-emerald-900" : "text-red-900"}`}>
-                            Días solicitados: <span className="text-lg font-bold">{days}</span>
+                            Días solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
                         </p>
                         <p className={`text-xs ${canSubmit ? "text-emerald-700" : "text-red-700"}`}>
                             {canSubmit
@@ -443,7 +594,9 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <span className="text-sm text-gray-600">Duración:</span>
                     <span className="text-sm font-semibold text-gray-900">
                         {tipoSolicitud === "vacaciones"
-                            ? `${calculateDays()} días`
+                            ? vacacionMedioDia
+                                ? "0.5 días (4h)"
+                                : `${calculateDays()} días`
                             : formData.duracion_horas
                                 ? `${formData.duracion_horas} horas`
                                 : `${formData.duracion_dias} días`}

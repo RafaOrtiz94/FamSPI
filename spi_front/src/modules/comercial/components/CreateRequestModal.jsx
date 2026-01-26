@@ -112,6 +112,7 @@ const EquipoInput = ({
   onViewUnassigned,
   includeUnassigned,
   needsClientEquipment,
+  allowUnassignedEquipment,
   onRegisterNewEquipment,
 }) => {
   const showStateField = type === "inspection" || type === "compra";
@@ -172,7 +173,7 @@ const EquipoInput = ({
         {!equipmentLoading && equipmentOptions.length === 0 && (
           <div className="text-xs text-gray-500 mt-1 space-y-1">
             <p>No hay equipos disponibles.</p>
-            {needsClientEquipment && !includeUnassigned && (
+            {allowUnassignedEquipment && !includeUnassigned && (
               <button
                 type="button"
                 onClick={onViewUnassigned}
@@ -311,6 +312,14 @@ const CreateRequestModal = ({
   initialData = null,
   isEditing = false,
 }) => {
+  // Log inicial al montar componente
+  console.log('[FLOW_COMERCIAL][FE][MODAL][INIT]', {
+    open,
+    presetType,
+    isEditing,
+    hasInitialData: !!initialData,
+    timestamp: new Date().toISOString()
+  });
   const [type, setType] = useState(presetType || "inspection");
   const [formData, setFormData] = useState({});
   const [equipos, setEquipos] = useState([]);
@@ -339,8 +348,10 @@ const CreateRequestModal = ({
 
   const todayDateString = useMemo(() => TODAY, []);
   const clientSelectionRequired = type === "inspection" || type === "retiro" || type === "mantenimiento";
+  const requiresEquipment = type === "inspection" || type === "retiro";
+  const allowUnassignedEquipment = type === "inspection";
   const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
-  const needsClientEquipment = clientSelectionRequired;
+  const needsClientEquipment = type === "retiro" || type === "mantenimiento";
 
   const submissionSteps = useMemo(
     () => [
@@ -378,6 +389,15 @@ const CreateRequestModal = ({
       setType(presetType || (initialData.client_type ? "cliente" : "inspection"));
       if (presetType !== "cliente") {
         setFormData(initialData);
+      }
+      const initialClientId =
+        initialData?.cliente_id ||
+        initialData?.client_id ||
+        initialData?.client_request_id ||
+        initialData?.registered_client_id ||
+        "";
+      if (initialClientId) {
+        setSelectedClientId(String(initialClientId));
       }
     } else {
       setType(presetType || "inspection");
@@ -451,7 +471,7 @@ const CreateRequestModal = ({
 
     // 4. Validar equipos seleccionados desde inventario
     if (requestTypes[type].equipos) {
-      if (!equipos.length) {
+      if (requiresEquipment && !equipos.length) {
         newErrors.equipos = "Agrega al menos un equipo";
       }
 
@@ -498,14 +518,14 @@ const CreateRequestModal = ({
   }, [loadClients]);
 
   useEffect(() => {
-    setIncludeUnassigned(false);
+    setIncludeUnassigned(type === "inspection");
   }, [type]);
 
   useEffect(() => {
     const loadEquipmentOptions = async () => {
       if (!open || !requestTypes[type]?.equipos) return;
 
-      const needsClient = type === "inspection" || type === "retiro" || type === "mantenimiento";
+      const needsClient = needsClientEquipment;
       if (needsClient && !selectedClientId) {
         setEquipmentOptions([]);
         return;
@@ -515,7 +535,7 @@ const CreateRequestModal = ({
       setEquipmentError("");
       try {
         const filters = needsClient ? { cliente_id: selectedClientId } : {};
-        if (includeUnassigned) {
+        if (includeUnassigned || allowUnassignedEquipment) {
           filters.incluir_no_asignados = true;
         }
         const data = await getEquiposDisponibles(filters);
@@ -535,6 +555,16 @@ const CreateRequestModal = ({
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
     const { name, value, type: inputType, checked } = e.target;
+    const fieldValue = inputType === "checkbox" ? checked : value;
+
+    // Log cambio de campo en modal comercial
+    console.log('[FLOW_COMERCIAL][FE][MODAL][FORM][FIELD_CHANGE]', {
+      field: name,
+      value: fieldValue,
+      type: type,
+      timestamp: new Date().toISOString()
+    });
+
     setFormData((prev) => ({
       ...prev,
       [name]: inputType === "checkbox" ? checked : value,
@@ -547,12 +577,24 @@ const CreateRequestModal = ({
 
   // ✅ Gestión dinámica de equipos
   const addEquipo = () => {
+    console.log('[FLOW_COMERCIAL][FE][MODAL][EQUIPMENT][ADD]', {
+      currentCount: equipos.length,
+      type: type,
+      timestamp: new Date().toISOString()
+    });
+
     if (!type || !requestTypes[type].equipos) return;
     const base = requestTypesForEquipments[type];
     setEquipos([...equipos, { ...base }]);
   };
 
   const handleClientSelect = (clientId) => {
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT]', {
+      clientId,
+      availableClientsCount: availableClients.length,
+      timestamp: new Date().toISOString()
+    });
+
     if (!clientId) {
       setFormData((prev) => ({ ...prev, nombre_cliente: "" }));
       setSelectedClientId("");
@@ -560,7 +602,20 @@ const CreateRequestModal = ({
     }
 
     const selected = availableClients.find((c) => `${c.id}` === `${clientId}`);
-    if (!selected) return;
+    if (!selected) {
+      console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT][ERROR]', {
+        clientId,
+        error: 'Client not found in availableClients'
+      });
+      return;
+    }
+
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT][SUCCESS]', {
+      clientId,
+      clientName: selected.commercial_name || selected.nombre,
+      hasShippingAddress: !!selected.shipping_address,
+      hasContactName: !!selected.shipping_contact_name
+    });
 
     setSelectedClientId(`${clientId}`);
     setIncludeUnassigned(false);
@@ -590,6 +645,7 @@ const CreateRequestModal = ({
   };
 
   const handleViewUnassigned = () => {
+    if (!allowUnassignedEquipment) return;
     setIncludeUnassigned(true);
   };
 
@@ -668,10 +724,23 @@ const CreateRequestModal = ({
   // ✅ Envío al backend (ya estructurado)
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!validateForm()) return;
+
+    console.log('[FLOW_COMERCIAL][FE][MODAL][FORM][SUBMIT][START]', {
+      type,
+      hasClient: !!selectedClientId,
+      equipmentCount: equipos.length,
+      filesCount: files.length,
+      timestamp: new Date().toISOString()
+    });
+
+    if (!validateForm()) {
+      console.log('[FLOW_COMERCIAL][FE][MODAL][FORM][SUBMIT][VALIDATION_FAILED]');
+      return;
+    }
 
     setSubmitting(true);
     setProgressStep("validating");
+
     try {
       const payload = { ...formData };
       const parsedClientId = Number(selectedClientId);
@@ -687,15 +756,30 @@ const CreateRequestModal = ({
         payload.serial = principal.serial;
       }
 
+      console.log('[FLOW_COMERCIAL][FE][MODAL][FORM][SUBMIT][PAYLOAD_READY]', {
+        requestTypeId: type,
+        payloadKeys: Object.keys(payload),
+        equipmentCount: equipos.length,
+        filesCount: files.length
+      });
+
       setProgressStep("preparing");
       setProgressStep("submitting");
-      await Promise.resolve(
+
+      const result = await Promise.resolve(
         onSubmit?.({
           request_type_id: type,
           payload,
           files,
         }),
       );
+
+      console.log('[FLOW_COMERCIAL][FE][MODAL][FORM][SUBMIT][SUCCESS]', {
+        requestTypeId: type,
+        result: !!result,
+        timestamp: new Date().toISOString()
+      });
+
       setProgressStep("refreshing");
 
       setFiles([]);
@@ -704,7 +788,11 @@ const CreateRequestModal = ({
       setErrors({});
       setType(null);
     } catch (error) {
-      console.error("Error al enviar la solicitud", error);
+      console.error('[FLOW_COMERCIAL][FE][MODAL][FORM][SUBMIT][ERROR]', {
+        requestTypeId: type,
+        error: error.response?.data || error.message,
+        timestamp: new Date().toISOString()
+      });
     } finally {
       setSubmitting(false);
       setProgressStep(null);
@@ -853,7 +941,9 @@ const CreateRequestModal = ({
                     Equipos
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    Selecciona un equipo disponible y registra su estado/serial para dejarlo ligado al cliente.
+                    {requiresEquipment
+                      ? "Selecciona un equipo disponible y registra su estado/serial para dejarlo ligado al cliente."
+                      : "Agrega equipos solo si aplica. No es obligatorio que estén vinculados al cliente para inspección."}
                   </p>
                   {equipos.map((eq, i) => (
                     <EquipoInput
@@ -870,6 +960,7 @@ const CreateRequestModal = ({
                       onViewUnassigned={handleViewUnassigned}
                       includeUnassigned={includeUnassigned}
                       needsClientEquipment={needsClientEquipment}
+                      allowUnassignedEquipment={allowUnassignedEquipment}
                       onRegisterNewEquipment={openRegisterEquipmentModal}
                     />
                     ))}

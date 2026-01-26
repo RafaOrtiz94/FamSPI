@@ -189,6 +189,10 @@ const canonicalizeOutputData = (data) => {
     return data;
   }
 
+  if (data instanceof Date) {
+    return data.toISOString();
+  }
+
   if (Array.isArray(data)) {
     return data.map(item => canonicalizeOutputData(item));
   }

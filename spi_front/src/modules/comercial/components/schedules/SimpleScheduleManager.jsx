@@ -10,6 +10,12 @@ import {
   FiSearch,
   FiFilter,
   FiEdit3,
+  FiGrid3X3,
+  FiList,
+  FiArrowLeft,
+  FiClock,
+  FiMapPin,
+  FiUser,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -127,13 +133,13 @@ const SimpleScheduleManager = ({
 
   const renderListView = () => (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-      <Card className="border bg-white shadow-sm">
-        <div className="p-5 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-gray-900">Planificaciones mensuales</h1>
-            <p className="text-sm text-gray-500">{schedules.length} planificaciones registradas</p>
+      <Card className="border-0 shadow-lg shadow-slate-100/50 rounded-xl bg-gradient-to-br from-slate-50 to-white">
+        <div className="p-6 flex items-center justify-between">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold text-slate-900">Planificaciones mensuales</h1>
+            <p className="text-sm text-slate-600">{schedules.length} planificaciones registradas</p>
           </div>
-          <Button onClick={() => setShowCreateForm(true)} icon={FiPlus}>
+          <Button onClick={() => setShowCreateForm(true)} icon={FiPlus} className="bg-slate-600 hover:bg-slate-700">
             Nueva planificación
           </Button>
         </div>
@@ -205,63 +211,80 @@ const SimpleScheduleManager = ({
         )}
       </AnimatePresence>
 
-      <Card className="p-4 border shadow-sm">
-        <div className="flex flex-col md:flex-row gap-3">
-          <div className="flex-1 flex items-center gap-2">
-            <FiSearch className="text-slate-500" size={16} />
+      <Card className="p-6 border-0 shadow-lg shadow-slate-100/50 rounded-xl bg-gradient-to-br from-slate-50 to-white">
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1 relative">
+            <FiSearch className="absolute left-3 top-1/2 transform -translate-y-1/2 text-slate-400" size={18} />
             <input
               type="text"
-              placeholder="Buscar por mes, año o estado"
+              placeholder="Buscar por mes, año o estado..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-slate-500 text-sm transition-colors"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <FiFilter className="text-slate-500" size={16} />
+          <div className="flex items-center gap-3">
+            <FiFilter className="text-slate-500" size={18} />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="px-3 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500"
+              className="px-4 py-3 border border-slate-200 rounded-lg focus:ring-2 focus:ring-slate-500 focus:border-slate-500 text-sm min-w-48 transition-colors"
             >
-              <option value="all">Todos</option>
-              <option value="draft">Borradores</option>
-              <option value="pending_approval">Pendientes</option>
-              <option value="approved">Aprobados</option>
-              <option value="rejected">Rechazados</option>
+              <option value="all">Todos los estados</option>
+              <option value="draft">📝 Borradores</option>
+              <option value="pending_approval">⏳ Pendientes</option>
+              <option value="approved">✅ Aprobados</option>
+              <option value="rejected">❌ Rechazados</option>
             </select>
           </div>
         </div>
       </Card>
 
-      <div className="space-y-3">
+      <div className="space-y-4">
         {filteredSchedules.length === 0 ? (
-          <Card className="p-10 border shadow-sm text-center text-slate-600">
-            <p>No hay planificaciones que coincidan.</p>
+          <Card className="p-12 border-0 shadow-lg shadow-slate-100/50 rounded-xl bg-gradient-to-br from-slate-50 to-white text-center">
+            <FiCalendar className="mx-auto text-slate-300 mb-4" size={64} />
+            <h3 className="text-lg font-semibold text-slate-900 mb-2">No se encontraron planificaciones</h3>
+            <p className="text-slate-600">
+              {searchTerm || statusFilter !== 'all'
+                ? 'Intenta ajustar los filtros de búsqueda'
+                : 'Crea tu primera planificación mensual para comenzar'
+              }
+            </p>
           </Card>
         ) : (
-          filteredSchedules.map((schedule) => (
-            <Card
+          filteredSchedules.map((schedule, index) => (
+            <motion.div
               key={schedule.id}
-              className="border shadow-sm hover:border-indigo-200 hover:shadow-md transition"
-              onClick={() => handleSelectSchedule(schedule)}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
             >
-              <div className="p-4 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <FiCalendar className="text-indigo-600" />
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      {schedule.month}/{schedule.year}
-                    </p>
-                    <p className="text-xs text-slate-500">Estado: {schedule.status}</p>
+              <Card
+                className="border-0 shadow-lg shadow-slate-100/50 rounded-xl bg-gradient-to-br from-white to-slate-50 hover:shadow-xl hover:shadow-slate-200/60 transition-all duration-200 cursor-pointer group"
+                onClick={() => handleSelectSchedule(schedule)}
+              >
+                <div className="p-6 flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-slate-600 rounded-lg group-hover:bg-slate-700 transition-colors">
+                      <FiCalendar className="text-white" size={20} />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-lg font-bold text-slate-900">
+                        Planificación {schedule.month}/{schedule.year}
+                      </p>
+                      <p className="text-sm text-slate-600">
+                        {schedule.visits?.length || 0} visitas programadas
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <ScheduleStatusBadge status={schedule.status} />
+                    <FiChevronRight className="text-slate-400 group-hover:text-slate-600 transition-colors" size={20} />
                   </div>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-indigo-600">
-                  <ScheduleStatusBadge status={schedule.status} />
-                  <FiChevronRight />
-                </div>
-              </div>
-            </Card>
+              </Card>
+            </motion.div>
           ))
         )}
       </div>

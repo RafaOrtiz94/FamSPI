@@ -3,6 +3,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const service = require("./equipmentPurchases.service");
 const { logAction } = require("../../utils/audit");
+const { normalizeDatesDeep } = require("../../utils/date.serializer");
 
 exports.upload = upload;
 
@@ -49,7 +50,11 @@ exports.getBusinessCaseOptions = async (req, res, next) => {
 exports.listMine = async (req, res, next) => {
   try {
     const data = await service.listByUser(req.user);
-    res.json({ ok: true, data });
+    const normalizedData = normalizeDatesDeep(data, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedData });
   } catch (error) {
     next(error);
   }
@@ -59,7 +64,11 @@ exports.getOne = async (req, res, next) => {
   try {
     const item = await service.getById(req.params.id, req.user);
     if (!item) return res.status(404).json({ ok: false, message: "No encontrado" });
-    res.json({ ok: true, data: item });
+    const normalizedItem = normalizeDatesDeep(item, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedItem });
   } catch (error) {
     next(error);
   }
@@ -116,7 +125,11 @@ exports.create = async (req, res, next) => {
       entity_id: created.id,
     });
 
-    res.status(201).json({ ok: true, data: created });
+    const normalizedCreated = normalizeDatesDeep(created, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.status(201).json({ ok: true, data: normalizedCreated });
   } catch (error) {
     // Manejar errores de autorización de Gmail
     if (error.message?.includes("autorizar")) {
@@ -165,7 +178,11 @@ exports.saveProviderResponse = async (req, res, next) => {
       notes,
     });
 
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -174,7 +191,11 @@ exports.saveProviderResponse = async (req, res, next) => {
 exports.requestProforma = async (req, res, next) => {
   try {
     const updated = await service.requestProforma({ id: req.params.id, user: req.user });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -187,7 +208,11 @@ exports.uploadProforma = async (req, res, next) => {
       user: req.user,
       file: req.file,
     });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -196,7 +221,11 @@ exports.uploadProforma = async (req, res, next) => {
 exports.reserve = async (req, res, next) => {
   try {
     const updated = await service.reserveEquipment({ id: req.params.id, user: req.user });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -213,7 +242,11 @@ exports.uploadSignedProforma = async (req, res, next) => {
       inspection_max_date,
       includes_starter_kit: includes_starter_kit === "true" || includes_starter_kit === true,
     });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -234,7 +267,11 @@ exports.uploadContract = async (req, res, next) => {
       user: req.user,
       file: req.file,
     });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -243,7 +280,11 @@ exports.uploadContract = async (req, res, next) => {
 exports.renewReservation = async (req, res, next) => {
   try {
     const updated = await service.renewReservation({ id: req.params.id, user: req.user });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -253,7 +294,11 @@ exports.cancelOrder = async (req, res, next) => {
   try {
     const { reason } = req.body;
     const updated = await service.cancelOrder({ id: req.params.id, user: req.user, reason });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -266,7 +311,11 @@ exports.updateBusinessCaseFields = async (req, res, next) => {
       user: req.user,
       fields: req.body.fields || req.body,
     });
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -275,7 +324,11 @@ exports.updateBusinessCaseFields = async (req, res, next) => {
 exports.addBusinessCaseItem = async (req, res, next) => {
   try {
     const created = await service.addBusinessCaseItem({ id: req.params.id, user: req.user, item: req.body });
-    res.json({ ok: true, data: created });
+    const normalizedCreated = normalizeDatesDeep(created, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedCreated });
   } catch (error) {
     next(error);
   }
@@ -284,7 +337,11 @@ exports.addBusinessCaseItem = async (req, res, next) => {
 exports.listBusinessCaseItems = async (req, res, next) => {
   try {
     const items = await service.listBusinessCaseItems({ id: req.params.id, user: req.user });
-    res.json({ ok: true, data: items });
+    const normalizedItems = normalizeDatesDeep(items, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedItems });
   } catch (error) {
     next(error);
   }
@@ -304,7 +361,11 @@ exports.resolveBusinessCase = async (req, res, next) => {
       details: { business_case_id: result.business_case_id, created: result.created }
     });
 
-    res.json({ ok: true, data: result });
+    const normalizedResult = normalizeDatesDeep(result, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedResult });
   } catch (error) {
     next(error);
   }
@@ -324,10 +385,14 @@ exports.submitSignedProformaWithInspection = async (req, res, next) => {
       includes_starter_kit: includes_starter_kit === 'true' || includes_starter_kit === true
     });
 
+    const normalizedResult = normalizeDatesDeep(result, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
     res.json({
       ok: true,
       message: "Proforma firmada subida e inspección de ambiente creada",
-      data: result
+      data: normalizedResult
     });
   } catch (error) {
     next(error);
@@ -344,7 +409,11 @@ exports.startAvailability = async (req, res, next) => {
       notes,
     });
 
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -355,7 +424,11 @@ exports.startAvailability = async (req, res, next) => {
 exports.submitBusinessCase = async (req, res, next) => {
   try {
     const updated = await service.submitBusinessCaseForApproval(req.params.id, req.user);
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -365,7 +438,11 @@ exports.approveBusinessCase = async (req, res, next) => {
   try {
     const { notes } = req.body;
     const updated = await service.approveBusinessCase(req.params.id, req.user, notes);
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }
@@ -382,7 +459,11 @@ exports.rejectBusinessCase = async (req, res, next) => {
     }
 
     const updated = await service.rejectBusinessCase(req.params.id, req.user, reason.trim());
-    res.json({ ok: true, data: updated });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: 'equipment_purchases',
+      keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
+    });
+    res.json({ ok: true, data: normalizedUpdated });
   } catch (error) {
     next(error);
   }

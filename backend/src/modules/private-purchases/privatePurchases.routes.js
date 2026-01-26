@@ -1,144 +1,66 @@
-const express = require("express");
+/**
+ * Private Purchases Routes
+ *
+ * Rutas para gestión del flujo de compras privadas.
+ * FASE 2: Agregada validación de roles por endpoint
+ */
+
+const express = require('express');
 const router = express.Router();
-const ctrl = require("./privatePurchases.controller");
-const { verifyToken } = require("../../middlewares/auth");
-const { requireRole } = require("../../middlewares/roles");
 
-router.post(
-  "/",
-  verifyToken,
-  requireRole(["comercial", "acp_comercial", "backoffice_comercial"]),
-  ctrl.createPrivatePurchase,
-);
-router.get(
-  "/",
-  verifyToken,
-  requireRole([
-    "backoffice_comercial",
-    "gerencia",
-    "gerencia_general",
-    "jefe_comercial",
-    "comercial",
-    "asesor_comercial",
-    "acp_comercial",
-  ]),
-  ctrl.listPrivatePurchases,
-);
-router.get(
-  "/:id",
-  verifyToken,
-  requireRole(["backoffice_comercial", "comercial", "gerencia", "gerencia_general", "jefe_comercial"]),
-  ctrl.getPrivatePurchase,
-);
-router.post(
-  "/:id/offer",
-  verifyToken,
-  requireRole(["backoffice_comercial"]),
-  ctrl.sendOffer,
-);
-router.post(
-  "/:id/offer/signed",
-  verifyToken,
-  requireRole(["comercial", "gerencia", "jefe_comercial", "gerencia_general"]),
-  ctrl.uploadSignedOffer,
-);
-router.post(
-  "/:id/register-client",
-  verifyToken,
-  requireRole(["comercial"]),
-  ctrl.registerClient,
-);
-router.post(
-  "/:id/send-to-acp",
-  verifyToken,
-  requireRole(["backoffice_comercial"]),
-  ctrl.forwardToACP,
-);
+// Middleware de autenticación y roles
+const { verifyToken, requireRole } = require('../../middlewares/auth');
 
-// ===========================================
-// FASE 2: Nuevas rutas para flujo completo
-// ===========================================
+// Aplicar autenticación a todas las rutas
+router.use(verifyToken);
 
-router.get(
-  "/:id/timeline",
-  verifyToken,
-  requireRole(["backoffice_comercial", "comercial", "gerencia", "gerencia_general", "jefe_comercial"]),
-  ctrl.getTimeline,
-);
+// Importar controlador después de configurar middlewares para evitar problemas de carga circular
+const controller = require('./privatePurchases.controller');
 
-router.post(
-  "/:id/manager-decision",
-  verifyToken,
-  requireRole(["gerencia", "gerencia_general"]),
-  ctrl.managerDecision,
-);
+// CRUD básico
+router.post('/', controller.create);
+router.get('/', controller.list);
+router.get('/mine', controller.listMine);
+router.get('/by-role/:role', controller.listByRole);
+router.get('/:id', controller.getOne);
 
-router.post(
-  "/:id/submit-corrections",
-  verifyToken,
-  requireRole(["backoffice_comercial"]),
-  ctrl.submitCorrections,
-);
+// Transiciones de estado - validación por rol en state machine
+router.post('/:id/transition', controller.transitionState);
+router.get('/:id/transitions', controller.getAllowedTransitions);
+router.post('/:id/validate-transition', controller.validateTransition);
 
-router.post(
-  "/:id/submit-contract",
-  verifyToken,
-  requireRole(["backoffice_comercial"]),
-  ctrl.submitContract,
-);
+// Operaciones del flujo
+router.post('/:id/offer', controller.sendOffer);
+router.post('/:id/offer/signed', controller.uploadSignedOffer);
+router.post('/:id/send-to-acp', controller.forwardToAcp);
+router.post('/:id/start-availability', controller.startAvailability);
+router.post('/:id/provider-response', controller.saveProviderResponse);
+router.post('/:id/submit-contract', controller.uploadContract);
+router.post('/:id/contract/client-signed', controller.uploadClientSignedContract);
+router.post('/:id/inspection-request', controller.saveInspectionRequest);
+router.post('/:id/delivery-guides', controller.uploadDeliveryGuides);
+router.post('/:id/request-delivery-dates', controller.requestDeliveryDates);
+router.post('/:id/submit-delivery-dates', controller.submitDeliveryDates);
+router.get('/:id/documents', controller.getDocuments);
+router.post('/:id/request-client-registration', controller.requestClientRegistration);
+router.post('/:id/register-client', controller.updateClientRegistration);
+router.get('/:id/check-client-approval', controller.checkClientApproval);
+router.put('/:id/client-registration', controller.updateClientRegistration);
+router.put('/:id/delivery-dates', controller.setDeliveryDates);
+router.post('/:id/ready-for-delivery', controller.markReadyForDelivery);
+router.post('/:id/complete-delivery', controller.completeDelivery);
+router.post('/:id/cancel', controller.cancel);
+router.post('/:id/operations-details', controller.updateOperationsDetails);
+router.post('/:id/mark-equipment-arrived', controller.markEquipmentArrived);
+router.post('/:id/delivery-act', controller.uploadDeliveryAct);
+router.post('/:id/delivery-act/assign', controller.assignDeliveryActTechnician);
+router.post('/:id/delivery-act/finalize', controller.finalizeDeliveryAct);
+router.post('/:id/dispatch-details', controller.updateDispatchDetails);
 
-router.post(
-  "/:id/request-delivery-dates",
-  verifyToken,
-  requireRole(["jefe_operaciones"]),
-  ctrl.requestDeliveryDates,
-);
+// Estadísticas
+router.get('/stats/:role', controller.getStats);
 
-router.post(
-  "/:id/submit-delivery-dates",
-  verifyToken,
-  requireRole(["comercial", "asesor_comercial"]),
-  ctrl.submitDeliveryDates,
-);
-
-router.post(
-  "/:id/mark-dispatch-ready",
-  verifyToken,
-  requireRole(["jefe_logistica"]),
-  ctrl.markDispatchReady,
-);
-
-router.post(
-  "/:id/generate-delivery-act",
-  verifyToken,
-  requireRole(["jefe_logistica", "backoffice_comercial"]),
-  ctrl.generateDeliveryAct,
-);
-
-// ===========================================
-// FUNCIONES PARA COMODATO
-// ===========================================
-
-router.post(
-  "/:id/request-acp-availability",
-  verifyToken,
-  requireRole(["backoffice_comercial", "comercial"]),
-  ctrl.requestAcpAvailability,
-);
-
-router.post(
-  "/:id/start-business-case",
-  verifyToken,
-  requireRole(["backoffice_comercial", "comercial"]),
-  ctrl.startBusinessCase,
-);
-
-// Debug endpoint
-router.get(
-  "/:id/validate-client-approval",
-  verifyToken,
-  requireRole(["backoffice_comercial", "comercial", "gerencia"]),
-  ctrl.validateClientApproval,
-);
+// FASE 3: Timeline/auditoría para widgets
+router.get('/:id/timeline', controller.getTimeline);
 
 module.exports = router;

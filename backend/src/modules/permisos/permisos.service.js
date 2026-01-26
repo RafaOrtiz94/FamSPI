@@ -70,8 +70,20 @@ async function createSolicitud({ body, user }) {
   let justificacionRequerida = [];
   let esRecuperable = false;
 
-  // Validar y procesar según tipo de solicitud
+  // Validar y procesar segun tipo de solicitud
   if (payload.tipo_solicitud === "permiso") {
+    if (
+      payload.tipo_permiso === "salud" &&
+      !payload.duracion_dias &&
+      !payload.duracion_horas &&
+      payload.fecha_inicio &&
+      payload.fecha_fin
+    ) {
+      const start = new Date(payload.fecha_inicio);
+      const end = new Date(payload.fecha_fin);
+      const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+      payload.duracion_dias = diff >= 0 ? diff + 1 : 0;
+    }
     const validation = await validatePermisoRequest(payload);
     justificacionRequerida = validation.justificantes_requeridos || [];
     esRecuperable = Boolean(validation.es_recuperable);
@@ -155,9 +167,17 @@ function canApprove({ approverRole, approver }) {
 
 async function aprobarParcial({ id, approver }) {
   await ensureTable();
-  const existing = await db.query(`SELECT approver_role, status FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const existing = await db.query(
+    `SELECT approver_role, status, tipo_solicitud FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
+    [id]
+  );
   const solicitud = existing.rows[0];
   if (!solicitud) throw new Error("Solicitud no encontrada");
+  if (solicitud.tipo_solicitud === "vacaciones") {
+    const err = new Error("Las solicitudes de vacaciones se aprueban de forma definitiva");
+    err.status = 400;
+    throw err;
+  }
   if (!canApprove({ approverRole: solicitud.approver_role, approver })) {
     const err = new Error("No autorizado para aprobar esta solicitud");
     err.status = 403;
@@ -298,6 +318,123 @@ async function getSolicitudById(id) {
   return rows[0] || null;
 }
 
+function calculateVacationDays(row) {
+  const explicitDays = Number(row?.duracion_dias);
+  if (Number.isFinite(explicitDays) && explicitDays > 0) return explicitDays;
+  if (!row?.fecha_inicio || !row?.fecha_fin) return 0;
+  const start = new Date(row.fecha_inicio);
+  const end = new Date(row.fecha_fin);
+  const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+  return diff >= 0 ? diff + 1 : 0;
+}
+
+async function listarResumenColaboradores() {
+  await ensureTable();
+  const { rows } = await db.query(
+    `SELECT
+        id,
+        user_email,
+        user_fullname,
+        tipo_solicitud,
+        tipo_permiso,
+        status,
+        duracion_dias,
+        duracion_horas,
+        justificacion_requerida,
+        justificantes_urls,
+        fecha_inicio,
+        fecha_fin,
+        aprobacion_parcial_at,
+        aprobacion_final_at,
+        created_at
+      FROM permisos_vacaciones
+      ORDER BY created_at DESC`
+  );
+
+  const collaborators = new Map();
+
+  rows.forEach((row) => {
+    const key = row.user_email || `user-${row.id}`;
+    if (!collaborators.has(key)) {
+      collaborators.set(key, {
+        user_email: row.user_email,
+        user_fullname: row.user_fullname,
+        permisos: {
+          total: 0,
+          aprobacion_completa: 0,
+          aprobacion_parcial: 0,
+          pendientes: 0,
+          aprobados: 0,
+          items: [],
+        },
+        vacaciones: {
+          dias_aprobados: 0,
+          dias_pendientes: 0,
+          dias_disponibles: 15,
+          dias_restantes: 15,
+          items: [],
+        },
+      });
+    }
+
+    const record = collaborators.get(key);
+    const status = row.status || "pending";
+
+    if (row.tipo_solicitud === "vacaciones") {
+      const days = calculateVacationDays(row);
+      if (status === "approved" || status === "aprobado") {
+        record.vacaciones.dias_aprobados += days;
+      } else if (status === "pending" || status === "pendiente" || status === "pending_final" || status === "partially_approved") {
+        record.vacaciones.dias_pendientes += days;
+      }
+
+      record.vacaciones.items.push({
+        id: row.id,
+        status,
+        fecha_inicio: row.fecha_inicio,
+        fecha_fin: row.fecha_fin,
+        duracion_dias: days,
+        created_at: row.created_at,
+      });
+    } else {
+      record.permisos.total += 1;
+      if (status === "approved" || status === "aprobado") {
+        record.permisos.aprobacion_completa += 1;
+        record.permisos.aprobados += 1;
+      } else if (status === "partially_approved") {
+        record.permisos.aprobacion_parcial += 1;
+      } else if (status === "pending" || status === "pending_final" || status === "pendiente") {
+        record.permisos.pendientes += 1;
+      }
+
+      record.permisos.items.push({
+        id: row.id,
+        status,
+        tipo_permiso: row.tipo_permiso,
+        fecha_inicio: row.fecha_inicio,
+        fecha_fin: row.fecha_fin,
+        duracion_horas: row.duracion_horas,
+        duracion_dias: row.duracion_dias,
+        justificacion_requerida: row.justificacion_requerida,
+        justificantes_urls: row.justificantes_urls,
+        created_at: row.created_at,
+        aprobacion_parcial_at: row.aprobacion_parcial_at,
+        aprobacion_final_at: row.aprobacion_final_at,
+      });
+    }
+  });
+
+  return Array.from(collaborators.values()).map((record) => {
+    record.vacaciones.dias_restantes = Math.max(
+      0,
+      record.vacaciones.dias_disponibles -
+        record.vacaciones.dias_aprobados -
+        record.vacaciones.dias_pendientes
+    );
+    return record;
+  });
+}
+
 module.exports = {
   ensureTable,
   createSolicitud,
@@ -308,4 +445,7 @@ module.exports = {
   listarPendientes,
   listarPorUsuario,
   getSolicitudById,
+  listarResumenColaboradores,
 };
+
+

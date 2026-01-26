@@ -60,6 +60,44 @@ export function isValidDateInput(value) {
  */
 export function parseToDate(value) {
     if (!isValidDateInput(value)) {
+        if (value && typeof value === "object") {
+            if (typeof value.toDate === "function") {
+                const dateValue = value.toDate();
+                return dateValue instanceof Date && !isNaN(dateValue.getTime()) ? dateValue : null;
+            }
+
+            if (value.$date) {
+                return parseToDate(value.$date);
+            }
+
+            if (value.value) {
+                return parseToDate(value.value);
+            }
+
+            if (value.date) {
+                return parseToDate(value.date);
+            }
+
+            if (value.timestamp) {
+                return parseToDate(value.timestamp);
+            }
+
+            if (typeof value.seconds === "number") {
+                const dateValue = new Date(value.seconds * 1000);
+                return !isNaN(dateValue.getTime()) ? dateValue : null;
+            }
+
+            if (typeof value._seconds === "number") {
+                const dateValue = new Date(value._seconds * 1000);
+                return !isNaN(dateValue.getTime()) ? dateValue : null;
+            }
+
+            if (typeof value.ms === "number") {
+                const dateValue = new Date(value.ms);
+                return !isNaN(dateValue.getTime()) ? dateValue : null;
+            }
+        }
+
         return null;
     }
 

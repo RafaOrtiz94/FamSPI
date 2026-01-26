@@ -238,11 +238,17 @@ const AprobacionPermisosView = () => {
                                     <>
                                         <Button
                                             variant="primary"
-                                            onClick={() => handleAprobarParcial(solicitud.id)}
+                                            onClick={() =>
+                                                solicitud.tipo_solicitud === "vacaciones"
+                                                    ? handleAprobarFinal(solicitud.id)
+                                                    : handleAprobarParcial(solicitud.id)
+                                            }
                                             className="flex-1"
                                         >
                                             <FiCheck className="w-4 h-4 mr-2" />
-                                            Aprobar Parcialmente
+                                            {solicitud.tipo_solicitud === "vacaciones"
+                                                ? "Aprobar Definitivamente"
+                                                : "Aprobar Parcialmente"}
                                         </Button>
                                         <Button
                                             variant="secondary"

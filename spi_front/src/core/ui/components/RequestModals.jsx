@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { FiPlus, FiTrash2 } from "react-icons/fi";
+import { FiPlus, FiTrash2, FiAlertTriangle } from "react-icons/fi";
 import Button from "./Button";
 import Modal from "./Modal";
 import ProcessingOverlay from "./ProcessingOverlay";
 import { useUI } from "../useUI";
 import api from "../../api/index";
+import { getEquiposDisponibles, getEquipmentModels } from "../../api/inventarioApi";
 
 /**
  * Componentes de modales para diferentes tipos de solicitudes
@@ -363,9 +364,11 @@ export const MaintenanceRequestModal = ({ isOpen, onClose, onSuccess }) => {
 // ============================================================================
 
 export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
+
   const { showToast } = useUI();
   const [formData, setFormData] = useState({
-    client_snapshot: {
+    client_id: '', // ← ID directo del cliente
+    client_snapshot: { // ← Mantener para compatibilidad con UI
       commercial_name: '',
       client_email: '',
       first_name: '',
@@ -386,6 +389,131 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
 
+  // Estados para selector híbrido de cliente
+  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [filteredClients, setFilteredClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [isNewClient, setIsNewClient] = useState(false);
+
+  // Filtrar clientes basado en el término de búsqueda
+  useEffect(() => {
+    if (clientSearchTerm.trim() === '') {
+      setFilteredClients([]);
+      setShowClientDropdown(false);
+      return;
+    }
+
+    const filtered = availableClients.filter(client =>
+      client && // Verificar que el cliente existe
+      ((client.commercial_name || client.nombre || '').toLowerCase().includes(clientSearchTerm.toLowerCase()) ||
+        (client.email || '').toLowerCase().includes(clientSearchTerm.toLowerCase()))
+    ).slice(0, 5); // Limitar a 5 resultados
+
+    // Filtrar cualquier elemento undefined/null adicional
+    const cleanFiltered = filtered.filter(client => client != null);
+
+    setFilteredClients(cleanFiltered);
+    setShowClientDropdown(cleanFiltered.length > 0);
+  }, [clientSearchTerm, availableClients]);
+
+  // Handler para selección de cliente del dropdown
+  const handleClientSelect = (client) => {
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client object:', client);
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client exists:', !!client);
+
+    if (!client) {
+      console.error('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] ERROR: Client is undefined/null');
+      return;
+    }
+
+    setSelectedClient(client);
+    setClientSearchTerm(client.nombre || client.commercial_name || '');
+    setShowClientDropdown(false);
+    setIsNewClient(false);
+
+    // Actualizar formData con verificación de seguridad
+    const clientData = {
+      commercial_name: client.nombre || client.commercial_name || '',
+      client_email: client.client_email || client.email || '',
+      first_name: client.first_name || '',
+      last_name: client.last_name || '',
+      client_identifier: client.identificador || client.identifier || client.id || ''
+    };
+
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client data to set:', clientData);
+
+    setFormData(prev => ({
+      ...prev,
+      client_id: client.id,
+      client_snapshot: clientData
+    }));
+
+    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Form data updated successfully');
+  };
+
+  // Handler para cambio en el input de búsqueda
+  const handleClientSearchChange = (value) => {
+    setClientSearchTerm(value);
+
+    if (value.trim() === '') {
+      // Campo vacío - reset
+      setSelectedClient(null);
+      setIsNewClient(false);
+      setFormData(prev => ({
+        ...prev,
+        client_id: '',
+        client_snapshot: {
+          commercial_name: '',
+          client_email: '',
+          first_name: '',
+          last_name: '',
+          client_identifier: ''
+        }
+      }));
+      return;
+    }
+
+    // Debug: mostrar todos los clientes disponibles
+    console.log('[CLIENT_SELECTOR] Buscando cliente:', value);
+    console.log('[CLIENT_SELECTOR] Clientes disponibles:', availableClients.map(c => ({
+      id: c.id,
+      nombre: c.nombre,
+      commercial_name: c.commercial_name
+    })));
+
+    // Buscar si existe un cliente exacto con ese nombre (insensible a mayúsculas)
+    const exactMatch = availableClients.find(client => {
+      const clientName = (client.nombre || client.commercial_name || '').toLowerCase().trim();
+      const inputValue = value.toLowerCase().trim();
+      const matches = clientName === inputValue;
+      console.log(`[CLIENT_SELECTOR] Comparando "${clientName}" === "${inputValue}" → ${matches}`);
+      return matches;
+    });
+
+    if (exactMatch) {
+      // Si coincide exactamente con un cliente existente, selecciónalo automáticamente
+      console.log('[CLIENT_SELECTOR] ✅ Cliente existente encontrado:', exactMatch.nombre || exactMatch.commercial_name);
+      handleClientSelect(exactMatch);
+    } else {
+      // No coincide exactamente - es un cliente nuevo
+      console.log('[CLIENT_SELECTOR] 🔵 Cliente nuevo detectado:', value);
+      setSelectedClient(null);
+      setIsNewClient(true);
+      setFormData(prev => ({
+        ...prev,
+        client_id: `new_${Date.now()}`, // ID temporal para nuevos clientes
+        client_snapshot: {
+          commercial_name: value,
+          client_email: '',
+          first_name: '',
+          last_name: '',
+          client_identifier: ''
+        }
+      }));
+    }
+  };
+
   // Cargar clientes disponibles
   useEffect(() => {
     if (!isOpen) return;
@@ -394,7 +522,14 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
       setLoadingClients(true);
       try {
         const response = await api.get('/clients');
-        setAvailableClients(Array.isArray(response.data) ? response.data : []);
+        console.log('[CLIENT_SELECTOR] API Response:', response);
+        console.log('[CLIENT_SELECTOR] Response.data:', response.data);
+        console.log('[CLIENT_SELECTOR] Response.data.data:', response.data?.data);
+
+        // La API devuelve { ok: true, data: [...] }, necesitamos response.data.data
+        const clientsData = response.data?.data || response.data || [];
+        setAvailableClients(Array.isArray(clientsData) ? clientsData : []);
+        console.log('[CLIENT_SELECTOR] Clientes procesados:', clientsData);
       } catch (error) {
         console.error('Error loading clients for private purchase:', error);
         showToast("Error al cargar clientes", "error");
@@ -406,29 +541,20 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     loadClients();
   }, [isOpen, showToast]);
 
-  // Cargar equipos disponibles
+  // Cargar equipos disponibles desde la base de datos
   useEffect(() => {
     if (!isOpen) return;
 
     const loadEquipment = async () => {
       setLoadingEquipment(true);
       try {
-        // Por ahora usamos datos mock hasta que se implemente el endpoint
-        const mockEquipment = [
-          { id: 1, nombre: 'Analizador Cobas C111', sku: 'COBAS-C111', modelo: 'C111' },
-          { id: 2, nombre: 'Centrífuga Eppendorf', sku: 'EPF-5430R', modelo: '5430R' },
-          { id: 3, nombre: 'Microscopio Olympus', sku: 'OLY-CX23', modelo: 'CX23' },
-          { id: 4, nombre: 'Incubadora Thermo', sku: 'THM-HERAcell', modelo: 'HERAcell' },
-          { id: 5, nombre: 'Balanza Precisa', sku: 'PRC-320-2M', modelo: '320-2M' }
-        ];
-        setEquipmentOptions(mockEquipment);
-
-        // TODO: Reemplazar con endpoint real cuando esté disponible
-        // const response = await api.get('/equipment-models');
-        // setEquipmentOptions(Array.isArray(response.data) ? response.data : []);
+        // Usar endpoint real para obtener modelos de equipos disponibles
+        const equipmentModels = await getEquipmentModels();
+        setEquipmentOptions(Array.isArray(equipmentModels) ? equipmentModels : []);
       } catch (error) {
-        console.error('Error loading equipment for private purchase:', error);
-        showToast("Error al cargar equipos disponibles", "error");
+        console.error('Error loading equipment models for private purchase:', error);
+        showToast("Error al cargar modelos de equipos disponibles", "error");
+        setEquipmentOptions([]);
       } finally {
         setLoadingEquipment(false);
       }
@@ -439,25 +565,63 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
 
   // Reset form when modal closes
   useEffect(() => {
+    console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Modal isOpen changed:', isOpen);
     if (!isOpen) {
-      setFormData({
-        client_snapshot: {
-          commercial_name: '',
-          client_email: '',
-          first_name: '',
-          last_name: '',
-          client_identifier: ''
-        },
-        equipment: [],
-        notes: '',
-        offer_kind: 'venta'
-      });
+      try {
+        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Resetting form data');
+
+        // Reset form data safely
+        setFormData({
+          client_id: '', // ← ID directo del cliente
+          client_snapshot: { // ← Mantener para compatibilidad con UI
+            commercial_name: '',
+            client_email: '',
+            first_name: '',
+            last_name: '',
+            client_identifier: ''
+          },
+          equipment: [],
+          notes: '',
+          offer_kind: 'venta'
+        });
+
+        // Reset estados del selector híbrido
+        setClientSearchTerm('');
+        setSelectedClient(null);
+        setFilteredClients([]);
+        setShowClientDropdown(false);
+        setIsNewClient(false);
+
+        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Form reset completed successfully');
+      } catch (error) {
+        console.error('[FLOW_COMERCIAL][FE][MODAL][RESET] ERROR during form reset:', error);
+        // Fallback: force a complete reset even if there's an error
+        setFormData({
+          client_id: '',
+          client_snapshot: {
+            commercial_name: '',
+            client_email: '',
+            first_name: '',
+            last_name: '',
+            client_identifier: ''
+          },
+          equipment: [],
+          notes: '',
+          offer_kind: 'venta'
+        });
+        setClientSearchTerm('');
+        setSelectedClient(null);
+        setFilteredClients([]);
+        setShowClientDropdown(false);
+        setIsNewClient(false);
+        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Fallback reset completed');
+      }
     }
   }, [isOpen]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.client_snapshot?.commercial_name || !formData.equipment?.length) {
+    if (!formData.client_id || !formData.equipment?.length) {
       showToast("Completa el nombre del cliente y agrega al menos un equipo", "error");
       return;
     }
@@ -468,10 +632,27 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     try {
       setProgressStep("uploading");
 
+      // Ajustar payload para coincidir con la API del backend
       const payload = {
-        ...formData,
+        client_data: {
+          id: formData.client_id,
+          // Construir explícitamente para asegurar que 'name' esté incluido
+          name: formData.client_snapshot.commercial_name || formData.client_snapshot.name || '',
+          commercial_name: formData.client_snapshot.commercial_name || '',
+          client_email: formData.client_snapshot.client_email || '',
+          first_name: formData.client_snapshot.first_name || '',
+          last_name: formData.client_snapshot.last_name || '',
+          client_identifier: formData.client_snapshot.client_identifier || ''
+        },
+        equipment: formData.equipment,
+        offer_kind: formData.offer_kind,
+        notes: formData.notes,
         status: 'pending_commercial'
       };
+
+      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Payload enviado:', JSON.stringify(payload, null, 2));
+      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Campo name presente:', !!payload.client_data.name);
+      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Valor de name:', payload.client_data.name);
 
       setProgressStep("submitting");
       const response = await api.post('/private-purchases', payload);
@@ -483,6 +664,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
 
       // Reset form
       setFormData({
+        client_id: '', // ← Cambiado: usar ID directo
         client_snapshot: {
           commercial_name: '',
           client_email: '',
@@ -570,38 +752,76 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         <div className="border-b pb-4">
           <h3 className="text-lg font-semibold text-gray-900 mb-3">Información del Cliente</h3>
           <div className="grid grid-cols-2 gap-4">
-            <div>
+            <div className="relative">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Nombre comercial *
               </label>
-              <select
-                value={formData.client_snapshot.commercial_name}
-                onChange={(e) => {
-                  const selected = availableClients.find(c => c.commercial_name === e.target.value || c.nombre === e.target.value);
-                  setFormData(prev => ({
-                    ...prev,
-                    client_snapshot: {
-                      commercial_name: e.target.value,
-                      client_email: selected?.email || '',
-                      first_name: selected?.first_name || '',
-                      last_name: selected?.last_name || '',
-                      client_identifier: selected?.identifier || selected?.id || ''
+              {/* Selector híbrido de cliente */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={clientSearchTerm}
+                  onChange={(e) => handleClientSearchChange(e.target.value)}
+                  onFocus={() => {
+                    if (filteredClients.length > 0) {
+                      setShowClientDropdown(true);
                     }
-                  }));
-                }}
-                disabled={loadingClients}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">
-                  {loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}
-                </option>
-                {availableClients.map((client) => (
-                  <option key={client.id} value={client.commercial_name || client.nombre || ""}>
-                    {client.commercial_name || client.nombre || `Cliente ${client.id}`}
-                  </option>
-                ))}
-              </select>
+                  }}
+                  onBlur={() => {
+                    // Delay para permitir clicks en el dropdown
+                    setTimeout(() => setShowClientDropdown(false), 200);
+                  }}
+                  placeholder={loadingClients ? "Cargando clientes..." : "Escribe o selecciona un cliente"}
+                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent ${selectedClient ? 'bg-green-50 border-green-300' : isNewClient ? 'bg-blue-50 border-blue-300' : ''
+                    }`}
+                  disabled={loadingClients}
+                />
+
+                {/* Indicador visual del tipo de cliente */}
+                {selectedClient && (
+                  <span className="absolute right-2 top-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
+                    Existente
+                  </span>
+                )}
+                {isNewClient && !selectedClient && (
+                  <span className="absolute right-2 top-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                    Nuevo
+                  </span>
+                )}
+
+                {/* Dropdown de sugerencias */}
+                {showClientDropdown && filteredClients.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                    {filteredClients.map((client) => {
+                      // Verificación defensiva de cliente
+                      if (!client) {
+                        console.warn('[CLIENT_DROPDOWN] Cliente undefined/null encontrado');
+                        return null;
+                      }
+                      return (
+                        <div
+                          key={client.id || Math.random()}
+                          onClick={() => handleClientSelect(client)}
+                          className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="font-medium text-gray-900">
+                            {client.commercial_name || client.nombre || 'Cliente sin nombre'}
+                          </div>
+                          <div className="text-sm text-gray-500">
+                            {(client.email || client.client_email) && `${client.email || client.client_email} • `}
+                            ID: {client.id || 'Sin ID'}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Mensaje informativo */}
+              <p className="text-xs text-gray-500 mt-1">
+                {loadingClients ? "Cargando..." : "Escribe para buscar clientes existentes o crea uno nuevo"}
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -614,7 +834,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                 onChange={handleChange}
                 className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="cliente@empresa.com"
-                readOnly
+                readOnly={selectedClient} // Solo readonly si hay cliente seleccionado
               />
             </div>
           </div>
@@ -649,6 +869,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                       value={item.name}
                       onChange={(e) => {
                         const selected = equipmentOptions.find(opt => opt.nombre === e.target.value || opt.name === e.target.value);
+                        updateEquipment(index, 'id', selected?.id || selected?.unidad_id || `temp_${Date.now()}_${index}`);
                         updateEquipment(index, 'name', e.target.value);
                         updateEquipment(index, 'sku', selected?.sku || selected?.modelo || '');
                       }}
@@ -680,7 +901,6 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                   >
                     <option value="new">Nuevo</option>
                     <option value="cu">CU</option>
-                    <option value="used">Usado</option>
                   </select>
                   <Button
                     type="button"
@@ -713,6 +933,19 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               <option value="alquiler">Alquiler</option>
               <option value="comodato">Comodato</option>
             </select>
+
+            {/* Aviso para comodato */}
+            {formData.offer_kind === 'comodato' && (
+              <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <div className="text-sm">
+                  <p className="font-medium text-amber-800">Comodato solo disponible para clientes registrados</p>
+                  <p className="text-amber-700 mt-1">
+                    El comodato requiere que el cliente esté previamente registrado en el sistema.
+                    Si el cliente no está registrado, será necesario crearlo antes de continuar.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -741,7 +974,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
           </Button>
           <Button
             type="submit"
-            disabled={loading || !formData.client_snapshot.commercial_name || formData.equipment.length === 0}
+            disabled={loading || !formData.client_id || formData.equipment.length === 0}
             isLoading={loading}
           >
             Crear Solicitud
@@ -1344,7 +1577,6 @@ export const PublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                     >
                       <option value="nuevo">Nuevo</option>
                       <option value="cu">CU</option>
-                      <option value="usado">Usado</option>
                     </select>
                     <Button
                       type="button"

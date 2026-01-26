@@ -1,7 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { FiCheck, FiEye, FiRefreshCw, FiX } from "react-icons/fi";
+import { FiCheck, FiEye, FiFileText, FiRefreshCw, FiX } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
-import { processClientRequest, getClientRequests } from "../../../core/api/requestsApi";
+import {
+  processClientRequest,
+  getClientRequests,
+  getClientRequestById,
+} from "../../../core/api/requestsApi";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
 
@@ -10,7 +14,10 @@ const ClientApprovalsWidget = () => {
   const { showToast } = useUI();
   const [processingId, setProcessingId] = useState(null);
   const [requests, setRequests] = useState([]);
+  const [approvedRequests, setApprovedRequests] = useState([]);
+  const [approvedDetails, setApprovedDetails] = useState({});
   const [loading, setLoading] = useState(false);
+  const [loadingApproved, setLoadingApproved] = useState(false);
   const [rejectContext, setRejectContext] = useState({
     open: false,
     request: null,
@@ -30,6 +37,35 @@ const ClientApprovalsWidget = () => {
     }
   }, [showToast]);
 
+  const loadApprovedRequests = useCallback(async () => {
+    setLoadingApproved(true);
+    try {
+      const data = await getClientRequests({ page: 1, pageSize: 4, status: "approved" });
+      const rows = data.rows || data || [];
+      setApprovedRequests(rows);
+
+      const details = await Promise.all(
+        rows.map((req) => getClientRequestById(req.id).catch(() => null))
+      );
+      const detailMap = {};
+      details.forEach((detail, index) => {
+        if (detail) {
+          detailMap[rows[index]?.id] = detail;
+        }
+      });
+      setApprovedDetails(detailMap);
+    } catch (error) {
+      console.error(error);
+      showToast("No pudimos cargar los clientes aprobados", "error");
+    } finally {
+      setLoadingApproved(false);
+    }
+  }, [showToast]);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadRequests(), loadApprovedRequests()]);
+  }, [loadRequests, loadApprovedRequests]);
+
   const handleProcess = useCallback(
     async (id, action, rejectionReason) => {
       setProcessingId(`${action}-${id}`);
@@ -43,7 +79,7 @@ const ClientApprovalsWidget = () => {
           action === "approve" ? "Solicitud aprobada" : "Solicitud rechazada",
           "success"
         );
-        await loadRequests();
+        await refreshAll();
       } catch (error) {
         console.error(error);
         showToast("No se pudo procesar la solicitud", "error");
@@ -58,10 +94,27 @@ const ClientApprovalsWidget = () => {
   useEffect(() => {
     if (loadedRef.current) return;
     loadedRef.current = true;
-    loadRequests();
-  }, [loadRequests]);
+    refreshAll();
+  }, [refreshAll]);
 
   const pendingCount = requests.length;
+  const approvedCount = approvedRequests.length;
+
+  const documentLabels = [
+    { key: "id_file_id", label: "Cédula/ID" },
+    { key: "ruc_file_id", label: "RUC" },
+    { key: "legal_rep_appointment_file_id", label: "Nombramiento" },
+    { key: "operating_permit_file_id", label: "Permiso operación" },
+    { key: "consent_evidence_file_id", label: "Consentimiento" },
+  ];
+
+  const getDocumentLinks = (detail) =>
+    documentLabels
+      .filter((doc) => detail?.[doc.key])
+      .map((doc) => ({
+        ...doc,
+        link: `https://drive.google.com/file/d/${detail[doc.key]}/view`,
+      }));
 
   const openRejectModal = (req) => {
     setRejectContext({ open: true, request: req, reason: "" });
@@ -102,8 +155,8 @@ const ClientApprovalsWidget = () => {
             size="sm"
             variant="ghost"
             icon={FiRefreshCw}
-            onClick={loadRequests}
-            loading={loading}
+            onClick={refreshAll}
+            loading={loading || loadingApproved}
           >
             Actualizar
           </Button>
@@ -189,6 +242,117 @@ const ClientApprovalsWidget = () => {
           ))}
         </div>
       )}
+
+      {/* Aprobados */}
+      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[11px] font-bold uppercase text-emerald-700 tracking-wider">
+              Clientes aprobados
+            </p>
+            <p className="text-sm text-emerald-700/80">
+              Documentación verificada y lista para seguimiento
+            </p>
+          </div>
+          <div className="text-sm text-emerald-700 font-semibold">
+            {approvedCount} aprobados
+          </div>
+        </div>
+
+        {approvedRequests.length === 0 && !loadingApproved ? (
+          <div className="mt-4 text-sm text-emerald-700/70 bg-white/80 rounded-xl py-4 text-center border border-emerald-100">
+            Aún no hay clientes aprobados
+          </div>
+        ) : (
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            {approvedRequests.map((req) => {
+              const detail = approvedDetails[req.id];
+              const docs = getDocumentLinks(detail);
+              const contactEmail = detail?.client_email || detail?.consent_recipient_email;
+              const clientType = detail?.client_type || "no definido";
+              const createdAt = req.created_at
+                ? new Date(req.created_at).toLocaleDateString("es-EC")
+                : "Sin fecha";
+
+              return (
+                <div
+                  key={req.id}
+                  className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm hover:shadow-md transition-all duration-200"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-gray-900">
+                        {req.commercial_name || "Cliente sin nombre"}
+                      </p>
+                      <div className="mt-1 space-y-0.5">
+                        <p className="text-xs text-gray-500">
+                          RUC/Cédula: {req.ruc_cedula || "No disponible"}
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Tipo:{" "}
+                          <span className="font-medium text-gray-700">
+                            {clientType}
+                          </span>
+                        </p>
+                        <p className="text-xs text-gray-500">
+                          Fecha aprobación:{" "}
+                          <span className="font-medium text-gray-700">
+                            {createdAt}
+                          </span>
+                        </p>
+                        {contactEmail && (
+                          <p className="text-xs text-gray-500">
+                            Contacto:{" "}
+                            <span className="font-medium text-gray-700">
+                              {contactEmail}
+                            </span>
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      leftIcon={<FiEye />}
+                      onClick={() =>
+                        navigate(`/dashboard/backoffice/client-request/${req.id}`)
+                      }
+                    >
+                      Ver
+                    </Button>
+                  </div>
+
+                  <div className="mt-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
+                      Documentos
+                    </p>
+                    {docs.length === 0 ? (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Documentación no disponible
+                      </p>
+                    ) : (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {docs.map((doc) => (
+                          <a
+                            key={`${req.id}-${doc.key}`}
+                            href={doc.link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-100"
+                          >
+                            <FiFileText />
+                            {doc.label}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
       {/* Modal */}
       {rejectContext.open && (

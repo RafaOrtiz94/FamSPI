@@ -1,5 +1,6 @@
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw } from "react-icons/fi";
+import { FiClipboard, FiUsers, FiCheckSquare, FiFileText, FiCalendar, FiRefreshCw, FiShoppingCart, FiBriefcase, FiUser } from "react-icons/fi";
 import { Doughnut, Bar } from "react-chartjs-2";
 import {
     Chart as ChartJS,
@@ -14,9 +15,12 @@ import {
 } from "chart.js";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
+import Modal from "../../../../core/ui/components/Modal";
 import { DashboardHeader } from "../../../../core/ui/layouts/DashboardLayout";
 import StatCard from "../../../../core/ui/patterns/StatCard";
 import ChartCard from "../../../gerencia/components/ChartCard";
+import PurchaseHandoffWidget from "../../components/PurchaseHandoffWidget";
+import PurchaseTypeSelector from "../../../../shared/purchases/PurchaseTypeSelector";
 
 // Register Chart.js components
 ChartJS.register(
@@ -46,6 +50,15 @@ const LoadingChartState = () => (
 
 const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError }) => {
     const navigate = useNavigate();
+    const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
+    const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+
+    const handlePurchaseTypeSelection = (type) => {
+        // Log TEMPORAL para debugging
+        console.log('[UI_COMERCIAL][FASE2][DASHBOARD_ENTRYPOINT_CLICK]');
+        // El PurchaseTypeSelector ya maneja la navegación al workspace
+        // No necesitamos lógica adicional aquí
+    };
 
     // Error state component
     const ErrorState = ({ message = "Error cargando datos", onRetry }) => (
@@ -213,7 +226,25 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
             {/* Navigation Cards Section */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Accesos Rápidos</h2>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                    {/* 🎯 ACCESO DIRECTO: Crear Solicitud de Compra */}
+                    <Card className="p-0">
+                        <button
+                            className="w-full text-left p-4 cursor-pointer hover:shadow-lg hover:border-indigo-300 transition-all duration-200 border-2 border-indigo-200 bg-gradient-to-br from-indigo-50 to-indigo-100"
+                            onClick={() => setShowPurchaseTypeModal(true)}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="p-3 bg-indigo-500 rounded-lg text-white shadow-sm">
+                                    <FiShoppingCart size={20} />
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-gray-900">Crear Solicitud</p>
+                                    <p className="text-xs text-gray-600 font-medium">Compra de equipos</p>
+                                </div>
+                            </div>
+                        </button>
+                    </Card>
+
                     {/* 👉 Clientes */}
                     <Card className="p-0">
                         <button
@@ -243,8 +274,8 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
                                     <FiClipboard size={18} />
                                 </div>
                                 <div>
-                                    <p className="text-sm font-semibold text-gray-900">Solicitudes</p>
-                                    <p className="text-xs text-gray-500">Módulo dedicado</p>
+                                    <p className="text-sm font-semibold text-gray-900">Todas las Solicitudes</p>
+                                    <p className="text-xs text-gray-500">Historial completo</p>
                                 </div>
                             </div>
                         </button>
@@ -287,6 +318,21 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
                     </Card>
                 </div>
             </section>
+
+            {/* COMPONENTE UNIFICADO PARA SELECCIÓN DE TIPO DE COMPRA */}
+            <PurchaseTypeSelector
+                isOpen={showPurchaseTypeModal}
+                onClose={() => setShowPurchaseTypeModal(false)}
+                origin="dashboard"
+                onSelect={handlePurchaseTypeSelection}
+            />
+
+            {/* PURCHASE HANDOFF MODAL */}
+            <PurchaseHandoffWidget
+                isOpen={showPurchaseHandoff}
+                onOpenChange={setShowPurchaseHandoff}
+                hideButton={true}
+            />
         </>
     );
 };

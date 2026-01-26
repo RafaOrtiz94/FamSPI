@@ -10,7 +10,7 @@ import { getEquipmentPurchaseMeta } from "../../../../core/api/equipmentPurchase
 import Button from "../../../../core/ui/components/Button";
 import Modal from "../../../../core/ui/components/Modal";
 import RequestDetailModal from "../RequestDetailModal";
-import PurchaseHandoffWidget from "../PurchaseHandoffWidget";
+
 import PermisoVacacionModal from "../../../shared/solicitudes/modals/PermisoVacacionModal";
 import RequestStatWidget from "../../../shared/solicitudes/components/RequestStatWidget";
 import RequestsListModal from "../../../shared/solicitudes/components/RequestsListModal";
@@ -309,6 +309,7 @@ const ComercialSolicitudesView = () => {
         }
 
         showLoader();
+        const flowId = `pp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         try {
             const equipmentPayload = selectedEquipment
                 .map((selected) => {
@@ -346,11 +347,31 @@ const ComercialSolicitudesView = () => {
                 payload.comodato_document_mime = comodatoFile.type;
             }
 
-            await createPrivatePurchase(payload);
+            console.log("[FLOW_PRIVADA][FE][COMERCIAL][CREATE][START]", {
+                flowId,
+                client: payload.clientSnapshot?.commercial_name,
+                equipmentCount: payload.equipment?.length || 0,
+                offerKind: payload.offer_kind
+            });
+            const created = await createPrivatePurchase(payload, {
+                headers: { "x-flow-id": flowId }
+            });
+            console.log("[FLOW_PRIVADA][FE][COMERCIAL][CREATE][SUCCESS]", {
+                flowId,
+                requestId: created?.id,
+                client: payload.clientSnapshot?.commercial_name,
+                offerKind: payload.offer_kind
+            });
+            if (created?.id) {
+                localStorage.setItem(`private_purchase_flow_${created.id}`, flowId);
+            }
             showToast("Solicitud privada registrada. Backoffice la revisará", "success");
             closePrivateModal();
         } catch (error) {
-            console.error("Error creando solicitud privada:", error);
+            console.error("[FLOW_PRIVADA][FE][COMERCIAL][CREATE][ERROR]", {
+                flowId,
+                error: error?.message || error
+            });
             showToast("No pudimos crear la solicitud privada", "error");
         } finally {
             hideLoader();
@@ -382,12 +403,7 @@ const ComercialSolicitudesView = () => {
                 ]}
             />
 
-            {/* PURCHASE HANDOFF MODAL */}
-            <PurchaseHandoffWidget
-                isOpen={showPurchaseHandoff}
-                onOpenChange={setShowPurchaseHandoff}
-                hideButton={true}
-            />
+            {/* PURCHASE HANDOFF MODAL REMOVED - Now using global modals */}
 
             <Modal
                 open={showPurchaseTypeModal}

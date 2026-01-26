@@ -1,19 +1,59 @@
 import React, { useState, useEffect } from 'react';
 import { FiCheck, FiX, FiEye, FiFileText, FiAlertTriangle, FiClock } from 'react-icons/fi';
-import { privatePurchasesApi } from '../../comercial/api/privatePurchasesApi';
+import {
+  getPrivatePurchaseTimeline,
+  listPrivatePurchasesByRole,
+  transitionPrivatePurchaseState,
+  uploadPrivatePurchaseContract
+} from '../../../core/api/privatePurchasesApi';
 import { useUI } from '../../../core/ui/useUI';
+import Modal from '../../../core/ui/components/Modal';
+import { formatDateEC, formatDateTimeEC, parseToDate } from '../../../core/utils/dateUtils';
+import {
+  PRIVATE_PURCHASE_ERROR_CODES,
+} from '../../shared/constants/privatePurchaseConstants';
 
 /**
  * PrivatePurchaseApprovalsWidget - Widget para gerencia general
- * Muestra compras privadas pendientes de aprobación de contrato
+ * Muestra compras privadas pendientes de aprobacion de contrato
  */
+const pickFirstValidDate = (values) => {
+  for (const value of values) {
+    if (parseToDate(value)) {
+      return value;
+    }
+  }
+  return null;
+};
+
+const formatDateMaybe = (value, fallback, label) => {
+  if (!value) {
+    console.warn('[GERENCIA_WIDGET][DATE][MISSING]', { label, value });
+    return fallback;
+  }
+  if (parseToDate(value)) return formatDateEC(value, fallback);
+  console.warn('[GERENCIA_WIDGET][DATE][INVALID]', { label, value });
+  return String(value);
+};
+
+const formatDateTimeMaybe = (value, fallback, label) => {
+  if (!value) {
+    console.warn('[GERENCIA_WIDGET][DATE_TIME][MISSING]', { label, value });
+    return fallback;
+  }
+  if (parseToDate(value)) return formatDateTimeEC(value, fallback);
+  console.warn('[GERENCIA_WIDGET][DATE_TIME][INVALID]', { label, value });
+  return String(value);
+};
+
 const PrivatePurchaseApprovalsWidget = () => {
-  const { showToast, showModal } = useUI();
+  const { showToast } = useUI();
   const [purchases, setPurchases] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedPurchase, setSelectedPurchase] = useState(null);
   const [timelineData, setTimelineData] = useState(null);
   const [actionLoading, setActionLoading] = useState({});
+  const [detailsOpen, setDetailsOpen] = useState(false);
 
   useEffect(() => {
     loadPendingApprovals();
@@ -24,13 +64,29 @@ const PrivatePurchaseApprovalsWidget = () => {
       setLoading(true);
       console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Loading pending contract approvals');
 
-      // Get purchases pending manager approval
-      const result = await privatePurchasesApi.listPrivatePurchases({
-        status: 'pending_manager_contract_approval'
-      });
+      // Get purchases pending manager approval via role-based endpoint
+      const result = await listPrivatePurchasesByRole('gerencia_general');
 
-      console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Loaded purchases:', result.data?.length || 0);
-      setPurchases(result.data || []);
+      console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Loaded purchases:', result?.length || 0);
+      if (Array.isArray(result) && result.length > 0) {
+        const sample = result[0] || {};
+        console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET][DATE_SAMPLE]', {
+          id: sample.id,
+          created_at: sample.created_at,
+          createdAt: sample.createdAt,
+          updated_at: sample.updated_at,
+          updatedAt: sample.updatedAt,
+          created: sample.created,
+          created_on: sample.created_on,
+          createdOn: sample.createdOn,
+          created_date: sample.created_date,
+          createdDate: sample.createdDate,
+          requested_at: sample.requested_at,
+          requestedAt: sample.requestedAt,
+          keys: Object.keys(sample || {})
+        });
+      }
+      setPurchases(result || []);
     } catch (error) {
       console.error('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Error loading approvals:', error);
       showToast('Error al cargar aprobaciones pendientes', 'error');
@@ -43,42 +99,44 @@ const PrivatePurchaseApprovalsWidget = () => {
     try {
       console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Loading timeline for purchase:', purchase.id);
 
-      const timelineResult = await privatePurchasesApi.getTimeline(purchase.id);
-      setTimelineData(timelineResult.data);
+      const timelineResult = await getPrivatePurchaseTimeline(purchase.id);
+      if (Array.isArray(timelineResult?.events) && timelineResult.events.length > 0) {
+        const eventSample = timelineResult.events[0] || {};
+        console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET][TIMELINE_DATE_SAMPLE]', {
+          eventType: eventSample.eventType || eventSample.type,
+          timestamp: eventSample.timestamp,
+          created_at: eventSample.created_at,
+          updated_at: eventSample.updated_at,
+          keys: Object.keys(eventSample || {})
+        });
+      }
+      setTimelineData(timelineResult);
       setSelectedPurchase(purchase);
-
-      // Show modal with details
-      showModal({
-        title: `Aprobación de Contrato - ${purchase.client_snapshot?.commercial_name || 'Cliente'}`,
-        size: 'xl',
-        content: (
-          <PurchaseApprovalModal
-            purchase={purchase}
-            timelineData={timelineResult.data}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            loading={actionLoading}
-          />
-        )
-      });
+      setDetailsOpen(true);
     } catch (error) {
       console.error('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Error loading timeline:', error);
       showToast('Error al cargar detalles de la compra', 'error');
     }
   };
 
-  const handleApprove = async (purchaseId, reason) => {
+  const handleCloseDetails = () => {
+    setDetailsOpen(false);
+    setSelectedPurchase(null);
+    setTimelineData(null);
+  };
+
+  const handleApprove = async (purchaseId, contractData) => {
     try {
       setActionLoading(prev => ({ ...prev, [purchaseId]: true }));
-      console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Approving contract:', purchaseId);
+      console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Uploading contract:', purchaseId);
 
-      await privatePurchasesApi.managerDecision(purchaseId, 'approved', reason || 'Aprobado por gerencia');
+      await uploadPrivatePurchaseContract(purchaseId, contractData);
 
-      showToast('Contrato aprobado exitosamente', 'success');
+      showToast('Contrato subido exitosamente', 'success');
       await loadPendingApprovals(); // Refresh list
     } catch (error) {
-      console.error('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Error approving:', error);
-      showToast(error.message || 'Error al aprobar contrato', 'error');
+      console.error('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Error uploading contract:', error);
+      showToast(error.message || 'Error al subir contrato', 'error');
     } finally {
       setActionLoading(prev => ({ ...prev, [purchaseId]: false }));
     }
@@ -86,21 +144,50 @@ const PrivatePurchaseApprovalsWidget = () => {
 
   const handleReject = async (purchaseId, reason) => {
     if (!reason || reason.trim().length === 0) {
+      console.log('[FLOW_PRIVADA][FE][FASE3][GERENCIA][REJECT][BLOCKED_EMPTY_REASON]', {
+        purchaseId,
+        reason: reason || 'empty'
+      });
       showToast('Debe proporcionar un motivo para el rechazo', 'warning');
       return;
     }
 
     try {
       setActionLoading(prev => ({ ...prev, [purchaseId]: true }));
-      console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Rejecting contract:', purchaseId);
+      console.log('[FLOW_PRIVADA][FE][FASE3][GERENCIA][REJECT][OPEN_MODAL]', {
+        purchaseId,
+        reasonLength: reason.length
+      });
 
-      await privatePurchasesApi.managerDecision(purchaseId, 'rejected', reason);
+      await transitionPrivatePurchaseState(purchaseId, 'contract_rejected', reason);
 
-      showToast('Contrato rechazado - se solicitarán correcciones', 'info');
+      console.log('[FLOW_PRIVADA][FE][FASE3][GERENCIA][REJECT][API_OK]', {
+        purchaseId,
+        ok: true,
+        code: 'SUCCESS'
+      });
+
+      showToast('Contrato rechazado. Se solicitaran correcciones.', 'info');
       await loadPendingApprovals(); // Refresh list
     } catch (error) {
-      console.error('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Error rejecting:', error);
-      showToast(error.message || 'Error al rechazar contrato', 'error');
+      console.error('[FLOW_PRIVADA][FE][FASE3][GERENCIA][REJECT][API_ERROR]', {
+        purchaseId,
+        error: error.response?.data || error.message,
+        ok: false
+      });
+
+      // Manejo especifico de errores BE
+      const errorCode = error.response?.data?.code;
+      if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.GERENCIA_REJECTION_REASON_REQUIRED) {
+        console.log('[FLOW_PRIVADA][FE][FASE3][GERENCIA][REJECT][BLOCKED_EMPTY_REASON]', {
+          purchaseId,
+          errorCode,
+          reasonLength: reason.length
+        });
+        showToast('El motivo del rechazo es obligatorio y no puede estar vacio', 'error');
+      } else {
+        showToast(error.message || 'Error al rechazar contrato', 'error');
+      }
     } finally {
       setActionLoading(prev => ({ ...prev, [purchaseId]: false }));
     }
@@ -121,10 +208,10 @@ const PrivatePurchaseApprovalsWidget = () => {
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-lg font-semibold text-gray-900">
-            Aprobaciones de Contratos
+            Aprobaciones de contratos
           </h3>
           <p className="text-sm text-gray-600">
-            Compras privadas pendientes de aprobación gerencial
+            Compras privadas pendientes de aprobacion por gerencia
           </p>
         </div>
         <div className="flex items-center space-x-2">
@@ -137,7 +224,7 @@ const PrivatePurchaseApprovalsWidget = () => {
       {purchases.length === 0 ? (
         <div className="text-center py-8 text-gray-500">
           <FiCheck className="mx-auto h-12 w-12 text-green-400 mb-4" />
-          <p>No hay contratos pendientes de aprobación</p>
+          <p>No hay contratos pendientes de aprobacion</p>
         </div>
       ) : (
         <div className="space-y-3">
@@ -159,13 +246,22 @@ const PrivatePurchaseApprovalsWidget = () => {
                     <span>ID: {purchase.id.slice(0, 8)}</span>
                     <span>
                       <FiClock className="w-3 h-3 inline mr-1" />
-                      {new Date(purchase.created_at).toLocaleDateString('es-ES')}
+                      {formatDateMaybe(
+                        pickFirstValidDate([
+                          purchase.created_at,
+                          purchase.createdAt,
+                          purchase.updated_at,
+                          purchase.updatedAt
+                        ]),
+                        'Fecha pendiente',
+                        'purchase.list.created'
+                      )}
                     </span>
                   </div>
 
                   {purchase.equipment && (
                     <p className="mt-2 text-sm text-gray-600">
-                      Equipos: {Array.isArray(purchase.equipment) ? purchase.equipment.length : 'N/A'} ítems
+                      Equipos: {Array.isArray(purchase.equipment) ? purchase.equipment.length : 'N/A'} items
                     </p>
                   )}
                 </div>
@@ -193,6 +289,23 @@ const PrivatePurchaseApprovalsWidget = () => {
           Actualizar lista
         </button>
       </div>
+
+      <Modal
+        open={detailsOpen}
+        onClose={handleCloseDetails}
+        title={`Aprobacion de contrato - ${selectedPurchase?.client_snapshot?.commercial_name || 'Cliente'}`}
+        maxWidth="max-w-4xl"
+      >
+        {selectedPurchase && (
+          <PurchaseApprovalModal
+            purchase={selectedPurchase}
+            timelineData={timelineData}
+            onApprove={handleApprove}
+            onReject={handleReject}
+            loading={actionLoading}
+          />
+        )}
+      </Modal>
     </div>
   );
 };
@@ -203,11 +316,127 @@ const PrivatePurchaseApprovalsWidget = () => {
 const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, loading }) => {
   const [decision, setDecision] = useState('');
   const [reason, setReason] = useState('');
-  const [showReasonInput, setShowReasonInput] = useState(false);
+  const [contractBase64, setContractBase64] = useState('');
+  const [contractFileName, setContractFileName] = useState('');
+  const [contractMimeType, setContractMimeType] = useState('');
+
+
+  const formatStateLabel = (state) => {
+    if (!state) return 'Sin estado';
+    const map = {
+      pending_backoffice: 'Pendiente de backoffice',
+      acp_availability_requested: 'Disponibilidad solicitada a ACP',
+      acp_availability_confirmed: 'Disponibilidad confirmada',
+      acp_availability_rejected: 'Disponibilidad rechazada',
+      offer_sent: 'Oferta enviada',
+      pending_client_signature: 'Pendiente firma de cliente',
+      pending_contract_client_signature: 'Contrato pendiente firma cliente',
+      offer_signed: 'Oferta firmada',
+      client_registration_requested: 'Registro de cliente solicitado',
+      client_registered: 'Cliente registrado',
+      pending_contract_approval: 'Pendiente de aprobacion de gerencia general',
+      contract_available: 'Contrato disponible',
+      contract_rejected: 'Contrato rechazado',
+      delivery_dates_requested: 'Fecha de entrega solicitada',
+      delivery_dates_submitted: 'Fecha de entrega definida',
+      waiting_dispatch: 'Esperando despacho',
+      dispatch_ready: 'Despacho listo',
+      delivery_act_generated: 'Acta de entrega generada',
+      delivered_signed: 'Entregado'
+    };
+    return map[state] || state.replace(/_/g, ' ');
+  };
+
+  const formatEventLabel = (event) => {
+    if (!event) return 'Evento';
+    if (event.eventType === 'STATE_TRANSITION') {
+      return `Cambio de estado: ${formatStateLabel(event.prevState)} -> ${formatStateLabel(event.nextState || event.newState)}`;
+    }
+    const map = {
+      REQUEST_CREATED: 'Solicitud creada',
+      CLIENT_REGISTERED: 'Cliente registrado',
+      OFFER_UPLOADED: 'Oferta enviada',
+      SIGNED_OFFER_UPLOADED: 'Oferta firmada recibida',
+      PROVIDER_RESPONSE: 'Respuesta de disponibilidad registrada',
+    CONTRACT_UPLOADED: 'Contrato subido',
+    CONTRACT_CLIENT_SIGNED_UPLOADED: 'Contrato firmado por cliente cargado',
+      INSPECTION_REQUESTED: 'Inspeccion de ambiente solicitada',
+      RESERVATION_REQUESTED: 'Reserva solicitada al proveedor'
+    };
+    return map[event.eventType] || map[event.type] || 'Evento registrado';
+  };
+
+  const formatRoleLabel = (role) => {
+    if (!role) return 'Rol no disponible';
+    const map = {
+      acp_comercial: 'ACP comercial',
+      backoffice_comercial: 'Backoffice comercial',
+      gerencia_general: 'Gerencia general',
+      administrador: 'Administrador',
+      sistema: 'Sistema'
+    };
+    return map[role] || role.replace(/_/g, ' ');
+  };
+
+  const formatDocLabel = (docType) => {
+    const map = {
+      CLIENT_REGISTRATION: 'Registro del cliente',
+      CLIENT_ID: 'Documento de identidad del cliente',
+      RUC: 'RUC del cliente',
+      OPERATING_PERMIT: 'Permiso de funcionamiento',
+      LEGAL_REP_APPOINTMENT: 'Nombramiento del representante legal',
+      APPROVAL_LETTER: 'Oficio/acta de aprobacion',
+      LOPDP_APPROVAL: 'Consentimiento LOPDP',
+      LOPDP_RECORD: 'Registro de consentimiento LOPDP',
+      LOPDP_EVIDENCE: 'Evidencia de consentimiento LOPDP',
+      ACP_RESPONSE: 'Respuesta de disponibilidad',
+      OFFER_DOCUMENT: 'Documento de la oferta',
+      OFFER: 'Oferta enviada',
+      SIGNED_OFFER: 'Oferta firmada',
+    CONTRACT_DRAFT: 'Borrador del contrato',
+    CONTRACT_CLIENT_SIGNED: 'Contrato firmado por cliente',
+    CONTRACT_SIGNED: 'Contrato firmado',
+      CONTRACT: 'Contrato',
+      INSPECTION_ACT: 'Acta de inspeccion de ambiente',
+      DELIVERY_ACT: 'Acta de entrega',
+      COMODATO: 'Documento comodato'
+    };
+    return map[docType] || docType?.replace(/_/g, ' ') || 'Documento';
+  };
+
+  const handleContractFileChange = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      setContractBase64('');
+      setContractFileName('');
+      setContractMimeType('');
+      return;
+    }
+
+    setContractFileName(file.name);
+    setContractMimeType(file.type || 'application/pdf');
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result || '';
+      const base64 = String(result).split(',')[1] || '';
+      setContractBase64(base64);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleDecision = () => {
     if (decision === 'approved') {
-      onApprove(purchase.id, reason || 'Aprobado por gerencia');
+      if (!contractBase64) {
+        alert('Debe adjuntar el contrato aprobado');
+        return;
+      }
+      onApprove(purchase.id, {
+        contract_base64: contractBase64,
+        file_name: contractFileName,
+        mime_type: contractMimeType,
+        reason: reason || 'Aprobado por gerencia'
+      });
     } else if (decision === 'rejected') {
       if (!reason.trim()) {
         alert('Debe proporcionar un motivo para el rechazo');
@@ -221,19 +450,31 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
     <div className="space-y-6">
       {/* Purchase Summary */}
       <div className="bg-gray-50 p-4 rounded-lg">
-        <h4 className="font-medium text-gray-900 mb-2">Resumen de la Compra</h4>
+        <h4 className="font-medium text-gray-900 mb-2">Resumen de la compra</h4>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <div>
             <span className="font-medium">Cliente:</span> {purchase.client_snapshot?.commercial_name}
           </div>
           <div>
-            <span className="font-medium">Tipo:</span> {purchase.offer_kind === 'comodato' ? 'Comodato' : 'Compra Directa'}
+            <span className="font-medium">Solicitado por:</span> {timelineData?.requested_by_name || 'No disponible'}
           </div>
           <div>
-            <span className="font-medium">Fecha:</span> {new Date(purchase.created_at).toLocaleDateString('es-ES')}
+            <span className="font-medium">Tipo:</span> {purchase.offer_kind === 'comodato' ? 'Comodato' : 'Compra directa'}
           </div>
           <div>
-            <span className="font-medium">Estado:</span> {purchase.status?.replace(/_/g, ' ')}
+            <span className="font-medium">Fecha:</span> {formatDateMaybe(
+              pickFirstValidDate([
+                purchase.created_at,
+                purchase.createdAt,
+                purchase.updated_at,
+                purchase.updatedAt
+              ]),
+              'Fecha pendiente',
+              'purchase.detail.created'
+            )}
+          </div>
+          <div>
+            <span className="font-medium">Estado:</span> {formatStateLabel(purchase.status)}
           </div>
         </div>
       </div>
@@ -241,14 +482,70 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
       {/* Checklist Status */}
       {timelineData?.checklist && (
         <div>
-          <h4 className="font-medium text-gray-900 mb-3">Estado de Documentación</h4>
+          <h4 className="font-medium text-gray-900 mb-3">Estado de los documentos</h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
             {timelineData.checklist.map((item, index) => (
               <div key={index} className="flex items-center space-x-2 p-2 bg-gray-50 rounded">
                 <div className={`w-2 h-2 rounded-full ${item.present ? 'bg-green-500' : 'bg-red-400'}`} />
                 <span className={`text-xs ${item.present ? 'text-gray-900' : 'text-gray-500'}`}>
-                  {item.docType.replace(/_/g, ' ')}
+                  {formatDocLabel(item.docType)}
                 </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+
+      {Array.isArray(timelineData?.documents) && timelineData.documents.length > 0 && (
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Documentos del cliente</h4>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {timelineData.documents.map((doc) => (
+              <a
+                key={`${doc.doc_type}-${doc.drive_file_id}`}
+                href={doc.link}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+              >
+                <span>{formatDocLabel(doc.doc_type)}</span>
+                <FiFileText className="w-4 h-4 text-blue-500" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {Array.isArray(timelineData?.events) && timelineData.events.length > 0 && (
+        <div>
+          <h4 className="font-medium text-gray-900 mb-3">Trazabilidad del proceso</h4>
+          <div className="space-y-2">
+            {timelineData.events.map((event, index) => (
+              <div key={`${event.eventType || event.type}-${index}`} className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-700">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold">{formatEventLabel(event)}</span>
+                  <span className="text-gray-500">
+                    {formatDateTimeMaybe(
+                      pickFirstValidDate([
+                        event.timestamp,
+                        event.updated_at,
+                        event.updatedAt,
+                        event.created_at,
+                        event.createdAt
+                      ]),
+                      'Fecha pendiente',
+                      `event.${event.eventType || event.type || 'unknown'}`
+                    )}
+                  </span>
+                </div>
+                <div className="mt-1 text-gray-600">
+                  {event.actorName ? `Persona responsable: ${event.actorName}` : 'Persona responsable: Sistema'}
+                  {event.actorRole ? ` (${formatRoleLabel(event.actorRole)})` : ''}
+                </div>
+                {event.reason && (
+                  <div className="mt-1 text-gray-500">Observacion: {event.reason}</div>
+                )}
               </div>
             ))}
           </div>
@@ -257,7 +554,7 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
 
       {/* Decision Section */}
       <div className="border-t pt-6">
-        <h4 className="font-medium text-gray-900 mb-4">Decisión de Gerencia</h4>
+        <h4 className="font-medium text-gray-900 mb-4">Decision de gerencia</h4>
 
         <div className="space-y-4">
           <div className="flex space-x-4">
@@ -271,7 +568,7 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
                 className="mr-2"
               />
               <FiCheck className="w-4 h-4 text-green-500 mr-1" />
-              Aprobar Contrato
+              Aprobar y subir contrato
             </label>
 
             <label className="flex items-center">
@@ -284,19 +581,19 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
                 className="mr-2"
               />
               <FiX className="w-4 h-4 text-red-500 mr-1" />
-              Rechazar (solicitar correcciones)
+              Rechazar y pedir correcciones
             </label>
           </div>
 
           {(decision === 'approved' || decision === 'rejected') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                {decision === 'approved' ? 'Comentarios (opcional)' : 'Motivo del rechazo (requerido)'}
+                {decision === 'approved' ? 'Comentarios (opcional)' : 'Motivo del rechazo (obligatorio)'}
               </label>
               <textarea
                 value={reason}
                 onChange={(e) => setReason(e.target.value)}
-                placeholder={decision === 'approved' ? 'Comentarios adicionales...' : 'Explique el motivo del rechazo...'}
+                placeholder={decision === 'approved' ? 'Agregue comentarios si aplica...' : 'Explique el motivo del rechazo...'}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 rows={3}
                 required={decision === 'rejected'}
@@ -304,22 +601,41 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
             </div>
           )}
 
+          {decision === 'approved' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Contrato aprobado (PDF)
+              </label>
+              <input
+                type="file"
+                accept="application/pdf"
+                onChange={handleContractFileChange}
+                className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+              />
+              {contractFileName && (
+                <p className="text-xs text-gray-500 mt-1">
+                  Archivo seleccionado: {contractFileName}
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex justify-end space-x-3">
             <button
               onClick={handleDecision}
-              disabled={!decision || loading[purchase.id] || (decision === 'rejected' && !reason.trim())}
+              disabled={!decision || loading[purchase.id] || (decision === 'rejected' && !reason.trim()) || (decision === 'approved' && !contractBase64)}
               className={`px-4 py-2 rounded-md text-white font-medium ${
                 decision === 'approved'
                   ? 'bg-green-600 hover:bg-green-700'
-                  : decision === 'rejected'
-                  ? 'bg-red-600 hover:bg-red-700'
-                  : 'bg-gray-400 cursor-not-allowed'
+                : decision === 'rejected'
+                ? 'bg-red-600 hover:bg-red-700'
+                : 'bg-gray-400 cursor-not-allowed'
               }`}
             >
               {loading[purchase.id] ? 'Procesando...' :
-               decision === 'approved' ? 'Aprobar Contrato' :
-               decision === 'rejected' ? 'Rechazar y Solicitar Correcciones' :
-               'Seleccionar Decisión'}
+               decision === 'approved' ? 'Subir contrato' :
+               decision === 'rejected' ? 'Rechazar y pedir correcciones' :
+               'Seleccione una decision'}
             </button>
           </div>
         </div>
@@ -331,8 +647,8 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
           <div className="flex">
             <FiAlertTriangle className="w-5 h-5 text-orange-400 mr-3" />
             <div className="text-sm text-orange-800">
-              <strong>Importante:</strong> El rechazo enviará la solicitud de vuelta al BackOffice
-              para que realice las correcciones solicitadas. El asesor comercial será notificado.
+              <strong>Importante:</strong> Al rechazar, la solicitud vuelve a Backoffice
+              para que se hagan los ajustes solicitados. El asesor comercial sera notificado.
             </div>
           </div>
         </div>

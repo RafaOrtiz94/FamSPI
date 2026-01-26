@@ -7,7 +7,7 @@ import { validateFormForMode } from "./purchaseRequest.modes";
 /**
  * Hook for creating purchase requests with unified logic
  * @param {Object} options - Hook options
- * @param {string} options.mode - Modal mode ('acp_required' | 'acp_optional_autoassign')
+ * @param {string} options.mode - Modal mode ('acp_required' | 'acp_optional_autoassign' | 'private_direct')
  * @param {string} options.source - Source identifier ('dashboard' | 'solicitudes_publicas')
  * @param {Function} options.onSuccess - Success callback
  * @param {Function} options.onError - Error callback
@@ -22,10 +22,11 @@ export const useCreatePurchaseRequest = ({
     const [loading, setLoading] = useState(false);
     const [progressStep, setProgressStep] = useState(null);
 
-    const submissionSteps = [
+    // Dynamic submission steps based on mode
+    const getSubmissionSteps = (currentMode) => [
         { id: "validating", label: "Validando información" },
         { id: "preparing", label: "Preparando solicitud" },
-        { id: "submitting", label: "Enviando a ACP" },
+        { id: "submitting", label: currentMode === 'private_direct' ? "Creando solicitud privada" : "Enviando a ACP" },
     ];
 
     /**
@@ -74,9 +75,11 @@ export const useCreatePurchaseRequest = ({
             const result = await createPurchaseRequest(apiPayload);
 
             // Success handling
-            const successMessage = mode === 'acp_required'
-                ? "Solicitud enviada al ACP Comercial"
-                : "Solicitud de compra pública creada correctamente";
+            const successMessage = mode === 'private_direct'
+                ? "Solicitud de compra privada creada correctamente"
+                : mode === 'acp_required'
+                    ? "Solicitud enviada al ACP Comercial"
+                    : "Solicitud de compra pública creada correctamente";
 
             showToast(successMessage, "success");
             onSuccess?.(result);
@@ -114,7 +117,7 @@ export const useCreatePurchaseRequest = ({
         submitRequest,
         loading,
         progressStep,
-        submissionSteps,
+        submissionSteps: getSubmissionSteps(mode),
         reset
     };
 };
