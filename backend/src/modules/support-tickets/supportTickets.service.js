@@ -4,7 +4,16 @@ const notificationsService = require("../notifications/notifications.service");
 const TICKET_TYPES = new Set(["fallo", "implementacion", "requerimiento", "problema"]);
 const TICKET_PRIORITIES = new Set(["baja", "media", "alta", "critica"]);
 const TICKET_STATUSES = new Set(["abierto", "triage", "en_progreso", "en_espera", "resuelto", "cerrado", "reabierto"]);
-const TI_ROLES = ["ti", "jefe_ti", "admin_ti", "jefe_de_ti"];
+const TI_ROLES = [
+  "ti",
+  "jefe_ti",
+  "admin_ti",
+  "jefe_de_ti",
+  "tecnico",
+  "jefe_tecnico",
+  "servicio_tecnico",
+  "jefe_servicio_tecnico",
+];
 const STATUS_ALIASES = {
   terminado: "resuelto",
 };
@@ -325,7 +334,6 @@ async function getTIUsers(client) {
       SELECT id, email, fullname
       FROM users
       WHERE LOWER(COALESCE(role, '')) = ANY($1)
-         OR LOWER(COALESCE(scope, '')) = ANY($1)
       ORDER BY id ASC
     `,
     [TI_ROLES]
