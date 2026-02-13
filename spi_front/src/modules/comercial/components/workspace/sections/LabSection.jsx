@@ -20,7 +20,6 @@ const EMPTY_SCHEMA = {
 
 /**
  * LabSection - Workspace section for laboratory environment configuration
- * Adapted from Step2LabData.jsx wizard component
  */
 const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}, onSave }) => {
     const { id: bcId } = useParams();
@@ -70,7 +69,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
 
     const handleSave = async (data) => {
         if (!bcId) {
-            showToast("Error: No se encontró el Business Case ID", "error");
+            showToast("Error: No se encontr? el Business Case ID", "error");
             return;
         }
 
@@ -100,24 +99,27 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
 
     const canEdit = permissions.canEdit !== false && ownership.canUserEdit !== false;
 
+    const inputClasses = "w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500";
+
     return (
         <div className="space-y-6">
             {/* Section Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-4">
-                    <div className="text-3xl">🏥</div>
+                    
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Entorno Laboratorio</h2>
-                        <p className="text-sm text-gray-600">Configuración operativa y parámetros del laboratorio</p>
+                        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Entorno Laboratorio</h2>
+                        <p className="text-sm text-gray-500 mt-1">Configuración operativa y parámetros del laboratorio</p>
                     </div>
                 </div>
                 {canEdit && (
                     <button
                         type="submit"
                         disabled={saving}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        onClick={handleSubmit(handleSave)}
+                        className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
                     >
-                        <FiSave size={16} />
+                        <FiSave size={18} />
                         {saving ? "Guardando..." : "Guardar"}
                     </button>
                 )}
@@ -125,16 +127,18 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
 
             {/* Form */}
             <form onSubmit={handleSubmit(handleSave)} className="space-y-6">
-                <Card className="p-6">
-                    <div className="flex items-center gap-2 border-b pb-4 mb-6">
-                        <FiActivity className="text-blue-600" />
-                        <h3 className="text-lg font-semibold text-gray-800">Datos Operativos del Laboratorio</h3>
+                <Card className="p-6 rounded-2xl shadow-sm border border-gray-100 bg-white">
+                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-6">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                            <FiActivity size={20} />
+                        </div>
+                        <h3 className="text-lg font-bold text-gray-900 tracking-tight">Datos Operativos del Laboratorio</h3>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                         {/* Work Days */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Días de trabajo por semana
                             </label>
                             <input
@@ -143,14 +147,14 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                                 max="7"
                                 {...register("workDaysPerWeek")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: 5"
                             />
                         </div>
 
                         {/* Shifts per Day */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Turnos por día
                             </label>
                             <input
@@ -159,14 +163,14 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                                 max="3"
                                 {...register("shiftsPerDay")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: 2"
                             />
                         </div>
 
                         {/* Hours per Shift */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Horas por turno
                             </label>
                             <input
@@ -176,14 +180,14 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                                 step="0.5"
                                 {...register("hoursPerShift")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: 8"
                             />
                         </div>
 
                         {/* QC per Shift */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Controles de calidad por turno
                             </label>
                             <input
@@ -191,14 +195,14 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                                 min="0"
                                 {...register("qcPerShift")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: 3"
                             />
                         </div>
 
                         {/* Control Levels */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Niveles de control
                             </label>
                             <input
@@ -206,49 +210,49 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                                 min="1"
                                 {...register("controlLevels")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: 2"
                             />
                         </div>
 
                         {/* Routine QC Frequency */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Frecuencia QC (Rutina)
                             </label>
                             <input
                                 type="text"
                                 {...register("routineQCFrequency")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: Diario, Por turno..."
                             />
                         </div>
 
                         {/* Special Tests */}
-                        <div className="space-y-1 md:col-span-2">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5 md:col-span-2">
+                            <label className="text-sm font-bold text-gray-700">
                                 Pruebas Especiales
                             </label>
                             <textarea
                                 {...register("specialTests")}
                                 disabled={!canEdit}
                                 rows={2}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Describa las pruebas especiales requeridas..."
                             />
                         </div>
 
                         {/* Special QC Frequency */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-bold text-gray-700">
                                 Frecuencia QC (Especiales)
                             </label>
                             <input
                                 type="text"
                                 {...register("specialTestQCFrequency")}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className={inputClasses}
                                 placeholder="Ej: Semanal, Por lote..."
                             />
                         </div>
@@ -256,12 +260,12 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                 </Card>
 
                 {/* Info Card */}
-                <Card className="p-4 bg-blue-50 border-blue-200">
+                <Card className="p-4 bg-blue-50 border border-blue-100 rounded-2xl shadow-sm">
                     <div className="flex items-start gap-3">
-                        <div className="text-blue-600 mt-0.5">ℹ️</div>
+                        <div className="text-blue-600 mt-0.5 text-lg">Info</div>
                         <div>
-                            <h4 className="font-medium text-blue-900">Información</h4>
-                            <p className="text-sm text-blue-700 mt-1">
+                            <h4 className="font-bold text-blue-900 text-sm">Información Importante</h4>
+                            <p className="text-sm text-blue-800 mt-1 leading-relaxed">
                                 Los datos del laboratorio se usan para calcular el consumo de reactivos y
                                 la utilización del equipo. Asegúrese de ingresar valores precisos para
                                 obtener proyecciones exactas.
@@ -272,14 +276,14 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
 
                 {/* Section Actions */}
                 {canEdit && (
-                    <div className="flex justify-between items-center pt-4 border-t">
-                        <p className="text-xs text-gray-500">Los cambios se guardan automáticamente al enviar el formulario.</p>
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
+                        <p className="text-xs text-gray-400 font-medium">Los cambios se guardan automáticamente al enviar el formulario.</p>
                         <button
                             type="submit"
                             disabled={saving}
-                            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                            className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
                         >
-                            <FiSave size={16} />
+                            <FiSave size={18} />
                             {saving ? "Guardando..." : "Guardar"}
                         </button>
                     </div>

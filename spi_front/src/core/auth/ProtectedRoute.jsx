@@ -38,6 +38,10 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
   const normalizedScopes = scopesList.map((s) => s.toLowerCase());
   const userRole = normalizedUserRoles[0] || "";
   const userScope = normalizedScopes[0] || userRole;
+  const hasPendingRole =
+    normalizedUserRoles.some((r) => r.includes("pending") || r.includes("pendiente")) ||
+    normalizedScopes.some((s) => s.includes("pending") || s.includes("pendiente")) ||
+    !userRole;
   const hasPermission =
     normalizedAllowed.length === 0 ||
     normalizedAllowed.some((role) => normalizedUserRoles.includes(role)) ||
@@ -64,6 +68,16 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
     }
   }, [loading, isAuthenticated, hasPermission, showToast, lopdpPending]);
 
+  console.log("🛡️ ProtectedRoute snapshot:", {
+    loading,
+    isAuthenticated,
+    userRole,
+    normalizedUserRoles,
+    normalizedScopes,
+    hasPermission,
+    path: location.pathname,
+  });
+
   // 🕐 Mientras se verifica sesión
   if (loading) {
     return (
@@ -81,6 +95,10 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
   ) {
     console.warn("🚫 Usuario no autenticado, redirigiendo a /login");
     return <Navigate to="/login" replace />;
+  }
+
+  if (isAuthenticated && hasPendingRole && location.pathname !== "/registro-en-proceso") {
+    return <Navigate to="/registro-en-proceso" replace />;
   }
 
   // 🎫 Validar roles permitidos
@@ -129,6 +147,7 @@ export const RoleRedirect = () => {
     finanzas: "/dashboard/finanzas",
     jefe_finanzas: "/dashboard/finanzas",
     jefe_financiero: "/dashboard/finanzas",
+    financiero: "/dashboard/finanzas",
     comercial: "/dashboard/comercial",
     jefe_comercial: "/dashboard/comercial",
     backoffice_comercial: "/dashboard/comercial",
@@ -143,6 +162,7 @@ export const RoleRedirect = () => {
     jefe_talento_humano: "/dashboard/talento-humano",
     ti: "/dashboard/ti",
     jefe_ti: "/dashboard/ti",
+    admin_ti: "/dashboard/ti",
     operaciones: "/dashboard/operaciones",
     jefe_operaciones: "/dashboard/operaciones",
     logistica: "/dashboard/logistica",
@@ -154,7 +174,9 @@ export const RoleRedirect = () => {
   const target =
     roleRoutes[scope] ||
     roleRoutes[role] ||
-    "/unauthorized";
+    (role.includes("pendiente") || role.includes("pending") || scope.includes("pendiente") || scope.includes("pending")
+      ? "/registro-en-proceso"
+      : "/unauthorized");
   console.log(`🎯 Redirigiendo según rol [${role}] → ${target}`);
 
   return <Navigate to={target} replace />;

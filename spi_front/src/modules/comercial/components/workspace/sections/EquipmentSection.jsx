@@ -1,19 +1,18 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import { FiActivity } from "react-icons/fi";
-import Step2EquipmentSelector from "../../wizard/Step2EquipmentSelector";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 
 const DEFAULT_EQUIPMENT_PAIRS = [
-  { id: Date.now(), primary: null, backup: null } // Start with one empty pair
+  { id: Date.now(), primary: null, backup: null, requiresBackup: false } // Start with one empty pair
 ];
 
 const EquipmentSection = ({
   businessCase,
   permissions = {},
   ownership = {},
-  onSave = () => {}
+  onSave = () => { }
 }) => {
   const { id: bcId } = useParams();
   const { showToast } = useUI();
@@ -23,12 +22,22 @@ const EquipmentSection = ({
 
   // COMPLETE SECTION DATA - All fields from businessCase, even conditional ones
   const sectionData = useMemo(() => {
-    if (!businessCase?.equipment_details) return { equipmentPairs: DEFAULT_EQUIPMENT_PAIRS };
+    const equipmentDetails =
+      businessCase?.equipment_details ||
+      businessCase?.extra?.equipment_details ||
+      null;
+    if (!equipmentDetails) return { equipmentPairs: DEFAULT_EQUIPMENT_PAIRS };
 
     // Map business case equipment data to component state format
     return {
-      equipmentPairs: businessCase.equipment_details.map((detail, index) => ({
+      equipmentPairs: equipmentDetails.map((detail, index) => ({
         id: detail.id || Date.now() + index,
+        requiresBackup: Boolean(
+          detail.requires_backup ??
+          detail.requiresBackup ??
+          detail.backup_id ??
+          detail.backup
+        ),
         primary: detail.primary ? {
           id: detail.primary.id,
           name: detail.primary.name,
@@ -37,7 +46,7 @@ const EquipmentSection = ({
           price: detail.primary.price,
           description: detail.primary.description,
           categories: detail.primary.categories || []
-        } : null,
+        } : detail.primary_id ? { id: detail.primary_id } : null,
         backup: detail.backup ? {
           id: detail.backup.id,
           name: detail.backup.name,
@@ -48,7 +57,7 @@ const EquipmentSection = ({
           categories: detail.backup.categories || [],
           condition: detail.backup.condition || "Nuevo",
           install_with_primary: detail.backup.install_with_primary || false
-        } : null
+        } : detail.backup_id ? { id: detail.backup_id } : null
       })) || DEFAULT_EQUIPMENT_PAIRS
     };
   }, [businessCase]);
@@ -61,7 +70,10 @@ const EquipmentSection = ({
     // GUARD: Only hydrate once, when sectionData has equipment pairs and different from current
     if (!sectionData.equipmentPairs || hydratedRef.current) return;
 
-    console.log('EquipmentSection: Hydrating with equipment pairs:', sectionData.equipmentPairs);
+    console.info("[BC][EQUIPMENT][HYDRATE]", {
+      pairsCount: sectionData.equipmentPairs.length,
+      hasPrimary: sectionData.equipmentPairs.some((pair) => Boolean(pair.primary)),
+    });
     setEquipmentPairs(sectionData.equipmentPairs);
     hydratedRef.current = true; // Mark as hydrated - never reset again
   }, [sectionData.equipmentPairs]);
@@ -80,17 +92,27 @@ const EquipmentSection = ({
     }
 
     try {
+      console.info("[BC][EQUIPMENT][SAVE][START]", {
+        bcId,
+        pairsCount: pairsData.length,
+        requiresBackup: pairsData.filter((pair) => pair.requiresBackup).length,
+      });
       // Transform to backend format
       const payload = {
         equipment_pairs: pairsData.map(p => ({
           primary_id: p.primary.id,
-          backup_id: p.backup?.id || null,
+          requires_backup: Boolean(p.requiresBackup),
+          backup_id: p.requiresBackup ? (p.backup?.id || null) : null,
           backup_install_simultaneous: p.backup?.install_with_primary || false,
         })),
       };
 
       // Use the existing equipment-details endpoint or v2 if available
-      await api.post(`/business-case/${bcId}/equipment-details-v2`, payload);
+      const res = await api.post(`/business-case/${bcId}/equipment-details-v2`, payload);
+      console.info("[BC][EQUIPMENT][SAVE][OK]", {
+        bcId,
+        status: res?.status,
+      });
 
       showToast("Equipos guardados exitosamente", "success");
 
@@ -98,6 +120,10 @@ const EquipmentSection = ({
       onSave();
 
     } catch (err) {
+      console.error("[BC][EQUIPMENT][SAVE][ERROR]", {
+        bcId,
+        message: err?.response?.data?.message || err?.message,
+      });
       showToast("Error guardando equipos", "error");
       console.error("Error saving equipment:", err);
     }
@@ -108,12 +134,12 @@ const EquipmentSection = ({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-2">
         <FiActivity className="text-blue-600" />
         <div>
           <h2 className="text-lg font-semibold text-gray-900">Equipamiento</h2>
           <p className="text-sm text-gray-500">
-            Selección y configuración de equipos médicos
+            Seleccion y configuracion de equipos medicos
             {!canEdit && " (Solo lectura)"}
           </p>
         </div>
@@ -124,7 +150,7 @@ const EquipmentSection = ({
         <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
           <div className="flex items-center gap-2 text-amber-800">
             <span className="text-sm">
-              No tienes permisos para editar esta sección en el estado actual.
+              No tienes permisos para editar esta seccion en el estado actual.
             </span>
           </div>
         </div>
@@ -134,6 +160,7 @@ const EquipmentSection = ({
       <div className={`${!canEdit ? 'opacity-60 pointer-events-none' : ''}`}>
         <EquipmentSelectorWrapper
           equipmentPairs={equipmentPairs}
+          onPairsChange={setEquipmentPairs}
           onSave={handleWorkspaceSave}
           disabled={!canEdit}
         />
@@ -141,10 +168,10 @@ const EquipmentSection = ({
 
       {/* Section Actions */}
       {canEdit && (
-        <div className="flex justify-end pt-4 border-t">
+        <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t">
           <button
             onClick={() => handleWorkspaceSave(equipmentPairs)}
-            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="bg-blue-600 text-white w-full sm:w-auto px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Guardar Equipamiento
           </button>
@@ -154,40 +181,24 @@ const EquipmentSection = ({
   );
 };
 
-// Internal wrapper component that manages state and adapts Step2EquipmentSelector
-const EquipmentSelectorWrapper = ({ equipmentPairs, onSave, disabled }) => {
+// Internal wrapper component that manages equipment selection state
+const EquipmentSelectorWrapper = ({ equipmentPairs, onPairsChange, onSave, disabled }) => {
   const [currentPairs, setCurrentPairs] = useState(equipmentPairs);
-  const { showToast } = useUI();
 
-  // Mock wizard context for Step2EquipmentSelector
-  const mockWizardContext = {
-    state: {
-      equipmentPairs: currentPairs,
-      businessCaseId: null // Not needed for workspace
-    },
-    updateState: (updates) => {
-      if (updates.equipmentPairs) {
-        setCurrentPairs(updates.equipmentPairs);
-      }
+  // Sync local changes back to parent state for save button
+  useEffect(() => {
+    if (onPairsChange) {
+      onPairsChange(currentPairs);
     }
-  };
+  }, [currentPairs, onPairsChange]);
 
   // Mock onNext to call our onSave
   const handleNext = () => {
     onSave(currentPairs);
   };
 
-  // Mock onPrev (not used in workspace)
-  const handlePrev = () => {
-    // No action needed in workspace
-  };
-
   return (
     <div className={disabled ? 'pointer-events-none opacity-60' : ''}>
-      {/* We need to provide the wizard context somehow. Since we can't modify Step2EquipmentSelector,
-          we'll need to create a minimal context provider or use a different approach.
-
-          For now, let's create a simplified version that reuses the core logic but without wizard dependencies. */}
       <EquipmentSelectorCore
         equipmentPairs={currentPairs}
         onUpdatePairs={setCurrentPairs}
@@ -213,31 +224,57 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
   const loadEquipment = async () => {
     setLoading(true);
     try {
+      console.info("[BC][EQUIPMENT][CATALOG][LOAD]", {
+        search: filters.search || null,
+        category: filters.category || null,
+      });
       const res = await api.get("/equipment-catalog", {
         params: {
           search: filters.search || undefined,
           category: filters.category || undefined,
         },
       });
-      const payload = res.data?.data ?? res.data;
-      const parsedItems = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
+      const payload = res?.data || {};
+      const parsedItems = Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload?.items)
+          ? payload.items
+          : Array.isArray(payload)
+            ? payload
+            : [];
 
       const normalized = parsedItems.map((item) => {
-        const id = item.id ?? item.equipment_id ?? item.equipmentId ?? item.code;
+        const id = item.equipment_id ?? item.id ?? item.equipmentId ?? null;
+        const code = item.equipment_code ?? item.code ?? item.equipmentCode ?? item.sku ?? item.id_fabricante ?? null;
+        const description =
+          item.equipment_description ??
+          item.description ??
+          item.model ??
+          item.modelo ??
+          null;
         return {
           id,
-          name: item.name ?? item.equipment_name ?? "Equipo",
-          code: item.code,
-          capacity: item.capacity,
-          price: item.price,
-          description: item.description,
-          categories: item.categories ?? [item.category || item.categoria || item.category_type].filter(Boolean),
+          name: item.equipment_name ?? item.name ?? "Equipo",
+          code,
+          capacity: item.capacity_per_hour ?? item.capacity ?? item.max_daily_capacity ?? null,
+          price: item.base_price ?? item.price ?? null,
+          description,
+          categories: (item.categories || [item.category || item.categoria || item.category_type]).filter(Boolean),
           raw: item,
         };
       }).filter((i) => i.id);
       setItems(normalized);
+      console.info("[BC][EQUIPMENT][CATALOG][OK]", {
+        count: normalized.length,
+        sample: normalized[0]
+          ? { id: normalized[0].id, name: normalized[0].name, code: normalized[0].code }
+          : null,
+      });
     } catch (err) {
-      showToast("No se pudo cargar el catálogo", "error");
+      console.error("[BC][EQUIPMENT][CATALOG][ERROR]", {
+        message: err?.response?.data?.message || err?.message,
+      });
+      showToast("No se pudo cargar el catalogo", "error");
     } finally {
       setLoading(false);
     }
@@ -255,7 +292,7 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
 
   const addPair = () => {
     const maxId = equipmentPairs.length > 0 ? Math.max(...equipmentPairs.map(p => p.id)) : 0;
-    const newPair = { id: maxId + 1, primary: null, backup: null };
+    const newPair = { id: maxId + 1, primary: null, backup: null, requiresBackup: false };
     const newPairs = [...equipmentPairs, newPair];
     onUpdatePairs(newPairs);
     setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
@@ -270,20 +307,76 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
     onUpdatePairs(newPairs);
   };
 
+  const normalizeSelected = (item) => {
+    if (!item) return item;
+    const raw = item.raw || item;
+    return {
+      ...item,
+      code: item.code ?? raw.equipment_code ?? raw.code ?? raw.sku ?? raw.id_fabricante ?? null,
+      description: item.description ?? raw.equipment_description ?? raw.description ?? raw.model ?? raw.modelo ?? null,
+      name: item.name ?? raw.equipment_name ?? raw.name ?? "Equipo",
+      raw,
+    };
+  };
+
   const selectPrimary = (pairId, item) => {
+    const normalized = normalizeSelected(item);
+    console.info("[BC][EQUIPMENT][SELECT_PRIMARY]", {
+      pairId,
+      id: normalized?.id,
+      code: normalized?.code,
+      name: normalized?.name,
+      id_fabricante: normalized?.raw?.technical_specs?.id_fabricante ?? normalized?.raw?.metadata?.id_fabricante ?? null,
+      raw: normalized?.raw,
+    });
     updatePair(pairId, {
-      primary: { ...item },
+      primary: { ...normalized },
       backup: null,
     });
     showToast("Equipo principal seleccionado", "success");
   };
 
   const selectBackup = (pairId, item) => {
+    const normalized = normalizeSelected(item);
+    console.info("[BC][EQUIPMENT][SELECT_BACKUP]", {
+      pairId,
+      id: normalized?.id,
+      code: normalized?.code,
+      name: normalized?.name,
+      id_fabricante: normalized?.raw?.technical_specs?.id_fabricante ?? normalized?.raw?.metadata?.id_fabricante ?? null,
+      raw: normalized?.raw,
+    });
     updatePair(pairId, {
-      backup: { ...item, condition: "Nuevo", install_with_primary: false }
+      requiresBackup: true,
+      backup: { ...normalized, condition: "Nuevo", install_with_primary: false }
     });
     showToast("Backup seleccionado", "success");
   };
+
+  // Resolve primary/backup details once catalog is loaded
+  useEffect(() => {
+    if (!items.length) return;
+    const updated = equipmentPairs.map(pair => {
+      let primary = pair.primary;
+      let backup = pair.backup;
+      if (primary?.id && (!primary.name || !primary.code || !primary.description)) {
+        const found = items.find(i => i.id === primary.id);
+        if (found) primary = { ...found };
+      }
+      if (backup?.id && (!backup.name || !backup.code || !backup.description)) {
+        const found = items.find(i => i.id === backup.id);
+        if (found) {
+          backup = {
+            ...found,
+            condition: backup.condition || "Nuevo",
+            install_with_primary: backup.install_with_primary || false
+          };
+        }
+      }
+      return (primary !== pair.primary || backup !== pair.backup) ? { ...pair, primary, backup } : pair;
+    });
+    onUpdatePairs(updated);
+  }, [items]);
 
   const getBackupCandidates = (primaryItem) => {
     if (!primaryItem || !primaryItem.categories) return [];
@@ -310,29 +403,33 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
 
   const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => (
     <div
-      className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${disabled ? "opacity-60 pointer-events-none border-gray-200" : selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"}`}
+      className={`border rounded-2xl p-5 text-left space-y-3 transition-all duration-300 hover:shadow-md bg-white ${disabled ? "opacity-60 pointer-events-none border-gray-100" : selected ? "border-blue-500 ring-2 ring-blue-200 shadow-sm" : "border-gray-100 shadow-sm"}`}
     >
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
-            <FiCpu />
+        <div className="flex items-center gap-3">
+          <div className="p-2.5 rounded-xl bg-blue-50 text-blue-600">
+            <FiCpu size={20} />
           </div>
           <div>
-            <p className="text-sm font-semibold text-gray-900">{item.name}</p>
-            <p className="text-xs text-gray-500">{item.code || "Sin código"}</p>
+            <p className="text-sm font-bold text-gray-900">{item.name}</p>
+            {(item.code || item.raw?.equipment_code || item.raw?.code) && (
+              <p className="text-xs text-gray-500">
+                Codigo: {item.code || item.raw?.equipment_code || item.raw?.code}
+              </p>
+            )}
+            {(item.description || item.raw?.model || item.raw?.equipment_description) && (
+              <p className="text-xs text-gray-500 line-clamp-2">
+                {item.description || item.raw?.model || item.raw?.equipment_description}
+              </p>
+            )}
           </div>
         </div>
-        <div className="text-right">
-          <p className="text-sm text-gray-700">Capacidad: {item.capacity || "-"}</p>
-          <p className="text-sm text-gray-700">Precio: ${item.price ?? "-"}</p>
-        </div>
       </div>
-      <p className="text-xs text-gray-600">{item.description || "Sin descripción"}</p>
-      <div className="flex flex-wrap gap-1">
+      <div className="flex flex-wrap gap-2">
         {(item.categories || []).map((cat) => (
           <span
             key={cat}
-            className="text-[10px] px-2 py-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200"
+            className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-gray-50 text-gray-600 border border-gray-100"
           >
             {cat}
           </span>
@@ -342,7 +439,7 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
         <button
           type="button"
           onClick={() => onSelect(item)}
-          className={`w-full rounded-lg bg-${actionColor}-500 px-3 py-2 text-xs font-semibold text-white hover:bg-${actionColor}-600 mt-2`}
+          className={`w-full rounded-xl bg-${actionColor}-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-${actionColor}-700 active:scale-95 transition-all shadow-sm hover:shadow-${actionColor}-200 mt-3`}
         >
           {actionLabel}
         </button>
@@ -351,37 +448,44 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
   );
 
   const AccordionSection = ({ title, description, isOpen, onToggle, statusBadge, children }) => (
-    <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm mb-4">
+    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-all duration-300 mb-4">
       <button
         type="button"
         onClick={onToggle}
-        className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 focus:outline-none"
+        className="flex w-full items-center justify-between gap-3 px-6 py-5 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50/50 focus:outline-none"
       >
-        <div>
-          <p>{title}</p>
-          {description && <p className="text-xs text-gray-500">{description}</p>}
-        </div>
         <div className="flex items-center gap-3">
+            <div className={`p-2 rounded-lg ${isOpen ? 'bg-blue-50 text-blue-600' : 'bg-gray-100 text-gray-500'} transition-colors`}>
+                <FiActivity size={18} />
+            </div>
+            <div>
+                <p className="text-base font-bold text-gray-900">{title}</p>
+                {description && <p className="text-xs text-gray-500 mt-0.5">{description}</p>}
+            </div>
+        </div>
+        <div className="flex items-center gap-4">
           {statusBadge}
-          <FiChevronDown className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+          <div className={`p-1.5 rounded-full ${isOpen ? 'bg-gray-100 text-gray-900' : 'text-gray-400'} transition-all`}>
+            <FiChevronDown className={`h-4 w-4 transition-transform duration-300 ${isOpen ? "rotate-180" : ""}`} />
+          </div>
         </div>
       </button>
       <div className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
-        <div className="px-6 pb-6 pt-0">{children}</div>
+        <div className="px-6 pb-6 pt-2 border-t border-gray-50">{children}</div>
       </div>
     </div>
   );
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center border-b pb-4">
-        <h2 className="text-lg font-semibold text-gray-800">Selección de Equipos</h2>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-2">
+        <h2 className="text-lg font-bold text-gray-900 tracking-tight">Seleccion de Equipos</h2>
         <button
           onClick={addPair}
           disabled={disabled}
-          className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-semibold text-blue-600 bg-blue-50 rounded-full hover:bg-blue-100 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
         >
-          <FiPlus /> Agregar Grupo de Equipos
+          <FiPlus size={16} /> Agregar Grupo
         </button>
       </div>
 
@@ -393,24 +497,32 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
             description={pair.primary ? `${pair.primary.name} ${pair.backup ? '+ Backup' : ''}` : "Seleccione equipos..."}
             isOpen={openPairs[pair.id]}
             onToggle={() => togglePair(pair.id)}
-            statusBadge={pair.primary ? <span className="text-green-600 text-xs font-bold">Listo</span> : <span className="text-amber-600 text-xs">Pendiente</span>}
+            statusBadge={pair.primary ? <span className="px-2.5 py-1 rounded-full bg-green-50 text-green-600 text-xs font-bold border border-green-100">Listo</span> : <span className="px-2.5 py-1 rounded-full bg-amber-50 text-amber-600 text-xs font-bold border border-amber-100">Pendiente</span>}
           >
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fadeIn">
               {/* Primary Selection */}
               <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-gray-700">Equipo Principal</h4>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    placeholder="Filtrar..."
-                    className="border rounded px-2 py-1 text-sm w-full"
-                    onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
-                    disabled={disabled}
-                  />
+                <h4 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                    Equipo Principal
+                </h4>
+                <div className="flex flex-col sm:flex-row gap-2 mb-2">
+                  <div className="relative w-full">
+                    <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <input
+                        placeholder="Buscar equipos por nombre, codigo o categoria..."
+                        className="w-full border border-gray-200 rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-gray-50 focus:bg-white"
+                        onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
+                        disabled={disabled}
+                    />
+                  </div>
                 </div>
 
                 {!pair.primary ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                    {sortedEquipmentItems.filter(i => i.name.toLowerCase().includes(filters.search.toLowerCase())).map(item => (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-96 overflow-y-auto pr-2 custom-scrollbar">
+                    {sortedEquipmentItems
+                      .filter(i => (i.name || "").toLowerCase().includes(filters.search.toLowerCase()))
+                      .map(item => (
                       <EquipmentCard
                         key={item.id}
                         item={item}
@@ -421,14 +533,15 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
                     ))}
                   </div>
                 ) : (
-                  <div className="relative">
+                  <div className="relative group">
                     <EquipmentCard item={pair.primary} selected />
                     <button
-                      onClick={() => updatePair(pair.id, { primary: null, backup: null })}
+                      onClick={() => updatePair(pair.id, { primary: null, backup: null, requiresBackup: false })}
                       disabled={disabled}
-                      className="absolute top-2 right-2 text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="absolute top-4 right-4 p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 active:scale-95 transition-all shadow-sm opacity-0 group-hover:opacity-100"
+                      title="Cambiar equipo"
                     >
-                      <FiTrash2 /> Cambiar
+                      <FiTrash2 size={18} />
                     </button>
                   </div>
                 )}
@@ -436,73 +549,120 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
 
               {/* Backup Selection */}
               {pair.primary && (
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-sm font-semibold text-gray-700">Equipo de Respaldo (Backup)</h4>
+                <div className="space-y-4 border-t border-gray-100 pt-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                    <h4 className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                        <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                        Equipo de Respaldo (Backup)
+                    </h4>
                     {pair.backup && (
                       <button
                         onClick={() => updatePair(pair.id, { backup: null })}
                         disabled={disabled}
-                        className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-xs text-red-500 hover:text-red-700 font-medium hover:underline disabled:opacity-50 disabled:cursor-not-allowed px-2"
                       >
                         Eliminar Backup
                       </button>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Mostrando equipos con características similares (mismas categorías).
-                  </p>
-
-                  {!pair.backup ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                      {getBackupCandidates(pair.primary).map(item => (
-                        <EquipmentCard
-                          key={item.id}
-                          item={item}
-                          actionLabel="Agregar como Backup"
-                          actionColor="amber"
-                          onSelect={(i) => selectBackup(pair.id, i)}
-                          disabled={disabled}
-                        />
-                      ))}
-                      {getBackupCandidates(pair.primary).length === 0 && (
-                        <p className="text-sm text-gray-500 italic">No se encontraron equipos similares.</p>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
-                      <h5 className="font-semibold text-sm text-amber-900">{pair.backup.name}</h5>
-                      <div className="mt-2 text-xs space-y-2">
-                        <label className="block">
-                          Condición:
-                          <input
-                            value={pair.backup.condition}
-                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
-                            disabled={disabled}
-                            className="ml-2 border rounded px-1 disabled:opacity-50"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
+                  
+                  <div className="bg-gray-50/80 rounded-xl p-4 border border-gray-100">
+                    <label className="flex items-center gap-3 text-sm font-medium text-gray-700 cursor-pointer select-none">
+                        <div className="relative flex items-center">
+                            <input
                             type="checkbox"
-                            checked={pair.backup.install_with_primary}
-                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
+                            checked={Boolean(pair.requiresBackup)}
+                            onChange={(e) => updatePair(pair.id, { requiresBackup: e.target.checked, backup: e.target.checked ? pair.backup : null })}
                             disabled={disabled}
-                          />
-                          Instalar simultáneamente
-                        </label>
-                      </div>
+                            className="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-gray-300 transition-all checked:border-blue-500 checked:bg-blue-500 disabled:cursor-not-allowed"
+                            />
+                            <svg className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 transition-opacity" width="12" height="12" viewBox="0 0 12 12" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M10 3L4.5 8.5L2 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                        </div>
+                        El cliente desea equipo de respaldo
+                    </label>
+                    <p className="text-xs text-gray-500 mt-2 ml-8">
+                        No es obligatorio elegir un equipo de respaldo. Solo se selecciona si el cliente lo solicita.
+                    </p>
+                  </div>
+
+                  {pair.requiresBackup && !pair.backup ? (
+                    <div className="space-y-3 animate-fadeIn">
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Equipos compatibles recomendados
+                        </p>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                        {getBackupCandidates(pair.primary).length > 0 ? (
+                            getBackupCandidates(pair.primary).map(item => (
+                                <EquipmentCard
+                                key={item.id}
+                                item={item}
+                                actionLabel="Agregar como Backup"
+                                actionColor="purple"
+                                onSelect={(i) => selectBackup(pair.id, i)}
+                                disabled={disabled}
+                                />
+                            ))
+                        ) : (
+                            <div className="col-span-2 text-center py-8 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                                <p className="text-gray-500">No se encontraron equipos compatibles automaticamente.</p>
+                            </div>
+                        )}
+                        </div>
                     </div>
-                  )}
+                  ) : pair.backup ? (
+                    <div className="relative group">
+                        <EquipmentCard item={pair.backup} selected actionColor="purple" />
+                        <button
+                            onClick={() => updatePair(pair.id, { backup: null })}
+                            disabled={disabled}
+                            className="absolute top-4 right-4 p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 active:scale-95 transition-all shadow-sm opacity-0 group-hover:opacity-100"
+                            title="Cambiar backup"
+                        >
+                            <FiTrash2 size={18} />
+                        </button>
+                        
+                        <div className="mt-4 bg-purple-50 p-4 rounded-xl border border-purple-100">
+                            <h5 className="font-semibold text-sm text-purple-900 mb-3 flex items-center gap-2">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                                Configuracion de Backup
+                            </h5>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-1">
+                                    <label className="text-xs font-medium text-gray-600">Condicion</label>
+                                    <input
+                                        value={pair.backup.condition}
+                                        onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
+                                        disabled={disabled}
+                                        className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 bg-white"
+                                    />
+                                </div>
+                                <div className="flex items-end pb-2">
+                                    <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            checked={pair.backup.install_with_primary}
+                                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
+                                            disabled={disabled}
+                                            className="rounded border-gray-300 text-purple-600 focus:ring-purple-500"
+                                        />
+                                        Instalar simultaneamente
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                  ) : null}
                 </div>
               )}
 
               {/* Remove Pair Button */}
-              <div className="pt-4 flex justify-end">
+              <div className="pt-4 flex justify-end border-t border-gray-50 mt-4">
                 <button
                   onClick={() => removePair(pair.id)}
                   disabled={disabled || equipmentPairs.length <= 1}
-                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 text-xs font-medium text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-2 rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <FiTrash2 /> Eliminar Grupo
                 </button>

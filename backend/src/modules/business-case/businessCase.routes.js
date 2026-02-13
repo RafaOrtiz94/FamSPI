@@ -10,8 +10,16 @@ const equipmentCatalogCtrl = require("./equipmentCatalog.controller");
 const determinationsCatalogCtrl = require("./determinationsCatalog.controller");
 const calculationTemplatesCtrl = require("./calculationTemplates.controller");
 
-const businessCaseRoles = ["comercial", "acp_comercial", "gerencia", "jefe_tecnico"];
+const businessCaseRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
+const investmentRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
 const adminRoles = ["admin", "gerencia", "jefe_tecnico"];
+const determinationsCatalogWriteRoles = [
+  "admin",
+  "gerencia",
+  "jefe_tecnico",
+  "comercial",
+  "acp_comercial",
+];
 
 const router = express.Router();
 
@@ -56,12 +64,19 @@ router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ct
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);
 router.get("/:id/ownership", verifyToken, requireRole(businessCaseRoles), ctrl.getDataOwnership);
 router.post("/:id/ownership/complete", verifyToken, requireRole(businessCaseRoles), ctrl.recordSectionCompletion);
+router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial"]), ctrl.lockSection);
+router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial"]), ctrl.unlockSection);
 
 // Investment routes
 router.get("/:id/investments", verifyToken, requireRole(businessCaseRoles), ctrl.getInvestments);
 router.post("/:id/investments", verifyToken, requireRole(businessCaseRoles), ctrl.addInvestment);
 router.put("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), ctrl.updateInvestment);
 router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), ctrl.deleteInvestment);
+router.get("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.getInvestmentCatalog);
+router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.createInvestmentCatalogItem);
+router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
+router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
+router.put("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.saveConsumptionItems);
 
 // Manual BC Form routes
 router.get("/:id/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getComplete);
@@ -69,6 +84,7 @@ router.post("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles),
 router.get("/:id/lab-environment", verifyToken, requireRole(businessCaseRoles), ctrl.getLabEnvironment);
 router.post("/:id/equipment-details", verifyToken, requireRole(businessCaseRoles), ctrl.saveEquipmentDetails);
 router.get("/:id/equipment-details", verifyToken, requireRole(businessCaseRoles), ctrl.getEquipmentDetails);
+router.post("/:id/equipment-details-v2", verifyToken, requireRole(businessCaseRoles), ctrl.saveEquipmentDetailsV2);
 router.post("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.saveLisIntegration);
 router.get("/:id/lis-integration", verifyToken, requireRole(businessCaseRoles), ctrl.getLisIntegration);
 router.post("/:id/lis-integration/equipment-interfaces", verifyToken, requireRole(businessCaseRoles), ctrl.addLisEquipmentInterface);
@@ -104,6 +120,30 @@ equipmentCatalogRoutes.get(
   requireRole(businessCaseRoles),
   equipmentCatalogCtrl.getDeterminations,
 );
+equipmentCatalogRoutes.get(
+  "/:id/consumables",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  equipmentCatalogCtrl.getConsumables,
+);
+equipmentCatalogRoutes.post(
+  "/:id/consumables",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  equipmentCatalogCtrl.createConsumable,
+);
+equipmentCatalogRoutes.put(
+  "/:id/consumables/:consumableId",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  equipmentCatalogCtrl.updateConsumable,
+);
+equipmentCatalogRoutes.post(
+  "/:id/determinations",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  equipmentCatalogCtrl.createDetermination,
+);
 equipmentCatalogRoutes.post("/", verifyToken, requireRole(adminRoles), equipmentCatalogCtrl.create);
 equipmentCatalogRoutes.put("/:id", verifyToken, requireRole(adminRoles), equipmentCatalogCtrl.update);
 equipmentCatalogRoutes.post(
@@ -125,19 +165,19 @@ determinationsCatalogRoutes.get(
 determinationsCatalogRoutes.post(
   "/",
   verifyToken,
-  requireRole(adminRoles),
+  requireRole(determinationsCatalogWriteRoles),
   determinationsCatalogCtrl.create,
 );
 determinationsCatalogRoutes.put(
   "/:id",
   verifyToken,
-  requireRole(adminRoles),
+  requireRole(determinationsCatalogWriteRoles),
   determinationsCatalogCtrl.update,
 );
 determinationsCatalogRoutes.delete(
   "/:id",
   verifyToken,
-  requireRole(adminRoles),
+  requireRole(determinationsCatalogWriteRoles),
   determinationsCatalogCtrl.remove,
 );
 determinationsCatalogRoutes.post(

@@ -19,20 +19,42 @@ const helmetConfig = {
   referrerPolicy: { policy: "no-referrer" },
 };
 
+const FRONTEND_URL = (process.env.FRONTEND_URL || "https://fam-spi-front.web.app").replace(/\/$/, "");
+
+const ORIGIN_WHITELIST = new Set([
+  FRONTEND_URL,
+  "https://fam-spi-front.web.app",
+  "https://fam-spi-front.firebaseapp.com",
+  "https://spi-dev.famproject.com.ec",
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "http://127.0.0.1:3001",
+  "http://localhost:5173",
+]);
+
 /* ============================================================
    🌐 Configuración CORS (cross-origin)
 ============================================================ */
 const corsConfig = {
-  origin: [
-    process.env.FRONTEND_URL,     // dominio del front (React)
-    "http://localhost:3001",      // entorno local de desarrollo
-  ],
-  credentials: true,              // permite enviar encabezados como Authorization
+  origin: (origin, callback) => {
+    // ✅ Permitir si no hay origin (peticiones no-browser o herramientas)
+    if (!origin) return callback(null, true);
+
+    if (ORIGIN_WHITELIST.has(origin)) {
+      return callback(null, true);
+    } else {
+      console.warn(`❌ CORS bloqueado en security.js: Dominio "${origin}" no está en el Set.`);
+      return callback(new Error(`CORS: Origen [${origin}] no autorizado`));
+    }
+  },
+  credentials: true,
   allowedHeaders: [
     "Content-Type",
     "Authorization",
     "x-refresh-token",
     "X-Requested-With",
+    "Accept",
+    "x-flow-id",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 };

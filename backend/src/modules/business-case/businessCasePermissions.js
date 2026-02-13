@@ -17,6 +17,7 @@ const ROLES = {
   COMERCIAL: 'comercial',
   ACP_COMERCIAL: 'acp_comercial',
   BACKOFFICE: 'backoffice',
+  BACKOFFICE_COMERCIAL: 'backoffice_comercial',
   JEFE_TECNICO: 'jefe_tecnico',
   JEFE_COMERCIAL: 'jefe_comercial',
   JEFE_OPERACIONES: 'jefe_operaciones'
@@ -52,7 +53,7 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: true,
       [SECTIONS.EQUIPMENT]: true,
       [SECTIONS.LIS]: true,
-      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true, // Always accessible
       [SECTIONS.PRICES]: false
     },
@@ -70,6 +71,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,
       [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
+      [SECTIONS.GENERAL]: true,
+      [SECTIONS.LAB_ENVIRONMENT]: true,
+      [SECTIONS.EQUIPMENT]: true,
+      [SECTIONS.LIS]: true,
       [SECTIONS.DETERMINATIONS]: false,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
@@ -110,7 +120,7 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,
       [SECTIONS.LIS]: false,
-      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -129,6 +139,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.EQUIPMENT]: false,
       [SECTIONS.LIS]: false,
       [SECTIONS.DETERMINATIONS]: true, // Can work on determinations
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -190,6 +209,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
     [ROLES.JEFE_TECNICO]: {
       [SECTIONS.GENERAL]: false,
       [SECTIONS.LAB_ENVIRONMENT]: false,
@@ -226,7 +254,7 @@ const PERMISSION_MATRIX = {
       [SECTIONS.LAB_ENVIRONMENT]: true,
       [SECTIONS.EQUIPMENT]: true,
       [SECTIONS.LIS]: true,
-      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
@@ -240,6 +268,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.PRICES]: false
     },
     [ROLES.BACKOFFICE]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: true,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
       [SECTIONS.GENERAL]: false,
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,
@@ -306,6 +343,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
     [ROLES.JEFE_TECNICO]: {
       [SECTIONS.GENERAL]: false,
       [SECTIONS.LAB_ENVIRONMENT]: false,
@@ -364,6 +410,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.INVESTMENTS]: true,
       [SECTIONS.PRICES]: false
     },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: true,
+      [SECTIONS.PRICES]: false
+    },
     [ROLES.JEFE_TECNICO]: {
       [SECTIONS.GENERAL]: false,
       [SECTIONS.LAB_ENVIRONMENT]: false,
@@ -414,6 +469,15 @@ const PERMISSION_MATRIX = {
       [SECTIONS.PRICES]: false
     },
     [ROLES.BACKOFFICE]: {
+      [SECTIONS.GENERAL]: false,
+      [SECTIONS.LAB_ENVIRONMENT]: false,
+      [SECTIONS.EQUIPMENT]: false,
+      [SECTIONS.LIS]: false,
+      [SECTIONS.DETERMINATIONS]: false,
+      [SECTIONS.INVESTMENTS]: false,
+      [SECTIONS.PRICES]: false
+    },
+    [ROLES.BACKOFFICE_COMERCIAL]: {
       [SECTIONS.GENERAL]: false,
       [SECTIONS.LAB_ENVIRONMENT]: false,
       [SECTIONS.EQUIPMENT]: false,

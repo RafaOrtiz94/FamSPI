@@ -1,129 +1,137 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
-import { Bar, Doughnut } from "react-chartjs-2";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiRefreshCw,
   FiDownload,
   FiTrendingUp,
+  FiUsers,
+  FiCalendar,
   FiCheckCircle,
-  FiXCircle,
-  FiSearch,
+  FiShoppingCart,
+  FiLayers,
+  FiFileText,
+  FiClipboard,
+  FiShield,
   FiLogOut,
 } from "react-icons/fi";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 
 import Button from "../../core/ui/components/Button";
-import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
-import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
-import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
-import { useUI } from "../../core/ui/useUI";
-import { useApi } from "../../core/hooks/useApi";
-import { useDashboard } from "../../core/hooks/useDashboard";
-import { getAuditoria } from "../../core/api/auditoriaApi";
-import { getRequests } from "../../core/api/requestsApi";
-import { logout } from "../../core/api";
-import PrivatePurchaseApprovalsWidget from "./components/PrivatePurchaseApprovalsWidget";
-
 import StatCard from "../../core/ui/patterns/StatCard";
-import ChartCard from "./components/ChartCard";
-import RequestCard from "./components/RequestCard";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
-
-import {
-  Chart as ChartJS,
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-  PointElement,
-  Filler,
-} from "chart.js";
-
-ChartJS.register(
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  LinearScale,
-  Tooltip,
-  Legend,
-  PointElement,
-  Filler
-);
+import { useUI } from "../../core/ui/useUI";
+import { logout } from "../../core/api";
+import { listPrivatePurchases, getPrivatePurchaseStats } from "../../core/api/privatePurchasesApi";
+import { listEquipmentPurchases } from "../../core/api/equipmentPurchasesApi";
+import { fetchClients } from "../../core/api/clientsApi";
+import { getPendientes } from "../../core/api/permisosApi";
+import { getCollaboratorStats } from "../../core/api/collaboratorsApi";
+import { usePurchaseSSE } from "../../core/hooks/usePurchaseSSE";
 
 const Dashboard = () => {
   const { showToast, showLoader, hideLoader } = useUI();
-  const [query, setQuery] = useState("");
-  const [initialized, setInitialized] = useState(false);
-  const [auditStats, setAuditStats] = useState({});
-  const reportRef = useRef();
-  const perPage = 9;
+  const [loading, setLoading] = useState(true);
+  const [privateCount, setPrivateCount] = useState(0);
+  const [publicCount, setPublicCount] = useState(0);
+  const [pendingPrivateApprovals, setPendingPrivateApprovals] = useState(0);
+  const [clientsCount, setClientsCount] = useState(0);
+  const [vacationPending, setVacationPending] = useState(0);
+  const [profilePercent, setProfilePercent] = useState(0);
+  const [pendingRequests, setPendingRequests] = useState([]);
+  const reportRef = React.useRef();
 
-  const {
-    data: requestsData,
-    execute: fetchRequests,
-  } = useApi(getRequests, { globalLoader: true });
-  const { data: auditData, execute: fetchAuditoria } = useApi(getAuditoria);
+  const quickAccess = useMemo(
+    () => [
+      { label: "Album de Compras", path: "/dashboard/gerencia/compras-album", icon: FiLayers },
+      { label: "Workspace Compras", path: "/dashboard/purchases/workspace", icon: FiShoppingCart },
+      { label: "Business Case", path: "/dashboard/business-case", icon: FiFileText },
+      { label: "Aprobacion de planes", path: "/dashboard/comercial/aprobaciones-planificacion", icon: FiClipboard },
+      { label: "Planificacion", path: "/dashboard/comercial/planificacion", icon: FiClipboard },
+      { label: "Permisos y Vacaciones", path: "/dashboard/talento-humano/permisos", icon: FiCalendar },
+      { label: "Colaboradores", path: "/dashboard/talento-humano/colaboradores", icon: FiUsers },
+      { label: "Auditoria", path: "/dashboard/auditoria", icon: FiShield },
+      { label: "Prep. Auditoria", path: "/dashboard/auditoria/preparacion", icon: FiCheckCircle },
+    ],
+    []
+  );
 
-  const fetchRef = useRef(fetchRequests);
-  useEffect(() => {
-    fetchRef.current = fetchRequests;
-  }, [fetchRequests]);
+  const refreshPurchaseStats = useCallback(async () => {
+    const [privateList, publicList, privateStats] = await Promise.all([
+      listPrivatePurchases(),
+      listEquipmentPurchases(),
+      getPrivatePurchaseStats("gerencia_general"),
+    ]);
 
-  const load = useCallback(async () => {
+    setPrivateCount((privateList || []).length);
+    setPublicCount((publicList || []).length);
+    setPendingPrivateApprovals(Number(privateStats?.pending_approval || 0));
+
+    return { privateList, publicList, privateStats };
+  }, []);
+
+  const load = async () => {
+    setLoading(true);
     showLoader();
     try {
-      await Promise.all([fetchRef.current(), fetchAuditoria()]);
+      await refreshPurchaseStats();
+      const [clients, pendientes, collabStats] = await Promise.all([
+        fetchClients(),
+        getPendientes("pending"),
+        getCollaboratorStats(),
+      ]);
+
+      const totalClients = clients?.summary?.total || (clients?.clients?.length || 0);
+      setClientsCount(totalClients);
+
+      const pendingData = pendientes?.data || [];
+      const pendingVac = pendingData.filter(
+        (item) => item?.tipo_solicitud === "vacaciones"
+      ).length;
+      setVacationPending(pendingVac);
+      setPendingRequests(pendingData);
+
+      setProfilePercent(Number(collabStats?.data?.percent_complete || 0));
+
+      return true;
     } catch (err) {
       console.error(err);
+      showToast("Error al cargar indicadores", "error");
+      return null;
     } finally {
       hideLoader();
+      setLoading(false);
     }
-  }, [fetchAuditoria, showLoader, hideLoader]);
+  };
+
+  const handlePurchaseEvent = useCallback(() => {
+    refreshPurchaseStats().catch((error) => {
+      console.warn("[GERENCIA_DASH][SSE] Error refrescando compras:", error);
+    });
+  }, [refreshPurchaseStats]);
+
+  usePurchaseSSE({
+    type: "public",
+    onEvent: handlePurchaseEvent,
+    debounceMs: 10000,
+  });
+
+  usePurchaseSSE({
+    type: "private",
+    onEvent: handlePurchaseEvent,
+    debounceMs: 10000,
+  });
 
   useEffect(() => {
-    if (!initialized) {
-      load();
-      setInitialized(true);
-    }
-  }, [initialized, load]);
-
-  const requests = requestsData?.rows || requestsData?.result?.rows || [];
-  const audits = auditData?.results || auditData?.rows || [];
-  const { stats, chartData } = useDashboard(requests);
-
-  useEffect(() => {
-    if (audits.length > 0) {
-      const countByModule = {};
-      audits.forEach((a) => {
-        countByModule[a.module] = (countByModule[a.module] || 0) + 1;
-      });
-      const sorted = Object.entries(countByModule)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 6);
-
-      setAuditStats({
-        labels: sorted.map((e) => e[0]),
-        data: sorted.map((e) => e[1]),
-      });
-    }
-  }, [audits]);
-
-  const filtered = requests.filter(
-    (r) =>
-      r.tipo?.toLowerCase().includes(query.toLowerCase()) ||
-      r.solicitante?.toLowerCase().includes(query.toLowerCase())
-  );
-  const current = filtered.slice(0, perPage);
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = async () => {
     try {
       await logout();
-      showToast("Sesión cerrada correctamente", "success");
+      showToast("Sesion cerrada correctamente", "success");
     } catch (err) {
-      console.error("❌ Error cerrando sesión:", err);
-      showToast("Error al cerrar sesión", "error");
+      console.error("Error cerrando sesion:", err);
+      showToast("Error al cerrar sesion", "error");
     }
   };
 
@@ -146,24 +154,14 @@ const Dashboard = () => {
     }
   };
 
-  const auditChartData = {
-    labels: auditStats.labels || [],
-    datasets: [
-      {
-        label: "Registros por módulo",
-        data: auditStats.data || [],
-        backgroundColor: "#3b82f6",
-        borderRadius: 6,
-      },
-    ],
-  };
+  const totalPurchases = privateCount + publicCount;
 
   return (
     <DashboardLayout includeWidgets={false}>
       <div ref={reportRef}>
         <DashboardHeader
           title="Dashboard Gerencial"
-          subtitle="Visión estratégica y control operativo"
+          subtitle="Control estrategico de compras, clientes y talento"
           actions={
             <>
               <Button variant="secondary" icon={FiRefreshCw} onClick={load}>
@@ -179,101 +177,115 @@ const Dashboard = () => {
           }
         />
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-          <AttendanceWidget />
-          <ClientRequestWidget />
-        </div>
-
-        <div className="mb-6">
-          <PermisosStatusWidget />
-        </div>
-
-        <div className="mb-6">
-          <PrivatePurchaseApprovalsWidget />
-        </div>
-
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           <StatCard
-            label="Total Solicitudes"
-            value={stats.total || 0}
-            icon={FiTrendingUp}
+            label="Procesos de compras"
+            value={totalPurchases}
+            icon={FiShoppingCart}
             color="blue"
           />
           <StatCard
-            label="Aprobadas"
-            value={stats.approved || 0}
-            icon={FiCheckCircle}
+            label="Compras publicas"
+            value={publicCount}
+            icon={FiClipboard}
+            color="cyan"
+          />
+          <StatCard
+            label="Compras privadas"
+            value={privateCount}
+            icon={FiLayers}
+            color="orange"
+          />
+          <StatCard
+            label="Pendientes aprobacion"
+            value={pendingPrivateApprovals}
+            icon={FiTrendingUp}
+            color="amber"
+          />
+          <StatCard
+            label="Clientes registrados"
+            value={clientsCount}
+            icon={FiUsers}
             color="emerald"
           />
           <StatCard
-            label="Rechazadas"
-            value={stats.rejected || 0}
-            icon={FiXCircle}
+            label="Vacaciones pendientes"
+            value={vacationPending}
+            icon={FiCalendar}
             color="red"
           />
           <StatCard
-            label="Pendientes"
-            value={stats.pending || 0}
-            icon={FiRefreshCw}
-            color="amber"
+            label="Perfiles completos"
+            value={`${profilePercent}%`}
+            icon={FiCheckCircle}
+            color="indigo"
           />
         </section>
 
-        <section className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          <ChartCard title="Estado de Solicitudes">
-            <div className="h-64 flex justify-center items-center">
-              <Doughnut
-                data={chartData.doughnut}
-                options={{ maintainAspectRatio: false }}
-              />
-            </div>
-          </ChartCard>
-          <ChartCard title="Módulos más activos (Auditoría)">
-            <div className="h-64">
-              <Bar
-                data={auditChartData}
-                options={{ maintainAspectRatio: false }}
-              />
-            </div>
-          </ChartCard>
-        </section>
-
-        <div className="flex flex-col md:flex-row justify-between items-center gap-3 mb-6">
-          <h2 className="text-xl font-semibold text-gray-900">
-            Registro de Solicitudes
-          </h2>
-          <div className="relative w-full md:w-1/3">
-            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="Buscar por tipo o solicitante..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 bg-white text-gray-800 focus:ring-2 focus:ring-blue-500"
-            />
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base font-semibold text-gray-900">Aprobaciones permisos y vacaciones</h2>
+            <a
+              href="/dashboard/talento-humano/permisos"
+              className="text-xs font-semibold text-blue-600 hover:underline"
+            >
+              Ver todas
+            </a>
           </div>
-        </div>
-
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-10">
-          {current.length ? (
-            current.map((req) => (
-              <RequestCard
-                key={req.id}
-                req={req}
-                onView={(id) =>
-                  showToast(`Ver detalle solicitud #${id}`, "info")
-                }
-                onFiles={(files) =>
-                  showToast(`Tiene ${files.length} archivos adjuntos.`, "info")
-                }
-              />
-            ))
+          {pendingRequests.length === 0 ? (
+            <div className="text-xs text-gray-500 border border-dashed border-gray-200 rounded-xl p-4">
+              Sin solicitudes pendientes.
+            </div>
           ) : (
-            <div className="col-span-full text-center py-16 text-gray-500 bg-white rounded-2xl border border-gray-200">
-              No se encontraron solicitudes.
+            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
+              {pendingRequests.slice(0, 12).map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-slate-200 bg-white/80 p-3 flex flex-col gap-1 text-[11px]"
+                >
+                  <div className="flex items-center justify-between text-[10px] text-slate-500">
+                    <span>{item.tipo_solicitud === "vacaciones" ? "Vacaciones" : "Permiso"}</span>
+                    <span>#{item.id}</span>
+                  </div>
+                  <div className="font-semibold text-slate-900 truncate">
+                    {item.user_fullname || item.user_email || "Colaborador"}
+                  </div>
+                  <div className="text-slate-500 truncate">
+                    {item.fecha_inicio ? `Inicio: ${item.fecha_inicio}` : "Sin fecha"}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </section>
+
+        <section className="mb-10">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Accesos rapidos</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4">
+            {quickAccess.map((item) => {
+              const Icon = item.icon;
+              return (
+                <a
+                  key={item.path}
+                  href={item.path}
+                  className="group rounded-2xl border border-slate-200 bg-white/70 backdrop-blur shadow-sm hover:shadow-md transition-all p-4 flex flex-col gap-3"
+                >
+                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center text-slate-700 group-hover:scale-105 transition-transform">
+                    <Icon size={22} />
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">{item.label}</p>
+                    <p className="text-xs text-slate-500">Ir al modulo</p>
+                  </div>
+                </a>
+              );
+            })}
+          </div>
+        </section>
+
+        {loading && (
+          <div className="text-center text-sm text-gray-500">Cargando indicadores...</div>
+        )}
       </div>
     </DashboardLayout>
   );

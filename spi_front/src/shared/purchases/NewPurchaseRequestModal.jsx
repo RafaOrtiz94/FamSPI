@@ -251,25 +251,6 @@ const NewPurchaseRequestModal = ({
 
     return (
         <>
-            {!hideButton && (
-                <div className="flex flex-col justify-between h-full">
-                    <div className="mb-4">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 mb-2">
-                            {source === 'solicitudes_publicas' ? 'Nueva Solicitud de Compra' : 'Nueva Solicitud de Compra'}
-                        </p>
-                        <p className="text-sm text-gray-700">
-                            {source === 'solicitudes_publicas'
-                                ? 'Proceso formal vía Administración de Contratación Pública'
-                                : 'Envía al ACP Comercial para gestionar proveedor'
-                            }
-                        </p>
-                    </div>
-                    <Button size="sm" className="w-full" onClick={() => setIsOpen(true)}>
-                        {source === 'solicitudes_publicas' ? 'Nueva Compra Pública' : 'Abrir Formulario'}
-                    </Button>
-                </div>
-            )}
-
             {isOpen && (
                 <>
                     {creating && (

@@ -12,6 +12,7 @@ import {
 import Card from "../../../../../core/ui/components/Card";
 import { getEquipmentPurchaseStats } from "../../../../../core/api/equipmentPurchasesApi";
 import { RequestActionButton } from "../../../../../core/ui/components/RequestActionCards";
+import { usePurchaseSSE } from "../../../../../core/hooks/usePurchaseSSE";
 
 const STATUS_OVERVIEW = [
     { key: "waiting_provider_response", label: "Esperando respuesta de proveedor" },
@@ -41,6 +42,16 @@ export const OverviewSection = () => {
     useEffect(() => {
         loadStats();
     }, [loadStats]);
+
+    const handleStatsRefresh = useCallback(() => {
+        loadStats();
+    }, [loadStats]);
+
+    usePurchaseSSE({
+        type: "public",
+        onEvent: handleStatsRefresh,
+        debounceMs: 8000
+    });
 
     const totalRequests = stats?.total ?? 0;
 

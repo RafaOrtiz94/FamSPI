@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../core/ui/components/Card';
 import { Button } from '../../../core/ui/components/Button';
 import { Select } from '../../../core/ui/components/Select';
@@ -23,6 +23,7 @@ import {
   uploadPrivatePurchaseDeliveryGuides,
   updatePrivatePurchaseOperationsDetails,
 } from '../../../core/api/privatePurchasesApi';
+import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
 
 const OperacionesPrivatePurchases = () => {
   const [purchases, setPurchases] = useState([]);
@@ -58,11 +59,7 @@ const OperacionesPrivatePurchases = () => {
     'delivered_signed'
   ];
 
-  useEffect(() => {
-    loadPurchases();
-  }, [statusFilter]);
-
-  const fileToBase64Payload = (file) => new Promise((resolve, reject) => {
+    const fileToBase64Payload = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = reader.result;
@@ -73,7 +70,7 @@ const OperacionesPrivatePurchases = () => {
     reader.readAsDataURL(file);
   });
 
-  const loadPurchases = async () => {
+  const loadPurchases = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -97,9 +94,31 @@ const OperacionesPrivatePurchases = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
 
-  const handleViewDetail = async (purchase) => {
+  useEffect(() => {
+    loadPurchases();
+  }, [loadPurchases]);
+
+  const operationStatusSet = useMemo(() => new Set(operationStatuses), [operationStatuses]);
+
+  usePurchaseSSE({
+    type: 'private',
+    debounceMs: 8000,
+    onEvent: loadPurchases,
+    filter: (payload) => {
+      const status = payload?.request?.status;
+      const fromState = payload?.meta?.from;
+      const toState = payload?.meta?.to;
+      return (
+        operationStatusSet.has(status) ||
+        operationStatusSet.has(fromState) ||
+        operationStatusSet.has(toState)
+      );
+    }
+  });
+
+  const handleSelectPurchase = useCallback(async (purchase, options = {}) => {
     try {
       console.log('[FLOW_PRIVADA_UI][FASE2][OPS]', {
         action: 'view_detail',
@@ -124,7 +143,11 @@ const OperacionesPrivatePurchases = () => {
         estimatedArrivalAt: detailResponse?.estimated_arrival_at ? String(detailResponse.estimated_arrival_at).slice(0, 10) : '',
         saving: false
       });
-      setShowDetail(true);
+      if (options.forceModal) {
+        setShowDetail(true);
+      } else if (typeof window !== 'undefined') {
+        setShowDetail(window.innerWidth < 1024);
+      }
     } catch (err) {
       console.error('[FLOW_PRIVADA_UI][FASE2][OPS]', {
         action: 'view_detail_error',
@@ -134,7 +157,7 @@ const OperacionesPrivatePurchases = () => {
       });
       setError('Error al cargar detalles de la compra');
     }
-  };
+  }, []);
 
   const handleSaveOperationsDetails = async () => {
     if (!selectedPurchase) return;
@@ -338,6 +361,238 @@ const OperacionesPrivatePurchases = () => {
     ].includes(purchase?.status);
   };
 
+  useEffect(() => {
+    if (!selectedPurchase && purchases.length > 0 && typeof window !== 'undefined' && window.innerWidth >= 1024) {
+      handleSelectPurchase(purchases[0], { forceModal: false });
+    }
+  }, [purchases, selectedPurchase, handleSelectPurchase]);
+
+  const renderDetailContent = () => {
+    if (!selectedPurchase) {
+      return (
+        <div className="rounded-2xl border border-dashed border-slate-200 bg-white p-6 text-center text-sm text-slate-500">
+          Selecciona una compra para ver el detalle operativo.
+        </div>
+      );
+    }
+
+    const guideDocuments = filterDocumentsByType(selectedPurchase?.documents, ['DELIVERY_GUIDE']);
+    const coreDocuments = filterDocumentsByType(selectedPurchase?.documents, ['SIGNED_OFFER', 'CONTRACT_SIGNED']);
+    const hasGuides = guideDocuments.length > 0;
+
+    return (
+      <div className="space-y-6">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs text-gray-500">Cliente</p>
+            <p className="text-sm font-semibold text-gray-900">{formatClientName(selectedPurchase)}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs text-gray-500">Estado actual</p>
+            <div className="mt-1">
+              <Badge variant={getStatusBadgeVariant(selectedPurchase.status)}>
+                {getStatusLabel(selectedPurchase.status)}
+              </Badge>
+            </div>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs text-gray-500">Fecha tentativa</p>
+            <p className="text-sm text-gray-700">{formatDateFallback(selectedPurchase.estimated_arrival_at)}</p>
+          </div>
+          <div className="rounded-lg border border-gray-200 bg-white p-3">
+            <p className="text-xs text-gray-500">Ultima actualizacion</p>
+            <p className="text-sm text-gray-700">{formatDate(selectedPurchase.updated_at)}</p>
+          </div>
+        </div>
+
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)] min-h-0">
+          <div className="space-y-4 min-h-0">
+            {selectedPurchase.status === 'contract_available' && (
+              <details id="delivery-request-section" className="group rounded-xl border border-gray-200 bg-white p-4" open>
+                <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                  Solicitud de fecha de entrega
+                </summary>
+                <div className="mt-3 space-y-2">
+                  <Button
+                    variant="primary"
+                    onClick={handleRequestDeliveryDates}
+                    disabled={!selectedPurchase.equipment_arrived_at}
+                  >
+                    Solicitar fecha de entrega
+                  </Button>
+                  {!selectedPurchase.equipment_arrived_at && (
+                    <p className="text-xs text-orange-600">
+                      Marca la llegada del equipo para habilitar esta solicitud.
+                    </p>
+                  )}
+                </div>
+              </details>
+            )}
+
+            <details id="delivery-guides-section" className="group rounded-xl border border-gray-200 bg-white p-4" open>
+              <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                Guias de despacho
+              </summary>
+              <div className="mt-3 space-y-4">
+                <p className="text-sm text-gray-500">
+                  Sube una o varias guias en PDF o imagen antes de continuar.
+                </p>
+                <input
+                  type="file"
+                  multiple
+                  accept="application/pdf,image/*"
+                  onChange={handleGuideFilesChange}
+                  disabled={!canUploadGuides(selectedPurchase)}
+                />
+                {guideFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 text-xs text-gray-600">
+                    {guideFiles.map((file) => (
+                      <span
+                        key={file.name}
+                        className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1"
+                      >
+                        {file.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {guideDocuments.length > 0 && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {guideDocuments.map((doc) => (
+                      <a
+                        key={`${doc.doc_type}-${doc.drive_file_id}`}
+                        href={doc.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+                      >
+                        <span>
+                          {getDocumentLabel(doc.doc_type)}
+                          {doc.doc_name ? ` - ${doc.doc_name}` : ''}
+                        </span>
+                        <span className="text-blue-600">Ver</span>
+                      </a>
+                    ))}
+                  </div>
+                )}
+                {guideUploadState.error && (
+                  <p className="text-sm text-red-600">{guideUploadState.error}</p>
+                )}
+                <div>
+                  <Button
+                    onClick={handleUploadGuides}
+                    disabled={guideUploadState.uploading || !canUploadGuides(selectedPurchase)}
+                  >
+                    {guideUploadState.uploading ? 'Subiendo guias...' : 'Subir guias'}
+                  </Button>
+                </div>
+              </div>
+            </details>
+
+            <details id="operations-details-section" className="group rounded-xl border border-gray-200 bg-white p-4" open>
+              <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                Detalles de operaciones
+              </summary>
+              <div className="mt-3 space-y-4">
+                {!hasGuides && (
+                  <p className="text-sm text-orange-600">
+                    Sube al menos una guia para habilitar esta seccion.
+                  </p>
+                )}
+                <div className="flex items-center space-x-3">
+                  <input
+                    id="includes-starter-kit"
+                    type="checkbox"
+                    checked={operationsForm.includesStarterKit}
+                    onChange={(e) => setOperationsForm((prev) => ({ ...prev, includesStarterKit: e.target.checked }))}
+                    disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
+                  />
+                  <label htmlFor="includes-starter-kit">Incluye kit de arranque</label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Fecha tentativa de llegada</label>
+                  <input
+                    type="date"
+                    className="w-full border rounded-md p-2 text-sm"
+                    value={operationsForm.estimatedArrivalAt}
+                    onChange={(e) => setOperationsForm((prev) => ({ ...prev, estimatedArrivalAt: e.target.value }))}
+                    disabled={!canEditOperationsDetails(selectedPurchase, hasGuides) || Boolean(selectedPurchase.equipment_arrived_at)}
+                  />
+                  {selectedPurchase.equipment_arrived_at && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Fecha tentativa bloqueada porque el equipo ya llego.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Observaciones</label>
+                  <textarea
+                    className="w-full border rounded-md p-2"
+                    rows={3}
+                    value={operationsForm.notes}
+                    onChange={(e) => setOperationsForm((prev) => ({ ...prev, notes: e.target.value }))}
+                    disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
+                  />
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    onClick={handleSaveOperationsDetails}
+                    disabled={operationsForm.saving || !canEditOperationsDetails(selectedPurchase, hasGuides)}
+                  >
+                    {operationsForm.saving ? 'Guardando...' : 'Guardar detalles'}
+                  </Button>
+                  <Button
+                    variant="secondary"
+                    onClick={handleMarkEquipmentArrived}
+                    disabled={!hasGuides || Boolean(selectedPurchase.equipment_arrived_at)}
+                  >
+                    {selectedPurchase.equipment_arrived_at ? 'Equipo recibido' : 'Marcar equipo recibido'}
+                  </Button>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div className="space-y-6 min-h-0">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div id="core-docs-section" className="rounded-xl border border-gray-200 bg-white p-4">
+                <h4 className="font-semibold mb-3">Documentos clave</h4>
+                {coreDocuments.length ? (
+                  <div className="grid grid-cols-1 gap-2">
+                    {coreDocuments.map((doc) => (
+                      <a
+                        key={`${doc.doc_type}-${doc.drive_file_id}`}
+                        href={doc.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
+                      >
+                        <span>
+                          {getDocumentLabel(doc.doc_type)}
+                          {doc.doc_name ? ` - ${doc.doc_name}` : ''}
+                        </span>
+                        <span className="text-blue-600">Ver</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">Contrato firmado y oferta firmada aun no disponibles.</p>
+                )}
+              </div>
+
+              <div id="checklist-section" className="rounded-xl border border-gray-200 bg-white p-4">
+                <h4 className="font-semibold mb-3">Documentos requeridos</h4>
+                <div className="max-h-[260px] overflow-y-auto pr-1">
+                  <DocumentChecklist checklist={selectedPurchase.checklist || []} readOnly={true} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -346,10 +601,6 @@ const OperacionesPrivatePurchases = () => {
       </div>
     );
   }
-
-  const guideDocuments = filterDocumentsByType(selectedPurchase?.documents, ['DELIVERY_GUIDE']);
-  const coreDocuments = filterDocumentsByType(selectedPurchase?.documents, ['SIGNED_OFFER', 'CONTRACT_SIGNED']);
-  const hasGuides = guideDocuments.length > 0;
 
   return (
     <div className="space-y-6">
@@ -382,50 +633,58 @@ const OperacionesPrivatePurchases = () => {
             </Alert>
           )}
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-            {purchases.map((purchase) => (
-              <div
-                key={purchase.id}
-                className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-xs uppercase tracking-wide text-slate-400">Compra privada</p>
-                    <p className="text-sm font-semibold text-slate-900">{formatClientName(purchase)}</p>
-                    <p className="text-xs text-slate-500">ID: {purchase.id.slice(0, 8)}...</p>
-                  </div>
-                  <Badge variant={getStatusBadgeVariant(purchase.status)}>
-                    {getStatusLabel(purchase.status)}
-                  </Badge>
-                </div>
-
-                <div className="mt-4 grid gap-2 text-xs text-slate-600">
-                  <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
-                    <span>Ultima actualizacion</span>
-                    <span className="font-semibold text-slate-700">
-                      {formatDate(purchase.updated_at)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleViewDetail(purchase)}
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,340px),minmax(0,1fr)]">
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-1">
+                {purchases.map((purchase) => (
+                  <div
+                    key={purchase.id}
+                    className="flex h-full flex-col rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
                   >
-                    Ver detalle
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-xs uppercase tracking-wide text-slate-400">Compra privada</p>
+                        <p className="text-sm font-semibold text-slate-900">{formatClientName(purchase)}</p>
+                        <p className="text-xs text-slate-500">ID: {purchase.id.slice(0, 8)}...</p>
+                      </div>
+                      <Badge variant={getStatusBadgeVariant(purchase.status)}>
+                        {getStatusLabel(purchase.status)}
+                      </Badge>
+                    </div>
 
-          {purchases.length === 0 && (
-            <div className="text-center py-8 text-gray-500">
-              No hay compras privadas para mostrar
+                    <div className="mt-4 grid gap-2 text-xs text-slate-600">
+                      <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2">
+                        <span>Ultima actualizacion</span>
+                        <span className="font-semibold text-slate-700">
+                          {formatDate(purchase.updated_at)}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleSelectPurchase(purchase, { forceModal: false })}
+                      >
+                        Ver detalle
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {purchases.length === 0 && (
+                <div className="text-center py-8 text-gray-500">
+                  No hay compras privadas para mostrar
+                </div>
+              )}
             </div>
-          )}
+
+            <div className="hidden lg:block">
+              {renderDetailContent()}
+            </div>
+          </div>
         </CardContent>
       </Card>
 
@@ -436,210 +695,33 @@ const OperacionesPrivatePurchases = () => {
         title={selectedPurchase ? `Detalle de compra ${selectedPurchase.id.slice(0, 8)}...` : 'Detalle de compra'}
         maxWidth="max-w-6xl"
       >
-        {selectedPurchase && (
-          <div className="space-y-6">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500">Cliente</p>
-                <p className="text-sm font-semibold text-gray-900">{formatClientName(selectedPurchase)}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500">Estado actual</p>
-                <div className="mt-1">
-                  <Badge variant={getStatusBadgeVariant(selectedPurchase.status)}>
-                    {getStatusLabel(selectedPurchase.status)}
-                  </Badge>
-                </div>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500">Fecha tentativa</p>
-                <p className="text-sm text-gray-700">{formatDateFallback(selectedPurchase.estimated_arrival_at)}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500">Ultima actualizacion</p>
-                <p className="text-sm text-gray-700">{formatDate(selectedPurchase.updated_at)}</p>
-              </div>
+        <div className="grid gap-4 lg:grid-cols-[200px,minmax(0,1fr)]">
+          <aside className="hidden lg:block rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Secciones</p>
+            <div className="space-y-2">
+              {selectedPurchase?.status === 'contract_available' && (
+                <a className="block hover:text-slate-900" href="#delivery-request-section">
+                  Solicitud de entrega
+                </a>
+              )}
+              <a className="block hover:text-slate-900" href="#delivery-guides-section">
+                Guias de despacho
+              </a>
+              <a className="block hover:text-slate-900" href="#operations-details-section">
+                Detalles de operaciones
+              </a>
+              <a className="block hover:text-slate-900" href="#core-docs-section">
+                Documentos clave
+              </a>
+              <a className="block hover:text-slate-900" href="#checklist-section">
+                Checklist
+              </a>
             </div>
-
-            <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr),minmax(0,1fr)] min-h-0">
-              <div className="space-y-6 min-h-0">
-                {selectedPurchase.status === 'contract_available' && (
-                  <div className="rounded-xl border border-gray-200 bg-white p-4">
-                    <h4 className="font-semibold mb-2">Solicitud de fecha de entrega</h4>
-                    <Button
-                      variant="primary"
-                      onClick={handleRequestDeliveryDates}
-                      disabled={!selectedPurchase.equipment_arrived_at}
-                    >
-                      Solicitar fecha de entrega
-                    </Button>
-                    {!selectedPurchase.equipment_arrived_at && (
-                      <p className="text-xs text-orange-600 mt-2">
-                        Marca la llegada del equipo para habilitar esta solicitud.
-                      </p>
-                    )}
-                  </div>
-                )}
-
-                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
-                  <div>
-                    <h4 className="font-semibold mb-2">Guias de despacho</h4>
-                    <p className="text-sm text-gray-500">
-                      Sube una o varias guias en PDF o imagen antes de continuar.
-                    </p>
-                  </div>
-                  <input
-                    type="file"
-                    multiple
-                    accept="application/pdf,image/*"
-                    onChange={handleGuideFilesChange}
-                    disabled={!canUploadGuides(selectedPurchase)}
-                  />
-                  {guideFiles.length > 0 && (
-                    <div className="flex flex-wrap gap-2 text-xs text-gray-600">
-                      {guideFiles.map((file) => (
-                        <span
-                          key={file.name}
-                          className="rounded-full border border-gray-200 bg-gray-50 px-3 py-1"
-                        >
-                          {file.name}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {guideDocuments.length > 0 && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      {guideDocuments.map((doc) => (
-                        <a
-                          key={`${doc.doc_type}-${doc.drive_file_id}`}
-                          href={doc.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
-                        >
-                          <span>
-                            {getDocumentLabel(doc.doc_type)}
-                            {doc.doc_name ? ` - ${doc.doc_name}` : ''}
-                          </span>
-                          <span className="text-blue-600">Ver</span>
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  {guideUploadState.error && (
-                    <p className="text-sm text-red-600">{guideUploadState.error}</p>
-                  )}
-                  <div>
-                    <Button
-                      onClick={handleUploadGuides}
-                      disabled={guideUploadState.uploading || !canUploadGuides(selectedPurchase)}
-                    >
-                      {guideUploadState.uploading ? 'Subiendo guias...' : 'Subir guias'}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-4">
-                  <h4 className="font-semibold">Detalles para operaciones</h4>
-                  {!hasGuides && (
-                    <p className="text-sm text-orange-600">
-                      Sube al menos una guia para habilitar esta seccion.
-                    </p>
-                  )}
-                  <div className="flex items-center space-x-3">
-                    <input
-                      id="includes-starter-kit"
-                      type="checkbox"
-                      checked={operationsForm.includesStarterKit}
-                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, includesStarterKit: e.target.checked }))}
-                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
-                    />
-                    <label htmlFor="includes-starter-kit">Incluye kit de arranque</label>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Fecha tentativa de llegada</label>
-                    <input
-                      type="date"
-                      className="w-full border rounded-md p-2 text-sm"
-                      value={operationsForm.estimatedArrivalAt}
-                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, estimatedArrivalAt: e.target.value }))}
-                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides) || Boolean(selectedPurchase.equipment_arrived_at)}
-                    />
-                    {selectedPurchase.equipment_arrived_at && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Fecha tentativa bloqueada porque el equipo ya llego.
-                      </p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Observaciones</label>
-                    <textarea
-                      className="w-full border rounded-md p-2"
-                      rows={3}
-                      value={operationsForm.notes}
-                      onChange={(e) => setOperationsForm((prev) => ({ ...prev, notes: e.target.value }))}
-                      disabled={!canEditOperationsDetails(selectedPurchase, hasGuides)}
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button
-                      onClick={handleSaveOperationsDetails}
-                      disabled={operationsForm.saving || !canEditOperationsDetails(selectedPurchase, hasGuides)}
-                    >
-                      {operationsForm.saving ? 'Guardando...' : 'Guardar detalles'}
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      onClick={handleMarkEquipmentArrived}
-                      disabled={!hasGuides || Boolean(selectedPurchase.equipment_arrived_at)}
-                    >
-                      {selectedPurchase.equipment_arrived_at ? 'Equipo recibido' : 'Marcar equipo recibido'}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6 min-h-0">
-                <div className="rounded-xl border border-gray-200 bg-white p-4 flex flex-col max-h-[50vh] sm:max-h-[60vh]">
-                  <h4 className="font-semibold mb-4">Linea de tiempo del proceso</h4>
-                  <div className="flex-1 overflow-y-auto pr-1">
-                    <PurchaseTimelinePanel requestId={selectedPurchase.id} compact />
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <h4 className="font-semibold mb-3">Documentos clave</h4>
-                  {coreDocuments.length ? (
-                    <div className="grid grid-cols-1 gap-2">
-                      {coreDocuments.map((doc) => (
-                        <a
-                          key={`${doc.doc_type}-${doc.drive_file_id}`}
-                          href={doc.link}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 hover:bg-gray-50"
-                        >
-                          <span>
-                            {getDocumentLabel(doc.doc_type)}
-                            {doc.doc_name ? ` - ${doc.doc_name}` : ''}
-                          </span>
-                          <span className="text-blue-600">Ver</span>
-                        </a>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-500">Contrato firmado y oferta firmada aun no disponibles.</p>
-                  )}
-                </div>
-
-                <div className="rounded-xl border border-gray-200 bg-white p-4">
-                  <h4 className="font-semibold mb-3">Documentos requeridos</h4>
-                  <DocumentChecklist checklist={selectedPurchase.checklist || []} readOnly={true} />
-                </div>
-              </div>
-            </div>
+          </aside>
+          <div className="max-h-[72vh] overflow-y-auto pr-2">
+            {renderDetailContent()}
           </div>
-        )}
+        </div>
       </Modal>
 
     </div>
@@ -647,6 +729,9 @@ const OperacionesPrivatePurchases = () => {
 };
 
 export default OperacionesPrivatePurchases;
+
+
+
 
 
 

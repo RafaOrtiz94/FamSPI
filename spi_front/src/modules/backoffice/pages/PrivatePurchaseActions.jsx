@@ -240,10 +240,18 @@ const AcpActions = ({
                         variant="secondary"
                         onClick={() => onRegisterProviderResponse(request.id)}
                         loading={processingAction?.type === "acp_response" && processingAction?.id === request.id}
-                        disabled={Boolean(request.provider_response_at)}
+                        disabled={
+                            Boolean(request.provider_response_at) ||
+                            !request.availability_email_sent_at
+                        }
                     >
                         {request.provider_response_at ? "Respuesta registrada" : "Registrar respuesta"}
                     </Button>
+                    {!request.availability_email_sent_at && (
+                        <span className="text-[11px] text-amber-600">
+                            Envia el correo al proveedor antes de registrar respuesta.
+                        </span>
+                    )}
                 </div>
             );
 

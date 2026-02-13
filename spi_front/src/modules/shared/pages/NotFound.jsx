@@ -2,6 +2,7 @@ import React from "react";
 import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
 import { FiAlertTriangle } from "react-icons/fi";
+import RolePending from "./RolePending";
 
 const NotFound = () => {
   const location = useLocation();
@@ -10,6 +11,10 @@ const NotFound = () => {
   console.log('[WORKSPACE_DEBUG] 404 page hit, path=', location.pathname);
   console.log('[WORKSPACE_DEBUG] 404 page hit, search=', location.search);
   console.log('[WORKSPACE_DEBUG] 404 page hit, hash=', location.hash);
+
+  if (location.pathname === "/registro-en-proceso" || location.pathname.startsWith("/registro-en-proceso/")) {
+    return <RolePending />;
+  }
   return (
     <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-blue-900 to-blue-600 dark:from-gray-900 dark:to-gray-800 text-white px-6 text-center">
       {/* Icono animado */}

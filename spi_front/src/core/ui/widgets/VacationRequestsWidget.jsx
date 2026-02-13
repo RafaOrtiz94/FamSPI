@@ -92,6 +92,13 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
         </div>
       ) : null}
 
+      {summary && !Array.isArray(summary) && summary.missing_hire_date ? (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          Falta registrar la <strong>fecha de ingreso</strong> en el perfil. Talento humano debe completarla
+          para calcular correctamente las vacaciones.
+        </div>
+      ) : null}
+
       {Array.isArray(summary) && summary.length && mode === "hr" ? (
         <div className="max-h-64 overflow-y-auto mb-3">
           <table className="w-full text-sm">
@@ -108,6 +115,9 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
                   <td className="py-1 pr-2">
                     <p className="font-medium">{row.fullname || row.email}</p>
                     <p className="text-xs text-gray-500">{row.department || ""}</p>
+                    {row.missing_hire_date ? (
+                      <p className="text-[10px] text-amber-600">Falta fecha de ingreso</p>
+                    ) : null}
                   </td>
                   <td className="text-center">{row.taken} / {row.allowance}</td>
                   <td className="text-center font-semibold text-green-700">{row.remaining}</td>

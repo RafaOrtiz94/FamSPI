@@ -51,3 +51,4 @@ const TableCell = ({ children, className = '' }) => {
 };
 
 export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell };
+export default Table;

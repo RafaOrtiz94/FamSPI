@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp, FiPlus } from "react-icons/fi";
+import { FiClock, FiCoffee, FiSun, FiMoon, FiAlertTriangle, FiTrendingUp } from "react-icons/fi";
 import confetti from "canvas-confetti";
 
 import Button from "../components/Button";
@@ -17,7 +17,6 @@ import {
     updateExceptionStatus,
     getActiveException,
     getTodayAttendance,
-    markOvertime,
 } from "../../api/attendanceApi";
 import { useAutoUpdate } from "../../api/index";
 import { formatTimeSafe, formatDateTimeSafe, toDate } from "../../../shared/utils/dateUtils";
@@ -36,11 +35,6 @@ const AttendanceWidget = () => {
     const [exceptionDescription, setExceptionDescription] = useState("");
     const [exceptionLoading, setExceptionLoading] = useState(false);
 
-    // Overtime state
-    const [overtimeModalOpen, setOvertimeModalOpen] = useState(false);
-    const [overtimeHours, setOvertimeHours] = useState("");
-    const [overtimeReason, setOvertimeReason] = useState("");
-    const [overtimeLoading, setOvertimeLoading] = useState(false);
 
     // Geolocation state
     const [locationLoading, setLocationLoading] = useState(false);
@@ -66,16 +60,6 @@ const AttendanceWidget = () => {
     const loadAttendance = async () => {
         try {
             const res = await getTodayAttendance();
-            // DEBUG: Log raw response structure
-            console.log("[AttendanceWidget] getTodayAttendance raw response:", res);
-            console.log("[AttendanceWidget] res.data:", res.data);
-            if (res.data) {
-                console.log("[AttendanceWidget] attendance keys:", Object.keys(res.data));
-                console.log("[AttendanceWidget] entry_time:", res.data.entry_time, "type:", typeof res.data.entry_time);
-                console.log("[AttendanceWidget] lunch_start_time:", res.data.lunch_start_time, "type:", typeof res.data.lunch_start_time);
-                console.log("[AttendanceWidget] lunch_end_time:", res.data.lunch_end_time, "type:", typeof res.data.lunch_end_time);
-                console.log("[AttendanceWidget] exit_time:", res.data.exit_time, "type:", typeof res.data.exit_time);
-            }
             setAttendance(res.data);
         } catch (err) {
             console.error(err);
@@ -176,22 +160,10 @@ const AttendanceWidget = () => {
         }
     };
     const formatTime = (ts) => {
-        if (process.env.NODE_ENV !== "production") {
-            console.log("[AttendanceWidget] formatTime called with:", ts, "type:", typeof ts);
-            const result = formatTimeSafe(ts);
-            console.log("[AttendanceWidget] formatTime result:", result);
-            return result;
-        }
         return formatTimeSafe(ts);
     };
 
     const formatDateTime = (ts) => {
-        if (process.env.NODE_ENV !== "production") {
-            console.log("[AttendanceWidget] formatDateTime called with:", ts, "type:", typeof ts);
-            const result = formatDateTimeSafe(ts, 'dd/MM/yyyy HH:mm');
-            console.log("[AttendanceWidget] formatDateTime result:", result);
-            return result;
-        }
         return formatDateTimeSafe(ts, 'dd/MM/yyyy HH:mm');
     };
 
@@ -332,44 +304,6 @@ const AttendanceWidget = () => {
             showToast(msg, "error");
         } finally {
             setLoading(false);
-        }
-    };
-
-    /**
-     * Optimized overtime registration with background geolocation
-     */
-    const handleMarkOvertime = async () => {
-        const hours = parseFloat(overtimeHours);
-        if (!hours || hours <= 0) {
-            showToast("Ingresa horas válidas de overtime", "error");
-            return;
-        }
-
-        if (!overtimeReason.trim()) {
-            showToast("Ingresa una razón para el overtime", "error");
-            return;
-        }
-
-        setOvertimeLoading(true);
-        try {
-            // Start geolocation in background
-            const locationPromise = getLocation(false);
-
-            const res = await markOvertime(hours, overtimeReason.trim(), await locationPromise);
-            if (res.ok) {
-                showToast(`Overtime de ${hours}h registrado correctamente`, "success");
-                setOvertimeModalOpen(false);
-                setOvertimeHours("");
-                setOvertimeReason("");
-            } else {
-                showToast("Error registrando overtime", "error");
-            }
-        } catch (err) {
-            console.error("Overtime registration error:", err);
-            const msg = err.response?.data?.message || err.message || "Error registrando overtime";
-            showToast(msg, "error");
-        } finally {
-            setOvertimeLoading(false);
         }
     };
 
@@ -554,22 +488,22 @@ const AttendanceWidget = () => {
     const quickBadgeText = quickEntryTime ? `${status.text} · ${quickEntryTime}` : status.text;
 
     const renderWidgetContent = () => (
-        <Card className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/20 backdrop-blur-xl shadow-xl shadow-blue-500/10 border border-white/50 p-6">
+        <Card className="relative overflow-hidden rounded-3xl bg-white/95 backdrop-blur-xl shadow-md border border-slate-200/70 p-4 sm:p-5">
             {/* Header Section */}
-            <div className="flex flex-col gap-4 mb-6 pb-4 border-b border-gray-100/80 md:flex-row md:items-start md:justify-between">
-                <div className="flex items-center gap-4">
-                    <div className="p-3 rounded-2xl bg-gradient-to-br from-blue-500/15 to-indigo-500/15 shadow-sm">
+            <div className="flex flex-col gap-3 mb-4 pb-3 border-b border-slate-200/70 md:flex-row md:items-center md:justify-between">
+                <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-2xl bg-slate-100 shadow-sm">
                         {status.icon}
                     </div>
                     <div>
-                        <h3 className="text-lg font-bold text-gray-900 tracking-tight">Asistencia de Hoy</h3>
-                        <p className="text-sm text-gray-600 font-medium">{status.text}</p>
+                        <h3 className="text-base font-bold text-slate-900 tracking-tight">Asistencia de Hoy</h3>
+                        <p className="text-[11px] text-slate-600 font-medium">{status.text}</p>
                     </div>
                 </div>
 
-                <div className="text-right">
-                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Hora Actual</div>
-                    <div className="text-lg font-mono font-bold text-blue-700 bg-blue-50 px-3 py-1 rounded-lg">
+                <div className="text-left md:text-right">
+                    <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-widest mb-1">Hora Actual</div>
+                    <div className="inline-flex items-center justify-center rounded-full bg-slate-900 text-white px-3 py-1 text-xs font-mono font-bold">
                         {formatTimeSafe(currentTime, 'HH:mm:ss')}
                     </div>
                 </div>
@@ -577,15 +511,15 @@ const AttendanceWidget = () => {
 
             {/* Progress Section */}
             {attendance?.entry_time && !attendance?.exit_time && (
-                <div className="mb-6 p-4 bg-gradient-to-r from-blue-50/80 to-indigo-50/60 rounded-xl border border-blue-100/50">
-                    <div className="flex justify-between items-center mb-3">
+                <div className="mb-4 p-3 bg-slate-50 rounded-2xl border border-slate-200/60">
+                    <div className="flex justify-between items-center mb-2">
                         <div className="flex items-center gap-2">
-                            <FiTrendingUp className="text-blue-600" size={16} />
-                            <span className="text-sm font-semibold text-blue-900">Progreso del Día</span>
+                            <FiTrendingUp className="text-blue-600" size={14} />
+                            <span className="text-[11px] font-semibold text-slate-800 uppercase tracking-widest">Progreso</span>
                         </div>
-                        <span className="text-lg font-bold text-blue-700">{progress}%</span>
+                        <span className="text-sm font-bold text-slate-900">{progress}%</span>
                     </div>
-                    <div className="h-4 bg-blue-100/60 rounded-full overflow-hidden shadow-inner">
+                    <div className="h-2.5 bg-slate-200/70 rounded-full overflow-hidden shadow-inner">
                         <motion.div
                             initial={{ width: 0 }}
                             animate={{ width: `${progress}%` }}
@@ -593,7 +527,7 @@ const AttendanceWidget = () => {
                             className="h-full rounded-full bg-gradient-to-r from-blue-500 via-cyan-400 to-emerald-400 shadow-sm"
                         />
                     </div>
-                    <div className="text-xs text-blue-600/80 mt-2 text-center font-medium">
+                    <div className="text-[10px] text-slate-500 mt-2 text-center font-medium">
                         Jornada laboral de 8 horas
                     </div>
                 </div>
@@ -602,24 +536,24 @@ const AttendanceWidget = () => {
             {renderExceptionBanner()}
 
             {/* Time Records Grid */}
-            <div className="mb-6">
-                <h4 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <FiClock className="text-gray-600" size={16} />
+            <div className="mb-4">
+                <h4 className="text-[11px] font-semibold text-slate-600 mb-2 flex items-center gap-2 uppercase tracking-widest">
+                    <FiClock className="text-slate-500" size={12} />
                     Registro de Tiempos
                 </h4>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {timeEntries.map((entry) => (
                         <motion.div
                             key={`${entry.label}-${entry.value ?? "pending"}`}
                             whileHover={{ y: -2, scale: 1.02 }}
-                            className={`rounded-xl border ${entry.colors} p-4 shadow-sm hover:shadow-md transition-all duration-200`}
+                            className={`rounded-2xl border ${entry.colors} p-2.5 shadow-sm hover:shadow-md transition-all duration-200`}
                         >
-                            <div className="text-xs font-medium uppercase tracking-wider mb-1 opacity-75">
+                            <div className="text-[10px] font-semibold uppercase tracking-wider mb-1 opacity-75">
                                 {entry.label}
                             </div>
-                            <div className="text-lg font-mono font-bold">{formatTime(entry.value)}</div>
+                            <div className="text-sm font-mono font-bold">{formatTime(entry.value)}</div>
                             {entry.note && (
-                                <div className="text-[11px] font-semibold tracking-wider text-slate-600 uppercase mt-1">
+                                <div className="text-[10px] font-semibold tracking-wider text-slate-600 uppercase mt-1">
                                     {entry.note}
                                 </div>
                             )}
@@ -630,9 +564,9 @@ const AttendanceWidget = () => {
 
             {/* Primary Action Section */}
             {!attendance?.exit_time && !hasActiveException && (
-                <div className="mb-6">
-                    <div className="text-center mb-4">
-                        <h4 className="text-sm font-semibold text-gray-800 mb-3">Acción Principal</h4>
+                <div className="mb-4">
+                    <div className="text-center mb-2">
+                        <h4 className="text-[11px] font-semibold text-slate-600 mb-2 uppercase tracking-widest">Acción Principal</h4>
                     </div>
                     {attendance?.entry_time ? (
                         <Button
@@ -644,7 +578,7 @@ const AttendanceWidget = () => {
                                         : handle(clockOutLunch, "Buen provecho")
                             }
                             disabled={loading || locationLoading}
-                            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-xl shadow-blue-500/25 transform hover:scale-[1.02] transition-all duration-200"
+                            className="w-full py-3 rounded-2xl font-semibold text-sm bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 shadow-md shadow-blue-500/15 transition-all duration-200"
                         >
                             {loading ? "⏳ Registrando..." :
                                 locationLoading ? "📍 Obteniendo ubicación..." :
@@ -658,7 +592,7 @@ const AttendanceWidget = () => {
                         <Button
                             onClick={() => handle(clockIn, "Entrada registrada")}
                             disabled={loading || locationLoading}
-                            className="w-full py-4 rounded-xl font-bold text-lg bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-xl shadow-emerald-500/25 transform hover:scale-[1.02] transition-all duration-200"
+                            className="w-full py-3 rounded-2xl font-semibold text-sm bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-md shadow-emerald-500/15 transition-all duration-200"
                         >
                             {loading ? "⏳ Registrando entrada..." :
                                 locationLoading ? "📍 Obteniendo ubicación..." :
@@ -669,64 +603,8 @@ const AttendanceWidget = () => {
             )}
 
             {/* Secondary Actions Section */}
-            <div className="space-y-4">
+            <div className="space-y-3">
                 {renderExceptionControls()}
-
-                {/* Overtime Section */}
-                {attendance?.is_overtime && attendance?.overtime_hours > 0 && (
-                    <div className="p-4 bg-gradient-to-r from-orange-50 via-yellow-50 to-orange-50 rounded-xl border border-orange-200/60 shadow-sm">
-                        <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-orange-100 rounded-lg">
-                                    <FiTrendingUp className="text-orange-600" size={16} />
-                                </div>
-                                <div>
-                                    <h5 className="text-sm font-bold text-orange-900 uppercase tracking-wider">
-                                        Tiempo Extra Registrado
-                                    </h5>
-                                    <p className="text-xs text-orange-700">Horas adicionales trabajadas</p>
-                                </div>
-                            </div>
-                            <div className="text-right">
-                                <div className="text-2xl font-mono font-bold text-orange-700">
-                                    +{Number(attendance?.overtime_hours ?? 0).toFixed(1)}h
-                                </div>
-                            </div>
-                        </div>
-                        <div className="text-xs text-orange-700/90 bg-orange-100/50 p-2 rounded-lg">
-                            ✅ Has trabajado horas adicionales hoy. Esto será considerado en tu registro de asistencia.
-                        </div>
-                    </div>
-                )}
-
-                {/* Overtime Controls */}
-                {attendance?.entry_time && !attendance?.exit_time && !hasActiveException && (
-                    <div className="p-4 bg-gradient-to-r from-gray-50 to-slate-50 rounded-xl border border-gray-200/60 shadow-sm">
-                        <div className="flex items-center justify-between mb-3">
-                            <div className="flex items-center gap-3">
-                                <div className="p-2 bg-gray-100 rounded-lg">
-                                    <FiPlus className="text-gray-600" size={16} />
-                                </div>
-                                <div>
-                                    <h5 className="text-sm font-semibold text-gray-900 uppercase tracking-wider">
-                                        Registrar Overtime
-                                    </h5>
-                                    <p className="text-xs text-gray-600">Tiempo extra manual</p>
-                                </div>
-                            </div>
-                        </div>
-                        <p className="text-xs text-gray-600 mb-4 bg-gray-100/50 p-2 rounded-lg">
-                            📊 Si trabajas tiempo extra, regístralo aquí para mantener un registro preciso.
-                        </p>
-                        <Button
-                            onClick={() => setOvertimeModalOpen(true)}
-                            className="w-full py-2.5 bg-gray-700 hover:bg-gray-800 text-white font-medium rounded-lg shadow-sm hover:shadow-md transition-all duration-200"
-                            disabled={loading}
-                        >
-                            ⚡ Registrar Overtime Manual
-                        </Button>
-                    </div>
-                )}
             </div>
 
             <AnimatePresence>
@@ -806,71 +684,6 @@ const AttendanceWidget = () => {
                 </div>
             </Modal>
 
-            <Modal
-                isOpen={overtimeModalOpen}
-                onClose={() => setOvertimeModalOpen(false)}
-                title="⚡ Registrar Tiempo Extra"
-                className="max-w-md"
-            >
-                <div className="space-y-5">
-                    <div className="p-3 bg-orange-50 rounded-lg border border-orange-200">
-                        <p className="text-sm text-orange-800">
-                            🕐 Registra las horas extras trabajadas para mantener un control preciso.
-                        </p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">
-                            ⏰ Horas Trabajadas
-                        </label>
-                        <input
-                            type="number"
-                            step="0.5"
-                            min="0.5"
-                            max="12"
-                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all"
-                            placeholder="Ej: 2.5"
-                            value={overtimeHours}
-                            onChange={(e) => setOvertimeHours(e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                            🔢 Mínimo 0.5 horas, máximo 12 horas por día
-                        </p>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-semibold text-gray-800 mb-2">
-                            📋 Razón del Tiempo Extra
-                        </label>
-                        <textarea
-                            className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-sm bg-white focus:border-orange-400 focus:ring-2 focus:ring-orange-100 transition-all resize-none"
-                            rows="3"
-                            placeholder="Describe por qué trabajaste tiempo extra..."
-                            value={overtimeReason}
-                            onChange={(e) => setOvertimeReason(e.target.value)}
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                            💼 Ej: Proyecto urgente, soporte técnico, capacitación, etc.
-                        </p>
-                    </div>
-
-                    <div className="flex justify-end gap-3 pt-2">
-                        <button
-                            onClick={() => setOvertimeModalOpen(false)}
-                            className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 hover:bg-gray-50 rounded-lg transition-colors"
-                        >
-                            ❌ Cancelar
-                        </button>
-                        <Button
-                            onClick={handleMarkOvertime}
-                            disabled={overtimeLoading}
-                            className="px-6 py-2 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold rounded-lg shadow-md hover:shadow-lg transition-all"
-                        >
-                            {overtimeLoading ? "⏳ Registrando..." : "⚡ Registrar Overtime"}
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
         </Card>
     );
 

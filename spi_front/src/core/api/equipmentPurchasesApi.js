@@ -11,10 +11,6 @@ export const listEquipmentPurchases = async () => {
   return data.data || [];
 };
 
-export const getBusinessCaseOptions = async () => {
-  const { data } = await api.get("/equipment-purchases/business-case/options");
-  return data.data || {};
-};
 
 export const getEquipmentPurchaseStats = async () => {
   const { data } = await api.get("/equipment-purchases/stats");
@@ -87,20 +83,6 @@ export const cancelOrder = async (id, reason) => {
   return data.data;
 };
 
-export const updateBusinessCaseFields = async (id, fields) => {
-  const { data } = await api.post(`/equipment-purchases/${id}/business-case/fields`, { fields });
-  return data.data;
-};
-
-export const listBusinessCaseItems = async (id) => {
-  const { data } = await api.get(`/equipment-purchases/${id}/business-case/items`);
-  return data.data || [];
-};
-
-export const addBusinessCaseItem = async (id, item) => {
-  const { data } = await api.post(`/equipment-purchases/${id}/business-case/items`, item);
-  return data.data;
-};
 
 export const submitSignedProformaWithInspection = async (id, { file, inspection_min_date, inspection_max_date, includes_starter_kit }) => {
   const formData = new FormData();
@@ -114,3 +96,8 @@ export const submitSignedProformaWithInspection = async (id, { file, inspection_
   });
   return data.data;
 };
+export const getEquipmentPurchaseById = async (id) => {
+  const { data } = await api.get(`/equipment-purchases/${id}`);
+  return data.data;
+};
+

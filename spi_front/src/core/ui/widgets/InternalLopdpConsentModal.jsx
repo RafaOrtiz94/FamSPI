@@ -24,7 +24,6 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
   );
 
   useEffect(() => {
-    console.log('[LOPDP_MODAL] mounted', { width: window.innerWidth });
     setVisible(forceOpen || normalizedStatus !== "granted");
   }, [forceOpen, normalizedStatus]);
 
@@ -130,7 +129,7 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
               ))}
               <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
                 <p className="text-xs">
-                  Al firmar, autorizas a FamSPI a conservar esta evidencia en la carpeta «LOPDP INTERNO FAM» del Drive corporativo.
+                  Al firmar, autorizas a FamSPI a conservar esta evidencia.
                 </p>
               </div>
               <div className="space-y-2 text-xs">

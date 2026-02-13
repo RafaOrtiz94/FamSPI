@@ -5710,7 +5710,7 @@ CREATE TABLE public.permisos_vacaciones (
     drive_pdf_link text,
     drive_folder_id text,
     CONSTRAINT permisos_vacaciones_check CHECK ((((tipo_solicitud = 'permiso'::text) AND (tipo_permiso = ANY (ARRAY['estudios'::text, 'personal'::text, 'salud'::text, 'calamidad'::text]))) OR (tipo_solicitud = 'vacaciones'::text))),
-    CONSTRAINT permisos_vacaciones_check1 CHECK ((((tipo_permiso = 'calamidad'::text) AND (subtipo_calamidad = ANY (ARRAY['fallecimiento'::text, 'accidente'::text, 'desastre'::text]))) OR (tipo_permiso <> 'calamidad'::text))),
+    CONSTRAINT permisos_vacaciones_check1 CHECK ((((tipo_permiso = 'calamidad'::text) AND (subtipo_calamidad IS NOT NULL) AND (length(btrim(subtipo_calamidad)) > 0)) OR (tipo_permiso <> 'calamidad'::text))),
     CONSTRAINT permisos_vacaciones_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'partially_approved'::text, 'pending_final'::text, 'approved'::text, 'rejected'::text]))),
     CONSTRAINT permisos_vacaciones_tipo_solicitud_check CHECK ((tipo_solicitud = ANY (ARRAY['permiso'::text, 'vacaciones'::text])))
 );

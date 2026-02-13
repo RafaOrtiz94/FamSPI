@@ -7,18 +7,20 @@ const logger = require('../../config/logger');
  */
 
 async function createRequirements(businessCaseId, data) {
-    const { deadline_months, projected_deadline_months } = data;
+    const { deadline_months, projected_deadline_months, observations } = data;
 
     const query = `
     INSERT INTO bc_requirements (
       business_case_id,
       deadline_months,
       projected_deadline_months
-    ) VALUES ($1, $2, $3)
+      ,observations
+    ) VALUES ($1, $2, $3, $4)
     ON CONFLICT (business_case_id)
     DO UPDATE SET
       deadline_months = EXCLUDED.deadline_months,
       projected_deadline_months = EXCLUDED.projected_deadline_months,
+      observations = EXCLUDED.observations,
       updated_at = now()
     RETURNING *;
   `;
@@ -26,7 +28,8 @@ async function createRequirements(businessCaseId, data) {
     const { rows } = await db.query(query, [
         businessCaseId,
         deadline_months,
-        projected_deadline_months
+        projected_deadline_months,
+        observations
     ]);
 
     return rows[0];

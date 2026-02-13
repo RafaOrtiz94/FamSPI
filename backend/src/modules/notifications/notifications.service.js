@@ -90,6 +90,33 @@ const markAllAsRead = async (userId) => {
   return result.rows.map(mapNotificationRow);
 };
 
+const deleteNotification = async (userId, notificationId) => {
+  const { rows } = await db.query(
+    `
+    DELETE FROM notifications
+    WHERE id = $1 AND user_id = $2
+    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    `,
+    [notificationId, userId]
+  );
+
+  if (rows.length === 0) return null;
+  return mapNotificationRow(rows[0]);
+};
+
+const clearNotifications = async (userId) => {
+  const result = await db.query(
+    `
+    DELETE FROM notifications
+    WHERE user_id = $1
+    RETURNING id, user_id, title, message, type, source, status, priority, meta, created_at, read_at
+    `,
+    [userId]
+  );
+
+  return result.rows.map(mapNotificationRow);
+};
+
 const getUnreadCount = async (userId) => {
   const { rows } = await db.query(
     `SELECT COUNT(*) AS total FROM notifications WHERE user_id = $1 AND status = 'unread'`,
@@ -216,6 +243,8 @@ module.exports = {
   createNotification,
   markAsRead,
   markAllAsRead,
+  deleteNotification,
+  clearNotifications,
   getUnreadCount,
   notifyTIAboutOffHoursLogin,
 };

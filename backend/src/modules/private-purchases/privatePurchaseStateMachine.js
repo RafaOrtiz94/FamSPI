@@ -10,6 +10,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { PRIVATE_PURCHASE_STATES, PRIVATE_PURCHASE_TRANSITIONS, FLOW_TYPES } = require('./privatePurchaseStates.constants');
+const { broadcastPrivatePurchaseUpdate } = require('./privatePurchaseEvents');
 
 class PrivatePurchaseStateMachine {
     static async _ensureTransitionTable() {
@@ -195,13 +196,66 @@ class PrivatePurchaseStateMachine {
 
             await client.query('COMMIT');
 
+            try {
+                const { rows: updatedRows } = await db.query(
+                    'SELECT * FROM private_purchase_requests WHERE id = $1',
+                    [purchaseId]
+                );
+                const updatedRequest = updatedRows[0];
+                if (updatedRequest) {
+                    broadcastPrivatePurchaseUpdate({
+                        request: updatedRequest,
+                        action: 'state_transition',
+                        user: { id: userId },
+                        meta: { from: fromState, to: toState }
+                    });
+                }
+            } catch (eventError) {
+                logger.warn({ eventError, purchaseId }, 'No se pudo emitir evento de compra privada');
+            }
+
             // NOTIFICACIONES: Enviar notificaciones después de transición exitosa
             setImmediate(async () => {
                 try {
                     const recipients = await this._getTransitionRecipients(purchaseId, fromState, toState);
                     const notificationManager = require('../notifications/notificationManager');
 
+                    const specialCreatorStates = new Set([
+                        PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED,
+                        PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE,
+                        PRIVATE_PURCHASE_STATES.BUSINESS_CASE_REJECTED,
+                        PRIVATE_PURCHASE_STATES.BUSINESS_CASE_FEASIBILITY_APPROVED
+                    ]);
+
+                    let creatorRecipient = null;
+                    if (specialCreatorStates.has(toState)) {
+                        creatorRecipient = recipients.find((r) => (r.extraInfo || '').toLowerCase().includes('creador'));
+                        if (creatorRecipient) {
+                            await notificationManager.sendNotification({
+                                userId: creatorRecipient.userId,
+                                customTitle: toState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED
+                                    ? 'Contrato rechazado'
+                                    : toState === PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE
+                                        ? 'Contrato aprobado'
+                                        : toState === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_REJECTED
+                                            ? 'Business Case rechazado'
+                                            : 'Business Case aprobado',
+                                customMessage: `La solicitud ${purchaseId} cambió a ${this._getStateFriendlyName(toState)}.`,
+                                type: toState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED || toState === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_REJECTED
+                                    ? 'warning'
+                                    : 'success',
+                                source: 'private_purchase.state_transition',
+                                priority: this._getTransitionPriority(toState),
+                                email: true,
+                                meta: { purchaseId, fromState, toState, transitionedBy: userId }
+                            });
+                        }
+                    }
+
                     for (const recipient of recipients) {
+                        if (creatorRecipient && recipient.userId === creatorRecipient.userId && specialCreatorStates.has(toState)) {
+                            continue;
+                        }
                         await notificationManager.sendNotification({
                             userId: recipient.userId,
                             template: 'private_purchase_state_transition',
@@ -625,7 +679,7 @@ class PrivatePurchaseStateMachine {
     static async _getUsersByRole(role) {
         try {
             const { rows } = await db.query(
-                'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true',
+                'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC LIMIT 1',
                 [role]
             );
             return rows;

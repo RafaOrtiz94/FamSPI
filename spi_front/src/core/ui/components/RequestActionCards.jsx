@@ -263,7 +263,12 @@ const RequestActionButton = ({
     }
   };
 
-  const buttonSize = size === "sm" ? "py-2 px-4 text-sm" : "py-3 px-6 text-base";
+  const buttonSize =
+    size === "xs"
+      ? "px-3 py-1.5 text-xs rounded-lg"
+      : size === "sm"
+        ? "py-2 px-4 text-sm"
+        : "py-3 px-6 text-base";
 
   return (
     <motion.div

@@ -1,9 +1,13 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const schedulesService = require("../schedules/schedules.service");
+const { uploadBase64File } = require("../../utils/drive");
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
   "gerencia",
   "gerente",
   "admin",
@@ -23,6 +27,34 @@ function isManager(user) {
 
 function isAdvisor(user) {
   return isManager(user) || ADVISOR_ROLES.has(user?.role?.toLowerCase?.() || "");
+}
+
+function buildDriveLink(fileId) {
+  return `https://drive.google.com/file/d/${fileId}/view`;
+}
+
+function getClientRequestAttachments(request = {}) {
+  const attachments = [
+    { key: "id_file", field: "id_file_id", label: "Documento de identificacion (PDF)" },
+    { key: "ruc_file", field: "ruc_file_id", label: "RUC en PDF" },
+    { key: "legal_rep_appointment_file", field: "legal_rep_appointment_file_id", label: "Nombramiento del representante legal (PDF)" },
+    { key: "operating_permit_file", field: "operating_permit_file_id", label: "Permiso de funcionamiento (PDF)" },
+    { key: "consent_evidence_file", field: "consent_evidence_file_id", label: "Evidencia del consentimiento LOPDP" },
+    { key: "approval_letter", field: "approval_letter_file_id", label: "Oficio de aprobacion" },
+    { key: "consent_record", field: "consent_record_file_id", label: "Registro de consentimiento" },
+  ];
+
+  return attachments
+    .map((attachment) => {
+      const fileId = request[attachment.field];
+      if (!fileId) return null;
+      return {
+        ...attachment,
+        file_id: fileId,
+        link: buildDriveLink(fileId),
+      };
+    })
+    .filter(Boolean);
 }
 
 async function ensureTables() {
@@ -107,6 +139,71 @@ async function getClientOrThrow(clientId) {
     throw error;
   }
   return rows[0];
+}
+
+async function ensureClientAccess({ clientId, user }) {
+  if (isManager(user)) return;
+
+  const { rows } = await db.query(
+    `SELECT 1 FROM client_requests cr
+     LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id AND ca.assigned_to_email = $2
+     WHERE cr.id = $1 AND (cr.created_by = $2 OR ca.assigned_to_email IS NOT NULL)
+     LIMIT 1`,
+    [clientId, user.email],
+  );
+  if (!rows.length) {
+    const error = new Error("No tienes acceso a este cliente");
+    error.status = 403;
+    throw error;
+  }
+}
+
+async function getClientDetail({ clientId, user }) {
+  await ensureTables();
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        cr.*,
+        COALESCE(json_agg(DISTINCT ca.assigned_to_email) FILTER (WHERE ca.assigned_to_email IS NOT NULL), '[]') AS asignados
+      FROM client_requests cr
+      LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id
+      WHERE cr.id = $1
+      GROUP BY cr.id
+    `,
+    [clientId],
+  );
+
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Cliente no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  if (request.status !== "approved") {
+    const error = new Error("El cliente aun no esta aprobado");
+    error.status = 400;
+    throw error;
+  }
+
+  await ensureClientAccess({ clientId, user });
+
+  let asignados = request.asignados;
+  if (typeof asignados === "string") {
+    try {
+      asignados = JSON.parse(asignados);
+    } catch (e) {
+      asignados = [];
+    }
+  }
+  if (!Array.isArray(asignados)) asignados = [];
+
+  return {
+    ...request,
+    asignados,
+    attachments: isManager(user) ? getClientRequestAttachments(request) : [],
+  };
 }
 
 async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
@@ -301,6 +398,144 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       has_approved_schedule: Boolean(approvedSchedule),
       cities_today: citiesToday,
     },
+  };
+}
+
+async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
+  await ensureTables();
+
+  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [clientId]);
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Cliente no encontrado");
+    error.status = 404;
+    throw error;
+  }
+  if (request.status !== "approved") {
+    const error = new Error("Solo puedes editar clientes aprobados");
+    error.status = 400;
+    throw error;
+  }
+
+  await ensureClientAccess({ clientId, user });
+
+  const data = Object.fromEntries(
+    Object.entries(rawData || {}).map(([key, value]) => [
+      key,
+      typeof value === "string" ? value.trim() : value,
+    ]),
+  );
+
+  const canEditFull = isManager(user);
+  const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
+  const fileIds = {};
+
+  if (canEditFull) {
+    const fileUploadPromises = Object.entries(normalizedFiles).map(async ([fieldName, fileArray]) => {
+      if (!Array.isArray(fileArray) || !fileArray.length) return;
+      const file = fileArray[0];
+      if (!file) return;
+      const driveFolderId = request.drive_folder_id;
+      const uploadedFile = await uploadBase64File(
+        file.originalname,
+        file.buffer.toString("base64"),
+        file.mimetype,
+        driveFolderId,
+      );
+      const dbFieldName = `${fieldName}_id`;
+      fileIds[dbFieldName] = uploadedFile.id;
+    });
+    await Promise.all(fileUploadPromises);
+  }
+
+  const limitedFields = [
+    "commercial_name",
+    "shipping_contact_name",
+    "shipping_phone",
+    "shipping_cellphone",
+  ];
+
+  const fullFields = [
+    "client_type",
+    "legal_person_business_name",
+    "nationality",
+    "natural_person_firstname",
+    "natural_person_lastname",
+    "commercial_name",
+    "establishment_name",
+    "ruc_cedula",
+    "establishment_province",
+    "establishment_city",
+    "establishment_address",
+    "establishment_reference",
+    "establishment_phone",
+    "establishment_cellphone",
+    "legal_rep_name",
+    "legal_rep_position",
+    "legal_rep_id_document",
+    "legal_rep_cellphone",
+    "legal_rep_email",
+    "shipping_contact_name",
+    "shipping_address",
+    "shipping_city",
+    "shipping_province",
+    "shipping_reference",
+    "shipping_phone",
+    "shipping_cellphone",
+    "shipping_delivery_hours",
+    "operating_permit_status",
+  ];
+
+  const fieldsToUpdate = canEditFull ? fullFields : limitedFields;
+
+  if (canEditFull) {
+    if (fileIds.legal_rep_appointment_file_id) fieldsToUpdate.push("legal_rep_appointment_file_id");
+    if (fileIds.ruc_file_id) fieldsToUpdate.push("ruc_file_id");
+    if (fileIds.id_file_id) fieldsToUpdate.push("id_file_id");
+    if (fileIds.operating_permit_file_id) fieldsToUpdate.push("operating_permit_file_id");
+    if (fileIds.consent_evidence_file_id) fieldsToUpdate.push("consent_evidence_file_id");
+  }
+
+  const values = [];
+  const setParts = fieldsToUpdate
+    .map((field) => {
+      let val;
+      if (field.endsWith("_id")) {
+        if (fileIds[field]) {
+          val = fileIds[field];
+        } else {
+          return null;
+        }
+      } else {
+        val = data[field];
+      }
+      if (val !== undefined) {
+        values.push(val);
+        return `${field} = $${values.length}`;
+      }
+      return null;
+    })
+    .filter(Boolean);
+
+  if (!setParts.length) {
+    return {
+      ...request,
+      attachments: canEditFull ? getClientRequestAttachments(request) : [],
+    };
+  }
+
+  setParts.push(`updated_at = now()`);
+  const setClause = setParts.join(", ");
+
+  const query = `UPDATE client_requests SET ${setClause} WHERE id = $${values.length + 1} RETURNING *`;
+  values.push(clientId);
+
+  const { rows: updatedRows } = await db.query(query, values);
+  const updated = updatedRows[0];
+
+  return {
+    ...updated,
+    attachments: canEditFull ? getClientRequestAttachments(updated) : [],
   };
 }
 
@@ -518,6 +753,8 @@ async function upsertProspectVisit({
 
 module.exports = {
   listAccessibleClients,
+  getClientDetail,
+  updateClient,
   assignClient,
   upsertVisitStatus,
   upsertProspectVisit

@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 
 const db = require("../../config/db");
@@ -6,10 +6,12 @@ const logger = require("../../config/logger");
 const { logAction } = require("../../utils/audit");
 const { ensureFolder, replaceTags, exportPdf } = require("../../utils/drive");
 const { drive } = require("../../config/google");
+const notificationManager = require("../notifications/notificationManager");
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const ANNUAL_ALLOWANCE = 15;
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
+const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 async function ensureTable() {
   await db.query(`
@@ -30,27 +32,55 @@ async function ensureTable() {
       drive_doc_link TEXT,
       drive_pdf_link TEXT,
       drive_folder_id TEXT,
+      advance_request BOOLEAN DEFAULT false,
+      advance_eligible_from DATE,
       created_at TIMESTAMP DEFAULT now(),
       updated_at TIMESTAMP DEFAULT now()
     );
   `);
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_request BOOLEAN DEFAULT false");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_eligible_from DATE");
 }
 
 const ROLE_APPROVER = {
   comercial: "jefe_comercial",
   acp_comercial: "jefe_comercial",
-  backoffice: "jefe_comercial",
+  marketing: "jefe_comercial",
   backoffice_comercial: "jefe_comercial",
-  jefe_comercial: "gerencia",
+  financiero: "jefe_financiero",
+  finanzas: "jefe_financiero",
   tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
-  jefe_tecnico: "gerencia",
+  logistica: "jefe_logistica",
+  operaciones: "jefe_operaciones",
   calidad: "jefe_calidad",
-  jefe_calidad: "gerencia",
 };
 
 const HR_ROLES = ["talento-humano", "talento_humano", "talento humano", "rh", "rrhh"];
-const MGMT_ROLES = ["gerencia", "gerencia_general", "gerente_general", "director", "gerente"];
+const MGMT_ROLES = ["gerencia_general", "gerente_general"];
+const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+
+function normalizeRole(role) {
+  return String(role || "").trim().toLowerCase();
+}
+
+function resolveApproverRole(requesterRole = "") {
+  const normalized = normalizeRole(requesterRole);
+  const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
+  if (isJefe) return "gerencia_general";
+  return ROLE_APPROVER[normalized] || "gerencia_general";
+}
+
+function getApproverRoleCandidates(user = {}) {
+  const candidates = new Set(
+    [user?.role, user?.scope, user?.role_name, user?.rol]
+      .map((value) => String(value || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  if (candidates.has("gerencia_general")) candidates.add("gerente_general");
+  if (candidates.has("gerente_general")) candidates.add("gerencia_general");
+  return Array.from(candidates);
+}
 
 function diffDaysInclusive(start, end) {
   const startDate = new Date(start);
@@ -69,6 +99,69 @@ async function loadUser(userId) {
   );
   return rows[0];
 }
+
+async function getHireDate(userId) {
+  const { rows } = await db.query(
+    `SELECT cp.profile->'laboral'->>'fecha_ingreso' AS fecha_ingreso
+       FROM collaborator_profiles cp
+      WHERE cp.user_id = $1
+      LIMIT 1`,
+    [userId]
+  );
+  return rows[0]?.fecha_ingreso || null;
+}
+
+const normalizeDate = (value) => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const calculateYearsOfService = (hireDate, asOfDate) => {
+  if (!hireDate || !asOfDate) return 0;
+  let years = asOfDate.getFullYear() - hireDate.getFullYear();
+  const anniversary = new Date(hireDate.getTime());
+  anniversary.setFullYear(hireDate.getFullYear() + years);
+  if (asOfDate < anniversary) years -= 1;
+  return Math.max(years, 0);
+};
+
+const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
+  const hireDate = normalizeDate(hireDateValue);
+  const asOfDate = normalizeDate(asOfValue) || new Date();
+  if (!hireDate) {
+    return {
+      allowance: 0,
+      tenureYears: 0,
+      eligible: false,
+      eligibleFrom: null,
+      missingHireDate: true,
+    };
+  }
+
+  const tenureYears = calculateYearsOfService(hireDate, asOfDate);
+  const eligible = tenureYears >= 1;
+  if (!eligible) {
+    const eligibleFrom = new Date(hireDate.getTime() + ONE_YEAR_MS);
+    return {
+      allowance: 0,
+      tenureYears,
+      eligible: false,
+      eligibleFrom: eligibleFrom.toISOString().split("T")[0],
+      missingHireDate: false,
+    };
+  }
+
+  const extra = tenureYears > 5 ? tenureYears - 5 : 0;
+  return {
+    allowance: ANNUAL_ALLOWANCE + extra,
+    tenureYears,
+    eligible: true,
+    eligibleFrom: hireDate.toISOString().split("T")[0],
+    missingHireDate: false,
+  };
+};
 
 async function findApprover(targetRole) {
   if (!targetRole) return null;
@@ -149,9 +242,10 @@ async function createVacationRequest(payload, userId) {
   const user = await loadUser(userId);
   if (!user) throw new Error("Usuario no encontrado");
 
-  const { start_date, end_date, period } = payload;
+  const { start_date, end_date, period, allow_advance } = payload;
   if (!start_date || !end_date) throw new Error("Las fechas de inicio y fin son obligatorias");
-
+  const hireDateValue = await getHireDate(userId);
+  const allowanceInfo = computeVacationAllowance(hireDateValue, start_date);
   const days = payload.days || diffDaysInclusive(start_date, end_date);
   const return_date = payload.return_date || new Date(new Date(end_date).getTime() + 24 * 60 * 60 * 1000)
     .toISOString()
@@ -159,9 +253,12 @@ async function createVacationRequest(payload, userId) {
 
   const year = new Date(start_date).getFullYear();
   const taken = await computeTakenDays(userId, year);
-  const remaining = Math.max(ANNUAL_ALLOWANCE - taken, 0);
+  const remaining = Math.max(allowanceInfo.allowance - taken, 0);
+  if (allowanceInfo.eligible && !allowanceInfo.missingHireDate && days > remaining) {
+    throw new Error("No tienes dias disponibles para enviar esta solicitud de vacaciones.");
+  }
 
-  const approverRole = ROLE_APPROVER[(user.role || "").toLowerCase()] || "gerencia";
+  const approverRole = resolveApproverRole(user.role || "");
   const approverId = await findApprover(approverRole) || null;
 
   let driveMeta = { drive_doc_id: null, drive_doc_link: null, drive_pdf_id: null, drive_pdf_link: null, folderId: null };
@@ -184,8 +281,9 @@ async function createVacationRequest(payload, userId) {
   const { rows } = await db.query(
     `INSERT INTO vacaciones_solicitudes (
       requester_id, approver_id, approver_role, department_id, start_date, end_date, return_date, period, days, status,
-      drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pendiente',$10,$11,$12,$13,$14)
+      drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
+      advance_request, advance_eligible_from
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pendiente',$10,$11,$12,$13,$14,$15,$16)
     RETURNING *`,
     [
       userId,
@@ -202,6 +300,8 @@ async function createVacationRequest(payload, userId) {
       driveMeta.drive_doc_link,
       driveMeta.drive_pdf_link,
       driveMeta.folderId,
+      (!allowanceInfo.eligible && !allowanceInfo.missingHireDate && (allow_advance !== false)) || allowanceInfo.missingHireDate,
+      !allowanceInfo.eligible ? allowanceInfo.eligibleFrom : null,
     ]
   );
 
@@ -213,6 +313,35 @@ async function createVacationRequest(payload, userId) {
     entity_id: rows[0].id,
     details: { start_date, end_date, days },
   });
+
+  try {
+    if (userId) {
+      await notificationManager.sendNotification({
+        userId,
+        customTitle: "Solicitud enviada",
+        customMessage: "Tu solicitud de vacaciones fue enviada para aprobaci?n.",
+        type: "info",
+        source: "vacaciones",
+        priority: 0,
+        email: true,
+        meta: { solicitud_id: rows[0].id, solicitante: user.email },
+      });
+    }
+    if (approverId && approverId != userId) {
+      await notificationManager.sendNotification({
+        userId: approverId,
+        customTitle: "Nueva solicitud de vacaciones",
+        customMessage: `${user.fullname || user.email} ha enviado una solicitud de vacaciones.`,
+        type: "task",
+        source: "vacaciones",
+        priority: 1,
+        email: true,
+        meta: { solicitud_id: rows[0].id, solicitante: user.email },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de vacaciones");
+  }
 
   return { ...rows[0], remaining_before: remaining };
 }
@@ -232,10 +361,11 @@ async function listVacationRequests(params = {}, user) {
   }
 
   const canSeeAll = HR_ROLES.includes(role) || MGMT_ROLES.includes(role);
-  if (scope === "pending" && !canSeeAll) {
+  if (scope === "pending") {
+    const roleCandidates = getApproverRoleCandidates(user);
     where.push(`status = 'pendiente'`);
-    where.push(`(approver_id = $${idx} OR approver_role = LOWER($${idx + 1}))`);
-    values.push(user.id, role);
+    where.push(`(approver_id = $${idx} OR (approver_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1})))`);
+    values.push(user.id, roleCandidates);
     idx += 2;
   } else if (!canSeeAll || scope === "mine") {
     where.push(`requester_id = $${idx++}`);
@@ -259,21 +389,25 @@ async function updateVacationStatus(id, status, user) {
   await ensureTable();
   const normalized = (status || "").toLowerCase();
   if (!['aprobado', 'rechazado', 'approved', 'rejected'].includes(normalized)) {
-    throw new Error("Estado inválido");
+    throw new Error("Estado invÃ¡lido");
   }
 
   const { rows } = await db.query("SELECT * FROM vacaciones_solicitudes WHERE id = $1", [id]);
   const current = rows[0];
   if (!current) throw new Error("Solicitud no encontrada");
 
-  const role = (user.role || "").toLowerCase();
+  const roleCandidates = getApproverRoleCandidates(user);
   const canApprove =
-    HR_ROLES.includes(role) ||
-    MGMT_ROLES.includes(role) ||
     current.approver_id === user.id ||
-    (current.approver_role && current.approver_role.toLowerCase() === role);
+    (current.approver_id == null &&
+      current.approver_role &&
+      (
+        GERENCIA_GENERAL_ROLES.has(String(current.approver_role).toLowerCase())
+          ? roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate))
+          : roleCandidates.includes(String(current.approver_role).toLowerCase())
+      ));
 
-  if (!canApprove) throw new Error("No tienes permisos para esta acción");
+  if (!canApprove) throw new Error("No tienes permisos para esta acciÃ³n");
 
   const mappedStatus = normalized.startsWith("ap") || normalized === "approved" ? "aprobado" : "rechazado";
 
@@ -292,6 +426,25 @@ async function updateVacationStatus(id, status, user) {
     entity_id: id,
   });
 
+  try {
+    if (updated[0]?.requester_id) {
+      const isApproved = mappedStatus === "aprobado";
+      await notificationManager.sendNotification({
+        userId: updated[0].requester_id,
+        customTitle: isApproved ? "Vacaciones aprobadas" : "Vacaciones rechazadas",
+        customMessage: isApproved
+          ? "Tu solicitud de vacaciones fue aprobada."
+          : "Tu solicitud de vacaciones fue rechazada.",
+        type: isApproved ? "success" : "warning",
+        source: "vacaciones",
+        priority: 1,
+        email: true,
+        meta: { solicitud_id: updated[0].id, status: mappedStatus },
+      });
+    }
+  } catch (notifyError) {
+    logger.warn({ notifyError, solicitudId: updated[0]?.id }, "No se pudo notificar estado de vacaciones");
+  }
   return updated[0];
 }
 
@@ -303,6 +456,8 @@ async function summary(user, includeAll = false) {
   if (!canSeeAll) {
     const year = new Date().getFullYear();
     const taken = await computeTakenDays(user.id, year);
+    const hireDateValue = await getHireDate(user.id);
+    const allowanceInfo = computeVacationAllowance(hireDateValue, new Date());
     const { rows: pendingRows } = await db.query(
       `SELECT COALESCE(SUM(days),0) as total FROM vacaciones_solicitudes
         WHERE requester_id=$1 AND status='pendiente' AND EXTRACT(YEAR FROM start_date)=$2`,
@@ -312,28 +467,49 @@ async function summary(user, includeAll = false) {
 
     return {
       year,
-      allowance: ANNUAL_ALLOWANCE,
+      allowance: allowanceInfo.allowance,
+      tenure_years: allowanceInfo.tenureYears,
+      eligible: allowanceInfo.eligible,
+      eligible_from: allowanceInfo.eligibleFrom,
+      missing_hire_date: allowanceInfo.missingHireDate,
       taken,
       pending,
-      remaining: Math.max(ANNUAL_ALLOWANCE - taken - pending, 0),
+      remaining:
+        !allowanceInfo.missingHireDate && !allowanceInfo.eligible
+          ? allowanceInfo.allowance - taken - pending
+          : Math.max(allowanceInfo.allowance - taken - pending, 0),
     };
   }
 
   const { rows } = await db.query(
     `SELECT u.id as user_id, u.fullname, u.email, d.name as department,
+            MAX(cp.profile->'laboral'->>'fecha_ingreso') as fecha_ingreso,
             COALESCE(SUM(CASE WHEN v.status='aprobado' THEN v.days ELSE 0 END),0) as taken,
             COALESCE(SUM(CASE WHEN v.status='pendiente' THEN v.days ELSE 0 END),0) as pending
        FROM users u
        LEFT JOIN vacaciones_solicitudes v ON v.requester_id = u.id
+       LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
        LEFT JOIN departments d ON d.id = u.department_id
+      WHERE (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms'
+        AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false)
       GROUP BY u.id, u.fullname, u.email, d.name
       ORDER BY u.fullname`);
 
-  return rows.map((r) => ({
-    ...r,
-    allowance: ANNUAL_ALLOWANCE,
-    remaining: Math.max(ANNUAL_ALLOWANCE - Number(r.taken || 0) - Number(r.pending || 0), 0),
-  }));
+  return rows.map((r) => {
+    const allowanceInfo = computeVacationAllowance(r.fecha_ingreso, new Date());
+    return {
+      ...r,
+      ...allowanceInfo,
+      missing_hire_date: allowanceInfo.missingHireDate,
+      remaining:
+        !allowanceInfo.missingHireDate && !allowanceInfo.eligible
+          ? allowanceInfo.allowance - Number(r.taken || 0) - Number(r.pending || 0)
+          : Math.max(
+              allowanceInfo.allowance - Number(r.taken || 0) - Number(r.pending || 0),
+              0
+            ),
+    };
+  });
 }
 
 module.exports = {
@@ -342,3 +518,4 @@ module.exports = {
   updateVacationStatus,
   summary,
 };
+

@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiCamera, FiSave, FiAward } from "react-icons/fi";
+import { FiCamera, FiSave, FiAward, FiAlertCircle } from "react-icons/fi";
 import { fetchMyProfile, upsertMyProfile } from "../../core/api/userProfileApi";
 import { useUI } from "../../core/ui/UIContext";
+import Modal from "../../core/ui/components/Modal";
 import { useAuth } from "../../core/auth/AuthContext";
 import CertificationsBoard from "./components/CertificationsBoard";
 
@@ -11,6 +12,20 @@ const emptyMetadata = {
   extension: "",
   location: "",
   about: "",
+  personal: {
+    telefono_personal: "",
+    email_personal: "",
+    estado_civil: "",
+  },
+  domicilio: {
+    ciudad_domicilio: "",
+    direccion_domicilio: "",
+    telefono_fijo: "",
+  },
+  emergencia: {
+    persona_contacto: "",
+    telefono_contacto: "",
+  },
 };
 
 const emptyPreferences = {
@@ -18,6 +33,36 @@ const emptyPreferences = {
   language: "es",
   density: "comfortable",
 };
+
+const reviewSections = [
+  {
+    key: "personal",
+    title: "Contacto personal",
+    fields: [
+      { key: "telefono_personal", label: "Teléfono personal" },
+      { key: "email_personal", label: "Email personal" },
+      { key: "estado_civil", label: "Estado civil" },
+    ],
+  },
+  {
+    key: "domicilio",
+    title: "Domicilio",
+    fields: [
+      { key: "ciudad_domicilio", label: "Ciudad" },
+      { key: "direccion_domicilio", label: "Dirección" },
+      { key: "telefono_fijo", label: "Teléfono fijo" },
+    ],
+  },
+  {
+    key: "emergencia",
+    title: "Contacto de emergencia",
+    fields: [
+      { key: "persona_contacto", label: "Persona de contacto" },
+      { key: "telefono_contacto", label: "Teléfono contacto" },
+    ],
+  },
+];
+
 
 const MyProfilePage = () => {
   const { showToast, showLoader, hideLoader, theme, setTheme } = useUI();
@@ -28,8 +73,29 @@ const MyProfilePage = () => {
   const [preferences, setPreferences] = useState(emptyPreferences);
   const [avatarPreview, setAvatarPreview] = useState(null);
   const [avatarFile, setAvatarFile] = useState(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
+  const [reviewData, setReviewData] = useState({});
   const [saving, setSaving] = useState(false);
 
+
+  const needsReview = useMemo(() => {
+    const last = metadata?.profile_last_reviewed_at;
+    if (!last) return true;
+    const lastDate = new Date(last);
+    if (Number.isNaN(lastDate.getTime())) return true;
+    const diffDays = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
+    return diffDays >= 365;
+  }, [metadata?.profile_last_reviewed_at]);
+
+  const buildReviewData = (source = {}) => {
+    const result = {};
+    reviewSections.forEach((section) => {
+      result[section.key] = {
+        ...(source?.[section.key] || {}),
+      };
+    });
+    return result;
+  };
   const identity = useMemo(() => profile?.identity || user, [profile?.identity, user]);
 
   useEffect(() => {
@@ -39,9 +105,22 @@ const MyProfilePage = () => {
         const data = await fetchMyProfile();
         setProfile(data);
 
+        const rawMetadata = data?.profile?.metadata || {};
         const incomingMetadata = {
           ...emptyMetadata,
-          ...(data?.profile?.metadata || {}),
+          ...rawMetadata,
+          personal: {
+            ...(emptyMetadata.personal || {}),
+            ...(rawMetadata.personal || {}),
+          },
+          domicilio: {
+            ...(emptyMetadata.domicilio || {}),
+            ...(rawMetadata.domicilio || {}),
+          },
+          emergencia: {
+            ...(emptyMetadata.emergencia || {}),
+            ...(rawMetadata.emergencia || {}),
+          },
         };
         const incomingPrefs = {
           ...emptyPreferences,
@@ -135,6 +214,31 @@ const MyProfilePage = () => {
           </button>
         </div>
       </header>
+
+      {needsReview && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-2">
+              <FiAlertCircle className="mt-0.5" />
+              <div>
+                <p className="font-semibold">Actualización anual de datos</p>
+                <p className="text-xs text-amber-800">
+                  Debes confirmar tus datos personales. Esto ayuda a mantener vacaciones, permisos y contactos actualizados.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setReviewData(buildReviewData(metadata || {}));
+                setShowReviewModal(true);
+              }}
+              className="rounded-xl bg-amber-600 px-4 py-2 text-xs font-semibold text-white hover:bg-amber-700"
+            >
+              Actualizar ahora
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="grid gap-8 lg:grid-cols-[280px,1fr]">
         <div className="space-y-6 rounded-2xl border border-slate-200 bg-slate-50/70 p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900/50">
@@ -294,6 +398,87 @@ const MyProfilePage = () => {
           </section>
         </div>
       </div>
+
+
+      <Modal
+        isOpen={showReviewModal}
+        onClose={() => setShowReviewModal(false)}
+        title="Actualización anual de datos"
+        maxWidth="max-w-3xl"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Actualiza tus datos personales. Estos cambios se reflejarán en los módulos de permisos, vacaciones y reportes internos.
+          </p>
+          <div className="grid gap-4">
+            {reviewSections.map((section) => (
+              <div key={section.key} className="rounded-xl border border-slate-200 p-4">
+                <h3 className="text-sm font-semibold text-slate-800 mb-3">{section.title}</h3>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {section.fields.map((field) => (
+                    <label key={field.key} className="text-xs text-slate-600">
+                      <span className="uppercase font-medium">{field.label}</span>
+                      <input
+                        type="text"
+                        value={reviewData?.[section.key]?.[field.key] || ""}
+                        onChange={(e) =>
+                          setReviewData((prev) => ({
+                            ...(prev || {}),
+                            [section.key]: {
+                              ...(prev?.[section.key] || {}),
+                              [field.key]: e.target.value,
+                            },
+                          }))
+                        }
+                        className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="flex gap-3 justify-end">
+            <button
+              type="button"
+              onClick={() => setShowReviewModal(false)}
+              className="rounded-xl border border-slate-200 px-4 py-2 text-sm"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  setSaving(true);
+                  showLoader();
+                  const nextMetadata = {
+                    ...metadata,
+                    ...reviewData,
+                    profile_last_reviewed_at: new Date().toISOString(),
+                  };
+                  const data = await upsertMyProfile({ metadata: nextMetadata, preferences, avatarFile: null });
+                  setProfile((prev) => ({ ...prev, profile: data }));
+                  setMetadata({ ...nextMetadata });
+                  setShowReviewModal(false);
+                  await reloadProfile?.();
+                  showToast("Datos actualizados", "success");
+                } catch (err) {
+                  console.error(err);
+                  showToast(err.message || "Error al actualizar", "error");
+                } finally {
+                  setSaving(false);
+                  hideLoader();
+                }
+              }}
+              className="rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white hover:bg-primary-dark"
+            >
+              Guardar actualización
+            </button>
+          </div>
+        </div>
+      </Modal>
+
     </div>
   );
 };

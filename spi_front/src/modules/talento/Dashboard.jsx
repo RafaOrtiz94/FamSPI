@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { FiUsers, FiSettings, FiRefreshCw, FiClipboard, FiCalendar } from "react-icons/fi";
+import { FiUsers, FiSettings, FiRefreshCw, FiClipboard, FiCalendar, FiAlertCircle, FiUserPlus } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -10,6 +10,7 @@ import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../core/api/usersApi";
 import { getDepartments } from "../../core/api/departmentsApi";
+import { getCollaboratorStats } from "../../core/api/collaboratorsApi";
 
 const TalentoDashboard = () => {
   console.log("[HR_UI][FASE2] entering Inicio");
@@ -17,14 +18,16 @@ const TalentoDashboard = () => {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pendingReview, setPendingReview] = useState(0);
   const navigate = useNavigate();
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, d] = await Promise.all([getUsers(), getDepartments()]);
+      const [u, d, stats] = await Promise.all([getUsers(), getDepartments(), getCollaboratorStats()]);
       setUsers(u);
       setDepartments(d);
+      setPendingReview(Number(stats?.pending_review || 0));
     } catch (err) {
       console.error(err);
       toast.error("Error cargando datos de Talento Humano");
@@ -86,6 +89,12 @@ const TalentoDashboard = () => {
           <p className="text-sm text-gray-500">Pendientes de asignación</p>
           <p className="text-2xl font-semibold">{pendientes}</p>
         </Card>
+        <Card className="flex flex-col items-center justify-center text-center p-5">
+          <FiAlertCircle className="text-amber-600 text-4xl mb-2" />
+          <p className="text-sm text-gray-500">Pendientes actualización anual</p>
+          <p className="text-2xl font-semibold">{pendingReview}</p>
+        </Card>
+
       </div>
 
       {/* AttendanceWidget - OBLIGATORIO mantener en Inicio */}
@@ -124,6 +133,39 @@ const TalentoDashboard = () => {
           onClick={() => navigate("/dashboard/talento-humano/permisos")}
         />
         <ActionCard
+          icon={FiUserPlus}
+          subtitle="Personal"
+          title="Gestion de Personal"
+          color="blue"
+          onClick={() => navigate("/dashboard/talento-humano/workspace-personal")}
+        >
+          <div className="mt-3 flex flex-col gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate("/dashboard/talento-humano/workspace-personal");
+              }}
+            >
+              Postulantes (Workspace)
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              className="w-full"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate("/dashboard/talento-humano/colaboradores");
+              }}
+            >
+              Colaboradores (Actualizacion)
+            </Button>
+          </div>
+        </ActionCard>
+
+      <ActionCard
           icon={FiRefreshCw}
           subtitle="Reportes"
           title="Asistencia Reportes"

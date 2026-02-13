@@ -109,7 +109,8 @@ async function updateRequestStatus(req, res) {
             id,
             status,
             userId,
-            notes
+            notes,
+            req.user?.role
         );
 
         res.json({
@@ -184,11 +185,124 @@ async function getStats(req, res) {
     }
 }
 
+/**
+ * Obtener perfil del personal seleccionado
+ */
+async function getPersonnelProfile(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const result = await personnelRequestsService.getPersonnelProfile(id);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error obteniendo perfil de personal:', error);
+        res.status(500).json({ success: false, message: 'Error al obtener perfil' });
+    }
+}
+
+/**
+ * Crear/actualizar perfil del personal seleccionado
+ */
+async function updatePersonnelProfile(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const result = await personnelRequestsService.upsertPersonnelProfile(id, req.body, req.user?.id);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error actualizando perfil de personal:', error);
+        res.status(500).json({ success: false, message: 'Error al actualizar perfil' });
+    }
+}
+
+/**
+ * Subir documento del personal seleccionado
+ */
+async function uploadPersonnelDocument(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const { doc_type } = req.body || {};
+        const file = req.file;
+        if (!doc_type) {
+            return res.status(400).json({ success: false, message: 'doc_type requerido' });
+        }
+        if (!file) {
+            return res.status(400).json({ success: false, message: 'archivo requerido' });
+        }
+        const result = await personnelRequestsService.addPersonnelDocument(id, doc_type, file, req.user?.id);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error subiendo documento de personal:', error);
+        res.status(500).json({ success: false, message: 'Error al subir documento' });
+    }
+}
+
+
+/**
+ * Vincular colaborador a solicitud
+ */
+async function linkCollaborator(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const { collaborator_user_id } = req.body || {};
+        const result = await personnelRequestsService.updatePersonnelRequestCollaborator(
+            id,
+            collaborator_user_id || null,
+            req.user?.id
+        );
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error vinculando colaborador:', error);
+        res.status(500).json({ success: false, message: 'Error al vincular colaborador' });
+    }
+}
+
+/**
+ * Vincular postulante a solicitud
+ */
+async function linkApplicant(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const { applicant_id } = req.body || {};
+        const result = await personnelRequestsService.linkApplicantToRequest(
+            id,
+            applicant_id || null,
+            req.user?.id
+        );
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error vinculando postulante:', error);
+        res.status(500).json({ success: false, message: 'Error al vincular postulante' });
+    }
+}
+
+/**
+ * Contratar postulante y cerrar solicitud
+ */
+async function hireApplicant(req, res) {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const result = await personnelRequestsService.hirePersonnelRequest(id, req.user?.id);
+        res.json({ success: true, data: result });
+    } catch (error) {
+        logger.error('Error contratando postulante:', error);
+        res.status(400).json({
+            success: false,
+            message: error.message || 'Error al contratar postulante',
+            details: error.details || null,
+        });
+    }
+}
+
 module.exports = {
     createRequest,
     getRequests,
     getRequestById,
     updateRequestStatus,
     addComment,
-    getStats
+    getStats,
+    getPersonnelProfile,
+    updatePersonnelProfile,
+    uploadPersonnelDocument,
+    linkCollaborator,
+    linkApplicant,
+    hireApplicant
 };

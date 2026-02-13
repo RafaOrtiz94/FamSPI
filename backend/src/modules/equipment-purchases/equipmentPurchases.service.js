@@ -5,7 +5,6 @@ const PDFDocument = require("pdfkit");
 const { ensureFolder, uploadBase64File, copyTemplate, replaceTags } = require("../../utils/drive");
 const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
-const { sheets } = require("../../config/google");
 const inventarioService = require("../inventario/inventario.service");
 const notificationManager = require("../notifications/notificationManager");
 const {
@@ -18,7 +17,7 @@ const {
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
 const COMMERCIAL_FOLDER_NAME = "Comercial";
-const BUSINESS_CASE_FOLDER_NAME = "businnesCase";
+const PURCHASE_FOLDER_NAME = "Compras";
 const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
@@ -34,7 +33,6 @@ const STATUS = {
   WAITING_SIGNED_PROFORMA: "waiting_signed_proforma",
   PENDING_CONTRACT: "pending_contract",
   COMPLETED: "completed",
-  BUSINESS_CASE: "business_case",
 };
 
 const STATUS_STATS_ORDER = [
@@ -47,73 +45,9 @@ const STATUS_STATS_ORDER = [
   STATUS.COMPLETED,
 ];
 
-const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "jefe_comercial"]);
-const BUSINESS_CASE_TEMPLATE_ID = process.env.BUSINESS_CASE_TEMPLATE_ID || "1cll8wqgVFKOm9tGN5HhgpAEWtIHQts2a";
+const MANAGER_ROLES = new Set(["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial"]);
 const PURCHASE_PROCESS_TEMPLATE_ID =
   process.env.PURCHASE_PROCESS_TEMPLATE_ID || process.env.EQUIPMENT_PURCHASE_PROCESS_TEMPLATE_ID || null;
-const BUSINESS_CASE_SHEET_RANGE = "A1:F200";
-const ADDITIONAL_INVESTMENT_CATALOG = [
-  "Control externo de tercera opinión",
-  "Control interno interlaboratorial",
-  "Póliza de Fiel Cumplimiento del Contrato",
-  "Póliza de seguro de equipos",
-  "Ups equipo",
-  "Ups servidor",
-  "LIS",
-  "Interfaz",
-  "Lantronix",
-  "IP publica",
-  "Punto de consulta web",
-  "Internet",
-  "Router para Internet",
-  "Servidor",
-  "Computadores",
-  "Impresora",
-  "Tinta",
-  "Toner para impresora de equipos (en caso de dejar las impresoras)",
-  "Impresora Zebra Termica ZD230 ETHERNET Y USB",
-  "Lector inalambrico de codigo de barra",
-  "Sistema de destilación de agua pequeño",
-  "Sistema de osmosis",
-  "Mantenimiento sistema de osmosis",
-  "Sistema de prefiltracion",
-  "Mantenimiento sistema pre filtración",
-  "Tanque para resina mixta (muerta)",
-  "Estructura de proteccion para sistema de agua",
-  "MEMBRANE EQ.OSMOSIS, AG2521TF  2.5 diam",
-  "FILTER NOM. P/SEDIMENTS PX10-20XX  PURTR (CARBON - AZUL)",
-  "FILTER NOM.P/SEDIMENTS GX05-20XX  HYTREX (FIBRA - PAPEL - PAPEL)",
-  "RESINA IONICA REGENERADA 20 ",
-  "RESINA MUERTA 16kilos",
-  "Sal en grano x quintal",
-  "Modificaciones de espacio fisico - estructura",
-  "Modificaciones de espacio fisico - mobiliario",
-  "Climatizacion del area",
-  "Rollo de cable UTP CAT5e x 100m",
-  "Conector RJ45 Delta CAT5E x 50 unds",
-  "Rack Cerrado POWEST 5UR",
-  "Switch HP Aruba Ion 5 puertos",
-  "Switch HP Aruba Ion 1430 24 puertos",
-  "Extensiones y cortapicos",
-  "Extras (tairas, canaletas, espiral plastico)",
-  "Etiquetas",
-  "A4 printer paper",
-  "Refrigerador panorámico",
-  "Refrigerador médico",
-  "Termometro para refrigerador",
-  "Termohigrometros",
-  "Cronometros digitales",
-  "Centrifuga",
-  "Servicio Logisticos Proveedores",
-  "Servicio Logisticos Clientes",
-  "Ampolla de agua bidestilada",
-  "Agua destilada por galón",
-  "Hisopos x 100 uds",
-  "Gasas x 100 uds",
-  "Alcohol prepad 10 x 100 uds",
-  "Tubos eppendorf X 500 UDS",
-  "Otros",
-];
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -121,6 +55,37 @@ function normalizeRole(role) {
 
 function canManageAll(user) {
   return MANAGER_ROLES.has(normalizeRole(user?.role));
+}
+
+async function getSingleUserByRole(role) {
+  if (!role) return null;
+  try {
+    const { rows } = await db.query(
+      'SELECT id, email, fullname FROM users WHERE role = $1 AND active = true ORDER BY id ASC LIMIT 1',
+      [role],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    logger.warn({ error, role }, 'No se pudo resolver usuario por rol');
+    return null;
+  }
+}
+
+async function notifyUsers({ userIds = [], title, message, type = "info", source, priority = 1, meta = {} }) {
+  const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
+  if (!uniqueIds.length) return;
+  await Promise.all(uniqueIds.map((userId) =>
+    notificationManager.sendNotification({
+      userId,
+      customTitle: title,
+      customMessage: message,
+      type,
+      source,
+      priority,
+      email: true,
+      meta,
+    })
+  ));
 }
 
 function driveLink(fileId) {
@@ -137,18 +102,14 @@ function safeJsonParse(value, fallback = {}) {
 
 function mapRequestRow(row = {}) {
   const extra = typeof row.extra === "string" ? safeJsonParse(row.extra) : row.extra;
-  const progress = typeof row.bc_progress === "string" ? safeJsonParse(row.bc_progress, {}) : row.bc_progress;
   return {
     ...row,
     extra,
     request_type: row.request_type || "purchase",
-    bc_progress: progress || {},
-    bc_stage: row.bc_stage || "pending_comercial",
     proforma_file_link: driveLink(row.proforma_file_id),
     signed_proforma_file_link: driveLink(row.signed_proforma_file_id),
     contract_file_link: driveLink(row.contract_file_id),
     process_doc_link: row.process_doc_url || driveLink(row.process_doc_id),
-    business_case_link: row.bc_spreadsheet_url || driveLink(row.bc_spreadsheet_id),
     inspection_request_id: row.inspection_request_id || null,
   };
 }
@@ -177,12 +138,6 @@ function stripHtml(text) {
     .replace(/&nbsp;/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function computeBusinessCaseStage(progress = {}) {
-  if (!progress.comercial) return "pending_comercial";
-  if (!progress.acp_comercial || !progress.gerencia) return "pending_managerial";
-  return "investments";
 }
 
 async function buildReport({ subject, html, request, actionLabel, user }) {
@@ -290,8 +245,6 @@ async function ensureTables() {
       contract_reminder_event_id TEXT,
       contract_reminder_event_link TEXT,
       drive_folder_id TEXT,
-      bc_stage TEXT DEFAULT 'pending_comercial',
-      bc_progress JSONB DEFAULT '{}',
       extra JSONB,
       request_type TEXT DEFAULT 'purchase',
       created_at TIMESTAMPTZ DEFAULT now(),
@@ -309,15 +262,6 @@ async function ensureTables() {
   );
   await db.query(`ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS notes TEXT`);
   await db.query(
-    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_spreadsheet_id TEXT`,
-  );
-  await db.query(
-    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_spreadsheet_url TEXT`,
-  );
-  await db.query(
-    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_created_at TIMESTAMPTZ`,
-  );
-  await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_id TEXT`,
   );
   await db.query(
@@ -327,31 +271,11 @@ async function ensureTables() {
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS process_doc_created_at TIMESTAMPTZ`,
   );
   await db.query(
-    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_stage TEXT DEFAULT 'pending_comercial'`,
-  );
-  await db.query(
-    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS bc_progress JSONB DEFAULT '{}'`,
-  );
-  await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS request_type TEXT DEFAULT 'purchase'`,
   );
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_request_id INTEGER`,
   );
-  await db.query(`
-    CREATE TABLE IF NOT EXISTS equipment_purchase_bc_items (
-      id UUID PRIMARY KEY,
-      request_id UUID REFERENCES equipment_purchase_requests(id) ON DELETE CASCADE,
-      name TEXT NOT NULL,
-      characteristics TEXT,
-      status TEXT,
-      quantity NUMERIC,
-      price NUMERIC,
-      total NUMERIC,
-      created_by INTEGER,
-      created_at TIMESTAMPTZ DEFAULT now()
-    );
-  `);
   initialized = true;
 }
 
@@ -402,184 +326,6 @@ function buildInspectionPayload({ request, clientInfo, inspection_min_date, insp
     accesorios: "",
     observaciones: request.notes || "",
   };
-}
-
-async function getFirstSheetTitle(spreadsheetId) {
-  const meta = await sheets.spreadsheets.get({ spreadsheetId });
-  return meta.data?.sheets?.[0]?.properties?.title;
-}
-
-async function updateSheetByLabel({ spreadsheetId, updates }) {
-  if (!spreadsheetId || !Object.keys(updates || {}).length) return false;
-  const sheetTitle = await getFirstSheetTitle(spreadsheetId);
-  if (!sheetTitle) return false;
-
-  const { data } = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${sheetTitle}!${BUSINESS_CASE_SHEET_RANGE}`,
-  });
-
-  const rows = data.values || [];
-  const ranges = [];
-  Object.entries(updates).forEach(([label, value]) => {
-    const rowIndex = rows.findIndex((row) => String(row?.[0] || "").trim().toLowerCase() === String(label || "").trim().toLowerCase());
-    if (rowIndex >= 0) {
-      ranges.push({
-        range: `${sheetTitle}!B${rowIndex + 1}`,
-        values: [[value ?? ""]],
-      });
-    }
-  });
-
-  if (!ranges.length) return false;
-
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: {
-      valueInputOption: "USER_ENTERED",
-      data: ranges,
-    },
-  });
-  return true;
-}
-
-async function syncBusinessCaseItemsToSheet({ spreadsheetId, items }) {
-  if (!spreadsheetId) return false;
-  const sheetTitle = await getFirstSheetTitle(spreadsheetId);
-  if (!sheetTitle) return false;
-
-  const { data } = await sheets.spreadsheets.values.get({
-    spreadsheetId,
-    range: `${sheetTitle}!${BUSINESS_CASE_SHEET_RANGE}`,
-  });
-
-  const rows = data.values || [];
-  const startIndex = rows.findIndex((row) => String(row?.[0] || "").toLowerCase().includes("inversiones adicionales"));
-  if (startIndex === -1) return false;
-
-  const subtotalIndex = rows.findIndex((row) => String(row?.[0] || "").toLowerCase().includes("sub total"));
-  const writableStart = startIndex + 2; // deja fila de título y cabecera
-  const maxRows = subtotalIndex > writableStart ? subtotalIndex - writableStart : items.length;
-  const normalizedItems = Array.isArray(items) ? items.slice(0, maxRows) : [];
-  const fillRows = Math.max(normalizedItems.length, 8);
-
-  const emptyBlock = Array.from({ length: fillRows }, () => ["", "", "", "", "", ""]);
-  const itemBlock = normalizedItems.map((item) => [
-    item.name || "",
-    item.characteristics || "",
-    item.status || "",
-    item.quantity ?? "",
-    item.price ?? "",
-    item.total ?? "",
-  ]);
-
-  const requests = [
-    {
-      range: `${sheetTitle}!A${writableStart}:F${writableStart + fillRows - 1}`,
-      values: emptyBlock,
-    },
-  ];
-
-  if (itemBlock.length) {
-    requests.push({
-      range: `${sheetTitle}!A${writableStart}:F${writableStart + itemBlock.length - 1}`,
-      values: itemBlock,
-    });
-  }
-
-  await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
-    requestBody: { valueInputOption: "USER_ENTERED", data: requests },
-  });
-
-  return true;
-}
-
-function buildBusinessCaseName(request) {
-  const monthYear = new Date().toLocaleDateString("es-EC", { month: "long", year: "numeric" }).toUpperCase();
-  const equipmentLabels = Array.isArray(request?.equipment)
-    ? request.equipment
-        .map((item) => item?.name || item?.sku || item?.id)
-        .filter(Boolean)
-        .slice(0, 3)
-        .join(",")
-    : "";
-  const suffix = equipmentLabels ? `-${equipmentLabels}` : "";
-  return `BC-${request?.client_name || "CLIENTE"}${suffix ? `-${suffix}` : ""}-${monthYear}`;
-}
-
-function buildBusinessCasePrefill({ request, clientInfo }) {
-  const extra = request?.extra || {};
-  return {
-    "TIPO DE CLIENTE": extra.tipo_cliente || "",
-    "ENTIDAD CONTRATANTE": extra.entidad_contratante || "",
-    CLIENTE: request?.client_name || clientInfo?.commercial_name || "",
-    "Provincia /Ciudad": extra.ciudad || extra.provincia || "",
-    "Código del Proceso": extra.codigo_proceso || "",
-    "Objeto de contratación": extra.objeto_contratacion || "",
-    "Número de días por semana que trabaja el laboratorio": extra.dias_lab || "",
-    "Turnos por dia": extra.turnos_dia || "",
-    "Horas por turno": extra.horas_turno || "",
-    "Controles de calidad por turno": extra.controles_por_turno || "",
-    "Niveles de Control": extra.niveles_control || "",
-    "Frecuencia de controles de calidad  (Rutina)": extra.frecuencia_calidad || "",
-    "Pruebas Especiales": extra.pruebas_especiales || "",
-    "Frecuencia de controles de calidad pruebas especiales": extra.frecuencia_especiales || "",
-    "Nombre de Equipo Principal": extra.equipo_principal || "",
-    "Estado de equipo principal (nuevo / usado/ año de fabricación) TDR": extra.estado_equipo_principal || "",
-    "Estado de equipo: Propio / Alquilado /Nuevo /Reservado/ Serie (FAM)": extra.estado_equipo_propiedad || "",
-    "Imagen reserva de equipo": extra.imagen_reserva_equipo || "",
-    "Nombre de Equipo Back up": extra.equipo_backup || "",
-    "Estado de equipo back up (nuevo / usado/ año de fabricación)": extra.estado_equipo_backup || "",
-    "Se debe instalar a la par del equipo principal? SI/NO": extra.backup_paralelo || "",
-    "Ubicación de los equipos a instalar": extra.ubicacion_equipos || "",
-    "Permite equipo provisional": extra.permite_equipo_provisional || "",
-    "Requiere equipo complementario) SI/NO": extra.requiere_equipo_complementario || "",
-    "Equipo complementario, para que prueba": extra.equipo_complementario_para || "",
-    "Incluye LIS : Si / No": extra.incluye_lis || "",
-    "Proveedor del sistema a trabajar": extra.proveedor_lis || "",
-    "Incluye Hadware: Si/No": extra.incluye_hardware || "",
-    "Número de pacientes MENSUAL": extra.pacientes_mensual || "",
-    "Interfaz a sistema actual": extra.interfaz_sistema_actual || "",
-    "Nombre del sistema": extra.nombre_sistema || "",
-    Proveedor: extra.proveedor_sistema || "",
-    "Incluye Hadware: Si/No ": extra.incluye_hardware_actual || "",
-    "Interfaz de equipos": extra.interfaz_equipos || "",
-    "Modelo / Proveedor": extra.interfaz_modelo_1 || "",
-    "Modelo / Proveedor ": extra.interfaz_modelo_2 || "",
-    "Modelo / Proveedor  ": extra.interfaz_modelo_3 || "",
-    Plazo: extra.plazo || "",
-    "Proyección de plazo": extra.proyeccion_plazo || "",
-    "Total/Parcial - tiempo/Parcial a necesidad del laboratorio": extra.entregas_plan || "",
-    "Determinacion Efectiva Si/No": extra.determinacion_efectiva || "",
-  };
-}
-
-async function ensureBusinessCaseDocument({ request, clientInfo, user }) {
-  if (request?.bc_spreadsheet_id) return request;
-  if (!request?.drive_folder_id || !BUSINESS_CASE_TEMPLATE_ID) return request;
-
-  try {
-    const name = buildBusinessCaseName(request);
-    const copy = await copyTemplate(BUSINESS_CASE_TEMPLATE_ID, name, request.drive_folder_id);
-    const prefills = buildBusinessCasePrefill({ request, clientInfo });
-    await updateSheetByLabel({ spreadsheetId: copy.id, updates: prefills });
-
-    await db.query(
-      `UPDATE equipment_purchase_requests
-          SET bc_spreadsheet_id = $1,
-              bc_spreadsheet_url = $2,
-              bc_created_at = now(),
-              updated_at = now()
-        WHERE id = $3`,
-      [copy.id, copy.webViewLink || null, request.id],
-    );
-
-    return { ...request, bc_spreadsheet_id: copy.id, bc_spreadsheet_url: copy.webViewLink };
-  } catch (error) {
-    logger.warn("No se pudo generar Business Case automático: %s", error.message);
-    return request;
-  }
 }
 
 function buildPurchaseDocumentName(request) {
@@ -649,17 +395,17 @@ async function ensureActaForInspection({ inspectionRequest, user }) {
   }
 }
 
-async function ensureBusinessCaseFolder(clientName) {
+async function ensurePurchaseFolder(clientName) {
   const root = await getRootFolder();
   const comercialFolder = await ensureFolder(COMMERCIAL_FOLDER_NAME, root.id);
-  const businessCaseFolder = await ensureFolder(BUSINESS_CASE_FOLDER_NAME, comercialFolder.id);
+  const purchaseFolder = await ensureFolder(PURCHASE_FOLDER_NAME, comercialFolder.id);
 
   const safeName = (() => {
     const cleaned = String(clientName || "Cliente").trim().replace(/[\/\\:*?"<>|]/g, "-");
     return cleaned.length ? cleaned : "Cliente";
   })();
 
-  const clientFolder = await ensureFolder(safeName, businessCaseFolder.id);
+  const clientFolder = await ensureFolder(safeName, purchaseFolder.id);
   return clientFolder.id;
 }
 
@@ -715,6 +461,22 @@ async function getAcpCommercialUsers() {
 }
 
 async function getEquipmentCatalog() {
+  try {
+    const modelos = await inventarioService.listModelos();
+    if (Array.isArray(modelos) && modelos.length) {
+      return modelos.map((row) => ({
+        id: row.id,
+        name: row.nombre || row.modelo || "Equipo",
+        sku: row.sku,
+        maker: row.fabricante || null,
+        model: row.modelo || row.nombre || null,
+        category: row.categoria || null,
+      }));
+    }
+  } catch (error) {
+    logger.warn("No se pudieron cargar modelos de equipos: %s", error.message);
+  }
+
   const { rows } = await db.query(
     `SELECT u.id      AS unidad_id,
             u.serial,
@@ -751,65 +513,6 @@ async function getEquipmentCatalog() {
   }));
 }
 
-async function getBusinessCaseOptions() {
-  await ensureTables();
-  const rowsResult = await db.query(`SELECT client_name, extra FROM equipment_purchase_requests`);
-
-  const sets = {
-    client_types: new Set(),
-    contract_entities: new Set(),
-    clients: new Set(),
-    locations: new Set(),
-    equipment_names: new Set(),
-    lis_providers: new Set(),
-    lis_systems: new Set(),
-    bc_codes: new Set(),
-    bc_objects: new Set(),
-  };
-
-  rowsResult.rows.forEach((row) => {
-    const extra = typeof row.extra === "string" ? safeJsonParse(row.extra, {}) : row.extra || {};
-    if (row.client_name) sets.clients.add(row.client_name);
-    if (extra.tipo_cliente) sets.client_types.add(extra.tipo_cliente);
-    if (extra.entidad_contratante) sets.contract_entities.add(extra.entidad_contratante);
-    if (extra.ciudad || extra.provincia) sets.locations.add(`${extra.provincia || ""} ${extra.ciudad || ""}`.trim());
-    if (extra.codigo_proceso) sets.bc_codes.add(extra.codigo_proceso);
-    if (extra.objeto_contratacion) sets.bc_objects.add(extra.objeto_contratacion);
-    [extra.equipo_principal, extra.equipo_backup, extra.equipo_complementario_para]
-      .filter(Boolean)
-      .forEach((eq) => sets.equipment_names.add(eq));
-    [extra.proveedor_lis, extra.proveedor_sistema]
-      .filter(Boolean)
-      .forEach((provider) => sets.lis_providers.add(provider));
-    [extra.nombre_sistema, extra.lis_system]
-      .filter(Boolean)
-      .forEach((system) => sets.lis_systems.add(system));
-  });
-
-  const equipmentCatalog = await getEquipmentCatalog();
-  equipmentCatalog.forEach((item) => item.name && sets.equipment_names.add(item.name));
-
-  const clients = await getApprovedClients();
-  clients.forEach((client) => client.name && sets.clients.add(client.name));
-
-  const investments = new Set(ADDITIONAL_INVESTMENT_CATALOG);
-
-  const normalize = (set) => Array.from(set).filter(Boolean).map((v) => String(v)).sort((a, b) => a.localeCompare(b, "es"));
-
-  return {
-    client_types: normalize(sets.client_types),
-    contract_entities: normalize(sets.contract_entities),
-    clients: normalize(sets.clients),
-    locations: normalize(sets.locations),
-    equipment_names: normalize(sets.equipment_names),
-    lis_providers: normalize(sets.lis_providers),
-    lis_systems: normalize(sets.lis_systems),
-    bc_codes: normalize(sets.bc_codes),
-    bc_objects: normalize(sets.bc_objects),
-    investment_catalog: normalize(investments),
-  };
-}
-
 async function listByUser(user) {
   await ensureTables();
   const params = [];
@@ -817,12 +520,8 @@ async function listByUser(user) {
   const role = normalizeRole(user?.role);
 
   if (!canManageAll(user)) {
-    if (role === "jefe_tecnico" || role === "jefe_operaciones") {
-      query += ` WHERE bc_stage = 'investments'`;
-    } else {
-      query += ` WHERE created_by = $1 OR assigned_to = $1`;
-      params.push(user.id);
-    }
+    query += ` WHERE created_by = $1 OR assigned_to = $1`;
+    params.push(user.id);
   }
 
   query += ` ORDER BY created_at DESC`;
@@ -838,8 +537,7 @@ async function getById(id, user) {
   const role = normalizeRole(user?.role);
   const isCreator = row?.created_by === user?.id;
   const isAssignee = row?.assigned_to === user?.id;
-  const isBcSupport = (role === "jefe_tecnico" || role === "jefe_operaciones") && row?.bc_stage === "investments";
-  if (!row || (!isCreator && !isAssignee && !canManageAll(user) && !isBcSupport)) return null;
+  if (!row || (!isCreator && !isAssignee && !canManageAll(user))) return null;
   let mapped = mapRequestRow(row);
 
   if (!mapped.process_doc_link && PURCHASE_PROCESS_TEMPLATE_ID) {
@@ -884,16 +582,15 @@ async function createPurchaseRequest({
     throw new Error("El cliente es obligatorio");
   }
 
-  if (requestType !== "business_case" && !equipment.length) {
+  if (!equipment.length) {
     throw new Error("Cliente y al menos un equipo son obligatorios");
   }
 
   const canSendAvailability = canManageAll(user);
-  const isBusinessCaseOnly = requestType === "business_case";
   const provider = canSendAvailability ? providerEmail : null;
 
   const assigneeUser = assignedTo ? await getUserById(assignedTo) : null;
-  const resolvedAssignee = assigneeUser || (canSendAvailability || isBusinessCaseOnly ? user : null);
+  const resolvedAssignee = assigneeUser || (canSendAvailability ? user : null);
 
   if (!resolvedAssignee) {
     throw new Error("Debes asignar la solicitud a un ACP Comercial");
@@ -901,7 +598,7 @@ async function createPurchaseRequest({
 
   const id = uuidv4();
   const createdAt = new Date();
-  const folderId = await ensureBusinessCaseFolder(clientName);
+  const folderId = await ensurePurchaseFolder(clientName);
 
   const extraPayload = {
     ...(extra || {}),
@@ -910,46 +607,44 @@ async function createPurchaseRequest({
   };
 
   let emailFileId = null;
-  let status = isBusinessCaseOnly ? STATUS.BUSINESS_CASE : STATUS.PENDING_PROVIDER;
+  let status = STATUS.PENDING_PROVIDER;
 
-  if (!isBusinessCaseOnly) {
-    const equipmentList = equipment
-      .map((item) => {
-        const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
-        const name = item.name || item.sku || item.id || "Equipo";
-        return `• ${name}${typeLabel}`;
-      })
-      .join("<br>");
+  const equipmentList = equipment
+    .map((item) => {
+      const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
+      const name = item.name || item.sku || item.id || "Equipo";
+      return `• ${name}${typeLabel}`;
+    })
+    .join("<br>");
 
-    const html = `
+  const html = `
       <h2>Solicitud de disponibilidad</h2>
       <p>Equipos requeridos para la solicitud #${id}:</p>
       <p>${equipmentList}</p>
       ${notes ? `<p>Notas: ${notes}</p>` : ""}
     `;
 
-    const requestSnapshot = {
-      id,
-      client_name: clientName,
-      provider_email: provider,
-      equipment,
-      created_at: createdAt,
-      notes,
-    };
+  const requestSnapshot = {
+    id,
+    client_name: clientName,
+    provider_email: provider,
+    equipment,
+    created_at: createdAt,
+    notes,
+  };
 
-    if (provider) {
-      emailFileId = await sendAndArchive({
-        user,
-        to: provider,
-        subject: `Disponibilidad de equipos - Solicitud #${id}`,
-        html,
-        folderId,
-        prefix: "disponibilidad",
-        request: requestSnapshot,
-        actionLabel: "Informe de disponibilidad de equipos",
-      });
-      status = STATUS.WAITING_PROVIDER;
-    }
+  if (provider) {
+    emailFileId = await sendAndArchive({
+      user,
+      to: provider,
+      subject: `Disponibilidad de equipos - Solicitud #${id}`,
+      html,
+      folderId,
+      prefix: "disponibilidad",
+      request: requestSnapshot,
+      actionLabel: "Informe de disponibilidad de equipos",
+    });
+    status = STATUS.WAITING_PROVIDER;
   }
 
   const { rows } = await db.query(
@@ -990,18 +685,33 @@ async function createPurchaseRequest({
     logger.warn("No se pudieron obtener los datos del cliente %s: %s", clientId, error.message);
   }
 
-  if (!isBusinessCaseOnly) {
-    try {
-      created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
-    } catch (error) {
-      logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
-    }
+  try {
+    created = await ensurePurchaseProcessDocument({ request: created, clientInfo });
+  } catch (error) {
+    logger.warn("No se pudo crear documento base del proceso de compra: %s", error.message);
   }
 
   try {
-    created = await ensureBusinessCaseDocument({ request: created, clientInfo, user });
-  } catch (error) {
-    logger.warn("No se pudo crear Business Case automático al iniciar: %s", error.message);
+    await notifyUsers({
+      userIds: [created.created_by, created.assigned_to].filter((id) => id && id !== created.created_by),
+      title: "Nueva solicitud de compra pública",
+      message: `${created.client_name || "Cliente"} · Solicitud creada`,
+      type: "task",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: created.id, client_name: created.client_name },
+    });
+    await notifyUsers({
+      userIds: [created.created_by],
+      title: "Solicitud enviada",
+      message: "Tu solicitud de compra pública fue enviada para aprobación.",
+      type: "info",
+      source: "equipment_purchases",
+      priority: 0,
+      meta: { request_id: created.id, client_name: created.client_name },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: created.id }, "No se pudieron enviar notificaciones de creación");
   }
 
   return created;
@@ -1077,6 +787,12 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes }) {
   await ensureTables();
   const request = await getById(id, user);
   if (!request) throw new Error("Solicitud no encontrada o sin acceso");
+  if (!request.availability_email_sent_at) {
+    const error = new Error("Debe enviar el correo de disponibilidad antes de registrar respuesta");
+    error.status = 409;
+    error.code = "AVAILABILITY_EMAIL_NOT_SENT";
+    throw error;
+  }
   if (request.status !== STATUS.WAITING_PROVIDER) {
     throw new Error("Esta solicitud ya tiene respuesta del proveedor");
   }
@@ -1096,7 +812,21 @@ async function saveProviderResponse({ id, user, outcome, items = [], notes }) {
       id,
     ],
   );
-  return rows[0];
+  const updated = rows[0];
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Respuesta de disponibilidad",
+      message: `Proveedor respondió disponibilidad para ${updated.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de disponibilidad");
+  }
+  return updated;
 }
 
 async function requestProforma({ id, user }) {
@@ -1140,7 +870,21 @@ async function requestProforma({ id, user }) {
       RETURNING *`,
     [STATUS.WAITING_PROFORMA, emailFileId, id],
   );
-  return rows[0];
+  const updated = rows[0];
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Proforma solicitada",
+      message: `Se solicitó la proforma para ${updated.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de proforma solicitada");
+  }
+  return updated;
 }
 
 async function uploadDocument(file, folderId, prefix) {
@@ -1172,10 +916,17 @@ async function uploadProforma({ id, user, file }) {
   const updated = mapRequestRow(rows[0]);
 
   try {
-    const clientInfo = await getClientDetails(request.client_id);
-    await ensureBusinessCaseDocument({ request: updated, clientInfo, user });
-  } catch (error) {
-    logger.warn("No se pudo crear Business Case tras proforma: %s", error.message);
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Proforma recibida",
+      message: `Se recibió la proforma para ${updated.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de proforma");
   }
 
   return updated;
@@ -1243,7 +994,21 @@ async function reserveEquipment({ id, user }) {
       id,
     ],
   );
-  return rows[0];
+  const updated = rows[0];
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Reserva enviada",
+      message: `Se envió la reserva para ${updated.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de reserva");
+  }
+  return updated;
 }
 
 async function uploadSignedProforma({ id, user, file, inspection_min_date, inspection_max_date, includes_starter_kit }) {
@@ -1301,8 +1066,6 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
             contract_reminder_event_id = $6,
             contract_reminder_event_link = $7,
             status = $8,
-            bc_stage = 'pending_comercial',
-            bc_progress = '{}'::jsonb,
             updated_at = now()
       WHERE id = $9
       RETURNING *`,
@@ -1318,7 +1081,21 @@ async function uploadSignedProforma({ id, user, file, inspection_min_date, inspe
       id,
     ],
   );
-  return rows[0];
+  const updated = rows[0];
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Proforma firmada",
+      message: `Se subió la proforma firmada para ${updated.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de proforma firmada");
+  }
+  return updated;
 }
 
 async function submitSignedProformaWithInspection({
@@ -1384,6 +1161,20 @@ async function submitSignedProformaWithInspection({
     }
   }
 
+  try {
+    await notifyUsers({
+      userIds: [signedResult?.created_by, signedResult?.assigned_to],
+      title: "Inspecci?n creada",
+      message: `Se gener? la inspecci?n para ${signedResult?.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: signedResult?.id, inspection_id: inspectionId || null },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: signedResult?.id }, "No se pudieron enviar notificaciones de inspecci?n");
+  }
+
   return { purchase_request: signedResult, inspection_request: inspectionWithActa };
 }
 
@@ -1408,6 +1199,21 @@ async function uploadContract({ id, user, file }) {
   );
 
   const completed = rows[0];
+
+  try {
+    const gerencia = await getSingleUserByRole("gerencia_general");
+    await notifyUsers({
+      userIds: [completed.created_by, completed.assigned_to, gerencia?.id],
+      title: "Contrato subido",
+      message: `Contrato subido para ${completed.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 2,
+      meta: { request_id: completed.id },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: completed.id }, "No se pudieron enviar notificaciones de contrato");
+  }
 
   // Enviar notificación automática de equipo disponible
   setImmediate(async () => {
@@ -1455,143 +1261,6 @@ async function uploadContract({ id, user, file }) {
   return completed;
 }
 
-async function updateBusinessCaseFields({ id, user, fields }) {
-  await ensureTables();
-  const request = await getById(id, user);
-  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
-
-  const clientInfo = await getClientDetails(request.client_id);
-  const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
-  if (!ensured?.bc_spreadsheet_id) {
-    throw new Error("No se pudo inicializar el Business Case para esta solicitud");
-  }
-
-  const role = normalizeRole(user.role);
-  const baseAllowed = new Set([
-    "comercial",
-    "acp_comercial",
-    "gerencia_general",
-    "jefe_operaciones",
-  ]);
-
-  if (!baseAllowed.has(role)) {
-    throw new Error("No tienes permisos para editar el Business Case");
-  }
-
-  const commercialFields = new Set(Object.keys(buildBusinessCasePrefill({ request, clientInfo })));
-  const gerenciaFields = new Set([
-    "Cobro de arriendo de equipamento",
-    "Compromiso de compra",
-  ]);
-  const acpFields = new Set([
-    "Presupuesto Referencial de proceso",
-    "Observaciones",
-  ]);
-
-  const operationsFields = new Set(["Observaciones de Jefe de Operaciones"]);
-
-  let allowedLabels = new Set();
-  if (role === "gerencia_general") allowedLabels = gerenciaFields;
-  else if (role === "acp_comercial") allowedLabels = acpFields;
-  else if (role === "jefe_operaciones") allowedLabels = operationsFields;
-  else allowedLabels = commercialFields;
-
-  const filtered = Object.fromEntries(
-    Object.entries(fields || {}).filter(([label]) => allowedLabels.has(label)),
-  );
-
-  await updateSheetByLabel({ spreadsheetId: ensured.bc_spreadsheet_id, updates: filtered });
-
-  const progress = typeof request.bc_progress === "string" ? safeJsonParse(request.bc_progress, {}) : request.bc_progress || {};
-
-  if (role === "comercial") progress.comercial = true;
-  if (role === "acp_comercial") progress.acp_comercial = true;
-  if (role === "gerencia_general") progress.gerencia = true;
-  if (role === "jefe_operaciones") progress.jefe_operaciones = true;
-
-  const nextStage = computeBusinessCaseStage(progress);
-
-  const { rows } = await db.query(
-    `UPDATE equipment_purchase_requests
-        SET bc_progress = $1,
-            bc_stage = $2,
-            updated_at = now()
-      WHERE id = $3
-      RETURNING *`,
-    [JSON.stringify(progress), nextStage, id],
-  );
-
-  return mapRequestRow(rows[0]);
-}
-
-async function addBusinessCaseItem({ id, user, item }) {
-  await ensureTables();
-  const request = await getById(id, user);
-  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
-
-  const progress = typeof request.bc_progress === "string" ? safeJsonParse(request.bc_progress, {}) : request.bc_progress || {};
-  const stage = computeBusinessCaseStage(progress);
-  if (stage !== "investments") {
-    throw new Error("Las inversiones adicionales se habilitan cuando Comercial, ACP Comercial y Gerencia completan sus datos");
-  }
-
-  const clientInfo = await getClientDetails(request.client_id);
-  const ensured = await ensureBusinessCaseDocument({ request, clientInfo, user });
-
-  const role = normalizeRole(user.role);
-  const canEditPrice = role === "jefe_operaciones";
-  const allowedRoles = new Set(["comercial", "acp_comercial", "jefe_tecnico", "jefe_operaciones"]);
-
-  if (!allowedRoles.has(role)) {
-    throw new Error("No tienes permisos para registrar inversiones adicionales");
-  }
-
-  const sanitizedItem = {
-    name: item?.name || item?.concepto || "Concepto",
-    characteristics: item?.characteristics || item?.descripcion || "",
-    status: item?.status || "",
-    quantity: item?.quantity ?? null,
-    price: canEditPrice ? item?.price ?? null : null,
-    total: canEditPrice ? item?.total ?? null : null,
-  };
-
-  const { rows } = await db.query(
-    `INSERT INTO equipment_purchase_bc_items (id, request_id, name, characteristics, status, quantity, price, total, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING *`,
-    [
-      uuidv4(),
-      id,
-      sanitizedItem.name,
-      sanitizedItem.characteristics,
-      sanitizedItem.status,
-      sanitizedItem.quantity,
-      sanitizedItem.price,
-      sanitizedItem.total,
-      user.id,
-    ],
-  );
-
-  const items = await listBusinessCaseItems({ id, user });
-  if (ensured.bc_spreadsheet_id) {
-    await syncBusinessCaseItemsToSheet({ spreadsheetId: ensured.bc_spreadsheet_id, items });
-  }
-
-  return rows[0];
-}
-
-async function listBusinessCaseItems({ id, user }) {
-  await ensureTables();
-  const request = await getById(id, user);
-  if (!request) throw new Error("Solicitud no encontrada o sin acceso");
-
-  const { rows } = await db.query(
-    `SELECT * FROM equipment_purchase_bc_items WHERE request_id = $1 ORDER BY created_at ASC`,
-    [id],
-  );
-  return rows;
-}
-
 async function getStats({ requestType = "purchase" } = {}) {
   await ensureTables();
   const { rows } = await db.query(
@@ -1619,7 +1288,6 @@ module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
   getEquipmentCatalog,
-  getBusinessCaseOptions,
   listByUser,
   getById,
   createPurchaseRequest,
@@ -1631,9 +1299,6 @@ module.exports = {
   uploadSignedProforma,
   submitSignedProformaWithInspection,
   uploadContract,
-  updateBusinessCaseFields,
-  addBusinessCaseItem,
-  listBusinessCaseItems,
   getStats,
   STATUS,
 };

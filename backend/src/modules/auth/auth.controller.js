@@ -71,6 +71,8 @@ const ROLE_META = {
     dashboard: "/dashboard/talento-humano",
   },
   administrador: { scope: "admin", dashboard: "/dashboard/gerencia" },
+  pending: { scope: "pending", dashboard: "/registro-en-proceso" },
+  pendiente: { scope: "pending", dashboard: "/registro-en-proceso" },
 };
 const resolveRoleMeta = (role) => {
   const key = (role || "pendiente").toLowerCase();

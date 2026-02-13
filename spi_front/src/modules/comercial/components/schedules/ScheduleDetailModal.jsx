@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { FiCalendar, FiCheck, FiX, FiMapPin } from "react-icons/fi";
+import { FiCalendar, FiCheck, FiClock, FiMapPin, FiX } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
 import { formatDateEC } from "../../../../core/utils/dateUtils";
 
@@ -11,6 +11,36 @@ const groupByDate = (visits = []) => {
     return acc;
   }, {});
 };
+
+const formatTime = (value) => {
+  if (!value) return "?";
+  try {
+    return new Date(value).toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit" });
+  } catch (error) {
+    return value;
+  }
+};
+
+const visitStatusLabel = (status) => {
+  const labels = {
+    visited: "Cumplida",
+    pending: "Pendiente",
+    skipped: "No cumplida",
+    in_visit: "En visita",
+  };
+  return labels[status] || "Sin estado";
+};
+
+const hasVisitDetails = (visit) =>
+  Boolean(
+    visit?.hora_entrada ||
+      visit?.hora_salida ||
+      visit?.lat_entrada ||
+      visit?.lng_entrada ||
+      visit?.lat_salida ||
+      visit?.lng_salida ||
+      visit?.observaciones
+  );
 
 const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
   const grouped = useMemo(() => groupByDate(schedule?.visits || []), [schedule]);
@@ -25,14 +55,20 @@ const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
           <p className="text-sm text-gray-600 flex items-center gap-2">
             <FiCalendar className="text-blue-600" /> Mes {schedule.month} / {schedule.year}
           </p>
+          <p className="text-xs text-gray-500 mt-1">
+            Enviado: {schedule.submitted_at ? new Date(schedule.submitted_at).toLocaleString("es-EC") : "?"}
+          </p>
+          <p className="text-xs text-gray-500">
+            Aprobado por: {schedule.reviewed_by_email || "?"} ? {schedule.reviewed_at ? new Date(schedule.reviewed_at).toLocaleString("es-EC") : "?"}
+          </p>
         </div>
         <div className="flex gap-2">
-          {onApprove && (
+          {onApprove && schedule.status === "pending_approval" && (
             <Button size="sm" variant="success" icon={FiCheck} onClick={onApprove}>
               Aprobar
             </Button>
           )}
-          {onReject && (
+          {onReject && schedule.status === "pending_approval" && (
             <Button size="sm" variant="danger" icon={FiX} onClick={onReject}>
               Rechazar
             </Button>
@@ -60,22 +96,163 @@ const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
               </p>
               <span className="text-xs text-gray-500">{visits.length} visitas</span>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-3">
               {visits.map((visit) => (
-                <div key={visit.id} className="flex items-center justify-between text-sm text-gray-700">
-                  <div className="flex items-center gap-2">
-                    <FiMapPin className="text-gray-400" />
-                    <div>
-                      <p className="font-semibold text-gray-900">{visit.client_name || `Cliente ${visit.client_request_id}`}</p>
-                      <p className="text-xs text-gray-500">{visit.city}</p>
+                <div key={visit.id} className="rounded-lg border border-gray-100 p-3 text-sm text-gray-700">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <FiMapPin className="text-gray-400" />
+                      <div>
+                        <p className="font-semibold text-gray-900">{visit.client_name || `Cliente ${visit.client_request_id}`}</p>
+                        <p className="text-xs text-gray-500">{visit.city || "Ciudad no especificada"}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="px-2 py-1 rounded-full bg-gray-100 text-gray-700">
+                        Prioridad {visit.priority || 1}
+                      </span>
+                      <span
+                        className={`px-2 py-1 rounded-full ${
+                          visit.visit_status === "visited"
+                            ? "bg-emerald-100 text-emerald-700"
+                            : visit.visit_status === "skipped"
+                            ? "bg-rose-100 text-rose-700"
+                            : visit.visit_status === "in_visit"
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-slate-100 text-slate-600"
+                        }`}
+                      >
+                        {visitStatusLabel(visit.visit_status)}
+                      </span>
                     </div>
                   </div>
-                  <span className="text-xs px-2 py-1 rounded-full bg-gray-100 text-gray-700">Prioridad {visit.priority || 1}</span>
+
+                  <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <FiClock className="text-gray-400" />
+                      <span>Entrada: {formatTime(visit.hora_entrada)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FiClock className="text-gray-400" />
+                      <span>Salida: {formatTime(visit.hora_salida)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FiMapPin className="text-gray-400" />
+                      <span>
+                        Ubicacion entrada: {visit.lat_entrada && visit.lng_entrada ? `${visit.lat_entrada}, ${visit.lng_entrada}` : "Sin registro"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FiMapPin className="text-gray-400" />
+                      <span>
+                        Ubicacion salida: {visit.lat_salida && visit.lng_salida ? `${visit.lat_salida}, ${visit.lng_salida}` : "Sin registro"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 text-xs text-gray-600">
+                    Observaciones: {visit.observaciones || "Sin observaciones"}
+                    {!hasVisitDetails(visit) && (
+                      <span className="ml-2 text-[10px] text-amber-600">Sin detalles de visita</span>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
         ))}
+      </div>
+
+      <div className="border border-gray-100 rounded-lg p-3">
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-semibold text-gray-900 flex items-center gap-2">
+            <FiMapPin className="text-gray-500" /> Visitas inesperadas
+          </p>
+          <span className="text-xs text-gray-500">
+            {(schedule.unexpected_visits || []).length +
+              (schedule.unexpected_client_visits || []).length}{" "}
+            registros
+          </span>
+        </div>
+        {!(schedule.unexpected_visits || []).length &&
+        !(schedule.unexpected_client_visits || []).length ? (
+          <p className="text-xs text-gray-500">No hay visitas inesperadas registradas.</p>
+        ) : (
+          <div className="space-y-2">
+            {(schedule.unexpected_client_visits || []).map((visit) => (
+              <div key={`client-${visit.id}`} className="rounded-lg border border-gray-100 p-3 text-xs text-gray-700">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-gray-900">
+                    {visit.client_name || `Cliente ${visit.client_request_id}`}
+                  </p>
+                  <span className="text-[10px] text-gray-500">
+                    {visit.visit_date ? formatDateEC(visit.visit_date) : "Fecha no disponible"}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2">
+                    <FiClock className="text-gray-400" />
+                    <span>Entrada: {formatTime(visit.hora_entrada)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiClock className="text-gray-400" />
+                    <span>Salida: {formatTime(visit.hora_salida)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="text-gray-400" />
+                    <span>
+                      Ubicacion entrada: {visit.lat_entrada && visit.lng_entrada ? `${visit.lat_entrada}, ${visit.lng_entrada}` : "Sin registro"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="text-gray-400" />
+                    <span>
+                      Ubicacion salida: {visit.lat_salida && visit.lng_salida ? `${visit.lat_salida}, ${visit.lng_salida}` : "Sin registro"}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 text-[11px] text-gray-600">
+                  Estado: {visitStatusLabel(visit.status)} · Observaciones: {visit.observaciones || "Sin observaciones"}
+                </div>
+              </div>
+            ))}
+            {schedule.unexpected_visits.map((visit) => (
+              <div key={visit.id} className="rounded-lg border border-gray-100 p-3 text-xs text-gray-700">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-gray-900">{visit.prospect_name}</p>
+                  <span className="text-[10px] text-gray-500">
+                    {visit.visit_date ? formatDateEC(visit.visit_date) : "Fecha no disponible"}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <div className="flex items-center gap-2">
+                    <FiClock className="text-gray-400" />
+                    <span>Entrada: {formatTime(visit.check_in_time)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiClock className="text-gray-400" />
+                    <span>Salida: {formatTime(visit.check_out_time)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="text-gray-400" />
+                    <span>
+                      Ubicacion entrada: {visit.check_in_lat && visit.check_in_lng ? `${visit.check_in_lat}, ${visit.check_in_lng}` : "Sin registro"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="text-gray-400" />
+                    <span>
+                      Ubicacion salida: {visit.check_out_lat && visit.check_out_lng ? `${visit.check_out_lat}, ${visit.check_out_lng}` : "Sin registro"}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-2 text-[11px] text-gray-600">
+                  Observaciones: {visit.observations || "Sin observaciones"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

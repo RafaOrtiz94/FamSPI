@@ -16,21 +16,20 @@ import LoginCallback from "../modules/shared/pages/LoginCallback";
 import FirstLoginSignature from "../modules/shared/pages/FirstLoginSignature";
 import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
+import RolePending from "../modules/shared/pages/RolePending";
 
 // 🧭 Dashboards por rol
 import DashboardGerencia from "../modules/gerencia/Dashboard";
+import PurchasesAlbumPage from "../modules/gerencia/PurchasesAlbumPage";
 import DashboardFinanzas from "../modules/finanzas/Dashboard";
+import ViaticosWorkspace from "../modules/finanzas/pages/ViaticosWorkspace";
 import DashboardComercial from "../modules/comercial/pages/Dashboard";
 import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
 import ClientesPage from "../modules/comercial/pages/Clientes";
 import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
 import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
 import ACPEquipmentPurchasesPage from "../modules/comercial/pages/ACPEquipmentPurchases";
-import BusinessCasePage from "../modules/comercial/pages/BusinessCase";
-import UnifiedBCView from "../modules/comercial/pages/UnifiedBCView";
-import BusinessCaseWizard from "../modules/comercial/pages/BusinessCaseWizard";
 import BusinessCaseWorkspace from "../modules/comercial/pages/BusinessCaseWorkspace";
-import ManualBCForm from "../modules/comercial/pages/ManualBCForm";
 import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
 import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
 import DashboardServicio from "../modules/servicio/pages/Dashboard";
@@ -48,6 +47,7 @@ import ServicioPrivatePurchaseDeliveries from "../modules/servicio/pages/Private
 import TecnicoPrivatePurchases from "../modules/servicio/pages/TecnicoPrivatePurchases";
 import DashboardTalento from "../modules/talento/Dashboard";
 import DashboardTI from "../modules/talento/DashboardTI";
+import TicketsWorkspace from "../modules/ti/pages/TicketsWorkspace";
 import DashboardOperaciones from "../modules/operaciones/Dashboard";
 import DashboardCalidad from "../modules/calidad/Dashboard";
 import DashboardLogistica from "../modules/logistica/Dashboard";
@@ -57,14 +57,16 @@ import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
 import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
 import OperacionesPrivatePurchases from "../modules/operaciones/pages/OperacionesPrivatePurchases";
 import LogisticaPrivatePurchases from "../modules/logistica/pages/LogisticaPrivatePurchases";
+import LinksInteres from "../modules/shared/pages/LinksInteres";
 
 // 🛒 Workspace de Compras Unificado
 import PurchasesWorkspace from "../modules/shared/purchases-workspace/PurchasesWorkspace";
 
 // 📋 Páginas de Talento Humano
-import Usuarios from "../modules/talento/pages/Usuarios";
-import Departamentos from "../modules/talento/pages/Departamentos";
 import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
+import PersonnelWorkspace from "../modules/talento/pages/PersonnelWorkspace";
+import ColaboradoresHub from "../modules/talento/pages/ColaboradoresHub";
+import CollaboratorWorkspace from "../modules/talento/pages/CollaboratorWorkspace";
 
 // 🧾 Páginas compartidas
 import RequestsPage from "../modules/RequestsPage";
@@ -82,12 +84,13 @@ import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
 
 
 // Lazy loaded components
-const Solicitudes = lazy(() => import("../modules/talento/pages/Solicitudes"));
 const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
 
 const AppRoutes = () => {
   return (
     <Routes>
+      {/* Ruta directa para /registro-en-proceso (fallback duro) */}
+      <Route path="/registro-en-proceso" element={<RolePending />} />
       {/* =======================================
           🌐 RUTAS PÚBLICAS
       ======================================= */}
@@ -95,6 +98,7 @@ const AppRoutes = () => {
         <Route path="/login" element={<Login />} />
         <Route path="/login/callback" element={<LoginCallback />} />
         <Route path="/unauthorized" element={<Unauthorized />} />
+        <Route path="/registro-en-proceso" element={<RolePending />} />
 
         {/* 📝 Verificación pública de documentos firmados */}
         <Route path="/verificar/:token" element={<DocumentVerification />} />
@@ -110,6 +114,8 @@ const AppRoutes = () => {
               "gerencia",
               "gerencia_general",
               "finanzas",
+              "financiero",
+              "jefe_finanzas",
               "jefe_financiero",
               "comercial",
               "jefe_comercial",
@@ -120,6 +126,8 @@ const AppRoutes = () => {
               "jefe_servicio_tecnico",
               "talento_humano",
               "ti",
+              "jefe_ti",
+              "admin_ti",
               "operaciones",
               "jefe_logistica",
               "calidad",
@@ -134,6 +142,8 @@ const AppRoutes = () => {
         <Route element={<DashboardLayout />}>
           {/* Dashboards principales */}
           <Route path="/dashboard/gerencia" element={<DashboardGerencia />} />
+          <Route path="/dashboard/gerencia/aprobaciones-contratos" element={<PurchasesAlbumPage />} />
+          <Route path="/dashboard/gerencia/compras-album" element={<PurchasesAlbumPage />} />
           <Route path="/dashboard/finanzas" element={<DashboardFinanzas />} />
           <Route path="/dashboard/comercial" element={<DashboardComercial />} />
 
@@ -178,13 +188,10 @@ const AppRoutes = () => {
               />
             }
           >
-            <Route path="/dashboard/business-case" element={<BusinessCasePage />} />
-            <Route path="/dashboard/comercial/business-case" element={<BusinessCasePage />} />
-            <Route path="/dashboard/business-case/:id/view" element={<UnifiedBCView />} />
-            {/* Wizard route removed - no longer accessible from UI */}
+            <Route path="/dashboard/business-case" element={<BusinessCaseWorkspace />} />
+            <Route path="/dashboard/comercial/business-case" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace/:id" element={<BusinessCaseWorkspace />} />
-            <Route path="/dashboard/business-case/:id/manual-form" element={<ManualBCForm />} />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />
@@ -205,12 +212,16 @@ const AppRoutes = () => {
             <Route path="/dashboard/servicio-tecnico/compras-privadas" element={<TecnicoPrivatePurchases />} />
           </Route>
           <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
-          <Route path="/dashboard/ti" element={<DashboardTI />} />
+          <Route element={<ProtectedRoute allowedRoles={["ti", "jefe_ti", "admin_ti"]} />}>
+            <Route path="/dashboard/ti" element={<DashboardTI />} />
+            <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
+          </Route>
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
           <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
+          <Route path="/dashboard/links-interes" element={<LinksInteres />} />
 
           {/* Subrutas Operaciones - Compras Privadas */}
           <Route element={<ProtectedRoute allowedRoles={["jefe_operaciones"]} />}>
@@ -223,28 +234,73 @@ const AppRoutes = () => {
           </Route>
 
           {/* Subrutas Talento Humano */}
-          <Route path="/dashboard/talento-humano/usuarios" element={<Usuarios />} />
-          <Route path="/dashboard/talento-humano/departamentos" element={<Departamentos />} />
+          <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub />} />
+          <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorWorkspace />} />
+          <Route path="/dashboard/talento-humano/usuarios" element={<ColaboradoresHub initialTab="usuarios" />} />
+          <Route path="/dashboard/talento-humano/departamentos" element={<ColaboradoresHub initialTab="departamentos" />} />
           <Route
             path="/dashboard/talento-humano/solicitudes"
-            element={
-              <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-                <Solicitudes />
-              </Suspense>
-            }
+            element={<ColaboradoresHub initialTab="solicitudes" />}
           />
           <Route
-            path="/dashboard/talento-humano/asistencia-reportes"
+            element={<ProtectedRoute allowedRoles={["talento_humano", "gerencia", "gerencia_general", "admin"]} />}
+          >
+            <Route path="/dashboard/talento-humano/workspace-personal" element={<PersonnelWorkspace />} />
+            <Route path="/dashboard/talento-humano/workspace-personal/:id" element={<PersonnelWorkspace />} />
+          </Route>
+          <Route
             element={
-              <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-                <AsistenciaReportes />
-              </Suspense>
+              <ProtectedRoute
+                allowedRoles={[
+                  "talento_humano",
+                  "jefe_talento_humano",
+                  "gerencia",
+                  "gerencia_general",
+                  "finanzas",
+                  "financiero",
+                  "jefe_finanzas",
+                  "jefe_financiero",
+                ]}
+              />
             }
-          />
+          >
+            <Route
+              path="/dashboard/talento-humano/asistencia-reportes"
+              element={
+                <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
+                  <AsistenciaReportes />
+                </Suspense>
+              }
+            />
+          </Route>
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "finanzas",
+                  "financiero",
+                  "jefe_finanzas",
+                  "jefe_financiero",
+                  "gerencia",
+                  "gerencia_general",
+                  "comercial",
+                  "jefe_comercial",
+                  "acp_comercial",
+                  "backoffice_comercial",
+                  "servicio_tecnico",
+                  "tecnico",
+                  "jefe_tecnico",
+                  "jefe_servicio_tecnico",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/finanzas/viaticos" element={<ViaticosWorkspace />} />
+          </Route>
           <Route path="/dashboard/talento-humano/permisos" element={<PermisosPage />} />
 
           {/* Auditoría (solo Gerencia y TI) */}
-          <Route element={<ProtectedRoute allowedRoles={["gerencia", "ti"]} />}>
+          <Route element={<ProtectedRoute allowedRoles={["gerencia", "gerencia_general", "gerente_general", "ti"]} />}>
             <Route path="/dashboard/auditoria" element={<Auditoria />} />
           </Route>
 

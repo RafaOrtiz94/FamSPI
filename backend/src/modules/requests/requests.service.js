@@ -11,6 +11,7 @@ const { v4: uuidv4 } = require("uuid");
 const { drive, docs } = require("../../config/google");
 const QRCode = require("qrcode");
 const { Readable } = require("stream");
+const PDFDocument = require("pdfkit");
 const {
   copyTemplate,
   replaceTags,
@@ -23,6 +24,7 @@ const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
 const gmailService = require("../../services/gmail.service");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
+const notificationManager = require("../notifications/notificationManager");
 const crypto = require("crypto");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
@@ -102,6 +104,83 @@ const uniqueRecipients = (...emails) => {
   return [...new Set(recipients.map((e) => e.trim().toLowerCase()))];
 };
 
+async function getBackofficeCommercialUsers() {
+  try {
+    const { rows } = await db.query(
+      "SELECT id, email FROM users WHERE LOWER(role) = 'backoffice_comercial'",
+    );
+    return rows || [];
+  } catch (error) {
+    logger.warn({ error }, "No se pudieron obtener usuarios backoffice_comercial");
+    return [];
+  }
+}
+
+async function getSingleUserByRole(role) {
+  if (!role) return null;
+  try {
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, name, role FROM users WHERE LOWER(role) = LOWER($1) ORDER BY id ASC LIMIT 1",
+      [role],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    logger.warn({ error, role }, "No se pudo obtener usuario por rol");
+    return null;
+  }
+}
+
+async function getSingleUserByRoles(roles = []) {
+  for (const role of roles) {
+    const user = await getSingleUserByRole(role);
+    if (user) return user;
+  }
+  return null;
+}
+
+async function getUsersByRoles(roles = []) {
+  if (!roles.length) return [];
+  try {
+    const normalized = roles.map((role) => String(role || "").toLowerCase());
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, name, role FROM users WHERE LOWER(role) = ANY($1)",
+      [normalized],
+    );
+    return rows || [];
+  } catch (error) {
+    logger.warn({ error, roles }, "No se pudieron obtener usuarios por roles");
+    return [];
+  }
+}
+
+async function getUserByEmail(email) {
+  const normalized = (email || "").trim().toLowerCase();
+  if (!normalized) return null;
+  try {
+    const { rows } = await db.query(
+      "SELECT id, email, fullname, name, role FROM users WHERE LOWER(email) = $1 LIMIT 1",
+      [normalized],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    logger.warn({ error, email }, "No se pudo obtener usuario por email");
+    return null;
+  }
+}
+
+function getFallbackNotificationEmail() {
+  return REQUEST_NOTIFICATION_EMAILS[0] || null;
+}
+
+function getRequestApproverRoles(typeCode) {
+  const normalized = String(typeCode || "").toUpperCase();
+  if (normalized === "F.ST-22") return ["backoffice_comercial"];
+  if (["F.ST-20", "F.ST-21"].includes(normalized)) {
+    return ["jefe_servicio_tecnico", "jefe_tecnico", "servicio_tecnico"];
+  }
+  return [];
+}
+
 function buildDriveLink(fileId) {
   return `https://drive.google.com/file/d/${fileId}/view`;
 }
@@ -132,6 +211,11 @@ function getClientRequestAttachments(request = {}) {
       };
     })
     .filter(Boolean);
+}
+
+async function getBackofficeCommercialEmails() {
+  const users = await getBackofficeCommercialUsers();
+  return (users || []).map((u) => u.email).filter(Boolean);
 }
 
 function buildConsentDeclarationText({ request, token }) {
@@ -980,18 +1064,24 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
     const rawBuffer = f?.buffer;
     const existingBase64 = typeof f?.base64 === "string" ? f.base64 : null;
     let contentBuffer = null;
+    let base64Content = null;
 
-    if (rawBuffer && Buffer.isBuffer(rawBuffer)) {
-      contentBuffer = rawBuffer;
-    } else if (typeof rawBuffer === "object" && rawBuffer?.bytes && ArrayBuffer.isView(rawBuffer?.buffer)) {
-      contentBuffer = Buffer.from(rawBuffer.buffer);
+    // Si ya tenemos base64, usarlo directamente
+    if (existingBase64) {
+      base64Content = existingBase64.includes(",") 
+        ? existingBase64.split(",").pop()?.trim() 
+        : existingBase64;
+    }
+    // Si tenemos buffer, convertirlo a base64 una sola vez
+    else if (rawBuffer && Buffer.isBuffer(rawBuffer)) {
+      base64Content = rawBuffer.toString("base64");
+    }
+    else if (typeof rawBuffer === "object" && rawBuffer?.bytes && ArrayBuffer.isView(rawBuffer?.buffer)) {
+      // Optimizado: evitar crear Buffer innecesario si ya tenemos bytes
+      base64Content = Buffer.from(rawBuffer.buffer, rawBuffer.byteOffset, rawBuffer.byteLength).toString("base64");
     }
 
-    if (!contentBuffer && existingBase64) {
-      contentBuffer = Buffer.from(existingBase64.split(",").pop()?.trim() || "", "base64");
-    }
-
-    if (!contentBuffer || !contentBuffer.length) {
+    if (!base64Content) {
       logger.warn(
         {
           file: f?.name || f?.originalname,
@@ -1003,10 +1093,9 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
       continue;
     }
 
-    const base64 = contentBuffer.toString("base64");
     const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
-    const { id, webViewLink } = await uploadBase64File(name, base64, mime, parentFolder);
+    const { id, webViewLink } = await uploadBase64File(name, base64Content, mime, parentFolder);
     uploadedFiles.push({ id, link: webViewLink });
     await db.query(
       `INSERT INTO request_attachments(request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)`
@@ -1100,92 +1189,177 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const normalizedCode = typeCode || "ACTA";
   const pdfBaseName = `${normalizedCode} -${paddedId} `;
   const docLabel = variantMeta.label || req.type_title || "Acta";
-  const templateId = getSolicitudTemplateId(typeCode);
-  if (!templateId) {
-    throw new Error(`No se encontró plantilla para el tipo de solicitud ${typeCode || "desconocido"}`);
-  }
-  const docName = `${docLabel} - ${pdfBaseName} `;
-  const doc = await copyTemplate(templateId, docName, folderId);
   const payload = payloadRaw || {};
   const resolvedEquipments = await resolveEquipmentDisplayData(payload.equipos);
   const equipos = resolvedEquipments || [];
-  const equipmentTags = {};
-  for (let i = 0; i < 4; i += 1) {
-    const equipo = equipos[i];
-    const nameTag = `<<N_Equipo${i + 1}>>`;
-    const stateTag = `<<E_Equipo${i + 1}>>`;
 
-    if (equipo) {
-      equipmentTags[nameTag] = asText(equipo.displayName);
-      equipmentTags[stateTag] = asText(equipo.displayState);
-    } else {
-      equipmentTags[nameTag] = "";
-      equipmentTags[stateTag] = "";
-    }
-  }
+  const buildFallbackPdf = async () => {
+    const fallbackName = `${docLabel} - ${pdfBaseName}.pdf`;
+    const buffer = await new Promise((resolve, reject) => {
+      const pdfDoc = new PDFDocument({ margin: 50 });
+      const chunks = [];
+      pdfDoc.on("data", (chunk) => chunks.push(chunk));
+      pdfDoc.on("end", () => resolve(Buffer.concat(chunks)));
+      pdfDoc.on("error", reject);
 
-  const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
-  const replacements = {
-    ID_SOLICITUD: asText(request_id),
-    NOMBRE_CLIENTE: asText(payload.nombre_cliente),
-    DIRECCION_CLIENTE: asText(payload.direccion_cliente),
-    PERSONA_CONTACTO: asText(payload.persona_contacto),
-    CELULAR_CONTACTO: asText(payload.celular_contacto),
-    FECHA_INSTALACION: asText(fechaInstalacionRaw),
-    EQUIPOS: equipos.map((e) => `${asText(e.displayName)} (${asText(e.displayState)})`).join(", "),
-    ACCESORIOS: asText(payload.accesorios),
-    ANOTACIONES: asText(payload.anotaciones),
-    OBSERVACIONES: asText(payload.observaciones),
-    SOLICITANTE: asText(req.requester_name),
-    FECHA: formatDate(req.created_at) || new Date().toLocaleDateString("es-EC"),
-    "<<Solicitante>>": asText(req.requester_name),
-    "<<Fecha>>": formatDate(req.created_at),
-    "<<Email>>": asText(payload.email_cliente || req.requester_email),
-    "<<Cliente>>": asText(payload.nombre_cliente),
-    "<<Direccion>>": asText(payload.direccion_cliente),
-    "<<Contacto>>": asText(payload.persona_contacto),
-    "<<Celular>>": asText(payload.celular_contacto),
-    "<<F_Instalacion>>": fechaInstalacionRaw ? formatDate(fechaInstalacionRaw) : "",
-    "<<Accesorios>>": asText(payload.accesorios),
-    "<<Observaciones>>": asText(payload.observaciones || payload.anotaciones),
-    "<<LIS>>": typeof payload.requiere_lis === "boolean" ? (payload.requiere_lis ? "Sí" : "No") : asText(payload.requiere_lis),
-    ...equipmentTags,
+      const title = `${docLabel}`;
+      pdfDoc.fontSize(16).text(title, { underline: true });
+      pdfDoc.moveDown();
+      pdfDoc.fontSize(11).text(`Solicitud: ${request_id}`);
+      pdfDoc.text(`Cliente: ${payload.nombre_cliente || ""}`);
+      pdfDoc.text(`Dirección: ${payload.direccion_cliente || ""}`);
+      pdfDoc.text(`Contacto: ${payload.persona_contacto || ""}`);
+      pdfDoc.text(`Teléfono: ${payload.celular_contacto || ""}`);
+      const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
+      if (fechaInstalacionRaw) {
+        pdfDoc.text(`Fecha instalación: ${formatDate(fechaInstalacionRaw)}`);
+      }
+      pdfDoc.moveDown();
+      pdfDoc.text("Equipos:");
+      if (equipos.length) {
+        equipos.forEach((eq, idx) => {
+          const name = eq.displayName || eq.nombre_equipo || "Equipo";
+          const state = eq.displayState || eq.estado || "";
+          pdfDoc.text(`• ${idx + 1}. ${name} ${state ? `(${state})` : ""}`);
+        });
+      } else {
+        pdfDoc.text("Sin equipos registrados");
+      }
+      if (payload.observaciones) {
+        pdfDoc.moveDown();
+        pdfDoc.text(`Observaciones: ${payload.observaciones}`);
+      }
+      pdfDoc.end();
+    });
+
+    const stored = await uploadBase64File(
+      fallbackName,
+      buffer.toString("base64"),
+      "application/pdf",
+      folderId,
+    );
+
+    await db.query(
+      `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)
+       VALUES ($1,$2,$3,$4,$5,$6)`,
+      [request_id, stored.id, stored.webViewLink || null, "application/pdf", uploaded_by, fallbackName]
+    );
+
+    await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta_fallback", entity: "requests", entity_id: request_id });
+
+    logger.warn(
+      {
+        request_id,
+        template: null,
+        pdf_id: stored.id,
+      },
+      "📄 Acta generada en Drive (fallback PDF)"
+    );
+
+    return {
+      id: stored.id,
+      link: stored.webViewLink || null,
+      pdfId: stored.id,
+      pdfLink: stored.webViewLink || null,
+      name: fallbackName,
+      variant: variantKey,
+      fallback: true,
+    };
   };
 
-  await replaceTags(doc.id, replacements);
-
-  const pdf = await exportPdf(doc.id, folderId, pdfBaseName);
-  const docLink = `https://drive.google.com/file/d/${doc.id}/view`;
-  const pdfLink = pdf?.webViewLink || (pdf ? `https://drive.google.com/file/d/${pdf.id}/view` : null);
-  const attachmentTitle = `${docLabel} (${pdfBaseName}`;
-
-  if (pdf) {
-    await db.query(
-      `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [request_id, pdf.id, pdfLink, "application/pdf", uploaded_by, attachmentTitle]
+  const templateId = getSolicitudTemplateId(typeCode);
+  if (!templateId) {
+    logger.warn(
+      { request_id, typeCode },
+      "No se encontró plantilla de acta, usando PDF de respaldo"
     );
-  } else {
-    await db.query(
-      `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title) VALUES ($1,$2,$3,$4,$5,$6)`,
-      [request_id, doc.id, docLink, "application/vnd.google-apps.document", uploaded_by, attachmentTitle]
-    );
+    return await buildFallbackPdf();
   }
 
-  if (pdf) await drive.files.delete({ fileId: doc.id, supportsAllDrives: true });
+  try {
+    const docName = `${docLabel} - ${pdfBaseName} `;
+    const doc = await copyTemplate(templateId, docName, folderId);
+    const equipmentTags = {};
+    for (let i = 0; i < 4; i += 1) {
+      const equipo = equipos[i];
+      const nameTag = `<<N_Equipo${i + 1}>>`;
+      const stateTag = `<<E_Equipo${i + 1}>>`;
 
-  await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta", entity: "requests", entity_id: request_id });
+      if (equipo) {
+        equipmentTags[nameTag] = asText(equipo.displayName);
+        equipmentTags[stateTag] = asText(equipo.displayState);
+      } else {
+        equipmentTags[nameTag] = "";
+        equipmentTags[stateTag] = "";
+      }
+    }
 
-  logger.info(
-    {
-      request_id,
-      template: templateId,
-      doc_id: doc.id,
-      pdf_id: pdf?.id || null,
-    },
-    "📄 Acta generada en Drive"
-  );
+    const fechaInstalacionRaw = payload.fecha_instalacion || payload.fecha_retiro || payload.fecha_tentativa_visita || "";
+    const replacements = {
+      ID_SOLICITUD: asText(request_id),
+      NOMBRE_CLIENTE: asText(payload.nombre_cliente),
+      DIRECCION_CLIENTE: asText(payload.direccion_cliente),
+      PERSONA_CONTACTO: asText(payload.persona_contacto),
+      CELULAR_CONTACTO: asText(payload.celular_contacto),
+      FECHA_INSTALACION: asText(fechaInstalacionRaw),
+      EQUIPOS: equipos.map((e) => `${asText(e.displayName)} (${asText(e.displayState)})`).join(", "),
+      ACCESORIOS: asText(payload.accesorios),
+      ANOTACIONES: asText(payload.anotaciones),
+      OBSERVACIONES: asText(payload.observaciones),
+      SOLICITANTE: asText(req.requester_name),
+      FECHA: formatDate(req.created_at) || new Date().toLocaleDateString("es-EC"),
+      "<<Solicitante>>": asText(req.requester_name),
+      "<<Fecha>>": formatDate(req.created_at),
+      "<<Email>>": asText(payload.email_cliente || req.requester_email),
+      "<<Cliente>>": asText(payload.nombre_cliente),
+      "<<Direccion>>": asText(payload.direccion_cliente),
+      "<<Contacto>>": asText(payload.persona_contacto),
+      "<<Celular>>": asText(payload.celular_contacto),
+      "<<F_Instalacion>>": fechaInstalacionRaw ? formatDate(fechaInstalacionRaw) : "",
+      "<<Accesorios>>": asText(payload.accesorios),
+      "<<Observaciones>>": asText(payload.observaciones || payload.anotaciones),
+      "<<LIS>>": typeof payload.requiere_lis === "boolean" ? (payload.requiere_lis ? "Sí" : "No") : asText(payload.requiere_lis),
+      ...equipmentTags,
+    };
 
-  return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
+    await replaceTags(doc.id, replacements);
+
+    const pdf = await exportPdf(doc.id, folderId, pdfBaseName);
+    const docLink = `https://drive.google.com/file/d/${doc.id}/view`;
+    const pdfLink = pdf?.webViewLink || (pdf ? `https://drive.google.com/file/d/${pdf.id}/view` : null);
+    const attachmentTitle = `${docLabel} (${pdfBaseName}`;
+
+    if (pdf) {
+      await db.query(
+        `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [request_id, pdf.id, pdfLink, "application/pdf", uploaded_by, attachmentTitle]
+      );
+    } else {
+      await db.query(
+        `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title) VALUES ($1,$2,$3,$4,$5,$6)`,
+        [request_id, doc.id, docLink, "application/vnd.google-apps.document", uploaded_by, attachmentTitle]
+      );
+    }
+
+    if (pdf) await drive.files.delete({ fileId: doc.id, supportsAllDrives: true });
+
+    await logAction({ user_id: uploaded_by, module: "requests", action: "generate_acta", entity: "requests", entity_id: request_id });
+
+    logger.info(
+      {
+        request_id,
+        template: templateId,
+        doc_id: doc.id,
+        pdf_id: pdf?.id || null,
+      },
+      "📄 Acta generada en Drive"
+    );
+
+    return { id: pdf?.id || doc.id, link: pdfLink || docLink, docId: doc.id, docLink, pdfId: pdf?.id || null, pdfLink: pdfLink || null, name: pdfBaseName, variant: variantKey };
+  } catch (error) {
+    logger.error({ err: error, request_id }, "Error generando acta con plantilla, usando fallback");
+    return await buildFallbackPdf();
+  }
 }
 
 async function generateClientApprovalLetter({ request, approvedBy }) {
@@ -1502,6 +1676,10 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
   const requesterName = requester?.fullname || requester?.name || requester?.email || "Usuario SPI";
   const requesterEmail = requester?.email || null;
   const requestTitle = getRequestLabel(requestType?.code, requestType?.title);
+  const approverRoles = getRequestApproverRoles(requestType?.code);
+  const approverUsers = approverRoles.length ? await getUsersByRoles(approverRoles) : [];
+  const approverEmails = approverUsers.map((user) => user.email).filter(Boolean);
+  const fallbackEmail = getFallbackNotificationEmail();
   const dashboardLink = `${FRONTEND_URL}/dashboard/servicio-tecnico`;
   const detailLink = `${dashboardLink}?request=${request.id}`;
   const summaryItems = [];
@@ -1531,24 +1709,61 @@ async function notifyTechnicalApprovers({ request, requester, requestType, paylo
     `*Revisar en SPI:* ${detailLink}`,
   ].filter(Boolean);
 
-  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, requesterEmail);
+  const recipients = uniqueRecipients(approverEmails, requesterEmail, fallbackEmail);
 
-  await sendMail({
-    to: recipients,
-    subject: `Solicitud pendiente de aprobación (#${request.id})`,
-    html: `
-      <h2>Solicitud pendiente de aprobación</h2>
-      <p><strong>Tipo:</strong> ${requestTitle}</p>
-      <p><strong>Solicitante:</strong> ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}</p>
-      ${summaryBlock}
-      ${documentSection || ""}
-      <p>Revisa y gestiona la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
-    `,
-    text: lines.map((line) => line.replace(/<[^>]+>/g, "")).join("\n"),
-    gmailUserId: requester?.id || null,
-    replyTo: requesterEmail || undefined,
-    from: requesterEmail || undefined,
-  });
+  if (recipients.length) {
+    await sendMail({
+      to: recipients,
+      subject: `Solicitud pendiente de aprobación (#${request.id})`,
+      html: `
+        <h2>Solicitud pendiente de aprobación</h2>
+        <p><strong>Tipo:</strong> ${requestTitle}</p>
+        <p><strong>Solicitante:</strong> ${requesterName}${requesterEmail ? ` (${requesterEmail})` : ""}</p>
+        ${summaryBlock}
+        ${documentSection || ""}
+        <p>Revisa y gestiona la solicitud en SPI: <a href="${detailLink}" target="_blank" rel="noopener">${detailLink}</a></p>
+      `,
+      text: lines.map((line) => line.replace(/<[^>]+>/g, "")).join("\n"),
+      gmailUserId: requester?.id || null,
+      replyTo: requesterEmail || undefined,
+      from: requesterEmail || undefined,
+    });
+  }
+
+  const notificationPayload = {
+    customTitle: "Solicitud pendiente de aprobación",
+    customMessage: `Solicitud #${request.id} (${requestTitle}) enviada por ${requesterName}.`,
+    type: "task",
+    source: "requests",
+    priority: 1,
+    email: false,
+    meta: {
+      request_id: request.id,
+      request_type: requestType?.code || null,
+      requester_email: requesterEmail,
+    },
+  };
+
+  if (approverUsers.length) {
+    await Promise.all(
+      approverUsers.map((approverUser) =>
+        notificationManager.sendNotification({
+          ...notificationPayload,
+          userId: approverUser.id,
+        })
+      )
+    );
+  }
+
+  if (request?.requester_id) {
+    await notificationManager.sendNotification({
+      ...notificationPayload,
+      userId: request.requester_id,
+      customTitle: "Solicitud enviada",
+      customMessage: `Tu solicitud #${request.id} fue enviada para revisión.`,
+      priority: 0,
+    });
+  }
 }
 
 async function cancelRequest({ id, user_id }) {
@@ -1861,7 +2076,9 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       }
     }
 
-    const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, user.email);
+    const backofficeUser = await getSingleUserByRole("backoffice_comercial");
+    const backofficeEmail = backofficeUser?.email || getFallbackNotificationEmail();
+    const recipients = uniqueRecipients(backofficeEmail, user.email);
     const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${newRequest.id}`;
     await sendMail({
       to: recipients,
@@ -1879,6 +2096,39 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       replyTo: user?.email || undefined,
       from: user?.email || undefined,
     });
+
+    try {
+      if (backofficeUser?.id) {
+        await notificationManager.sendNotification({
+          userId: backofficeUser.id,
+          customTitle: "Nueva solicitud de cliente",
+          customMessage: `Tienes una solicitud pendiente (#${newRequest.id}) de ${commercial_name}.`,
+          type: "task",
+          source: "client_requests",
+          priority: 1,
+          email: false,
+          meta: {
+            request_id: newRequest.id,
+            client_name: commercial_name,
+            created_by: user.email,
+          },
+        });
+      }
+      if (user?.id) {
+        await notificationManager.sendNotification({
+          userId: user.id,
+          customTitle: "Solicitud de cliente enviada",
+          customMessage: `Tu solicitud #${newRequest.id} fue enviada a Backoffice para revisión.`,
+          type: "info",
+          source: "client_requests",
+          priority: 0,
+          email: false,
+          meta: { request_id: newRequest.id, client_name: commercial_name },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, requestId: newRequest.id }, "Error enviando notificaciones de cliente");
+    }
     return newRequest;
   } catch (error) {
     await dbClient.query("ROLLBACK");
@@ -2041,7 +2291,9 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';
   const approvalLetterLink =
     approvalLetter?.webViewLink || (approvalLetter?.id ? buildDriveLink(approvalLetter.id) : null);
-  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, request.created_by, request.client_email);
+  const backofficeUser = await getSingleUserByRole("backoffice_comercial");
+  const backofficeEmail = backofficeUser?.email || getFallbackNotificationEmail();
+  const recipients = uniqueRecipients(backofficeEmail, request.created_by);
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${request.id}`;
   await sendMail({
     to: recipients,
@@ -2060,6 +2312,29 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     replyTo: user?.email || undefined,
     from: user?.email || undefined,
   });
+  if (request?.created_by && user?.id) {
+    try {
+      const createdByUser = await getUserByEmail(request.created_by);
+      if (createdByUser?.id) {
+        await notificationManager.sendNotification({
+          userId: createdByUser.id,
+          customTitle: `Solicitud de cliente ${outcome}`,
+          customMessage: `Tu solicitud #${request.id} fue ${outcome.toLowerCase()}.`,
+          type: newStatus === "approved" ? "task" : "alert",
+          source: "client_requests",
+          priority: newStatus === "approved" ? 1 : 2,
+          email: false,
+          meta: {
+            request_id: request.id,
+            outcome: newStatus,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn({ notifyError, requestId: request.id }, "Error enviando notificacion al solicitante");
+    }
+  }
+
   return updatedRequest;
 }
 
@@ -2127,7 +2402,9 @@ async function grantConsent({ token, audit = {} }) {
   });
 
   // Notificación interna
-  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by, updatedRequest.client_email);
+  const backofficeUser = await getSingleUserByRole("backoffice_comercial");
+  const backofficeEmail = backofficeUser?.email || getFallbackNotificationEmail();
+  const recipients = uniqueRecipients(backofficeEmail, updatedRequest.created_by);
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
   await sendMail({
     to: recipients,
@@ -2246,7 +2523,9 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   const { rows: updatedRows } = await db.query(query, values);
   const updatedRequest = updatedRows[0];
 
-  const recipients = uniqueRecipients(REQUEST_NOTIFICATION_EMAILS, updatedRequest.created_by);
+  const backofficeUser = await getSingleUserByRole("backoffice_comercial");
+  const backofficeEmail = backofficeUser?.email || getFallbackNotificationEmail();
+  const recipients = uniqueRecipients(backofficeEmail, updatedRequest.created_by);
   const detailLink = `${FRONTEND_URL}/dashboard/backoffice-comercial?request=${updatedRequest.id}`;
   await sendMail({
     to: recipients,

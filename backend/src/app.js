@@ -1,13 +1,17 @@
 /**
  * src/app.js
  * ------------------------------------------------------------
- * 🚀 SPI Fam Backend — Configuración central Express
+ * 🚀 SPI Fam Backend — Configuración central Express (Cloud Run Optimized)
  * - Seguridad sin cookies (JWT por headers)
  * - Protección CORS dinámica
  * - Logging, auditoría y manejo de errores global
+ * - Optimizado para Cloud Run / Free Tier
  */
 
-require("dotenv").config();
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+}
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -21,13 +25,27 @@ const { normalizeApiPayloads, logLegacyUsageStats } = require("./middlewares/api
 const { verifyToken } = require("./middlewares/auth");
 
 const app = express();
-app.set("etag", false); // evitar 304 con body cacheado en endpoints dinámicos
 
+app.disable("x-powered-by");
+app.set("etag", false);
+
+// ======================================================
+// ⚙️ TRUST PROXY (OBLIGATORIO EN CLOUD RUN)
+// ======================================================
+app.set("trust proxy", 1);
+
+// ======================================================
+// 🧠 RATE LIMIT CONFIG
+// ======================================================
 const RATE_LIMIT_WINDOW_MS =
   parseInt(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, 10) || 15 * 60 * 1000;
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 4000 : 0), 10);
+
+// 🔥 REDUCIDO (antes 4000 → ahora 300) para menor CPU/RAM
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 300 : 0), 10);
+
 const DISABLE_RATE_LIMIT =
   process.env.DISABLE_RATE_LIMIT === "true" || (!isProd && RATE_LIMIT_MAX === 0);
+
 const RATE_LIMIT_WHITELIST = new Set(
   (process.env.RATE_LIMIT_WHITELIST || "")
     .split(",")
@@ -45,6 +63,7 @@ const shouldBypassRateLimit = (req) => {
     req.ip;
 
   if (!candidate) return false;
+
   if (
     candidate === "127.0.0.1" ||
     candidate === "::1" ||
@@ -58,118 +77,71 @@ const shouldBypassRateLimit = (req) => {
 };
 
 // ======================================================
-// 🧠 ENTORNO Y DOMINIOS PERMITIDOS
+// 🛡️ SEGURIDAD BASE
 // ======================================================
-const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3001";
-const ORIGIN_WHITELIST = new Set([
-  FRONTEND_URL,
-  "http://localhost:3000",
-  "http://127.0.0.1:3001",
-  "http://localhost:5173", // soporte para Vite
-  "https://spi-dev.famproject.com.ec", // dominio de producción LAN
-]);
+app.use(helmet(helmetConfig));
 
-const trustProxyValue =
-  process.env.TRUST_PROXY ?? (isProd ? "1" : "loopback");
 
-if (
-  trustProxyValue !== null &&
-  trustProxyValue !== undefined &&
-  `${trustProxyValue}`.toLowerCase() !== "false"
-) {
-  const normalizedTrustProxy =
-    `${trustProxyValue}`.toLowerCase() === "true"
-      ? true
-      : Number.isNaN(Number(trustProxyValue))
-        ? trustProxyValue
-        : Number(trustProxyValue);
-
-  app.set("trust proxy", normalizedTrustProxy);
-  logger.info(
-    `⚙️ trust proxy habilitado (${JSON.stringify(normalizedTrustProxy)})`
+if (!DISABLE_RATE_LIMIT) {
+  app.use(
+    rateLimit({
+      windowMs: RATE_LIMIT_WINDOW_MS,
+      max: RATE_LIMIT_MAX,
+      standardHeaders: true,
+      legacyHeaders: false,
+      skip: shouldBypassRateLimit,
+      handler: (req, res) => {
+        logger.warn(`🚫 Rate limit alcanzado: ${req.ip} ${req.originalUrl}`);
+        res.status(429).json({
+          ok: false,
+          code: "RATE_LIMIT",
+          message: "Demasiadas peticiones, intenta de nuevo en unos segundos",
+        });
+      },
+    })
   );
 }
 
 // ======================================================
-// 🛡️ 1️⃣ Seguridad base (Helmet + Rate Limit)
+// 🌐 CORS
 // ======================================================
-app.use(helmet(helmetConfig));
-
-app.use(
-  rateLimit({
-    windowMs: RATE_LIMIT_WINDOW_MS,
-    max: RATE_LIMIT_MAX || 10000,
-    standardHeaders: true,
-    legacyHeaders: false,
-    skip: shouldBypassRateLimit,
-    handler: (req, res) => {
-      logger.warn(`🚫 Rate limit alcanzado: ${req.ip} ${req.originalUrl}`);
-      res.status(429).json({
-        ok: false,
-        code: "RATE_LIMIT",
-        message: "Demasiadas peticiones, intenta de nuevo en unos segundos",
-      });
-    },
-  })
-);
+app.use(cors(corsConfig));
 
 // ======================================================
-// 🌐 2️⃣ CORS dinámico — solo headers JWT
+// ⚠️ BODY PARSERS (CRÍTICO ↓↓↓)
+// ------------------------------------------------------
+// 50MB rompe Cloud Run (OOM)
+// 5MB es más que suficiente
 // ======================================================
-app.use(
-  cors({
-    ...corsConfig,
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      if (ORIGIN_WHITELIST.has(origin)) return callback(null, true);
-      logger.warn(`❌ CORS bloqueado: ${origin}`);
-      return callback(new Error(`Origen no permitido: ${origin}`));
-    },
-  })
-);
-
-// Preflight (CORS manual de respaldo)
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin && ORIGIN_WHITELIST.has(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-    res.header("Vary", "Origin");
-  } else {
-    res.header("Access-Control-Allow-Origin", FRONTEND_URL);
-  }
-
-  res.header(
-    "Access-Control-Allow-Headers",
-    "Content-Type, Authorization, x-refresh-token"
-  );
-  res.header(
-    "Access-Control-Allow-Methods",
-    "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-  );
-
-  if (req.method === "OPTIONS") return res.sendStatus(204);
-  next();
-});
+app.use(express.json({ limit: "5mb" }));
+app.use(express.urlencoded({ extended: true, limit: "5mb" }));
 
 // ======================================================
-// ⚙️ 3️⃣ Body parsers
-// ======================================================
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
-
-// ======================================================
-// 📋 4️⃣ Request Context middleware (correlation ID)
+// 📋 REQUEST CONTEXT
 // ======================================================
 const requestContextMiddleware = require("./middlewares/requestContext");
 app.use(requestContextMiddleware);
 
 // ======================================================
-// 🧾 5️⃣ Logger middleware global
+// 🧾 LOGGER
 // ======================================================
 app.use(mLogger);
 
 // ======================================================
-// 📦 5️⃣ Importar rutas
+// ❤️ HEALTH (ANTES DE TODO)
+// ======================================================
+app.get("/", (_req, res) =>
+  res.status(200).json({
+    ok: true,
+    message: "SPI FAM API",
+    version: require("../package.json").version,
+  })
+);
+
+app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+
+// ======================================================
+// 📦 IMPORTAR RUTAS
 // ======================================================
 const authRoutes = require("./modules/auth/auth.routes");
 const requestRoutes = require("./modules/requests/requests.routes");
@@ -196,6 +168,7 @@ const vacacionesRoutes = require("./modules/vacaciones/vacaciones.routes");
 const clientsRoutes = require("./modules/clients/clients.routes");
 const schedulesRoutes = require("./modules/schedules/schedules.routes");
 const privatePurchasesRoutes = require("./modules/private-purchases/privatePurchases.routes");
+const applicantsRoutes = require("./modules/applicants/applicants.routes");
 const {
   businessCaseRoutes,
   equipmentCatalogRoutes,
@@ -205,49 +178,28 @@ const {
 const notificationsRoutes = require("./modules/notifications/notifications.routes");
 const userProfileRoutes = require("./modules/user-profile/userProfile.routes");
 const userCertificationsRoutes = require("./modules/user-certifications/userCertifications.routes");
+const collaboratorsRoutes = require("./modules/collaborators/collaborators.routes");
 const signatureRoutes = require("./modules/signature/signature.routes");
 const dashboardRoutes = require("./modules/dashboard/dashboard.routes");
+const supportTicketsRoutes = require("./modules/support-tickets/supportTickets.routes");
+const viaticosRoutes = require("./modules/viaticos/viaticos.routes");
+const internalJobsRouter = require("./routes/internalJobs.routes");
 
 // ======================================================
-// ⏰ Initialize Attendance Overtime Scheduler
-// ======================================================
-const { processAutomaticOvertime } = require("./jobs/attendanceOvertimeScheduler");
-
-// Run every 5 minutes (300,000 ms) in production, every 30 seconds in development
-const SCHEDULER_INTERVAL = process.env.NODE_ENV === 'production' ? 5 * 60 * 1000 : 30 * 1000;
-
-setInterval(async () => {
-  try {
-    await processAutomaticOvertime();
-  } catch (error) {
-    logger.error({ error }, "❌ Error in attendance overtime scheduler interval");
-  }
-}, SCHEDULER_INTERVAL);
-
-logger.info(`⏰ Attendance overtime scheduler initialized (interval: ${SCHEDULER_INTERVAL / 1000}s)`);
-
-// ======================================================
-// ❤️ 6️⃣ Rutas públicas de salud
-// ======================================================
-app.get("/", (_req, res) => res.status(200).json({
-  ok: true,
-  message: "SPI FAM API",
-  version: require("../package.json").version
-}));
-app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
-
-// ======================================================
-// 🔓 7️⃣ Rutas públicas (sin JWT)
+// 🔓 RUTAS PÚBLICAS
 // ======================================================
 app.use("/api/v1/auth", authRoutes);
+app.use("/api/applicants", applicantsRoutes);
 
 // ======================================================
-// 🔒 8️⃣ Middleware global JWT (solo rutas protegidas)
+// 🔒 JWT GLOBAL
 // ======================================================
 app.use((req, res, next) => {
   if (
-    req.path === "/ws" || // permitir conexiones de websocket/sondeos sin JWT para evitar ruido en logs
+    req.path === "/ws" ||
     req.path.startsWith("/ws/") ||
+    req.path.startsWith("/api/v1/equipment-purchases/events") ||
+    req.path.startsWith("/api/v1/private-purchases/events") ||
     req.path.startsWith("/api/v1/auth/google") ||
     req.path.startsWith("/api/v1/gmail/auth/callback") ||
     req.path.startsWith("/health") ||
@@ -255,42 +207,19 @@ app.use((req, res, next) => {
   ) {
     return next();
   }
+
   verifyToken(req, res, next);
 });
 
 // ======================================================
-// 🔄 9️⃣ API Normalization Middleware
-// ------------------------------------------------------
-// Normalizes field names between legacy and canonical formats
+// NORMALIZACIÓN + AUDITORÍA
 // ======================================================
 app.use(normalizeApiPayloads);
 app.use(logLegacyUsageStats);
-
-// ======================================================
-// 🕵️ 🔟 Middleware de Auditoría Global
-// ------------------------------------------------------
-// Solo rutas autenticadas que modifiquen datos (POST, PUT, DELETE)
-// ======================================================
 app.use(auditMiddleware);
 
 // ======================================================
-// 🔍 API Normalization Stats Endpoint
-// ------------------------------------------------------
-// Endpoint to monitor legacy field usage during migration
-// ======================================================
-app.get("/api/v1/normalization/stats", (req, res) => {
-  const { getLegacyUsageStats } = require("./middlewares/apiNormalization");
-  const stats = getLegacyUsageStats();
-  res.json({
-    ok: true,
-    totalLegacyFields: stats.length,
-    stats: stats.slice(0, 50), // Limit response size
-    timestamp: new Date().toISOString()
-  });
-});
-
-// ======================================================
-// 🚦 🔟 Rutas privadas (ordenadas por dominio)
+// RUTAS PRIVADAS
 // ======================================================
 app.use("/api/v1/requests", requestRoutes);
 app.use("/api/v1/approvals", approvalRoutes);
@@ -310,6 +239,7 @@ app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
 app.use("/api/v1/calculation-templates", calculationTemplatesRoutes);
 app.use("/api/v1/mantenimientos", mantenimientosRoutes);
 app.use("/api/v1/users", usersRoutes);
+app.use("/api/v1/collaborators", collaboratorsRoutes);
 app.use("/api/v1/inventario", inventarioRoutes);
 app.use("/api/v1/attendance", attendanceRoutes);
 app.use("/api/v1/gmail", gmailRoutes);
@@ -322,28 +252,31 @@ app.use("/api/v1/clients", clientsRoutes);
 app.use("/api/v1/schedules", schedulesRoutes);
 app.use("/api/v1/notifications", notificationsRoutes);
 app.use("/api/v1/dashboard", dashboardRoutes);
+app.use("/api/v1/support-tickets", supportTicketsRoutes);
+app.use("/api/v1/viaticos", viaticosRoutes);
+app.use("/internal/jobs", internalJobsRouter);
 app.use("/api/v1/users/me/profile", userProfileRoutes);
 app.use("/api/v1/users", userCertificationsRoutes);
 app.use("/api", signatureRoutes);
 
 // ======================================================
-// 🚑 11️⃣ Manejo global de errores
+// 🚑 ERROR HANDLER GLOBAL
 // ======================================================
 app.use((err, req, res, next) => {
   logger.error(
-    { err, path: req.originalUrl, body: req.body, user: req.user?.email },
+    { err, path: req.originalUrl, user: req.user?.email },
     "🔥 Error no manejado"
   );
+
   if (res.headersSent) return next(err);
 
-  const status = err.status || 500;
-  res.status(status).json({
+  res.status(err.status || 500).json({
     ok: false,
     message: err.message || "Error interno del servidor",
   });
 });
 
 // ======================================================
-// 🧩 Exportación
+// EXPORT
 // ======================================================
 module.exports = app;

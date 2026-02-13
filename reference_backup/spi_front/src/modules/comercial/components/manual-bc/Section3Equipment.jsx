@@ -131,7 +131,7 @@ const Section3Equipment = ({ data, updateData }) => {
                     </label>
 
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium text-purple-900">AÃ±o de FabricaciÃ³n</span>
+                        <span className="text-sm font-medium text-purple-900">Año de Fabricación</span>
                         <input
                             type="number"
                             min="1900"
@@ -155,18 +155,18 @@ const Section3Equipment = ({ data, updateData }) => {
                 </div>
             </div>
 
-            {/* UbicaciÃ³n y Opciones */}
+            {/* Ubicacion y Opciones */}
             <div className="space-y-4">
                 <label className="flex flex-col gap-1">
                     <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-                        <FiMapPin /> UbicaciÃ³n de InstalaciÃ³n
+                        <FiMapPin /> Ubicación de Instalación 
                     </span>
                     <textarea
                         rows={2}
                         value={equipData.installation_location}
                         onChange={(e) => handleChange('installation_location', e.target.value)}
                         className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
-                        placeholder="DirecciÃ³n o ubicaciÃ³n especÃ­fica..."
+                        placeholder="Dirección o ubicación especí­fica..."
                     />
                 </label>
 
@@ -194,7 +194,7 @@ const Section3Equipment = ({ data, updateData }) => {
 
                 {equipData.requires_complementary && (
                     <label className="flex flex-col gap-1">
-                        <span className="text-sm font-medium text-gray-700">Â¿Para quÃ© prueba?</span>
+                        <span className="text-sm font-medium text-gray-700">¿Para qué prueba?</span>
                         <input
                             type="text"
                             value={equipData.complementary_test_purpose}

@@ -121,6 +121,13 @@ const PermisosColaboradoresWidget = () => {
                 </div>
               </div>
 
+              {row.vacaciones?.missing_hire_date && (
+                <div className="flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                  <FiAlertCircle />
+                  Falta fecha de ingreso en el perfil del colaborador para calcular vacaciones.
+                </div>
+              )}
+
               <div className="grid md:grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <p className="text-sm font-semibold text-gray-800 flex items-center gap-2">

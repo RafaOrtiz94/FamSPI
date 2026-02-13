@@ -1,0 +1,5 @@
+resource.type=cloud_run_revision
+resource.labels.service_name=spi-backend
+textPayload:"POST "
+timestamp>=2026-02-06T21:55:00Z
+timestamp<=2026-02-06T22:00:00Z

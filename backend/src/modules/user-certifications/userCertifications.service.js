@@ -159,7 +159,7 @@ const getUserCertifications = async (userId, includeInactive = false) => {
 
 const getCertificationsByUserId = async (targetUserId, requesterUserId, requesterRole) => {
   // Check permissions
-  const allowedRoles = ['acp_comercial', 'talento_humano'];
+  const allowedRoles = ['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general'];
   if (!allowedRoles.includes(requesterRole) && requesterUserId !== targetUserId) {
     const err = new Error("No tienes permisos para ver las certificaciones de este usuario");
     err.status = 403;
@@ -208,7 +208,7 @@ const softDeleteCertification = async (certificationId, userId, requesterRole) =
   const certification = certQuery.rows[0];
 
   // Check ownership or permissions
-  const allowedRoles = ['acp_comercial', 'talento_humano'];
+  const allowedRoles = ['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general'];
   if (certification.user_id !== userId && !allowedRoles.includes(requesterRole)) {
     const err = new Error("No tienes permisos para eliminar esta certificación");
     err.status = 403;
@@ -243,7 +243,7 @@ const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUser
   console.log('🎯 [PDF] Generando PDF consolidado de certificaciones para usuario:', targetUserId, 'por:', requesterUserId, 'rol:', requesterRole);
 
   // Verificar permisos
-  const allowedRoles = ['acp_comercial', 'talento_humano'];
+  const allowedRoles = ['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general'];
   if (!allowedRoles.includes(requesterRole) && requesterUserId !== targetUserId) {
     const err = new Error("No tienes permisos para acceder a las certificaciones de este usuario");
     err.status = 403;

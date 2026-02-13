@@ -13,9 +13,13 @@ const fs = require("fs");
 const { createLogger, format, transports } = require("winston");
 require("winston-daily-rotate-file");
 
-// Crear carpeta logs si no existe (usar /tmp para compatibilidad con Cloud Run)
+// Crear carpeta logs si no existe (solo si no es producción para evitar problemas en Cloud Run)
+const isProd = process.env.NODE_ENV === "production";
 const logDir = path.join("/tmp", "logs");
-if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+
+if (!isProd && !fs.existsSync(logDir)) {
+  fs.mkdirSync(logDir, { recursive: true });
+}
 
 const consoleFormat = format.combine(
   format.colorize({ all: true }),
@@ -50,38 +54,38 @@ const consoleTransport = new transports.Console({
   format: consoleFormat,
 });
 
-const appRotateTransport = createRotateTransport("app");
-const errorRotateTransport = createRotateTransport("errors", "error");
-const httpRotateTransport = createRotateTransport("access");
-const auditRotateTransport = createRotateTransport("audit");
+// En producción para Cloud Run, solo usamos consola (stdout/stderr)
+const transportsList = [consoleTransport];
 
-const httpFileLogger = createLogger({
-  level: "info",
-  format: fileFormat,
-  transports: [httpRotateTransport],
-});
-
-const auditFileLogger = createLogger({
-  level: "info",
-  format: fileFormat,
-  transports: [auditRotateTransport],
-});
+if (!isProd) {
+  transportsList.push(createRotateTransport("app"));
+  transportsList.push(createRotateTransport("errors", "error"));
+}
 
 const logger = createLogger({
-  level: process.env.NODE_ENV === "production" ? "info" : "debug",
+  level: isProd ? "info" : "debug",
   format: fileFormat,
-  transports: [consoleTransport, appRotateTransport, errorRotateTransport],
+  transports: transportsList,
   exitOnError: false,
 });
 
 // ==========================================================
-// ⚙️ Manejadores globales (solo loguea, no cierra servidor)
+// ⚙️ Manejadores globales (CRÍTICO: en producción deben salir para que Cloud Run reinicie)
 // ==========================================================
 process.on("unhandledRejection", (err) => {
   logger.error("💥 Promesa no manejada", { message: err.message, stack: err.stack });
+  if (isProd) {
+    logger.error("🛑 Saliendo por promesa no manejada en producción");
+    setTimeout(() => process.exit(1), 500).unref();
+  }
 });
+
 process.on("uncaughtException", (err) => {
   logger.error("💥 Excepción no capturada", { message: err.message, stack: err.stack });
+  if (isProd) {
+    logger.error("🛑 Saliendo por excepción no capturada en producción");
+    setTimeout(() => process.exit(1), 500).unref();
+  }
 });
 
 // ==========================================================
@@ -89,14 +93,12 @@ process.on("uncaughtException", (err) => {
 // ==========================================================
 logger.http = (msg, meta = {}) => {
   const payload = { ...meta, channel: "http" };
-  httpFileLogger.info(msg, payload);
   logger.info(`[HTTP] ${msg}`, payload);
 };
 logger.db = (msg, meta = {}) => logger.info(`[DB] ${msg}`, meta);
 logger.event = (msg, meta = {}) => logger.info(`[EVENT] ${msg}`, meta);
 logger.audit = (msg, meta = {}) => {
   const payload = { ...meta, channel: "audit" };
-  auditFileLogger.info(msg, payload);
   logger.info(`[AUDIT] ${msg}`, payload);
 };
 

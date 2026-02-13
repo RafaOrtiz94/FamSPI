@@ -163,8 +163,12 @@ const triggerManualRun = async () => {
   return { success: true, message: "Manual overtime processing completed" };
 };
 
+// Alias for Cloud Scheduler compatibility
+const runOnce = processAutomaticOvertime;
+
 module.exports = {
   processAutomaticOvertime,
   getSchedulerStatus,
   triggerManualRun,
+  runOnce,
 };

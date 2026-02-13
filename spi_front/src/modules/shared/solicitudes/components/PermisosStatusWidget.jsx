@@ -4,6 +4,7 @@ import {
   FiCheck,
   FiX,
   FiFileText,
+  FiDownload,
   FiAlertCircle,
   FiUpload,
   FiEye,
@@ -27,20 +28,37 @@ import { getActiveException, getTodayAttendance } from "../../../../core/api/att
 import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
+const formatDateTime = (value) => {
+  if (!value) return "N/A";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "N/A";
+  return parsed.toLocaleString();
+};
 
 const PermisosStatusWidget = () => {
   const { user } = useAuth();
   const { showToast } = useUI();
-  const role = normalizeRole(user?.role);
+  const role = normalizeRole(user?.role || user?.rol);
   const scope = normalizeRole(user?.scope || role);
   const userEmail = user?.email || "";
+  const userId = user?.id;
+  const gerenciaGeneralRoles = new Set(["gerencia_general", "gerente_general"]);
 
-  const isJefe = ["jefe_comercial", "jefe_tecnico", "jefe_aplicaciones", "jefe_calidad"].some((r) =>
-    role.includes(r)
+  const roleCandidates = [role, scope].filter(Boolean);
+  const isJefe = [
+    "jefe_comercial",
+    "jefe_financiero",
+    "jefe_finanzas",
+    "jefe_operaciones",
+    "jefe_calidad",
+    "jefe_tecnico",
+    "jefe_logistica",
+  ].some((r) =>
+    roleCandidates.some((candidate) => candidate.includes(r))
   );
-  const isGerencia = role.includes("gerencia");
+  const isGerencia = gerenciaGeneralRoles.has(role) || gerenciaGeneralRoles.has(scope);
   const isApprover = isJefe || isGerencia;
-  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero"].includes(scope);
+  const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero", "jefe_finanzas"].includes(scope);
 
   const [activeTab, setActiveTab] = useState("mine");
   const [misSolicitudes, setMisSolicitudes] = useState([]);
@@ -64,6 +82,24 @@ const PermisosStatusWidget = () => {
       return value.value || value.date || value.timestamp || value.time || value.iso || null;
     }
     return value;
+  };
+
+
+  const canSeeSolicitudForApproval = (solicitud) => {
+    if (!solicitud) return false;
+    if (isGerencia) return true;
+    const approverRole = (solicitud.approver_role || "").toLowerCase();
+    const approverEmail = (solicitud.approver_email || "").toLowerCase();
+    const approverUserId = solicitud.approver_user_id;
+    if (approverUserId && userId) return approverUserId === userId;
+    if (approverEmail && userEmail) return approverEmail === userEmail.toLowerCase();
+    if (approverRole) {
+      if (gerenciaGeneralRoles.has(approverRole)) {
+        return roleCandidates.some((candidate) => gerenciaGeneralRoles.has(candidate));
+      }
+      return roleCandidates.includes(approverRole);
+    }
+    return false;
   };
 
   const normalizeSolicitudDates = (solicitud) => ({
@@ -120,7 +156,8 @@ const PermisosStatusWidget = () => {
       if (pendingResp?.ok) {
         const filtered = (pendingResp.data || [])
           .map(normalizeSolicitudDates)
-          .filter((s) => s.user_email !== userEmail);
+          .filter((s) => s.user_email !== userEmail)
+          .filter((s) => canSeeSolicitudForApproval(s));
         setPendientesParcial(filtered);
       } else {
         setPendientesParcial([]);
@@ -128,7 +165,8 @@ const PermisosStatusWidget = () => {
       if (finalResp?.ok) {
         const filtered = (finalResp.data || [])
           .map(normalizeSolicitudDates)
-          .filter((s) => s.user_email !== userEmail);
+          .filter((s) => s.user_email !== userEmail)
+          .filter((s) => canSeeSolicitudForApproval(s));
         setPendientesFinal(filtered);
       } else {
         setPendientesFinal([]);
@@ -306,6 +344,15 @@ const PermisosStatusWidget = () => {
     const shouldShowDocs = (showActions || showDocs) && hasJustificantes(solicitud);
     const requiresUpload = solicitud.status === "partially_approved" && !showActions;
     const isVacation = solicitud.tipo_solicitud === "vacaciones";
+    const approverDisplay =
+      solicitud.approver_email ||
+      solicitud.approver_role ||
+      (solicitud.approver_user_id ? `Usuario #${solicitud.approver_user_id}` : "No asignado");
+    const rejectionNotes = Array.isArray(solicitud.observaciones)
+      ? solicitud.observaciones.filter(Boolean)
+      : solicitud.observaciones
+      ? [solicitud.observaciones]
+      : [];
 
     return (
       <motion.div
@@ -336,7 +383,10 @@ const PermisosStatusWidget = () => {
             {showUser && (
               <p className="text-xs text-gray-600 mb-1">
                 <FiUsers className="inline mr-1" />
-                {solicitud.user_fullname}
+                {solicitud.user_fullname || solicitud.user_email || "Sin solicitante"}
+                {solicitud.user_email && solicitud.user_fullname ? (
+                  <span className="text-[11px] text-gray-500 ml-1">({solicitud.user_email})</span>
+                ) : null}
               </p>
             )}
             <div className="flex items-center gap-3 text-xs text-gray-500">
@@ -363,6 +413,47 @@ const PermisosStatusWidget = () => {
               <FiUpload className="w-3 h-3 mr-1" />
               Subir docs
             </Button>
+          )}
+        </div>
+
+        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
+          <div className="text-xs">
+            <p className="text-gray-500">Solicitud</p>
+            <p className="font-medium text-gray-800">#{solicitud.id}</p>
+          </div>
+          <div className="text-xs">
+            <p className="text-gray-500">Enviada</p>
+            <p className="font-medium text-gray-800">{formatDateTime(solicitud.created_at)}</p>
+          </div>
+          <div className="text-xs">
+            <p className="text-gray-500">Tipo detalle</p>
+            <p className="font-medium text-gray-800">
+              {isVacation
+                ? `Vacaciones${solicitud.periodo_vacaciones ? ` (${solicitud.periodo_vacaciones})` : ""}`
+                : solicitud.tipo_permiso || "Permiso"}
+            </p>
+          </div>
+          <div className="text-xs">
+            <p className="text-gray-500">Aprobador asignado</p>
+            <p className="font-medium text-gray-800">{approverDisplay}</p>
+          </div>
+          {solicitud.aprobacion_parcial_at && (
+            <div className="text-xs">
+              <p className="text-gray-500">Aprobacion parcial</p>
+              <p className="font-medium text-gray-800">
+                {formatDateTime(solicitud.aprobacion_parcial_at)}
+                {solicitud.aprobacion_parcial_por ? ` - ${solicitud.aprobacion_parcial_por}` : ""}
+              </p>
+            </div>
+          )}
+          {solicitud.aprobacion_final_at && (
+            <div className="text-xs">
+              <p className="text-gray-500">Aprobacion final</p>
+              <p className="font-medium text-gray-800">
+                {formatDateTime(solicitud.aprobacion_final_at)}
+                {solicitud.aprobacion_final_por ? ` - ${solicitud.aprobacion_final_por}` : ""}
+              </p>
+            </div>
           )}
         </div>
 
@@ -396,6 +487,34 @@ const PermisosStatusWidget = () => {
                 </a>
               ))}
             </div>
+          </div>
+        )}
+
+        {solicitud.pdf_generado_url && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-2">
+            <p className="text-xs font-semibold text-emerald-900 mb-1.5">Formulario PDF generado:</p>
+            <a
+              href={solicitud.pdf_generado_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 rounded text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+            >
+              <FiDownload className="w-3 h-3" />
+              Descargar F.RH-10
+            </a>
+          </div>
+        )}
+
+        {rejectionNotes.length > 0 && (
+          <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mt-2">
+            <p className="text-xs font-semibold text-rose-900 mb-1">Observaciones:</p>
+            <ul className="space-y-1">
+              {rejectionNotes.map((note, idx) => (
+                <li key={`${solicitud.id}-obs-${idx}`} className="text-xs text-rose-800">
+                  - {note}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
 

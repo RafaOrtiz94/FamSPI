@@ -11,6 +11,7 @@ import {
 } from "react-icons/fi";
 import Card from "../../../../../core/ui/components/Card";
 import { getEquipmentPurchaseStats } from "../../../../../core/api/equipmentPurchasesApi";
+import { usePurchaseSSE } from "../../../../../core/hooks/usePurchaseSSE";
 
 export const AnalyticsSection = () => {
     const [stats, setStats] = useState({});
@@ -31,6 +32,16 @@ export const AnalyticsSection = () => {
     useEffect(() => {
         loadStats();
     }, [loadStats]);
+
+    const handleStatsRefresh = useCallback(() => {
+        loadStats();
+    }, [loadStats]);
+
+    usePurchaseSSE({
+        type: "public",
+        onEvent: handleStatsRefresh,
+        debounceMs: 8000
+    });
 
     const totalRequests = stats?.total ?? 0;
     const completedRequests = stats?.completed ?? 0;

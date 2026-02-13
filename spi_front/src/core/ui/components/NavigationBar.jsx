@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import {
   FiHome,
   FiUsers,
-  FiBriefcase,
+  FiDollarSign,
   FiClipboard,
   FiShoppingCart,
   FiFileText,
@@ -16,6 +16,7 @@ import {
   FiLayers,
   FiShield,
   FiTruck,
+  FiLifeBuoy,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -29,6 +30,7 @@ const homePathsByScope = {
   finanzas: "/dashboard/finanzas",
   jefe_finanzas: "/dashboard/finanzas",
   jefe_financiero: "/dashboard/finanzas",
+  financiero: "/dashboard/finanzas",
   comercial: "/dashboard/comercial",
   jefe_comercial: "/dashboard/comercial",
   backoffice_comercial: "/dashboard/comercial",
@@ -43,6 +45,7 @@ const homePathsByScope = {
   jefe_talento_humano: "/dashboard/talento-humano",
   ti: "/dashboard/ti",
   jefe_ti: "/dashboard/ti",
+  admin_ti: "/dashboard/ti",
   operaciones: "/dashboard/operaciones",
   jefe_operaciones: "/dashboard/operaciones",
   logistica: "/dashboard/logistica",
@@ -69,7 +72,7 @@ const comercialLinks = [
 ];
 
 const planificacionLink = {
-  name: "PlanificaciÃ³n",
+  name: "Planificación",
   icon: FiCalendar,
   path: "/dashboard/comercial/planificacion",
 };
@@ -78,7 +81,7 @@ const comercialScopes = ["comercial", "acp_comercial", "backoffice", "backoffice
 
 
 const aprobacionesPlanLink = {
-  name: "AprobaciÃ³n de planes",
+  name: "Aprobación de planes",
   icon: FiCheckCircle,
   path: "/dashboard/comercial/aprobaciones-planificacion",
 };
@@ -98,7 +101,7 @@ const privatePurchasesLink = {
 };
 
 const publicPurchasesLink = {
-  name: "Compras PÃºblicas",
+  name: "Compras Públicas",
   icon: FiShoppingCart,
   path: "/dashboard/comercial/equipment-purchases",
 };
@@ -109,10 +112,23 @@ const businessCaseLink = {
   path: "/dashboard/business-case",
 };
 
+const linksInteresLink = {
+  name: "Links de Interés",
+  icon: FiBookOpen,
+  path: "/dashboard/links-interes",
+};
+
 const purchasesWorkspaceLink = {
   name: "Workspace de Compras",
   icon: FiShoppingCart,
   path: "/dashboard/purchases/workspace",
+};
+
+
+const gerenciaContractApprovalsLink = {
+  name: "Album de Compras",
+  icon: FiCheckCircle,
+  path: "/dashboard/gerencia/compras-album",
 };
 
 const logisticaPurchasesLink = {
@@ -123,25 +139,15 @@ const logisticaPurchasesLink = {
 
 const talentoLinks = [
   {
-    name: "Gestion de Usuarios",
+    name: "Colaboradores",
     icon: FiUsers,
-    path: "/dashboard/talento-humano/usuarios",
-  },
-  {
-    name: "Departamentos",
-    icon: FiBriefcase,
-    path: "/dashboard/talento-humano/departamentos",
-  },
-  {
-    name: "Solicitudes",
-    icon: FiClipboard,
-    path: "/dashboard/talento-humano/solicitudes",
+    path: "/dashboard/talento-humano/colaboradores",
   },
 ];
 
 const auditLinks = [
   {
-    name: "AuditorÃ­a y Trazabilidad",
+    name: "Auditoría y Trazabilidad",
     icon: FiFileText,
     path: "/dashboard/auditoria",
   },
@@ -159,10 +165,22 @@ const asistenciaReportesLink = {
   path: "/dashboard/talento-humano/asistencia-reportes",
 };
 
+const viaticosLink = {
+  name: "Workspace Viaticos",
+  icon: FiDollarSign,
+  path: "/dashboard/finanzas/viaticos",
+};
+
 const auditPrepLink = {
-  name: "PreparaciÃ³n AuditorÃ­a",
+  name: "Preparación Auditoría",
   icon: FiShield,
   path: "/dashboard/auditoria/preparacion",
+};
+
+const tiWorkspaceLink = {
+  name: "Workspace TI",
+  icon: FiLifeBuoy,
+  path: "/dashboard/ti/workspace",
 };
 
 const servicioLinks = [
@@ -221,25 +239,30 @@ const getPriorityGroups = (scope, role, auditActive) => {
   // Siempre incluir inicio como crÃ­tico
   groups.critical.push(getHomeLink(scope));
 
-  // ðŸ“Š GERENCIA - Enfoque en control y supervisiÃ³n
-  if (["gerencia", "gerente_general", "director"].includes(scope)) {
-    groups.critical.push(aprobacionesPlanLink); // Aprobaciones crÃ­ticas
-    groups.primary.push(businessCaseLink, auditPrepLink);
-    groups.secondary.push(auditLinks[0]); // AuditorÃ­a y trazabilidad
-    groups.admin.push(permisosLink, ...talentoLinks);
+  // 📊 GERENCIA - Enfoque en control y supervisión
+  if (["gerencia", "gerencia_general", "gerente_general", "director"].includes(scope)) {
+    groups.critical.push(businessCaseLink, aprobacionesPlanLink); // Estrategia y Control
+    groups.primary.push(gerenciaContractApprovalsLink, permisosLink, auditLinks[0]); // Gestión de personal y Auditoría
+    groups.secondary.push(auditPrepLink); // Preparación
+    groups.admin.push(...talentoLinks); // Gestión administrativa
   }
 
   // ðŸ’° FINANZAS - Control presupuestario
   else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero"].includes(scope)) {
-    groups.primary.push(businessCaseLink, permisosLink); // Control financiero principal
-    groups.secondary.push(auditPrepLink);
+    groups.primary.push(viaticosLink, asistenciaReportesLink, businessCaseLink, permisosLink); // Control financiero principal
     if (auditActive) groups.secondary.push(auditPrepLink);
   }
 
   // ðŸ’¼ COMERCIAL - Flujo de ventas completo
   else if (comercialScopes.includes(scope)) {
-    groups.critical.push(...comercialLinks); // Solicitudes y clientes crÃ­ticos
-    groups.primary.push(planificacionLink); // PlanificaciÃ³n mensual
+    groups.critical.push(...comercialLinks); // Solicitudes y clientes cr????ticos
+    // Ocultar planificación para backoffice y acp_comercial (sea por scope o por rol)
+    const isBackoffice = String(scope || "").includes("backoffice") || role.includes("backoffice");
+    const isAcp = scope === "acp_comercial" || role.includes("acp_comercial");
+
+    if (!isBackoffice && !isAcp) {
+      groups.primary.push(planificacionLink); // Planificación mensual
+    }
 
     // UNIFICACIÃ“N: Solo Workspace de Compras - Roles segÃºn AppRoutes.jsx
     const workspaceAllowedRoles = [
@@ -249,10 +272,6 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
     if (workspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
       groups.primary.unshift(purchasesWorkspaceLink); // Workspace primero en primary
-      console.log("[PURCHASES_WORKSPACE][FASE6][NAVBAR] workspace_visible", {
-        role: scope,
-        allowedRoles: workspaceAllowedRoles
-      });
     }
 
     if (scope.includes("acp") || role.includes("acp")) {
@@ -264,7 +283,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
     }
 
     groups.secondary.push(businessCaseLink); // Business Case queda en secondary
-    groups.admin.push(permisosLink);
+    groups.admin.push(permisosLink, viaticosLink);
   }
 
   // ðŸ”§ SERVICIO TÃ‰CNICO - Operaciones tÃ©cnicas
@@ -286,17 +305,19 @@ const getPriorityGroups = (scope, role, auditActive) => {
     }
     groups.secondary.push(
       servicioLinks.find(l => l.name === "Capacitaciones"),
-      servicioLinks.find(l => l.name === "Aplicaciones")
+      servicioLinks.find(l => l.name === "Aplicaciones"),
+      viaticosLink
     );
   }
 
-  // ðŸ‘¥ TALENTO HUMANO - GestiÃ³n de personal
+  // TALENTO HUMANO - Gestión de personal
   else if (["talento-humano", "talento_humano", "jefe_talento_humano"].includes(scope)) {
     groups.primary.push(permisosLink, asistenciaReportesLink, ...talentoLinks);
   }
 
   // ðŸŽ¯ TI - TecnologÃ­a y auditorÃ­a
   else if (["ti", "jefe_ti", "admin_ti"].includes(scope)) {
+    groups.critical.push(tiWorkspaceLink);
     groups.primary.push(...talentoLinks, ...auditLinks);
     if (auditActive) groups.primary.push(auditPrepLink);
   }
@@ -324,6 +345,8 @@ const getPriorityGroups = (scope, role, auditActive) => {
     groups.secondary.push(...comercialLinks);
   }
 
+  groups.secondary.push(linksInteresLink);
+
   // Filtrar elementos vacÃ­os y aplanar arrays
   Object.keys(groups).forEach(key => {
     groups[key] = groups[key].filter(Boolean);
@@ -336,7 +359,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
 
 
-// Componente para botones de navegaciÃ³n
+// Componente para botones de navegación
 const NavButton = ({ link, variant = "primary", mobile = false, onClick }) => {
   const baseClasses = mobile
     ? "flex items-center px-3 py-2 text-base font-medium rounded-md transition-colors duration-200"
@@ -440,13 +463,13 @@ const NavigationBar = () => {
       <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16 gap-4">
           <div className="flex items-center gap-2 text-xs md:text-sm">
-            <span className="text-lg font-semibold text-slate-900 dark:text-white">FamSPI</span>
-            <span className="hidden md:inline text-slate-500 dark:text-slate-300">Panel integrado</span>
+            <span className="text-lg font-semibold text-slate-900 dark:text-white">FAMSPI</span>
+            <span className="hidden md:inline text-slate-500 dark:text-slate-300">Panel</span>
           </div>
 
           <div
             className="hidden md:flex flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap py-2"
-            aria-label="NavegaciÃ³n principal"
+            aria-label="Navegación principal"
           >
             <div className="flex items-center gap-1">
               {renderGroup(priorityGroups.critical, "critical")}
@@ -529,6 +552,9 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
+
+
+
 
 
 

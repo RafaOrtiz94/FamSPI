@@ -5,9 +5,10 @@ import Button from '../components/Button';
 import { createPersonnelRequest } from '../../api/personnelRequestsApi';
 import { createPortal } from 'react-dom';
 
-const PersonnelRequestForm = ({ onClose, onSuccess }) => {
+const PersonnelRequestForm = ({ onClose, onSuccess, isModal = true }) => {
     const [loading, setLoading] = useState(false);
     const [currentStep, setCurrentStep] = useState(1);
+    const [fieldErrors, setFieldErrors] = useState({});
 
     const [formData, setFormData] = useState({
         // Información del puesto
@@ -51,7 +52,26 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
             ...prev,
             [name]: value
         }));
+        if (fieldErrors[name]) {
+            setFieldErrors(prev => {
+                const next = { ...prev };
+                delete next[name];
+                return next;
+            });
+        }
     };
+    const validateFields = (fields) => {
+        const nextErrors = {};
+        fields.forEach((field) => {
+            const value = formData[field];
+            if (value === undefined || value === null || `${value}`.trim() === '') {
+                nextErrors[field] = 'Este campo es obligatorio';
+            }
+        });
+        setFieldErrors(prev => ({ ...prev, ...nextErrors }));
+        return Object.keys(nextErrors).length === 0;
+    };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -61,9 +81,13 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
         }
         if (loading) return;
 
-        // Validaciones básicas
-        if (!formData.position_title || !formData.education_level || !formData.main_responsibilities || !formData.justification) {
-            toast.error('Por favor completa todos los campos obligatorios');
+        // Validaciones basicas
+        const requiredBase = ['position_title', 'education_level', 'main_responsibilities', 'justification'];
+        const requiredConditions = ['work_schedule', 'salary_range', 'work_location', 'benefits'];
+        const okBase = validateFields(requiredBase);
+        const okConditions = validateFields(requiredConditions);
+        if (!okBase || !okConditions) {
+            toast.error('Por favor completa los campos obligatorios');
             return;
         }
 
@@ -100,51 +124,55 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
     const [portalNode] = useState(() => document.createElement('div'));
 
     useEffect(() => {
+        if (!isModal) return;
         document.body.appendChild(portalNode);
         return () => {
-            document.body.removeChild(portalNode);
+            if (document.body.contains(portalNode)) {
+                document.body.removeChild(portalNode);
+            }
         };
-    }, [portalNode]);
+    }, [portalNode, isModal]);
 
-    return createPortal(
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+    const content = (
+        <div className={isModal ? "fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-2 sm:p-4" : "w-full h-full bg-white flex flex-col"}>
+            <div className={isModal ? "bg-white w-full max-w-4xl max-h-[92vh] sm:max-h-[90vh] overflow-y-auto rounded-none sm:rounded-2xl shadow-xl" : "w-full h-full overflow-y-auto"}>
                 {/* Header */}
-                <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+                <div className="sticky top-0 bg-white border-b border-gray-200 px-4 py-3 sm:px-6 sm:py-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between z-10">
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Nueva Solicitud de Personal</h2>
-                        <p className="text-sm text-gray-600 mt-1">Paso {currentStep} de 4</p>
+                        <h2 className="text-xl sm:text-2xl font-bold text-gray-900">Nueva Solicitud de Personal</h2>
+                        <p className="text-xs sm:text-sm text-gray-600 mt-1">Paso {currentStep} de 4</p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 transition-colors"
+                        className="text-gray-400 hover:text-gray-600 transition-colors self-end sm:self-auto"
+                        title="Cancelar"
                     >
                         <FiX size={24} />
                     </button>
                 </div>
 
                 {/* Progress Bar */}
-                <div className="px-6 py-4 bg-gray-50">
-                    <div className="flex items-center justify-between mb-2">
+                <div className="px-4 py-3 sm:px-6 sm:py-4 bg-gray-50">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                         {['Puesto', 'Perfil', 'Responsabilidades', 'Condiciones'].map((step, idx) => (
                             <div key={idx} className="flex items-center">
-                                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold ${currentStep > idx + 1 ? 'bg-green-500 text-white' :
+                                <div className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full flex items-center justify-center text-xs sm:text-sm font-semibold ${currentStep > idx + 1 ? 'bg-green-500 text-white' :
                                     currentStep === idx + 1 ? 'bg-blue-600 text-white' :
                                         'bg-gray-300 text-gray-600'
                                     }`}>
                                     {idx + 1}
                                 </div>
-                                <span className={`ml-2 text-sm ${currentStep === idx + 1 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
+                                <span className={`ml-2 text-xs sm:text-sm ${currentStep === idx + 1 ? 'font-semibold text-gray-900' : 'text-gray-600'}`}>
                                     {step}
                                 </span>
-                                {idx < 3 && <div className="w-12 h-1 bg-gray-300 mx-2" />}
+                                {idx < 3 && <div className="hidden sm:block w-12 h-1 bg-gray-300 mx-2" />}
                             </div>
                         ))}
                     </div>
                 </div>
 
                 <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown}>
-                    <div className="px-6 py-6">
+                    <div className="px-4 py-5 sm:px-6 sm:py-6">
                         {/* Paso 1: Información del Puesto */}
                         {currentStep === 1 && (
                             <div className="space-y-4">
@@ -163,10 +191,13 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                             name="position_title"
                                             value={formData.position_title}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.position_title ? 'border-red-500' : ''}`}
                                             placeholder="Ej: Analista de Marketing Digital"
                                             required
                                         />
+                                        {fieldErrors.position_title && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.position_title}</p>
+                                        )}
                                     </div>
 
                                     <div>
@@ -185,6 +216,9 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                             <option value="reemplazo">Reemplazo</option>
                                             <option value="proyecto">Por Proyecto</option>
                                         </select>
+                                        {fieldErrors.education_level && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.education_level}</p>
+                                        )}
                                     </div>
 
                                     <div>
@@ -271,11 +305,14 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                         name="justification"
                                         value={formData.justification}
                                         onChange={handleChange}
-                                        className="input-field"
+                                        className={`input-field ${fieldErrors.justification ? 'border-red-500' : ''}`}
                                         rows="4"
                                         placeholder="Explica por qué es necesaria esta contratación..."
                                         required
                                     />
+                                    {fieldErrors.justification && (
+                                        <p className="text-xs text-red-600 mt-1">{fieldErrors.justification}</p>
+                                    )}
                                 </div>
                             </div>
                         )}
@@ -297,7 +334,7 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                             name="education_level"
                                             value={formData.education_level}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.education_level ? 'border-red-500' : ''}`}
                                             required
                                         >
                                             <option value="">Seleccionar...</option>
@@ -428,11 +465,14 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                         name="main_responsibilities"
                                         value={formData.main_responsibilities}
                                         onChange={handleChange}
-                                        className="input-field"
+                                        className={`input-field ${fieldErrors.main_responsibilities ? 'border-red-500' : ''}`}
                                         rows="5"
                                         placeholder="Describe las responsabilidades principales del puesto..."
                                         required
                                     />
+                                    {fieldErrors.main_responsibilities && (
+                                        <p className="text-xs text-red-600 mt-1">{fieldErrors.main_responsibilities}</p>
+                                    )}
                                 </div>
 
                                 <div>
@@ -484,6 +524,11 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                         {/* Paso 4: Condiciones Laborales */}
                         {currentStep === 4 && (
                             <div className="space-y-4">
+                                {(!formData.work_schedule || !formData.salary_range || !formData.work_location || !formData.benefits) && (
+                                    <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                        Faltan datos en este paso. Completa los campos obligatorios antes de enviar.
+                                    </div>
+                                )}
                                 <div className="flex items-center gap-2 mb-4">
                                     <FiDollarSign className="text-blue-600" size={24} />
                                     <h3 className="text-lg font-semibold text-gray-900">Condiciones Laborales</h3>
@@ -492,112 +537,123 @@ const PersonnelRequestForm = ({ onClose, onSuccess }) => {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Horario de Trabajo
+                                            Horario de Trabajo <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="text"
                                             name="work_schedule"
                                             value={formData.work_schedule}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.work_schedule ? 'border-red-500' : ''}`}
                                             placeholder="Ej: Lunes a Viernes 8:00-17:00"
+                                            required
                                         />
+                                        {fieldErrors.work_schedule && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.work_schedule}</p>
+                                        )}
                                     </div>
 
                                     <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Rango Salarial
+                                            Rango Salarial <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="text"
                                             name="salary_range"
                                             value={formData.salary_range}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.salary_range ? 'border-red-500' : ''}`}
                                             placeholder="Ej: $800 - $1200"
+                                            required
                                         />
+                                        {fieldErrors.salary_range && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.salary_range}</p>
+                                        )}
                                     </div>
 
                                     <div className="md:col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Ubicación de Trabajo
+                                            Ubicación de Trabajo <span className="text-red-500">*</span>
                                         </label>
                                         <input
                                             type="text"
                                             name="work_location"
                                             value={formData.work_location}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.work_location ? 'border-red-500' : ''}`}
                                             placeholder="Ej: Oficina principal, Remoto, Híbrido"
+                                            required
                                         />
+                                        {fieldErrors.work_location && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.work_location}</p>
+                                        )}
                                     </div>
 
                                     <div className="md:col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                                            Beneficios
+                                            Beneficios <span className="text-red-500">*</span>
                                         </label>
                                         <textarea
                                             name="benefits"
                                             value={formData.benefits}
                                             onChange={handleChange}
-                                            className="input-field"
+                                            className={`input-field ${fieldErrors.benefits ? 'border-red-500' : ''}`}
                                             rows="4"
                                             placeholder="Ej: Seguro médico, bonos por desempeño, capacitación continua..."
+                                            required
                                         />
+                                        {fieldErrors.benefits && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.benefits}</p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
                         )}
-                    </div>
 
-                    {/* Footer con botones */}
-                    <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 px-6 py-4 flex justify-between items-center">
-                        <div>
-                            {currentStep > 1 && (
+                        {/* Botones de Navegación */}
+                        <div className="mt-6 flex items-center justify-between pt-4 border-t border-gray-200">
+                            {currentStep > 1 ? (
                                 <Button
                                     type="button"
                                     variant="secondary"
                                     onClick={prevStep}
+                                    disabled={loading}
                                 >
-                                    Anterior
-                                </Button>
-                            )}
-                        </div>
-
-                        <div className="flex gap-2">
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={onClose}
-                            >
-                                Cancelar
-                            </Button>
-
-                            {currentStep < 4 ? (
-                                <Button
-                                    type="button"
-                                    variant="primary"
-                                    onClick={nextStep}
-                                >
-                                    Siguiente
+                                    Atrás
                                 </Button>
                             ) : (
+                                <div />
+                            )}
+
+                            <div className="flex gap-3">
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={onClose}
+                                    disabled={loading}
+                                >
+                                    Cancelar
+                                </Button>
                                 <Button
                                     type="submit"
                                     variant="primary"
-                                    icon={FiSave}
+                                    icon={currentStep === 4 ? FiSave : null}
                                     disabled={loading}
                                 >
-                                    {loading ? 'Guardando...' : 'Crear Solicitud'}
+                                    {loading ? 'Procesando...' : currentStep === 4 ? 'Finalizar Solicitud' : 'Siguiente'}
                                 </Button>
-                            )}
+                            </div>
                         </div>
                     </div>
                 </form>
             </div>
-        </div>,
-        portalNode
+        </div>
     );
+
+    if (isModal) {
+        return createPortal(content, portalNode);
+    }
+    return content;
 };
 
 export default PersonnelRequestForm;

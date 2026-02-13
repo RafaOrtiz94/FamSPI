@@ -55,6 +55,7 @@ const LoginCallback = () => {
 
         const role = (stored.role || "pendiente").toLowerCase();
         const scope = (stored.scope || role).toLowerCase();
+        const isPendingRole = !role || role === "pendiente" || role === "pending" || scope === "pendiente" || scope === "pending";
 
         const roleRoutes = {
           gerencia: "/dashboard/gerencia",
@@ -62,6 +63,8 @@ const LoginCallback = () => {
           director: "/dashboard/gerencia",
           finanzas: "/dashboard/finanzas",
           jefe_finanzas: "/dashboard/finanzas",
+          jefe_financiero: "/dashboard/finanzas",
+          financiero: "/dashboard/finanzas",
           comercial: "/dashboard/comercial",
           jefe_comercial: "/dashboard/comercial",
           backoffice_comercial: "/dashboard/comercial",
@@ -81,11 +84,9 @@ const LoginCallback = () => {
           jefe_calidad: "/dashboard/calidad",
         };
 
-        const target =
-          stored.dashboard ||
-          roleRoutes[scope] ||
-          roleRoutes[role] ||
-          "/unauthorized";
+        const target = isPendingRole
+          ? "/registro-en-proceso"
+          : stored.dashboard || roleRoutes[scope] || roleRoutes[role] || "/unauthorized";
         console.log(`🚀 Redirigiendo a: ${target}`);
         navigate(target, { replace: true });
       } catch (err) {

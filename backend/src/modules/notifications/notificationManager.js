@@ -9,8 +9,8 @@
  * - mailer.js para emails/chat
  */
 
-const notificationService = require('./notifications.service');
 const { sendMail } = require('../../utils/mailer');
+const loadNotificationService = () => require('./notifications.service');
 
 class NotificationManager {
   constructor() {
@@ -34,13 +34,56 @@ class NotificationManager {
         type: 'alert',
         priority: 1
       },
-      equipment_available: {
-        title: 'Equipo Disponible',
-        message: 'El equipo solicitado está listo para entrega',
-        type: 'task',
-        priority: 0
-      }
-    };
+    equipment_available: {
+      title: 'Equipo Disponible',
+      message: 'El equipo solicitado está listo para entrega',
+      type: 'task',
+      priority: 0
+    }
+    ,
+      private_purchase_request_submitted: {
+      title: 'Nueva solicitud privada',
+      message: 'Solicitada para #{client_name} ({offer_kind}) · revisa y responde cuanto antes',
+      type: 'alert',
+      priority: 2
+    },
+    private_purchase_created: {
+      title: 'Solicitud privada creada',
+      message: 'Tu solicitud #{purchase_id} para #{client_name} fue registrada. Te avisaremos cuando avance.',
+      type: 'task',
+      priority: 1
+    },
+    private_purchase_state_transition: {
+      title: 'Cambio en compra privada',
+      message: 'La solicitud #{purchase_id} cambió a #{new_state}.',
+      type: 'info',
+      priority: 0
+    },
+    bc_created: {
+      title: 'Business case generado',
+      message: 'Ya puedes seguir con el flujo del comodato para #{client_name}.',
+      type: 'task',
+      priority: 1
+    },
+    bc_section_review_requested: {
+      title: 'Revisión requerida de Business Case',
+      message: 'Se actualiza la sección #{section_name} del BC #{business_case_id}.',
+      type: 'alert',
+      priority: 1
+    },
+    bc_phase1_completed: {
+      title: 'BC listo para evaluacion',
+      message: 'El BC #{business_case_id} finalizo la fase 1 y esta listo para evaluacion.',
+      type: 'alert',
+      priority: 1
+    },
+    bc_section_locked: {
+      title: 'Sección bloqueada de Business Case',
+      message: 'La sección #{section_name} del BC #{business_case_id} fue bloqueada.',
+      type: 'info',
+      priority: 1
+    }
+  };
   }
 
   /**
@@ -76,7 +119,7 @@ class NotificationManager {
       };
 
       // 2. Crear notificación en BD
-      const notification = await notificationService.createNotification(notificationData);
+      const notification = await loadNotificationService().createNotification(notificationData);
 
       // 3. Enviar email si está habilitado
       if (email) {

@@ -12,7 +12,7 @@ router.get("/pending-approval", requireRole(managerRoles), controller.listPendin
 router.get("/team", requireRole(managerRoles), controller.listTeamSchedules);
 router.get("/analytics", requireRole(managerRoles), controller.analytics);
 router.get("/approved/current", requireRole([...advisorRoles, ...managerRoles]), controller.getApprovedSchedule);
-router.get("/:id", requireRole(advisorRoles), controller.getScheduleDetail);
+router.get("/:id", requireRole([...advisorRoles, ...managerRoles]), controller.getScheduleDetail);
 router.post("/", requireRole(advisorRoles), controller.createSchedule);
 router.put("/:id", requireRole(advisorRoles), controller.updateSchedule);
 router.delete("/:id", requireRole(advisorRoles), controller.deleteSchedule);

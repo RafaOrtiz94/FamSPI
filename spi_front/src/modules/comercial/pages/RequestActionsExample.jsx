@@ -137,7 +137,7 @@ const RequestActionsExample = () => {
               </h3>
               <p className="text-gray-600 mb-4">
                 Página: <code className="bg-gray-100 px-2 py-1 rounded">/dashboard/business-case</code> →
-                Redirige a: <code className="bg-indigo-100 px-2 py-1 rounded">/dashboard/business-case/wizard</code>
+                Redirige a: <code className="bg-indigo-100 px-2 py-1 rounded">/dashboard/business-case/workspace</code>
               </p>
               <RequestActionCard type="BUSINESS_CASE" size="compact" />
             </div>

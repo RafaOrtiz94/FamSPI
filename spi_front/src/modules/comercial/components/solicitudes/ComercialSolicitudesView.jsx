@@ -106,14 +106,20 @@ const ComercialSolicitudesView = () => {
     // Cargar equipos disponibles al montar el componente - RESTORED FROM REFERENCE VERSION
     useEffect(() => {
         let active = true;
-        const loadEquipment = async () => {
-            setLoadingEquipment(true);
-            try {
-                const meta = await getEquipmentPurchaseMeta();
-                if (!active) return;
-                setEquipmentCatalog(meta.equipment || []);
-            } catch (error) {
-                console.error("Error cargando equipos:", error);
+    const loadEquipment = async () => {
+        setLoadingEquipment(true);
+        try {
+          const meta = await getEquipmentPurchaseMeta();
+          console.info("[FLOW_PRIVADA][FE][DEBUG] equipment meta", {
+            fetched: Array.isArray(meta?.equipment) ? meta.equipment.length : 0,
+            payload: meta,
+          });
+          if (!active) return;
+          const catalog = meta.equipment || [];
+          console.info("[FLOW_PRIVADA][FE][DEBUG] catalog count", catalog.length);
+          setEquipmentCatalog(catalog);
+        } catch (error) {
+          console.error("Error cargando equipos:", error);
                 showToast("No se pudieron cargar los equipos disponibles", "error");
             } finally {
                 setLoadingEquipment(false);
@@ -275,6 +281,7 @@ const ComercialSolicitudesView = () => {
         setSelectedEquipment((prev) => {
             const normalizedId = normalizeEquipmentId(id);
             const exists = prev.find((item) => item.id === normalizedId);
+            console.debug("[FLOW_PRIVADA][FE][DEBUG] toggleEquipment", { id: normalizedId, exists: !!exists });
             if (exists) {
                 return prev.filter((item) => item.id !== normalizedId);
             }
@@ -311,19 +318,25 @@ const ComercialSolicitudesView = () => {
         showLoader();
         const flowId = `pp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
         try {
-            const equipmentPayload = selectedEquipment
-                .map((selected) => {
-                    const item = equipmentCatalog.find(
-                        (equip) => `${equip.id}` === normalizeEquipmentId(selected.id)
-                    );
-                    return {
-                        id: item?.id || selected.id,
-                        name: item?.name || "Equipo",
-                        sku: item?.sku || null,
-                        type: selected.type || "new",
-                    };
-                })
-                .filter(Boolean);
+        const equipmentPayload = selectedEquipment
+            .map((selected) => {
+                const item = equipmentCatalog.find(
+                    (equip) => `${equip.id}` === normalizeEquipmentId(selected.id)
+                );
+                return {
+                    id: item?.id || selected.id,
+                    name: item?.name || "Equipo",
+                    sku: item?.sku || null,
+                    type: selected.type || "new",
+                };
+            })
+            .filter(Boolean);
+            console.debug("[FLOW_PRIVADA][FE][DEBUG] equipmentPayload", {
+                selectedEquipment,
+                equipmentCatalogCount: equipmentCatalog.length,
+                payloadCount: equipmentPayload.length,
+                payloadPreview: equipmentPayload.slice(0,3),
+            });
 
             const payload = {
                 clientSnapshot: {
@@ -381,61 +394,6 @@ const ComercialSolicitudesView = () => {
     return (
         <div className="space-y-8">
             <BaseSolicitudesView
-                customSections={[
-                    {
-                        id: "resumen",
-                        title: "Resumen de Solicitudes",
-                        subtitle: "Consulta el historial de solicitudes por tipo",
-                        content: (
-                            <div className="space-y-6">
-                                {/* iOS Springboard Navigation - Enhanced for iPhone 13 */}
-                                <div className="flex items-center justify-between">
-                                    <h3 className="text-lg font-bold text-gray-900 tracking-tight">Accesos Rápidos</h3>
-                                    <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1 rounded-full">
-                                        {new Date().toLocaleDateString('es-ES', { 
-                                            day: 'numeric',
-                                            month: 'short'
-                                        })}
-                                    </div>
-                                </div>
-                                
-                                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                                    {visibleStatWidgets.map(widget => (
-                                        <div 
-                                            key={widget.id}
-                                            className="group cursor-pointer"
-                                            onClick={() => handleViewList(widget.type, widget.title, widget.fetcher)}
-                                        >
-                                            <div className="flex flex-col items-center justify-center p-4 bg-white rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg hover:scale-105 transition-all duration-300 group-hover:shadow-blue-100/50 group-active:scale-95">
-                                                <div className={`w-12 h-12 bg-gradient-to-br ${
-                                                    widget.color === 'emerald' ? 'from-emerald-500 to-emerald-600' :
-                                                    widget.color === 'blue' ? 'from-blue-500 to-blue-600' :
-                                                    widget.color === 'amber' ? 'from-amber-500 to-amber-600' :
-                                                    widget.color === 'orange' ? 'from-orange-500 to-orange-600' :
-                                                    'from-blue-500 to-blue-600'
-                                                } rounded-xl flex items-center justify-center shadow-md mb-2 group-hover:${
-                                                    widget.color === 'emerald' ? 'shadow-emerald-500/25' :
-                                                    widget.color === 'blue' ? 'shadow-blue-500/25' :
-                                                    widget.color === 'amber' ? 'shadow-amber-500/25' :
-                                                    widget.color === 'orange' ? 'shadow-orange-500/25' :
-                                                    'shadow-blue-500/25'
-                                                } transition-shadow`}>
-                                                    <widget.icon className="w-5 h-5 text-white" />
-                                                </div>
-                                                <span className="text-xs font-semibold text-gray-900 text-center leading-tight">
-                                                    {widget.title.split(' ')[0]}
-                                                </span>
-                                                <span className="text-[10px] text-gray-500 text-center leading-tight">
-                                                    {widget.title.split(' ').slice(1).join(' ')}
-                                                </span>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )
-                    }
-                ]}
             />
 
             {/* PURCHASE HANDOFF MODAL REMOVED - Now using global modals */}
@@ -558,8 +516,11 @@ const ComercialSolicitudesView = () => {
                     {/* Equipos */}
                     <div className="border-b pb-4">
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-lg font-semibold text-gray-900">Equipos disponibles</h3>
+                            <h3 className="text-lg font-semibold text-gray-900">Modelos disponibles</h3>
                         </div>
+                        <p className="text-xs text-gray-500 mb-3">
+                            Selecciona el modelo. El número de serie se asigna cuando se vincula el equipo al cliente.
+                        </p>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                             {equipmentCatalog.map((equipment) => {
                                 const selected = selectedEquipment.find(item => item.id === `${equipment.id}`);
@@ -576,9 +537,11 @@ const ComercialSolicitudesView = () => {
                                                 <p className="text-sm font-semibold text-gray-900">
                                                     {equipment.name}
                                                 </p>
-                                                <p className="text-xs text-gray-500 flex items-center gap-1">
-                                                    SKU: {equipment.sku || "N/A"}
-                                                </p>
+                                                <div className="text-xs text-gray-500 space-y-0.5">
+                                                    <p>Modelo: {equipment.model || equipment.name || "N/A"}</p>
+                                                    <p>SKU: {equipment.sku || "N/A"}</p>
+                                                    <p>Categoria: {equipment.category || "N/A"}</p>
+                                                </div>
                                             </div>
                                             <span className={`text-xs font-semibold ${selected ? "text-blue-700" : "text-gray-400"}`}>
                                                 {selected ? "Seleccionado" : "Agregar"}
@@ -619,7 +582,7 @@ const ComercialSolicitudesView = () => {
                         </div>
                         {equipmentCatalog.length === 0 && (
                             <p className="text-sm text-gray-500 text-center py-4">
-                                {loadingEquipment ? "Cargando equipos..." : "No hay equipos disponibles"}
+                                {loadingEquipment ? "Cargando modelos..." : "No hay modelos disponibles"}
                             </p>
                         )}
                     </div>

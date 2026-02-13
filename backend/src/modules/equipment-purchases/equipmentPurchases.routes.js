@@ -4,23 +4,24 @@ const router = express.Router();
 const ctrl = require("./equipmentPurchases.controller");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
+const { streamPurchaseUpdates } = require("./purchaseEvents");
 
-const managerRoles = ["acp_comercial", "gerencia", "jefe_comercial"];
+const managerRoles = ["acp_comercial", "gerencia", "gerencia_general", "jefe_comercial"];
 const creatorRoles = ["comercial", ...managerRoles];
-const businessCaseRoles = [
-  "comercial",
-  "acp_comercial",
-  "gerencia",
-  "jefe_comercial",
-  "jefe_tecnico",
-  "jefe_operaciones",
-];
 const viewerRoles = Array.from(new Set([...creatorRoles, "jefe_tecnico", "jefe_operaciones"]));
 
+const attachTokenFromQuery = (req, _res, next) => {
+  const token = req.query?.token;
+  if (token) {
+    req.headers.authorization = `Bearer ${token}`;
+  }
+  next();
+};
+
+router.get("/events", attachTokenFromQuery, verifyToken, requireRole(viewerRoles), streamPurchaseUpdates);
 router.get("/meta", verifyToken, requireRole(creatorRoles), ctrl.getMeta);
 router.get("/stats", verifyToken, requireRole(managerRoles), ctrl.getStats);
 router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
-router.get("/business-case/options", verifyToken, requireRole(businessCaseRoles), ctrl.getBusinessCaseOptions);
 router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
@@ -55,34 +56,6 @@ router.post(
   ctrl.uploadContract,
 );
 
-router.get(
-  "/:id/business-case/items",
-  verifyToken,
-  requireRole(businessCaseRoles),
-  ctrl.listBusinessCaseItems,
-);
-
-router.post(
-  "/:id/business-case/fields",
-  verifyToken,
-  requireRole(businessCaseRoles),
-  ctrl.updateBusinessCaseFields,
-);
-
-router.post(
-  "/:id/business-case/resolve",
-  verifyToken,
-  requireRole(businessCaseRoles),
-  ctrl.resolveBusinessCase
-);
-
-router.post(
-  "/:id/business-case/items",
-  verifyToken,
-  requireRole(businessCaseRoles),
-  ctrl.addBusinessCaseItem,
-);
-
 router.post(
   "/:id/renew-reservation",
   verifyToken,
@@ -103,37 +76,6 @@ router.post(
   requireRole(managerRoles),
   ctrl.upload.single("file"),
   ctrl.submitSignedProformaWithInspection,
-);
-
-// ===== BUSINESS CASE APPROVAL ROUTES =====
-const bcApprovalRoles = ["gerencia", "jefe_comercial"];
-
-router.post(
-  "/:id/business-case/submit",
-  verifyToken,
-  requireRole(managerRoles),
-  ctrl.submitBusinessCase
-);
-
-router.post(
-  "/:id/business-case/approve",
-  verifyToken,
-  requireRole(bcApprovalRoles),
-  ctrl.approveBusinessCase
-);
-
-router.post(
-  "/:id/business-case/reject",
-  verifyToken,
-  requireRole(bcApprovalRoles),
-  ctrl.rejectBusinessCase
-);
-
-router.get(
-  "/:id/gating-status",
-  verifyToken,
-  requireRole(managerRoles),
-  ctrl.getPurchaseGatingStatus
 );
 
 module.exports = router;

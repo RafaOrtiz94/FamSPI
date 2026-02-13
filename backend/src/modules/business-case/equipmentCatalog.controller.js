@@ -21,6 +21,25 @@ const equipmentFormulaSchema = Joi.object({
   exampleContext: Joi.object().default({}),
 });
 
+const consumableSchema = Joi.object({
+  name: Joi.string().trim().required(),
+  type: Joi.string().valid("reactivo", "control", "calibrador", "consumible", "material").required(),
+  supplier_code: Joi.string().allow(null, "").trim(),
+  determination_id: Joi.number().integer().allow(null),
+  metadata: Joi.object().default({}),
+});
+
+const determinationCreateSchema = Joi.object({
+  name: Joi.string().trim().required(),
+  roche_code: Joi.string().allow(null, "").trim(),
+  category: Joi.string().allow(null, "").trim(),
+  version: Joi.string().allow(null, "").default("1.0"),
+  status: Joi.string().valid("active", "discontinuado").default("active"),
+  valid_from: Joi.date().optional(),
+  valid_to: Joi.date().allow(null),
+  metadata: Joi.object().default({}),
+});
+
 const mapEquipmentModelRecord = (row) => ({
   equipment_id: row.id,
   equipment_code: row.code,
@@ -76,15 +95,178 @@ async function getDetails(req, res) {
 
 async function getDeterminations(req, res) {
   try {
+    const equipmentId = req.params.id;
     const { rows } = await db.query(
-      `SELECT id, name, category, roche_code, volume_per_test, reagent_consumption
-       FROM catalog_determinations WHERE equipment_id = $1 ORDER BY name`,
-      [req.params.id],
+      `SELECT
+         id,
+         name,
+         category,
+         roche_code,
+         status
+       FROM catalog_determinations
+       WHERE equipment_id = $1
+       ORDER BY name`,
+      [equipmentId],
     );
     res.json({ ok: true, data: rows });
   } catch (error) {
     logger.error(error);
     res.status(500).json({ ok: false, message: "Error obteniendo determinaciones" });
+  }
+}
+
+async function getConsumables(req, res) {
+  try {
+    const { type } = req.query;
+    const params = [req.params.id];
+    const typeClause = type ? "AND c.type = $2" : "";
+    if (type) params.push(type);
+    const { rows } = await db.query(
+      `SELECT
+         c.id AS id,
+         c.name,
+         c.type,
+         c.supplier_code,
+         c.metadata,
+         ec.determination_id,
+         d.name AS determination_name,
+         ec.consumption_rate
+       FROM catalog_equipment_consumables ec
+       JOIN catalog_consumables c ON c.id = ec.consumable_id
+       LEFT JOIN catalog_determinations d ON d.id = ec.determination_id
+       WHERE ec.equipment_id = $1
+       ${typeClause}
+       ORDER BY c.name`,
+      params,
+    );
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error obteniendo consumibles" });
+  }
+}
+
+async function createConsumable(req, res) {
+  try {
+    const { error, value } = consumableSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const equipmentId = req.params.id;
+    const normalizedSupplier = value.supplier_code || null;
+    const normalizedName = value.name.trim();
+    const existing = await db.query(
+      `SELECT id FROM catalog_consumables
+       WHERE lower(name) = lower($1)
+         AND COALESCE(supplier_code, '') = COALESCE($2, '')
+         AND type = $3
+       LIMIT 1`,
+      [normalizedName, normalizedSupplier, value.type],
+    );
+
+    let consumableId = existing.rows[0]?.id;
+    if (!consumableId) {
+      const insert = await db.query(
+        `INSERT INTO catalog_consumables (name, type, status, metadata, supplier_code, valid_from)
+         VALUES ($1, $2, 'active', $3, $4, CURRENT_DATE)
+         RETURNING id`,
+        [
+          normalizedName,
+          value.type,
+          JSON.stringify(value.metadata || {}),
+          normalizedSupplier,
+        ],
+      );
+      consumableId = insert.rows[0].id;
+    }
+
+    const linkExists = await db.query(
+      `SELECT id FROM catalog_equipment_consumables
+       WHERE equipment_id = $1 AND consumable_id = $2
+         AND COALESCE(determination_id, 0) = COALESCE($3, 0)
+       LIMIT 1`,
+      [equipmentId, consumableId, value.determination_id || null],
+    );
+
+    if (!linkExists.rows.length) {
+      await db.query(
+        `INSERT INTO catalog_equipment_consumables
+         (equipment_id, consumable_id, determination_id, consumption_rate, created_at)
+         VALUES ($1, $2, $3, 1, now())`,
+        [equipmentId, consumableId, value.determination_id || null],
+      );
+    }
+
+    res.status(201).json({ ok: true, data: { id: consumableId } });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error creando consumible" });
+  }
+}
+
+async function updateConsumable(req, res) {
+  try {
+    const { error, value } = consumableSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const equipmentId = req.params.id;
+    const consumableId = req.params.consumableId;
+
+    const { rows } = await db.query(
+      `UPDATE catalog_consumables
+       SET name=$1, type=$2, supplier_code=$3, metadata=$4, updated_at = now()
+       WHERE id=$5 RETURNING id`,
+      [
+        value.name.trim(),
+        value.type,
+        value.supplier_code || null,
+        JSON.stringify(value.metadata || {}),
+        consumableId,
+      ],
+    );
+    if (!rows.length) return res.status(404).json({ ok: false, message: "Consumible no encontrado" });
+
+    await db.query(
+      `UPDATE catalog_equipment_consumables
+       SET determination_id = $1, updated_at = now()
+       WHERE equipment_id = $2 AND consumable_id = $3`,
+      [value.determination_id || null, equipmentId, consumableId],
+    );
+
+    res.json({ ok: true, data: { id: consumableId } });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error actualizando consumible" });
+  }
+}
+
+async function createDetermination(req, res) {
+  try {
+    const { error, value } = determinationCreateSchema.validate(req.body);
+    if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const equipmentId = req.params.id;
+    const { rows } = await db.query(
+      `INSERT INTO catalog_determinations
+       (name, roche_code, category, equipment_id, version, status, valid_from, valid_to, metadata)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7, CURRENT_DATE),$8,$9)
+       RETURNING *`,
+      [
+        value.name,
+        value.roche_code,
+        value.category,
+        equipmentId,
+        value.version,
+        value.status,
+        value.valid_from,
+        value.valid_to,
+        JSON.stringify(value.metadata || {}),
+      ],
+    );
+
+    res.status(201).json({ ok: true, data: rows[0] });
+  } catch (error) {
+    logger.error(error);
+    res.status(500).json({ ok: false, message: "Error creando determinación" });
   }
 }
 
@@ -185,6 +367,10 @@ module.exports = {
   list,
   getDetails,
   getDeterminations,
+  getConsumables,
+  createConsumable,
+  updateConsumable,
+  createDetermination,
   create,
   update,
   updateFormula,

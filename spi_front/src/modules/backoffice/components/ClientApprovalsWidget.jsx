@@ -139,7 +139,7 @@ const ClientApprovalsWidget = () => {
   };
 
   return (
-    <div className="space-y-4 rounded-2xl border border-gray-200 bg-white/80 backdrop-blur-xl p-5 shadow-xl hover:shadow-2xl transition-all duration-300">
+    <div className="space-y-4 rounded-none border border-gray-200 border-x-0 bg-white/90 px-3 py-4 shadow-none transition-all duration-300 sm:rounded-2xl sm:border sm:bg-white/80 sm:p-5 sm:shadow-xl sm:hover:shadow-2xl sm:backdrop-blur-xl">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -150,7 +150,7 @@ const ClientApprovalsWidget = () => {
             Panel de aprobación y control centralizado
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
             size="sm"
             variant="ghost"
@@ -172,7 +172,7 @@ const ClientApprovalsWidget = () => {
 
       {/* Estado vacío */}
       {requests.length === 0 && !loading ? (
-        <div className="text-sm text-gray-500 bg-gray-50 rounded-xl py-4 text-center border">
+        <div className="text-sm text-gray-500 bg-gray-50 rounded-none py-4 text-center border border-x-0 sm:rounded-xl sm:border">
           No hay solicitudes pendientes
         </div>
       ) : (
@@ -180,7 +180,7 @@ const ClientApprovalsWidget = () => {
           {requests.map((req) => (
             <div
               key={req.id}
-              className="rounded-xl border border-gray-200 px-4 py-3 bg-white shadow-sm hover:shadow-md transition-all duration-200"
+              className="rounded-none border border-gray-200 border-x-0 px-4 py-3 bg-white shadow-none transition-all duration-200 sm:rounded-xl sm:border sm:shadow-sm sm:hover:shadow-md"
             >
               <div className="flex items-start justify-between gap-4">
                 {/* Info */}
@@ -205,7 +205,7 @@ const ClientApprovalsWidget = () => {
                 </div>
 
                 {/* Actions */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     size="sm"
                     variant="secondary"
@@ -244,7 +244,7 @@ const ClientApprovalsWidget = () => {
       )}
 
       {/* Aprobados */}
-      <div className="rounded-2xl border border-emerald-100 bg-emerald-50/60 p-5">
+      <div className="rounded-none border border-emerald-100 border-x-0 bg-emerald-50/70 p-4 sm:rounded-2xl sm:border sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-[11px] font-bold uppercase text-emerald-700 tracking-wider">
@@ -260,7 +260,7 @@ const ClientApprovalsWidget = () => {
         </div>
 
         {approvedRequests.length === 0 && !loadingApproved ? (
-          <div className="mt-4 text-sm text-emerald-700/70 bg-white/80 rounded-xl py-4 text-center border border-emerald-100">
+          <div className="mt-4 text-sm text-emerald-700/70 bg-white/80 rounded-none py-4 text-center border border-emerald-100 border-x-0 sm:rounded-xl sm:border">
             Aún no hay clientes aprobados
           </div>
         ) : (
@@ -277,7 +277,7 @@ const ClientApprovalsWidget = () => {
               return (
                 <div
                   key={req.id}
-                  className="rounded-2xl border border-emerald-100 bg-white p-4 shadow-sm hover:shadow-md transition-all duration-200"
+                  className="rounded-none border border-emerald-100 border-x-0 bg-white p-4 shadow-none transition-all duration-200 sm:rounded-2xl sm:border sm:shadow-sm sm:hover:shadow-md"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1">

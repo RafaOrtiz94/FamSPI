@@ -30,6 +30,7 @@ import {
   forwardPrivatePurchaseToAcp,
   getPrivatePurchaseDocuments,
   listPrivatePurchases,
+  getMyPrivatePurchases,
   checkClientApproval,
   requestDeliveryDates,
   requestClientRegistration,
@@ -76,6 +77,7 @@ import {
   canPerformPrivatePurchaseAction,
 } from "./PrivatePurchasesWidget.utils";
 import PrivatePurchaseActions from "./PrivatePurchaseActions";
+import { subscribeToPrivatePurchaseUpdates } from "../../../core/services/privatePurchaseEvents";
 
 const STATUS_DEFINITIONS = PRIVATE_PURCHASE_STATUS_DEFINITIONS;
 
@@ -228,8 +230,13 @@ const PrivatePurchasesPage = () => {
   }, [roleText, normalizedRole, normalizedScope, isAcpUser, isBackofficeUser, isManagerUser, isGerenciaGeneral, isPureCommercial]);
 
   const privatePurchasesFetcher = useCallback(
-    (params) => listPrivatePurchases(params),
-    [],
+    (params) => {
+      if (isPureCommercial) {
+        return getMyPrivatePurchases();
+      }
+      return listPrivatePurchases(params);
+    },
+    [isPureCommercial],
   );
 
   const { data, loading, execute: fetchPrivatePurchases, setData: setPrivatePurchasesData } = useApi(
@@ -237,7 +244,39 @@ const PrivatePurchasesPage = () => {
     { errorMsg: "No se pudo cargar las solicitudes privadas" },
   );
 
-  const requests = canViewRequests ? data?.rows || data || [] : [];
+  const rawRequests = canViewRequests ? data?.rows || data || [] : [];
+  const userEmail = (user?.email || "").toLowerCase();
+  const userId = user?.id ? String(user.id) : "";
+  const userFullname = (user?.fullname || user?.name || "").toLowerCase();
+  const isOwnedRequest = useCallback(
+    (req) => {
+      if (!req) return false;
+      const createdBy = req.created_by;
+      const createdById = req.created_by_id;
+      const createdByEmail = (req.created_by_email || "").toLowerCase();
+      const createdByName = (req.created_by_name || req.created_by_fullname || "").toLowerCase();
+
+      if (userId) {
+        if (createdById && String(createdById) === userId) return true;
+        if (createdBy && String(createdBy) === userId) return true;
+      }
+      if (userEmail) {
+        if (createdByEmail && createdByEmail === userEmail) return true;
+        if (typeof createdBy === "string" && createdBy.toLowerCase() === userEmail) return true;
+      }
+      if (userFullname) {
+        if (createdByName && createdByName === userFullname) return true;
+        if (typeof createdBy === "string" && createdBy.toLowerCase() === userFullname) return true;
+      }
+      return false;
+    },
+    [userEmail, userFullname, userId]
+  );
+
+  const requests = useMemo(() => {
+    if (!isPureCommercial) return rawRequests;
+    return rawRequests.filter(isOwnedRequest);
+  }, [isOwnedRequest, isPureCommercial, rawRequests]);
 
   const filteredRequests = useMemo(
     () => filterPrivatePurchaseRequests(requests, statusFilter, listQuery),
@@ -253,6 +292,22 @@ const PrivatePurchasesPage = () => {
     [requests]
   );
   const [detailModalRequest, setDetailModalRequest] = useState(null);
+  const isComodatoRequest = Boolean(detailModalRequest?.offer_kind === "comodato");
+  const comodatoChecklistStatus = isComodatoRequest
+    ? {
+      bcReady: Boolean(detailModalRequest.business_case_id),
+      acpReady: Boolean(detailModalRequest.provider_response_at),
+      sendOfferBlocked:
+        detailModalRequest.status !== "acp_availability_confirmed" ||
+        !detailModalRequest.business_case_id ||
+        !detailModalRequest.provider_response_at,
+    }
+    : {
+      bcReady: false,
+      acpReady: false,
+      sendOfferBlocked: false,
+    };
+  const sendOfferBlocked = Boolean(comodatoChecklistStatus.sendOfferBlocked);
 
   const handleDetailOpen = (req) => {
     setSelectedId(req.id);
@@ -277,6 +332,24 @@ const PrivatePurchasesPage = () => {
     };
     loadDocuments();
   }, [detailModalRequest]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToPrivatePurchaseUpdates(({ request }) => {
+      if (!request) return;
+      if (isPureCommercial && !isOwnedRequest(request)) return;
+      setPrivatePurchasesData((prev) => {
+        const rows = Array.isArray(prev?.rows) ? [...prev.rows] : [];
+        const idx = rows.findIndex((item) => item.id === request.id);
+        if (idx >= 0) {
+          rows[idx] = request;
+        } else {
+          rows.unshift(request);
+        }
+        return { ...prev, rows };
+      });
+    });
+    return unsubscribe;
+  }, [isOwnedRequest, isPureCommercial, setPrivatePurchasesData]);
 
   const visibleDocumentLinks = useMemo(() => {
     if (isGerenciaGeneral) return documentLinks;
@@ -332,6 +405,15 @@ const PrivatePurchasesPage = () => {
 
   const buildInspectionInitialData = (request) => {
     const snapshot = request?.client_snapshot || {};
+    const equipment = Array.isArray(request?.equipment)
+      ? request.equipment.map((item) => ({
+        equipo_id: item.id || item.equipo_id || item.unidad_id || "",
+        unidad_id: item.unidad_id || item.id || "",
+        estado: item.type === "cu" ? "cu" : "nuevo",
+        serial: item.serial || "",
+        nombre_equipo: item.name || item.label || item.sku || "Equipo",
+      }))
+      : [];
     return {
       cliente_id: snapshot.registered_client_id || snapshot.client_id || "",
       client_id: snapshot.registered_client_id || snapshot.client_id || "",
@@ -340,6 +422,7 @@ const PrivatePurchasesPage = () => {
       persona_contacto: snapshot.shipping_contact_name || snapshot.contact_name || snapshot.legal_rep_name || "",
       celular_contacto: snapshot.shipping_phone || snapshot.shipping_cellphone || snapshot.phone || "",
       email_cliente: snapshot.client_email || snapshot.email || "",
+      equipos: equipment,
     };
   };
 
@@ -1425,22 +1508,22 @@ const PrivatePurchasesPage = () => {
           activeStep={processingAction.type}
         />
       )}
-      <div className="space-y-6 p-6">
+      <div className="space-y-5 sm:space-y-6 pb-6 px-3 sm:px-0">
         <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
               <FiFileText className="text-blue-600" />
               Compras Privadas
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500 max-w-xl">
               Gestiona el flujo privado que empieza en comercial y termina en ACP.
             </p>
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700"
+              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:w-auto"
             >
               <option value="all">Todos los estados</option>
               {STATUS_DEFINITIONS.map((status) => (
@@ -1459,14 +1542,15 @@ const PrivatePurchasesPage = () => {
                   status: statusFilter !== "all" ? statusFilter : undefined,
                 })
               }
+              className="w-full sm:w-auto"
             >
               Actualizar
             </Button>
           </div>
         </header>
 
-        <Card className="rounded-2xl border border-gray-200 bg-white shadow-sm">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <Card className="rounded-none border border-gray-200 border-x-0 bg-white p-4 shadow-none sm:rounded-2xl sm:border sm:p-5 sm:shadow-sm">
+          <div className="grid gap-3 sm:gap-4 sm:grid-cols-2 lg:grid-cols-5">
             {kpiRows.map((row) => (
               <div key={row.key} className="flex items-center justify-between gap-2">
                 <p className="text-xs uppercase tracking-[0.25em] text-gray-500">{row.label}</p>
@@ -1485,16 +1569,16 @@ const PrivatePurchasesPage = () => {
               </div>
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Solicitudes de compra privada</h2>
-                <p className="text-sm text-slate-500">Gestiona el flujo completo desde comercial hasta ACP</p>
+                <p className="text-xs sm:text-sm text-slate-500">Gestiona el flujo completo desde comercial hasta ACP</p>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="relative">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+              <div className="relative w-full sm:w-auto">
                 <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
                 <input
                   type="text"
                   placeholder="Buscar por cliente o estado..."
-                  className="w-72 rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                  className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:w-72"
                   value={listQuery}
                   onChange={(e) => setListQuery(e.target.value)}
                 />
@@ -1504,7 +1588,7 @@ const PrivatePurchasesPage = () => {
                   status: statusFilter !== "all" ? statusFilter : undefined,
                 })}
                 variant="ghost"
-                className="px-3"
+                className="w-full px-3 sm:w-auto"
                 loading={loading}
               >
                 <FiRefreshCw size={14} />
@@ -1513,11 +1597,11 @@ const PrivatePurchasesPage = () => {
           </div>
 
           {filteredRequests.length === 0 ? (
-            <Card className="p-16 text-center border border-slate-200/70 bg-white/80 shadow-sm">
+            <Card className="rounded-none border border-slate-200/70 border-x-0 bg-white/80 p-8 text-center shadow-none sm:rounded-2xl sm:border sm:p-16 sm:shadow-sm">
               <FiPackage className="mx-auto text-slate-300 mb-4" size={48} />
               <p className="text-slate-500 text-lg font-medium">No hay solicitudes registradas</p>
               <p className="text-slate-400 text-sm mt-1">
-                {loading ? "Cargando solicitudes..." : "Las nuevas solicitudes aparecerÃƒÂ¡n aquÃƒÂ­"}
+                {loading ? "Cargando solicitudes..." : "Las nuevas solicitudes aparecerán aquí"}
               </p>
             </Card>
           ) : (
@@ -1528,7 +1612,7 @@ const PrivatePurchasesPage = () => {
                 const equipmentInfo = getPrivatePurchaseEquipmentInfo(req);
                 const creationInfo = {
                   date: req.created_at ? formatDateTimeEC(req.created_at) : "Fecha no disponible",
-                  by: req.created_by_email || req.created_by || "AnÃƒÂ³nimo"
+                  by: req.created_by_email || req.created_by || "Anónimo"
                 };
                 const isSelected = req.id === selectedId;
                 const expanded = expandedRequestId === req.id;
@@ -1552,9 +1636,9 @@ const PrivatePurchasesPage = () => {
                 return (
                   <Card
                     key={req.id}
-                    className={`relative h-full flex flex-col rounded-2xl p-5 border transition-all duration-300 transform hover:-translate-y-1 cursor-pointer ${isSelected
-                      ? 'border-blue-300 bg-blue-50/50 shadow-lg shadow-blue-200/60 ring-2 ring-blue-200'
-                      : `${statusConfig.cardBorder} ${statusConfig.cardBg} shadow-md hover:shadow-lg`
+                    className={`relative h-full flex flex-col rounded-none border border-x-0 p-4 shadow-none transition-all duration-300 cursor-pointer sm:rounded-2xl sm:border sm:p-5 sm:shadow-md sm:transform sm:hover:-translate-y-1 ${isSelected
+                      ? 'border-blue-300 bg-blue-50/50 sm:shadow-lg sm:shadow-blue-200/60 sm:ring-2 sm:ring-blue-200'
+                      : `${statusConfig.cardBorder} ${statusConfig.cardBg} sm:shadow-md sm:hover:shadow-lg`
                       }`}
                     onClick={() => setSelectedId(req.id)}
                   >
@@ -2585,6 +2669,45 @@ const PrivatePurchasesPage = () => {
                 </div>
               )}
 
+              {detailModalRequest.offer_kind === "comodato" && (
+                (() => {
+                  const bcReady = Boolean(detailModalRequest.business_case_id);
+                  const acpReady = Boolean(detailModalRequest.provider_response_at);
+                  const sendOfferBlocked =
+                    detailModalRequest.status !== "acp_availability_confirmed" || !bcReady || !acpReady;
+                  return (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2 mb-2">
+                      <p className="text-xs uppercase tracking-widest text-amber-600 font-semibold">
+                        Checklist de comodato
+                      </p>
+                      <div className="flex gap-2 items-center text-[13px]">
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${bcReady ? "bg-emerald-500" : "bg-gray-300"}`}
+                        />
+                        <span>{bcReady ? "Business case creado" : "Pendiente de business case"}</span>
+                      </div>
+                      <div className="flex gap-2 items-center text-[13px]">
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${acpReady ? "bg-emerald-500" : "bg-gray-300"}`}
+                        />
+                        <span>{acpReady ? "Respuesta ACP registrada" : "Respuesta ACP pendiente"}</span>
+                      </div>
+                      <div className="flex gap-2 items-center text-[13px]">
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${detailModalRequest.status === "acp_availability_confirmed" ? "bg-emerald-500" : "bg-gray-300"}`}
+                        />
+                        <span>{detailModalRequest.status === "acp_availability_confirmed" ? "Disponibilidad confirmada" : "Disponibilidad sin confirmar"}</span>
+                      </div>
+                      <div className="text-[12px] text-amber-800">
+                        {sendOfferBlocked && (
+                          <span>Subir oferta disponible cuando todos los pasos anteriores estén completos.</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()
+              )}
+
               <div className="space-y-2 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
                 <p className="text-xs uppercase tracking-widest text-gray-500">Expediente</p>
                 {!isGerenciaGeneral && documentLinks.length > visibleDocumentLinks.length && (
@@ -2650,11 +2773,50 @@ const PrivatePurchasesPage = () => {
                     </Button>
                   )
                 )}
+                {isComodatoRequest && (
+                  (() => {
+                    const { bcReady, acpReady } = comodatoChecklistStatus;
+                    const availabilityConfirmed = detailModalRequest.status === "acp_availability_confirmed";
+
+                    return (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 space-y-2 mb-2">
+                        <p className="text-xs uppercase tracking-widest text-amber-600 font-semibold">
+                          Checklist de comodato
+                        </p>
+                        <div className="flex gap-2 items-center text-[13px]">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${bcReady ? "bg-emerald-500" : "bg-gray-300"}`}
+                          />
+                          <span>{bcReady ? "Business case creado" : "Pendiente de business case"}</span>
+                        </div>
+                        <div className="flex gap-2 items-center text-[13px]">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${acpReady ? "bg-emerald-500" : "bg-gray-300"}`}
+                          />
+                          <span>{acpReady ? "Respuesta ACP registrada" : "Respuesta ACP pendiente"}</span>
+                        </div>
+                        <div className="flex gap-2 items-center text-[13px]">
+                          <span
+                            className={`h-2.5 w-2.5 rounded-full ${availabilityConfirmed ? "bg-emerald-500" : "bg-gray-300"}`}
+                          />
+                          <span>{availabilityConfirmed ? "Disponibilidad confirmada" : "Disponibilidad sin confirmar"}</span>
+                        </div>
+                        {!availabilityConfirmed && (
+                          <div className="text-[12px] text-amber-800">
+                            Subir oferta disponible cuando todos los pasos anteriores estén completos.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
                 {isBackofficeUser && detailModalRequest.status === "acp_availability_confirmed" && (
                   <Button
                     variant="primary"
                     size="sm"
                     onClick={() => setOfferModal({ open: true, loading: false })}
+                    disabled={sendOfferBlocked}
+                    title={sendOfferBlocked ? "Espera a que Business Case y ACP confirmen la disponibilidad" : undefined}
                   >
                     <FiSend /> Enviar oferta
                   </Button>
@@ -2750,10 +2912,18 @@ const PrivatePurchasesPage = () => {
                       size="sm"
                       onClick={() => handleOpenAcpResponseModal(detailModalRequest.id)}
                       loading={processingAction?.type === "acp_response" && processingAction?.id === detailModalRequest.id}
-                      disabled={Boolean(detailModalRequest.provider_response_at)}
+                      disabled={
+                        Boolean(detailModalRequest.provider_response_at) ||
+                        !detailModalRequest.availability_email_sent_at
+                      }
                     >
                       <FiFileText /> Registrar respuesta
                     </Button>
+                    {!detailModalRequest.availability_email_sent_at && (
+                      <p className="text-xs text-amber-600">
+                        Debes enviar el correo al proveedor antes de registrar respuesta.
+                      </p>
+                    )}
                   </>
                 )}
               </div>

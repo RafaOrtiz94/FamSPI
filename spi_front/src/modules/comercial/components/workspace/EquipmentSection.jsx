@@ -1,11 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FiChevronDown, FiCpu, FiFilter, FiSearch, FiTrash2, FiPlus, FiX } from "react-icons/fi";
+import { FiChevronDown, FiCpu, FiTrash2, FiPlus } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 
 const DEFAULT_EQUIPMENT_PAIRS = [
-  { id: Date.now(), primary: null, backup: null } // Start with one empty pair
+  { id: Date.now(), primary: null, backup: null, requiresBackup: false } // Start with one empty pair
 ];
 
 const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => (
@@ -90,6 +90,7 @@ const SwitchField = ({ label, checked, onChange }) => (
 );
 
 const EquipmentSection = ({
+  businessCase,
   permissions = {},
   ownership = {},
   onSave = () => {}
@@ -100,10 +101,53 @@ const EquipmentSection = ({
   const [filters, setFilters] = useState({ search: "", category: "" });
   const [loading, setLoading] = useState(false);
 
-  // Pairs state: Array of { id, primary: {}, backup: {} }
-  const [equipmentPairs, setEquipmentPairs] = useState(() => {
-    return DEFAULT_EQUIPMENT_PAIRS;
-  });
+  // ONE-TIME HYDRATION GUARD
+  const hydratedRef = useRef(false);
+
+  const sectionData = useMemo(() => {
+    const equipmentDetails =
+      businessCase?.equipment_details ||
+      businessCase?.extra?.equipment_details ||
+      null;
+    if (!equipmentDetails) return { equipmentPairs: DEFAULT_EQUIPMENT_PAIRS };
+
+    return {
+      equipmentPairs: equipmentDetails.map((detail, index) => ({
+        id: detail.id || Date.now() + index,
+        requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
+        primary: detail.primary ? {
+          id: detail.primary.id,
+          name: detail.primary.name,
+          code: detail.primary.code,
+          capacity: detail.primary.capacity,
+          price: detail.primary.price,
+          description: detail.primary.description,
+          categories: detail.primary.categories || []
+        } : detail.primary_id ? { id: detail.primary_id } : null,
+        backup: detail.backup ? {
+          id: detail.backup.id,
+          name: detail.backup.name,
+          code: detail.backup.code,
+          capacity: detail.backup.capacity,
+          price: detail.backup.price,
+          description: detail.backup.description,
+          categories: detail.backup.categories || [],
+          condition: detail.backup.condition || "Nuevo",
+          install_with_primary: detail.backup.install_with_primary || false
+        } : detail.backup_id ? { id: detail.backup_id } : null
+      })) || DEFAULT_EQUIPMENT_PAIRS
+    };
+  }, [businessCase]);
+
+  // Pairs state: Array of { id, primary: {}, backup: {}, requiresBackup }
+  const [equipmentPairs, setEquipmentPairs] = useState(() => sectionData.equipmentPairs);
+
+  useEffect(() => {
+    if (!sectionData.equipmentPairs || hydratedRef.current) return;
+    setEquipmentPairs(sectionData.equipmentPairs);
+    hydratedRef.current = true;
+  }, [sectionData.equipmentPairs]);
+
 
   const [openPairs, setOpenPairs] = useState({}); // { [pairId]: boolean }
 
@@ -148,6 +192,37 @@ const EquipmentSection = ({
     loadEquipment();
   }, []);
 
+  useEffect(() => {
+    if (!items.length) return;
+    setEquipmentPairs((prev) => {
+      let changed = false;
+      const next = prev.map((pair) => {
+        let primary = pair.primary;
+        let backup = pair.backup;
+        if (primary && !primary.name) {
+          const found = items.find((item) => item.id === primary.id);
+          if (found) {
+            primary = { ...found };
+            changed = true;
+          }
+        }
+        if (backup && !backup.name) {
+          const found = items.find((item) => item.id === backup.id);
+          if (found) {
+            backup = {
+              ...found,
+              condition: backup.condition || "Nuevo",
+              install_with_primary: backup.install_with_primary || false
+            };
+            changed = true;
+          }
+        }
+        return primary !== pair.primary || backup !== pair.backup ? { ...pair, primary, backup } : pair;
+      });
+      return changed ? next : prev;
+    });
+  }, [items]);
+
   // Update a specific pair
   const updatePair = (pairId, updates) => {
     const newPairs = equipmentPairs.map(p => p.id === pairId ? { ...p, ...updates } : p);
@@ -157,7 +232,7 @@ const EquipmentSection = ({
   const addPair = () => {
     // Generate deterministic ID based on existing pairs to ensure consistency
     const maxId = equipmentPairs.length > 0 ? Math.max(...equipmentPairs.map(p => p.id)) : 0;
-    const newPair = { id: maxId + 1, primary: null, backup: null };
+    const newPair = { id: maxId + 1, primary: null, backup: null, requiresBackup: false };
     const newPairs = [...equipmentPairs, newPair];
     setEquipmentPairs(newPairs);
     setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
@@ -173,15 +248,33 @@ const EquipmentSection = ({
   };
 
   const selectPrimary = (pairId, item) => {
+    console.info("[BC][EQUIPMENT][SELECT_PRIMARY]", {
+      pairId,
+      id: item?.id,
+      code: item?.code,
+      name: item?.name,
+      id_fabricante: item?.raw?.technical_specs?.id_fabricante ?? item?.raw?.metadata?.id_fabricante ?? null,
+      raw: item?.raw,
+    });
     updatePair(pairId, {
       primary: { ...item },
       backup: null,
+      requiresBackup: false,
     });
     showToast("Equipo principal seleccionado", "success");
   };
 
   const selectBackup = (pairId, item) => {
+    console.info("[BC][EQUIPMENT][SELECT_BACKUP]", {
+      pairId,
+      id: item?.id,
+      code: item?.code,
+      name: item?.name,
+      id_fabricante: item?.raw?.technical_specs?.id_fabricante ?? item?.raw?.metadata?.id_fabricante ?? null,
+      raw: item?.raw,
+    });
     updatePair(pairId, {
+      requiresBackup: true,
       backup: { ...item, condition: "Nuevo", install_with_primary: false }
     });
     showToast("Backup seleccionado", "success");
@@ -217,6 +310,10 @@ const EquipmentSection = ({
       showToast("Todos los grupos deben tener un equipo principal seleccionado", "warning");
       return;
     }
+    if (equipmentPairs.some(p => p.requiresBackup && !p.backup)) {
+      showToast("Si el cliente solicita backup, seleccione uno o desactive el backup", "warning");
+      return;
+    }
     if (!bcId) {
       showToast("ID del caso de negocio no disponible", "error");
       return;
@@ -229,13 +326,14 @@ const EquipmentSection = ({
       const payload = {
         equipment_pairs: equipmentPairs.map(p => ({
           primary_id: p.primary.id,
-          backup_id: p.backup?.id || null,
-          backup_install_simultaneous: p.backup?.install_with_primary || false,
+          requires_backup: Boolean(p.requiresBackup),
+          backup_id: p.requiresBackup ? (p.backup?.id || null) : null,
+          backup_install_simultaneous: p.requiresBackup && p.backup ? Boolean(p.backup.install_with_primary) : false,
         })),
       };
 
       // Use existing API endpoint for equipment details
-      await api.post(`/business-case/${bcId}/equipment-details`, payload);
+      await api.post(`/business-case/${bcId}/equipment-details-v2`, payload);
 
       showToast("Equipamiento guardado exitosamente", "success");
 
@@ -266,7 +364,7 @@ const EquipmentSection = ({
           <AccordionSection
             key={pair.id}
             title={`Grupo de Equipos #${index + 1}`}
-            description={pair.primary ? `${pair.primary.name} ${pair.backup ? '+ Backup' : ''}` : "Seleccione equipos..."}
+            description={pair.primary ? `${pair.primary.name} ${pair.requiresBackup ? "+ Backup" : ""}` : "Seleccione equipos..."}
             isOpen={openPairs[pair.id]}
             onToggle={() => togglePair(pair.id)}
             statusBadge={pair.primary ? <span className="text-green-600 text-xs font-bold">Listo</span> : <span className="text-amber-600 text-xs">Pendiente</span>}
@@ -299,7 +397,7 @@ const EquipmentSection = ({
                   <div className="relative">
                     <EquipmentCard item={pair.primary} selected />
                     <button
-                      onClick={() => updatePair(pair.id, { primary: null, backup: null })}
+                      onClick={() => updatePair(pair.id, { primary: null, backup: null, requiresBackup: false })}
                       className="absolute top-2 right-2 text-red-500 hover:text-red-700"
                     >
                       <FiTrash2 /> Cambiar
@@ -313,61 +411,78 @@ const EquipmentSection = ({
                 <div className="space-y-3 border-t pt-4">
                   <div className="flex justify-between items-center">
                     <h4 className="text-sm font-semibold text-gray-700">Equipo de Respaldo (Backup)</h4>
-                    {pair.backup && (
+                    {pair.backup && pair.requiresBackup && (
                       <button
-                        onClick={() => updatePair(pair.id, { backup: null })}
+                        onClick={() => updatePair(pair.id, { backup: null, requiresBackup: false })}
                         className="text-xs text-red-500 hover:text-red-700"
                       >
                         Eliminar Backup
                       </button>
                     )}
                   </div>
-                  <p className="text-xs text-gray-500">
-                    Mostrando equipos con características similares (mismas categorías).
-                  </p>
+                  <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-semibold text-amber-900">Backup opcional</p>
+                      <p className="text-xs text-amber-700">
+                        No es obligatorio elegir equipo backup. Solo si el cliente lo solicita.
+                      </p>
+                    </div>
+                    <SwitchField
+                      label="Requiere backup"
+                      checked={Boolean(pair.requiresBackup)}
+                      onChange={(nextValue) => updatePair(pair.id, { requiresBackup: nextValue, backup: nextValue ? pair.backup : null })}
+                    />
+                  </div>
+                  {pair.requiresBackup && (
+                    <>
+                      <p className="text-xs text-gray-500">
+                        Mostrando equipos con caracteristicas similares (mismas categorias).
+                      </p>
 
-                  {!pair.backup ? (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                      {getBackupCandidates(pair.primary).map(item => (
-                        <EquipmentCard
-                          key={item.id}
-                          item={item}
-                          actionLabel="Agregar como Backup"
-                          actionColor="amber"
-                          onSelect={(i) => selectBackup(pair.id, i)}
-                        />
-                      ))}
-                      {getBackupCandidates(pair.primary).length === 0 && (
-                        <p className="text-sm text-gray-500 italic">No se encontraron equipos similares.</p>
+                      {!pair.backup ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                          {getBackupCandidates(pair.primary).map(item => (
+                            <EquipmentCard
+                              key={item.id}
+                              item={item}
+                              actionLabel="Agregar como Backup"
+                              actionColor="amber"
+                              onSelect={(i) => selectBackup(pair.id, i)}
+                            />
+                          ))}
+                          {getBackupCandidates(pair.primary).length === 0 && (
+                            <p className="text-sm text-gray-500 italic">No se encontraron equipos similares.</p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
+                          <h5 className="font-semibold text-sm text-amber-900">{pair.backup.name}</h5>
+                          <div className="mt-2 text-xs space-y-2">
+                            <label className="block">
+                              Condicion:
+                              <input
+                                value={pair.backup.condition}
+                                onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
+                                className="ml-2 border rounded px-1"
+                              />
+                            </label>
+                            <label className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={pair.backup.install_with_primary}
+                                onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
+                              />
+                              Instalar simultaneamente
+                            </label>
+                          </div>
+                        </div>
                       )}
-                    </div>
-                  ) : (
-                    <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
-                      <h5 className="font-semibold text-sm text-amber-900">{pair.backup.name}</h5>
-                      <div className="mt-2 text-xs space-y-2">
-                        <label className="block">
-                          Condición:
-                          <input
-                            value={pair.backup.condition}
-                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
-                            className="ml-2 border rounded px-1"
-                          />
-                        </label>
-                        <label className="flex items-center gap-2">
-                          <input
-                            type="checkbox"
-                            checked={pair.backup.install_with_primary}
-                            onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
-                          />
-                          Instalar simultáneamente
-                        </label>
-                      </div>
-                    </div>
+                    </>
                   )}
                 </div>
               )}
 
-              {/* Remove Pair Button */}
+{/* Remove Pair Button */}
               <div className="pt-4 flex justify-end">
                 <button
                   onClick={() => removePair(pair.id)}
@@ -386,7 +501,7 @@ const EquipmentSection = ({
         <button
           onClick={handleSave}
           className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={equipmentPairs.some(p => !p.primary)}
+          disabled={equipmentPairs.some(p => !p.primary) || equipmentPairs.some(p => p.requiresBackup && !p.backup)}
         >
           Guardar Equipamiento
         </button>

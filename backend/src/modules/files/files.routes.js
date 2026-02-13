@@ -5,7 +5,14 @@ const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const multer = require("multer");
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.diskStorage({
+    destination: '/tmp',
+    filename: (req, file, cb) => {
+      cb(null, `file_${Date.now()}_${file.originalname}`);
+    }
+  })
+});
 
 // Subir uno o varios archivos
 router.post(

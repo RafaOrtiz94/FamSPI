@@ -56,7 +56,10 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
 
     const days = calculateDays();
     const remaining = summary?.remaining || 0;
-    const canSubmit = days > 0 && days <= remaining && formData.start_date && formData.end_date;
+    const missingHireDate = summary?.missing_hire_date;
+    const isAdvance = summary?.eligible === false && !missingHireDate;
+    const eligibleFrom = summary?.eligible_from || null;
+    const canSubmit = days > 0 && formData.start_date && formData.end_date && (missingHireDate || isAdvance || days <= remaining);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
@@ -66,7 +69,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
             return;
         }
 
-        if (days > remaining) {
+        if (!missingHireDate && !isAdvance && days > remaining) {
             showToast(`Solo tienes ${remaining} días disponibles`, "error");
             return;
         }
@@ -76,6 +79,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
             const response = await api.post("/vacaciones", {
                 ...formData,
                 days,
+                allow_advance: isAdvance,
             });
 
             if (response.data?.ok) {
@@ -152,23 +156,61 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                                 <p className="text-sm text-gray-500">Cargando información...</p>
                                             </div>
                                         ) : summary ? (
-                                            <div className="grid grid-cols-4 gap-4">
-                                                <div className="p-4 bg-blue-50 rounded-lg text-center">
-                                                    <p className="text-xs text-blue-600 font-medium mb-1">Asignados</p>
-                                                    <p className="text-2xl font-bold text-blue-700">{summary.allowance}</p>
+                                            <div>
+                                                <div className="grid grid-cols-4 gap-4">
+                                                    <div className="p-4 bg-blue-50 rounded-lg text-center">
+                                                        <p className="text-xs text-blue-600 font-medium mb-1">Asignados</p>
+                                                        <p className="text-2xl font-bold text-blue-700">{summary.allowance}</p>
+                                                    </div>
+                                                    <div className="p-4 bg-green-50 rounded-lg text-center">
+                                                        <p className="text-xs text-green-600 font-medium mb-1">Disponibles</p>
+                                                        <p className="text-2xl font-bold text-green-700">{summary.remaining}</p>
+                                                    </div>
+                                                    <div className="p-4 bg-amber-50 rounded-lg text-center">
+                                                        <p className="text-xs text-amber-600 font-medium mb-1">Usados</p>
+                                                        <p className="text-2xl font-bold text-amber-700">{summary.taken}</p>
+                                                    </div>
+                                                    <div className="p-4 bg-purple-50 rounded-lg text-center">
+                                                        <p className="text-xs text-purple-600 font-medium mb-1">Pendientes</p>
+                                                        <p className="text-2xl font-bold text-purple-700">{summary.pending}</p>
+                                                    </div>
                                                 </div>
-                                                <div className="p-4 bg-green-50 rounded-lg text-center">
-                                                    <p className="text-xs text-green-600 font-medium mb-1">Disponibles</p>
-                                                    <p className="text-2xl font-bold text-green-700">{summary.remaining}</p>
-                                                </div>
-                                                <div className="p-4 bg-amber-50 rounded-lg text-center">
-                                                    <p className="text-xs text-amber-600 font-medium mb-1">Usados</p>
-                                                    <p className="text-2xl font-bold text-amber-700">{summary.taken}</p>
-                                                </div>
-                                                <div className="p-4 bg-purple-50 rounded-lg text-center">
-                                                    <p className="text-xs text-purple-600 font-medium mb-1">Pendientes</p>
-                                                    <p className="text-2xl font-bold text-purple-700">{summary.pending}</p>
-                                                </div>
+                                                {summary?.eligible === false && !missingHireDate && (
+                                                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                                                        <FiAlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                                                        <div>
+                                                            <p className="text-sm font-medium text-amber-900">Vacaciones adelantadas</p>
+                                                            <p className="text-xs text-amber-700">
+                                                                Aún no cumples un año de ingreso. Puedes solicitar vacaciones adelantadas, pero
+                                                                se descontarán automáticamente cuando cumplas el año
+                                                                {eligibleFrom ? ` (desde ${eligibleFrom})` : ""}.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {!missingHireDate && !isAdvance && remaining <= 3 && (
+                                                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                                                        <FiAlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                                                        <div>
+                                                            <p className="text-sm font-medium text-amber-900">Pocos días disponibles</p>
+                                                            <p className="text-xs text-amber-700">
+                                                                Te quedan <strong>{remaining}</strong> días disponibles para este período.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {missingHireDate && (
+                                                    <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-3">
+                                                        <FiAlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                                                        <div>
+                                                            <p className="text-sm font-medium text-amber-900">Falta fecha de ingreso</p>
+                                                            <p className="text-xs text-amber-700">
+                                                                Puedes enviar la solicitud, pero Talento Humano debe completar la fecha de
+                                                                ingreso en tu perfil para calcular correctamente tus vacaciones.
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                )}
                                             </div>
                                         ) : null}
 
@@ -237,14 +279,14 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                                         Días solicitados: <span className="text-lg font-bold">{days}</span>
                                                     </p>
                                                     <p className="text-xs text-emerald-700">
-                                                        Quedarían {Math.max(remaining - days, 0)} días disponibles
+                                                        Quedarían {remaining - days} días disponibles
                                                     </p>
                                                 </div>
                                             </div>
                                         )}
 
                                         {/* Advertencia si excede días disponibles */}
-                                        {days > remaining && (
+                                        {!isAdvance && days > remaining && (
                                             <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
                                                 <FiAlertCircle className="w-5 h-5 text-red-600" />
                                                 <p className="text-sm text-red-700">

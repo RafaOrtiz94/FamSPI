@@ -8,8 +8,8 @@ const TransitionPanel = ({
 }) => {
   if (!readinessStatus) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-        <p className="text-sm text-gray-500">Cargando estado de readiness...</p>
+      <div className="bg-gray-50 border border-gray-200 rounded-2xl p-6 shadow-sm">
+        <p className="text-sm text-gray-500 font-medium animate-pulse">Cargando estado de readiness...</p>
       </div>
     );
   }
@@ -37,60 +37,58 @@ const TransitionPanel = ({
     COMPLETADO: "Completado"
   };
 
-  // Readiness status colors
-  const getReadinessColor = (readiness) => {
-    switch (readiness) {
-      case 'ready': return 'text-green-600 bg-green-50 border-green-200';
-      case 'partial': return 'text-yellow-600 bg-yellow-50 border-yellow-200';
-      case 'blocked': return 'text-red-600 bg-red-50 border-red-200';
-      default: return 'text-gray-600 bg-gray-50 border-gray-200';
+  const getReadinessColor = (status) => {
+    switch (status) {
+      case 'ready': return 'bg-green-100 text-green-800 border-green-200';
+      case 'partial': return 'bg-amber-100 text-amber-800 border-amber-200';
+      case 'blocked': return 'bg-red-100 text-red-800 border-red-200';
+      default: return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-6">
-      <div className="flex items-center gap-3 mb-4">
-        <FiArrowRight className="text-blue-600" size={20} />
+    <div className="bg-white border border-gray-100 rounded-2xl p-6 shadow-sm">
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+            <FiArrowRight size={20} />
+        </div>
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Transición de Estado</h3>
-          <p className="text-sm text-gray-600">Gestión del flujo de trabajo del Business Case</p>
+          <h3 className="text-lg font-bold text-gray-900 tracking-tight">Transición de Estado</h3>
+          <p className="text-sm text-gray-500">Gestión del flujo de trabajo</p>
         </div>
       </div>
 
       {/* Current State */}
-      <div className="mb-4">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-sm font-medium text-gray-700">Estado Actual:</span>
-          <span className={`px-3 py-1 rounded-full text-xs font-semibold ${getReadinessColor(overallReadiness)}`}>
+      <div className="mb-6">
+        <div className="flex flex-col gap-2">
+          <span className="text-xs font-bold text-gray-500 uppercase tracking-wider">Estado Actual</span>
+          <div className={`px-4 py-2 rounded-xl border text-sm font-bold w-fit ${getReadinessColor(overallReadiness)}`}>
             {stateLabels[currentState] || currentState}
-          </span>
+          </div>
         </div>
       </div>
 
       {/* Blocking Issues */}
       {blockingIssues.length > 0 && (
-        <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-          <div className="flex items-start gap-2">
-            <FiXCircle className="text-red-600 mt-0.5" size={16} />
-            <div className="flex-1">
-              <h4 className="text-sm font-semibold text-red-900 mb-2">Requisitos Pendientes</h4>
-              <div className="space-y-2">
+        <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl">
+          <div className="flex items-start gap-3">
+            <FiXCircle className="text-red-600 mt-0.5 flex-shrink-0" size={18} />
+            <div className="flex-1 min-w-0">
+              <h4 className="text-sm font-bold text-red-900 mb-2">Requisitos Pendientes</h4>
+              <div className="space-y-3">
                 {blockingIssues.map((issue, index) => (
-                  <div key={index} className="flex items-start gap-2">
-                    <span className="text-red-600 text-xs">•</span>
-                    <div className="flex-1">
-                      <p className="text-sm text-red-800">{issue.message}</p>
-                      {issue.section && (
-                        <button
-                          type="button"
-                          onClick={() => onNavigateToSection(issue.section)}
-                          className="inline-flex items-center gap-1 mt-1 text-xs text-blue-600 hover:text-blue-700 underline"
-                        >
-                          <FiNavigation size={12} />
-                          Ir a {issue.section}
-                        </button>
-                      )}
-                    </div>
+                  <div key={index} className="flex flex-col gap-1">
+                    <p className="text-sm text-red-800 leading-relaxed">{issue.message}</p>
+                    {issue.section && (
+                      <button
+                        type="button"
+                        onClick={() => onNavigateToSection(issue.section)}
+                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-blue-600 hover:text-blue-700 hover:underline w-fit"
+                      >
+                        <FiNavigation size={12} />
+                        Ir a la sección
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -100,41 +98,41 @@ const TransitionPanel = ({
       )}
 
       {/* Available Transitions */}
-      <div className="space-y-3">
-        <h4 className="text-sm font-semibold text-gray-900">Transiciones Disponibles</h4>
+      <div className="space-y-4">
+        <h4 className="text-sm font-bold text-gray-900 tracking-tight">Siguientes Pasos</h4>
 
         {availableTransitions.length === 0 ? (
-          <p className="text-sm text-gray-500 italic">No hay transiciones disponibles en este estado</p>
+          <div className="p-4 bg-gray-50 rounded-xl border border-gray-100 text-center">
+             <p className="text-sm text-gray-500 italic">No hay transiciones disponibles</p>
+          </div>
         ) : (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {availableTransitions.map((transition, index) => (
-              <div key={index} className="flex items-center justify-between p-3 border border-gray-200 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <FiArrowRight className="text-blue-600" size={16} />
-                  <div>
-                    <span className="text-sm font-medium text-gray-900">
-                      {stateLabels[transition.toState] || transition.toState}
-                    </span>
+              <div key={index} className="group p-4 border border-gray-100 rounded-2xl hover:shadow-md transition-all duration-200 bg-white">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                        <span className="text-sm font-bold text-gray-900">
+                        {stateLabels[transition.toState] || transition.toState}
+                        </span>
+                        {transition.canTransition ? (
+                            <span className="inline-block w-2 h-2 rounded-full bg-green-500"></span>
+                        ) : (
+                            <span className="inline-block w-2 h-2 rounded-full bg-gray-300"></span>
+                        )}
+                    </div>
                     {transition.description && (
-                      <p className="text-xs text-gray-600">{transition.description}</p>
+                      <p className="text-xs text-gray-500 leading-relaxed">{transition.description}</p>
                     )}
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {transition.canTransition ? (
-                    <span className="text-xs text-green-600 font-medium">Disponible</span>
-                  ) : (
-                    <span className="text-xs text-red-600 font-medium">Bloqueado</span>
-                  )}
 
                   <button
                     type="button"
                     onClick={() => onStateTransition(transition.toState)}
                     disabled={!transition.canTransition}
-                    className={`px-3 py-1 text-xs font-medium rounded ${
+                    className={`flex-shrink-0 px-4 py-2 text-xs font-bold rounded-full transition-all active:scale-95 ${
                       transition.canTransition
-                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-sm hover:shadow-blue-200'
                         : 'bg-gray-100 text-gray-400 cursor-not-allowed'
                     }`}
                   >
@@ -148,30 +146,29 @@ const TransitionPanel = ({
       </div>
 
       {/* Overall Readiness Indicator */}
-      <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="mt-6 pt-6 border-t border-gray-100">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            {overallReadiness === 'ready' && <FiCheckCircle className="text-green-600" size={16} />}
-            {overallReadiness === 'partial' && <FiAlertTriangle className="text-yellow-600" size={16} />}
-            {overallReadiness === 'blocked' && <FiXCircle className="text-red-600" size={16} />}
+            {overallReadiness === 'ready' && <FiCheckCircle className="text-green-600" size={18} />}
+            {overallReadiness === 'partial' && <FiAlertTriangle className="text-amber-500" size={18} />}
+            {overallReadiness === 'blocked' && <FiXCircle className="text-red-500" size={18} />}
 
-            <span className="text-sm font-medium text-gray-900">Estado General:</span>
-            <span className={`px-2 py-1 rounded text-xs font-semibold ${
-              overallReadiness === 'ready' ? 'bg-green-100 text-green-800' :
-              overallReadiness === 'partial' ? 'bg-yellow-100 text-yellow-800' :
-              overallReadiness === 'blocked' ? 'bg-red-100 text-red-800' :
-              'bg-gray-100 text-gray-800'
+            <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+              overallReadiness === 'ready' ? 'bg-green-50 text-green-700' :
+              overallReadiness === 'partial' ? 'bg-amber-50 text-amber-700' :
+              overallReadiness === 'blocked' ? 'bg-red-50 text-red-700' :
+              'bg-gray-50 text-gray-600'
             }`}>
-              {overallReadiness === 'ready' ? 'Listo para avanzar' :
-               overallReadiness === 'partial' ? 'Requiere atención' :
+              {overallReadiness === 'ready' ? 'Listo' :
+               overallReadiness === 'partial' ? 'Revisión' :
                overallReadiness === 'blocked' ? 'Bloqueado' :
                'Desconocido'}
             </span>
           </div>
 
           {!canTransition && (
-            <div className="text-xs text-gray-500">
-              Complete los requisitos pendientes para desbloquear transiciones
+            <div className="text-xs font-medium text-gray-400">
+              Complete requisitos
             </div>
           )}
         </div>

@@ -19,12 +19,12 @@ router.post('/me/certifications/bulk', upload.array('files', 10), ctrl.createMyB
 router.get('/me/certifications', ctrl.getMyCertifications);
 
 // GET /api/v1/users/:id/certifications - Ver certificaciones de otro usuario (solo roles autorizados)
-router.get('/:id/certifications', requireRole(['acp_comercial', 'talento_humano']), ctrl.getUserCertifications);
+router.get('/:id/certifications', requireRole(['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general']), ctrl.getUserCertifications);
 
 // DELETE /api/v1/users/me/certifications/:certId - Eliminar mi certificación (soft delete)
 router.delete('/me/certifications/:certId', ctrl.deleteMyCertification);
 
 // GET /api/v1/users/:id/certifications/pdf - Generar PDF consolidado (solo roles autorizados)
-router.get('/:id/certifications/pdf', requireRole(['acp_comercial', 'talento_humano']), ctrl.generateUserCertificationsPDF);
+router.get('/:id/certifications/pdf', requireRole(['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general']), ctrl.generateUserCertificationsPDF);
 
 module.exports = router;

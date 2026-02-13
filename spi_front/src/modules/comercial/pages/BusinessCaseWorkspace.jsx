@@ -3,15 +3,12 @@ import { useParams } from "react-router-dom";
 import {
   getBusinessCase,
   getUIGuidance,
-  recordSectionCompletion,
   normalizeUIGuidanceResponse,
   createAutosaveManager
 } from "../../../core/api/businessCaseApi";
 import { useUI } from "../../../core/ui/UIContext";
 import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
-import WorkspaceFooter from "../components/workspace/WorkspaceFooter";
-import OwnershipPanel from "../components/workspace/OwnershipPanel";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
@@ -38,10 +35,14 @@ const BusinessCaseWorkspace = () => {
     console.log("DEBUG: handleSectionSave called");
 
     try {
-      // Refresh UI guidance to get updated completion indicators
-      const data = await getUIGuidance(bcId);
+      // Refresh UI guidance and business case to rehydrate saved fields
+      const [data, businessCaseData] = await Promise.all([
+        getUIGuidance(bcId),
+        getBusinessCase(bcId)
+      ]);
       console.log("DEBUG: New UI guidance data", data);
-      setUiGuidance(data);
+      setUiGuidance(normalizeUIGuidanceResponse(data));
+      setBusinessCase(businessCaseData);
       console.log("DEBUG: uiGuidance state updated");
       showToast("Sección guardada y datos actualizados", "success");
     } catch (err) {
@@ -50,29 +51,6 @@ const BusinessCaseWorkspace = () => {
     }
   };
 
-  const handleSectionComplete = async () => {
-    if (!uiGuidance || !selectedSection) return;
-
-    try {
-      // Check if user can complete this section
-      const sectionRule = uiGuidance.sectionOwnership.rules[selectedSection];
-      if (!sectionRule?.canUserComplete) {
-        showToast("No tienes permisos para completar esta sección", "error");
-        return;
-      }
-
-      await recordSectionCompletion(bcId, selectedSection, "Manual completion from workspace");
-      showToast(`Sección ${selectedSection} marcada como completada`, "success");
-
-      // Refresh UI guidance to update completion indicators
-      const data = await getUIGuidance(bcId);
-      setUiGuidance(data);
-    } catch (err) {
-      console.error("Failed to complete section:", err);
-      // Show backend error verbatim
-      showToast(err.response?.data?.message || err.message || "Error completando sección", "error");
-    }
-  };
 
   // Initialize autosave manager and fetch data on mount and when bcId changes
   useEffect(() => {
@@ -128,7 +106,7 @@ const BusinessCaseWorkspace = () => {
 
     try {
       const data = await getUIGuidance(bcId);
-      setUiGuidance(data);
+      setUiGuidance(normalizeUIGuidanceResponse(data));
       showToast("Datos actualizados", "success");
     } catch (err) {
       console.error("Failed to refresh UI guidance:", err);
@@ -148,22 +126,22 @@ const BusinessCaseWorkspace = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
               Business Case Workspace
             </p>
-            <h1 className="text-2xl font-bold text-gray-900">Workspace Moderno</h1>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
             <p className="text-sm text-gray-600">
               Gestión colaborativa de casos de negocio por secciones
             </p>
           </div>
         </div>
-        <div className="flex items-center justify-center py-12">
+        <div className="flex items-center justify-center py-24">
           <div className="text-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Cargando workspace...</p>
+            <p className="text-gray-600 font-medium">Cargando workspace...</p>
           </div>
         </div>
       </div>
@@ -173,26 +151,26 @@ const BusinessCaseWorkspace = () => {
   // Error state
   if (error) {
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
               Business Case Workspace
             </p>
-            <h1 className="text-2xl font-bold text-gray-900">Workspace Moderno</h1>
+            <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
             <p className="text-sm text-gray-600">
               Gestión colaborativa de casos de negocio por secciones
             </p>
           </div>
         </div>
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6 text-center">
-          <div className="text-red-600 mb-4">
-            <svg className="mx-auto h-12 w-12" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="bg-red-50 border border-red-100 rounded-2xl p-8 text-center shadow-sm">
+          <div className="text-red-500 mb-4 bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto">
+            <svg className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.5 0L4.268 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h3 className="text-lg font-semibold text-red-900 mb-2">Error cargando workspace</h3>
-          <p className="text-red-700 mb-4">{error}</p>
+          <h3 className="text-lg font-bold text-red-900 mb-2">Error cargando workspace</h3>
+          <p className="text-red-700 mb-6">{error}</p>
           <button
             onClick={() => window.location.reload()}
             className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700"
@@ -227,14 +205,15 @@ const BusinessCaseWorkspace = () => {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+    <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
+      {/* Header Area */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
+          <p className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-1">
             Business Case Workspace
           </p>
-          <h1 className="text-2xl font-bold text-gray-900">Workspace Moderno</h1>
-          <p className="text-sm text-gray-600">
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
+          <p className="text-sm text-gray-500 mt-1">
             Gestión colaborativa de casos de negocio por secciones
           </p>
         </div>
@@ -242,45 +221,22 @@ const BusinessCaseWorkspace = () => {
 
       <CaseHeader uiGuidance={uiGuidance} onRefresh={handleRefresh} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        {/* Main Content - 3 columns */}
-        <div className="lg:col-span-3">
-          <WorkspaceContent
-            selectedSection={selectedSection}
-            businessCase={businessCase}
-            uiGuidance={uiGuidance}
-            onSectionSelect={handleSectionSelect}
-            onSectionSave={handleSectionSave}
-          />
-        </div>
-
-        {/* Side Panels - 1 column */}
-        <div className="lg:col-span-1 space-y-6">
-          <ErrorBoundary title="Panel de Ownership" message="Error en el panel de ownership y completion.">
-            <OwnershipPanel
-              businessCaseId={bcId}
-              selectedSection={selectedSection}
-              onOwnershipChange={handleRefresh}
-            />
-          </ErrorBoundary>
-
-          <ErrorBoundary title="Panel de UI Guidance" message="Error en el panel de guidance.">
-            <UIGuidancePanel
-              businessCaseId={bcId}
-              selectedSection={selectedSection}
-              onGuidanceChange={handleRefresh}
-            />
-          </ErrorBoundary>
-        </div>
+      <div className="space-y-6">
+        <WorkspaceContent
+          selectedSection={selectedSection}
+          businessCase={businessCase}
+          uiGuidance={uiGuidance}
+          onSectionSelect={handleSectionSelect}
+          onSectionSave={handleSectionSave}
+        />
       </div>
 
-      <WorkspaceFooter
-        selectedSection={selectedSection}
-        uiGuidance={uiGuidance}
-        onSectionSave={handleSectionSave}
-        onSectionComplete={handleSectionComplete}
-        onStateTransition={handleStateTransition}
-      />
+      <ErrorBoundary title="Panel de UI Guidance" message="Error en el panel de guidance.">
+        <UIGuidancePanel
+          businessCaseId={bcId}
+          selectedSection={selectedSection}
+        />
+      </ErrorBoundary>
     </div>
   );
 };

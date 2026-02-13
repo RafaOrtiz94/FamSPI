@@ -23,6 +23,42 @@ const listClients = async (req, res) => {
   }
 };
 
+const getClientDetail = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await clientsService.getClientDetail({
+      clientId: Number(id),
+      user: req.user,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error obteniendo cliente",
+    });
+  }
+};
+
+const updateClient = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await clientsService.updateClient({
+      clientId: Number(id),
+      user: req.user,
+      rawData: req.body,
+      rawFiles: req.files,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error actualizando cliente",
+    });
+  }
+};
+
 const assignClient = async (req, res) => {
   try {
     const { id } = req.params;
@@ -113,6 +149,8 @@ const registerProspectVisit = async (req, res) => {
 
 module.exports = {
   listClients,
+  getClientDetail,
+  updateClient,
   assignClient,
   setVisitStatus,
   registerProspectVisit,

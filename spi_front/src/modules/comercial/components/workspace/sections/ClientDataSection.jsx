@@ -31,7 +31,7 @@ const AccordionSection = ({
   onInteraction,
 }) => (
   <div
-    className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+    className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm hover:shadow-md transition-all duration-300"
     onFocusCapture={() => onInteraction?.(id)}
   >
     <button
@@ -39,17 +39,17 @@ const AccordionSection = ({
       onClick={() => onToggle(id)}
       aria-expanded={isOpen}
       aria-controls={`section-panel-${id}`}
-      className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left transition-colors hover:bg-gray-50 focus:outline-none"
+      className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition-colors hover:bg-gray-50 focus:outline-none"
     >
       <div>
-        <p className="text-sm font-semibold text-gray-900">{title}</p>
-        {description && <p className="text-xs text-gray-500">{description}</p>}
+        <p className="text-base font-bold text-gray-900 tracking-tight">{title}</p>
+        {description && <p className="text-sm text-gray-500 mt-1">{description}</p>}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-4">
         {statusBadge}
-        <FiChevronDown
-          className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-        />
+        <div className={`p-2 rounded-full transition-all duration-200 ${isOpen ? "bg-blue-50 text-blue-600 rotate-180" : "bg-gray-100 text-gray-500"}`}>
+             <FiChevronDown size={16} />
+        </div>
       </div>
     </button>
     <div
@@ -63,6 +63,7 @@ const AccordionSection = ({
 
 const ClientDataSection = ({
   businessCase,
+  uiGuidance,
   permissions = {},
   ownership = {},
   observationData,
@@ -86,14 +87,45 @@ const ClientDataSection = ({
 
     try {
       // Initialize form with empty/default values (don't set client ID yet)
+      const fallbackBusinessCase = uiGuidance?.businessCase || {};
+      const metadata =
+        businessCase?.modern_bc_metadata ||
+        fallbackBusinessCase?.modern_bc_metadata ||
+        {};
       const initialData = {
         client: "", // Don't set client ID - wait for reconciliation
-        clientType: businessCase?.clientType || "",
-        contractingEntity: businessCase?.contractingEntity || "",
-        provinceCity: businessCase?.provinceCity || "",
-        processCode: businessCase?.processCode || businessCase?.process_code || "",
-        contractObject: businessCase?.contractObject || businessCase?.contract_object || "",
-        notes: businessCase?.notes || "",
+        clientType:
+          businessCase?.clientType ||
+          fallbackBusinessCase?.clientType ||
+          metadata.clientType ||
+          "",
+        contractingEntity:
+          businessCase?.contractingEntity ||
+          fallbackBusinessCase?.contractingEntity ||
+          metadata.contractingEntity ||
+          "",
+        provinceCity:
+          businessCase?.provinceCity ||
+          fallbackBusinessCase?.provinceCity ||
+          metadata.provinceCity ||
+          "",
+        processCode:
+          businessCase?.processCode ||
+          businessCase?.process_code ||
+          fallbackBusinessCase?.processCode ||
+          fallbackBusinessCase?.process_code ||
+          "",
+        contractObject:
+          businessCase?.contractObject ||
+          businessCase?.contract_object ||
+          fallbackBusinessCase?.contractObject ||
+          fallbackBusinessCase?.contract_object ||
+          "",
+        notes:
+          businessCase?.notes ||
+          fallbackBusinessCase?.notes ||
+          metadata.notes ||
+          "",
       };
 
       console.log("DEBUG: Initializing form with empty client field:", initialData);
@@ -144,7 +176,7 @@ const ClientDataSection = ({
   const renderStatusBadge = (sectionId) => {
     const hasError = sectionHasErrors(sectionId);
     return (
-      <span className={`text-xs font-semibold ${hasError ? "text-rose-500" : "text-emerald-500"}`}>
+      <span className={`text-xs font-bold px-3 py-1 rounded-full ${hasError ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600"}`}>
         {hasError ? "Requiere atención" : "Listo"}
       </span>
     );
@@ -164,15 +196,17 @@ const ClientDataSection = ({
     <button
       type="button"
       onClick={() => toggleNA(field)}
-      className="text-[11px] text-gray-400 hover:text-gray-600 px-1 rounded transition-colors"
+      className="text-[10px] font-bold text-gray-400 hover:text-gray-600 px-2 py-0.5 rounded-md border border-transparent hover:border-gray-200 hover:bg-gray-50 transition-all"
     >
       N/A
     </button>
   );
 
   const naInputClass = (field) =>
-    `border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 ${
-      isNA(field) ? "bg-gray-50 text-gray-500" : ""
+    `w-full border rounded-xl px-4 py-2.5 transition-all outline-none ${
+      isNA(field) 
+        ? "bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed" 
+        : "bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400"
     }`;
 
 
@@ -350,27 +384,29 @@ const ClientDataSection = ({
   if (loading) {
     return (
       <div className="space-y-4">
-        <div className="flex items-center gap-2">
-          <FiCheckCircle className="text-blue-600" />
+        <div className="flex items-center gap-3">
+          <div className="p-3 bg-gray-100 rounded-xl animate-pulse">
+            <FiCheckCircle className="text-gray-400" size={24} />
+          </div>
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Datos del Cliente</h2>
-            <p className="text-sm text-gray-500">Cargando datos...</p>
+            <div className="h-5 w-48 bg-gray-200 rounded-md animate-pulse mb-2"></div>
+            <div className="h-4 w-32 bg-gray-100 rounded-md animate-pulse"></div>
           </div>
         </div>
-        <div className="animate-pulse bg-gray-200 h-32 rounded-lg"></div>
+        <div className="animate-pulse bg-white border border-gray-100 h-32 rounded-2xl shadow-sm"></div>
       </div>
     );
   }
 
   return (
     <div className="space-y-6">
-      <div className="flex items-start gap-3">
-        <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
-          <FiCheckCircle />
+      <div className="flex flex-col sm:flex-row sm:items-start gap-3">
+        <div className="p-3 rounded-xl bg-blue-50 text-blue-600 shadow-sm">
+          <FiCheckCircle size={24} />
         </div>
         <div>
-          <h2 className="text-lg font-semibold text-gray-900">Datos Comerciales y Operativos</h2>
-          <p className="text-sm text-gray-500">
+          <h2 className="text-xl font-bold text-gray-900 tracking-tight">Datos Comerciales y Operativos</h2>
+          <p className="text-sm text-gray-500 mt-1">
             Captura lo necesario para que operaciones pueda continuar con el Business Case.
             {!canEdit() && " (Solo lectura)"}
           </p>
@@ -379,8 +415,8 @@ const ClientDataSection = ({
 
       {/* Permission warning */}
       {!canEdit() && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-          <div className="flex items-center gap-2 text-amber-800">
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 shadow-sm">
+          <div className="flex items-center gap-2 text-amber-800 font-medium">
             <span className="text-sm">
               No tienes permisos para editar datos del cliente en el estado actual.
             </span>
@@ -404,14 +440,14 @@ const ClientDataSection = ({
           statusBadge={renderStatusBadge("general")}
           onInteraction={handleSectionInteraction}
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
 
-        <label className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-gray-700 flex items-center gap-2">
-            <FiUsers /> Cliente
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm font-bold text-gray-700 flex items-center gap-2">
+            <FiUsers className="text-gray-400" /> Cliente
           </span>
           <select
-            className="border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+            className={`w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900`}
             {...register("client", { required: "El cliente es obligatorio" })}
             disabled={!canEdit()}
           >
@@ -435,13 +471,13 @@ const ClientDataSection = ({
                 );
               })}
           </select>
-          {loadingClients && <p className="text-xs text-gray-400">Cargando clientes...</p>}
-          {errors.client && <p className="text-xs text-red-500">{errors.client.message}</p>}
+          {loadingClients && <p className="text-xs text-blue-500 font-medium ml-1">Cargando clientes...</p>}
+          {errors.client && <p className="text-xs text-rose-500 font-medium ml-1">{errors.client.message}</p>}
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Tipo de Cliente</span>
+            <span className="text-sm font-bold text-gray-700">Tipo de Cliente</span>
             {renderNAButton("clientType")}
           </div>
           <input
@@ -453,9 +489,9 @@ const ClientDataSection = ({
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Entidad contratante</span>
+            <span className="text-sm font-bold text-gray-700">Entidad contratante</span>
             {renderNAButton("contractingEntity")}
           </div>
           <input
@@ -466,9 +502,9 @@ const ClientDataSection = ({
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Provincia / Ciudad</span>
+            <span className="text-sm font-bold text-gray-700">Provincia / Ciudad</span>
             {renderNAButton("provinceCity")}
           </div>
           <input
@@ -479,9 +515,9 @@ const ClientDataSection = ({
             disabled={!canEdit()}
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Código del proceso</span>
+            <span className="text-sm font-bold text-gray-700">Código del proceso</span>
             {renderNAButton("processCode")}
           </div>
           <input
@@ -492,9 +528,9 @@ const ClientDataSection = ({
           />
         </label>
 
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Objeto de contratación</span>
+            <span className="text-sm font-bold text-gray-700">Objeto de contratación</span>
             {renderNAButton("contractObject")}
           </div>
           <input
@@ -504,9 +540,9 @@ const ClientDataSection = ({
             {...register("contractObject")}
           />
         </label>
-        <label className="flex flex-col gap-1">
+        <label className="flex flex-col gap-1.5 md:col-span-2">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-gray-700">Notas / contexto</span>
+            <span className="text-sm font-bold text-gray-700">Notas / contexto</span>
             {renderNAButton("notes")}
           </div>
           <textarea
@@ -523,12 +559,12 @@ const ClientDataSection = ({
 
         {/* Section Actions */}
         {canEdit() && (
-          <div className="flex justify-between items-center pt-4 border-t">
-            <p className="text-xs text-gray-500">Los cambios se guardan automáticamente al enviar el formulario.</p>
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
+            <p className="text-xs text-gray-400 font-medium">Los cambios se guardan autom?ticamente al enviar el formulario.</p>
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-60"
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-blue-600 text-white font-semibold hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-60 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
             >
               {saving ? "Guardando..." : "Guardar Datos del Cliente"}
             </button>

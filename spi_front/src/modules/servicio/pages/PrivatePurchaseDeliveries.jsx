@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../core/ui/components/Card';
 import { Button } from '../../../core/ui/components/Button';
 import { Select } from '../../../core/ui/components/Select';
@@ -19,6 +19,7 @@ import {
   getPrivatePurchaseTimeline,
   getPrivatePurchasesByRole
 } from '../../../core/api/privatePurchasesApi';
+import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
 
 const PrivatePurchaseDeliveries = () => {
   const [purchases, setPurchases] = useState([]);
@@ -41,11 +42,7 @@ const PrivatePurchaseDeliveries = () => {
     'delivery_act_generated'
   ];
 
-  useEffect(() => {
-    loadPurchases();
-  }, [statusFilter]);
-
-  const loadPurchases = async () => {
+  const loadPurchases = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -78,7 +75,29 @@ const PrivatePurchaseDeliveries = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter, isLeadRole, roleList, scopeList, mergedRoles]);
+
+  useEffect(() => {
+    loadPurchases();
+  }, [loadPurchases]);
+
+  const allowedStatusSet = useMemo(() => new Set(allowedStatuses), [allowedStatuses]);
+
+  usePurchaseSSE({
+    type: 'private',
+    debounceMs: 8000,
+    onEvent: loadPurchases,
+    filter: (payload) => {
+      const status = payload?.request?.status;
+      const fromState = payload?.meta?.from;
+      const toState = payload?.meta?.to;
+      return (
+        allowedStatusSet.has(status) ||
+        allowedStatusSet.has(fromState) ||
+        allowedStatusSet.has(toState)
+      );
+    }
+  });
 
   const handleViewDetail = async (purchase) => {
     try {
@@ -518,3 +537,9 @@ const PrivatePurchaseDeliveries = () => {
 };
 
 export default PrivatePurchaseDeliveries;
+
+
+
+
+
+

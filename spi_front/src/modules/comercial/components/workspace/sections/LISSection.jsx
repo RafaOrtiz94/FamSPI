@@ -11,9 +11,10 @@ const EMPTY_SCHEMA = {
     lisProvider: "",
     lisIncludesHardware: false,
     lisMonthlyPatients: "",
-    lisInterfaceSystem: "",
-    lisInterfaceProvider: "",
-    lisInterfaceHardware: "",
+    currentSystemInterface: false,
+    currentSystemName: "",
+    currentSystemProvider: "",
+    currentSystemHardware: false,
 };
 
 /**
@@ -29,30 +30,51 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
 
     // COMPLETE SECTION DATA - All fields from businessCase, even conditional ones
     const sectionData = useMemo(() => {
-        if (!businessCase?.lis_integration) return EMPTY_SCHEMA;
+        const lisData = businessCase?.lis_integration || businessCase?.lisIntegration || null;
+        if (!lisData) return EMPTY_SCHEMA;
 
         return {
-            lisIncludes: businessCase.lis_integration.lis_includes || false,
-            lisProvider: businessCase.lis_integration.lis_provider || "",
-            lisIncludesHardware: businessCase.lis_integration.lis_includes_hardware || false,
-            lisMonthlyPatients: businessCase.lis_integration.lis_monthly_patients || "",
-            lisInterfaceSystem: businessCase.lis_integration.lis_interface_system || "",
-            lisInterfaceProvider: businessCase.lis_integration.lis_interface_provider || "",
-            lisInterfaceHardware: businessCase.lis_integration.lis_interface_hardware || "",
+            lisIncludes: lisData.lis_includes || false,
+            lisProvider: lisData.lis_provider || "",
+            lisIncludesHardware: lisData.includes_hardware || false,
+            lisMonthlyPatients: lisData.monthly_patients || "",
+            currentSystemInterface: Boolean(lisData.current_system_name || lisData.current_system_provider),
+            currentSystemName: lisData.current_system_name || "",
+            currentSystemProvider: lisData.current_system_provider || "",
+            currentSystemHardware: lisData.current_system_hardware || false,
         };
     }, [businessCase]);
 
     // State for dynamic interfaces (these don't come from businessCase initially)
     const [interfaces, setInterfaces] = useState([]);
 
-    // HYDRATE INTERFACES - This comes from API, not businessCase
-    useEffect(() => {
-        if (!businessCase?.lis_integration?.interfaces) return;
-        setInterfaces(businessCase.lis_integration.interfaces);
-    }, [businessCase]);
+    const ensureDefaultInterfaces = () => ([
+        { id: Date.now(), model: "", provider: "" },
+        { id: Date.now() + 1, model: "", provider: "" },
+        { id: Date.now() + 2, model: "", provider: "" }
+    ]);
 
     // Initialize state with sectionData (deterministic hydration)
     const [formData, setFormData] = useState(() => sectionData);
+
+    // HYDRATE INTERFACES - This comes from API, not businessCase
+    useEffect(() => {
+        const lisData = businessCase?.lis_integration || businessCase?.lisIntegration || null;
+        const savedInterfaces = lisData?.equipmentInterfaces || lisData?.interfaces || [];
+        if (!savedInterfaces?.length) return;
+        setInterfaces(savedInterfaces.map((iface) => ({
+            id: iface.id || Date.now() + Math.random(),
+            model: iface.model || "",
+            provider: iface.provider || ""
+        })));
+    }, [businessCase]);
+
+    // Auto-seed 3 interface rows when LIS is enabled and none exist
+    useEffect(() => {
+        if (!formData.lisIncludes) return;
+        if (interfaces.length > 0) return;
+        setInterfaces(ensureDefaultInterfaces());
+    }, [formData.lisIncludes, interfaces.length]);
 
     // ONE-TIME HYDRATION: Reset form with complete sectionData
     useEffect(() => {
@@ -71,7 +93,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
     const handleAddInterface = () => {
         setInterfaces((prev) => [
             ...prev,
-            { id: Date.now(), equipment_name: "", interface_type: "", notes: "" },
+            { id: Date.now(), model: "", provider: "" },
         ]);
     };
 
@@ -87,33 +109,34 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
 
     const handleSave = async () => {
         if (!bcId) {
-            showToast("Error: No se encontró el Business Case ID", "error");
+            showToast("Error: No se encontro el Business Case ID", "error");
             return;
         }
 
         try {
             setSaving(true);
             const payload = {
-                lis_includes: formData.lisIncludes,
+                includes_lis: formData.lisIncludes,
                 lis_provider: formData.lisProvider || null,
-                lis_includes_hardware: formData.lisIncludesHardware,
-                lis_monthly_patients: formData.lisMonthlyPatients ? parseInt(formData.lisMonthlyPatients) : null,
-                lis_interface_system: formData.lisInterfaceSystem || null,
-                lis_interface_provider: formData.lisInterfaceProvider || null,
-                lis_interface_hardware: formData.lisInterfaceHardware || null,
-                interfaces: interfaces.map((i) => ({
-                    equipment_name: i.equipment_name,
-                    interface_type: i.interface_type,
-                    notes: i.notes,
-                })),
+                includes_hardware: formData.lisIncludesHardware,
+                monthly_patients: formData.lisMonthlyPatients ? parseInt(formData.lisMonthlyPatients) : null,
+                current_system_name: formData.currentSystemInterface ? (formData.currentSystemName || null) : null,
+                current_system_provider: formData.currentSystemInterface ? (formData.currentSystemProvider || null) : null,
+                current_system_hardware: formData.currentSystemInterface ? Boolean(formData.currentSystemHardware) : false,
+                interfaces: interfaces
+                    .filter((i) => i.model || i.provider)
+                    .map((i) => ({
+                        model: i.model || null,
+                        provider: i.provider || null,
+                    })),
             };
 
             await api.post(`/business-case/${bcId}/lis-integration`, payload);
-            showToast("Integración LIS guardada", "success");
+            showToast("Integracion LIS guardada", "success");
             if (onSave) onSave();
         } catch (err) {
             console.error("Error saving LIS data:", err);
-            showToast("Error guardando integración LIS", "error");
+            showToast("Error guardando integracion LIS", "error");
         } finally {
             setSaving(false);
         }
@@ -124,33 +147,33 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
     return (
         <div className="space-y-6">
             {/* Section Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-4">
-                    <div className="text-3xl">🔗</div>
+                    
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Integración LIS</h2>
-                        <p className="text-sm text-gray-600">Sistema de información laboratorio y interfaces</p>
+                        <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Integración LIS</h2>
+                        <p className="text-sm text-gray-500 mt-1">Sistema de información de laboratorio e interfaces</p>
                     </div>
                 </div>
                 {canEdit && (
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                        className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 w-full sm:w-auto"
                     >
-                        <FiSave size={16} />
+                        <FiSave size={18} />
                         {saving ? "Guardando..." : "Guardar"}
                     </button>
                 )}
             </div>
 
             {/* LIS Toggle */}
-            <Card className="p-6">
-                <div className="flex items-center justify-between">
+            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
-                        <h3 className="text-lg font-semibold text-gray-800">¿Incluye Sistema LIS?</h3>
-                        <p className="text-sm text-gray-600">
-                            Active esta opción si el contrato incluye un Sistema de Información de Laboratorio
+                        <h3 className="text-lg font-semibold text-gray-900">¿Incluye LIS?</h3>
+                        <p className="text-sm text-gray-500 mt-1">
+                            Active esta opci?n si el contrato incluye un Sistema de Información de Laboratorio
                         </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -161,39 +184,41 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                             disabled={!canEdit}
                             className="sr-only peer"
                         />
-                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        <div className="w-14 h-8 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[4px] after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-blue-600 shadow-inner"></div>
                     </label>
                 </div>
-            </Card>
+            </div>
 
             {/* LIS Configuration */}
             {formData.lisIncludes && (
-                <Card className="p-6">
-                    <div className="flex items-center gap-2 border-b pb-4 mb-6">
-                        <FiLink className="text-blue-600" />
-                        <h3 className="text-lg font-semibold text-gray-800">Configuración del LIS</h3>
+                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
+                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-6">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
+                            <FiLink size={20} />
+                        </div>
+                        <h3 className="text-lg font-semibold text-gray-900">Configuración del LIS</h3>
                     </div>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         {/* Provider */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                Proveedor del LIS
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                Proveedor del sistema a trabajar
                             </label>
                             <input
                                 type="text"
                                 value={formData.lisProvider}
                                 onChange={(e) => handleChange("lisProvider", e.target.value)}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500"
                                 placeholder="Ej: Cerner, Epic, LabWare..."
                             />
                         </div>
 
                         {/* Monthly Patients */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                Pacientes mensuales estimados
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                Número de pacientes mensual
                             </label>
                             <input
                                 type="number"
@@ -201,100 +226,128 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                                 value={formData.lisMonthlyPatients}
                                 onChange={(e) => handleChange("lisMonthlyPatients", e.target.value)}
                                 disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500"
                                 placeholder="Ej: 5000"
                             />
                         </div>
 
                         {/* Hardware Included */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                ¿Incluye Hardware?
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                ¿Incluye hardware?
                             </label>
-                            <select
-                                value={formData.lisIncludesHardware ? "yes" : "no"}
-                                onChange={(e) => handleChange("lisIncludesHardware", e.target.value === "yes")}
-                                disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                            >
-                                <option value="no">No</option>
-                                <option value="yes">Sí</option>
-                            </select>
+                            <div className="relative">
+                                <select
+                                    value={formData.lisIncludesHardware ? "yes" : "no"}
+                                    onChange={(e) => handleChange("lisIncludesHardware", e.target.value === "yes")}
+                                    disabled={!canEdit}
+                                    className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500 bg-white"
+                                >
+                                    <option value="no">No</option>
+                                    <option value="yes">Sí</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* Interface System */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                Sistema a Interfazar
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                Interfaz a sistema actual
+                            </label>
+                            <div className="relative">
+                                <select
+                                    value={formData.currentSystemInterface ? "yes" : "no"}
+                                    onChange={(e) => handleChange("currentSystemInterface", e.target.value === "yes")}
+                                    disabled={!canEdit}
+                                    className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500 bg-white"
+                                >
+                                    <option value="no">No</option>
+                                    <option value="yes">S?</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                Nombre del sistema
                             </label>
                             <input
                                 type="text"
-                                value={formData.lisInterfaceSystem}
-                                onChange={(e) => handleChange("lisInterfaceSystem", e.target.value)}
-                                disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                value={formData.currentSystemName}
+                                onChange={(e) => handleChange("currentSystemName", e.target.value)}
+                                disabled={!canEdit || !formData.currentSystemInterface}
+                                className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500"
                                 placeholder="Ej: HIS del hospital..."
                             />
                         </div>
 
-                        {/* Interface Provider */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                Proveedor de Interface
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                Proveedor
                             </label>
                             <input
                                 type="text"
-                                value={formData.lisInterfaceProvider}
-                                onChange={(e) => handleChange("lisInterfaceProvider", e.target.value)}
-                                disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
+                                value={formData.currentSystemProvider}
+                                onChange={(e) => handleChange("currentSystemProvider", e.target.value)}
+                                disabled={!canEdit || !formData.currentSystemInterface}
+                                className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500"
                                 placeholder="Ej: HL7 Solutions..."
                             />
                         </div>
 
-                        {/* Interface Hardware */}
-                        <div className="space-y-1">
-                            <label className="text-sm font-medium text-gray-700">
-                                Hardware de Interface
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-gray-700 ml-1">
+                                ¿Incluye hardware?
                             </label>
-                            <input
-                                type="text"
-                                value={formData.lisInterfaceHardware}
-                                onChange={(e) => handleChange("lisInterfaceHardware", e.target.value)}
-                                disabled={!canEdit}
-                                className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
-                                placeholder="Ej: Servidor dedicado, PC..."
-                            />
+                            <div className="relative">
+                                <select
+                                    value={formData.currentSystemHardware ? "yes" : "no"}
+                                    onChange={(e) => handleChange("currentSystemHardware", e.target.value === "yes")}
+                                    disabled={!canEdit || !formData.currentSystemInterface}
+                                    className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500 bg-white"
+                                >
+                                    <option value="no">No</option>
+                                    <option value="yes">S?</option>
+                                </select>
+                                <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </Card>
+                </div>
             )}
 
             {/* Equipment Interfaces */}
             {formData.lisIncludes && (
-                <Card className="p-6">
-                    <div className="flex items-center justify-between border-b pb-4 mb-6">
-                        <h3 className="text-lg font-semibold text-gray-800">Interfaces de Equipos</h3>
+                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-4 mb-6">
+                        <h3 className="text-lg font-semibold text-gray-900">Interfaces de equipos</h3>
                         {canEdit && (
                             <button
                                 onClick={handleAddInterface}
-                                className="flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700"
+                                className="flex items-center justify-center gap-2 px-4 py-2 text-sm bg-green-50 text-green-700 font-medium rounded-full hover:bg-green-100 active:scale-95 transition-all w-full sm:w-auto"
                             >
-                                <FiPlus size={14} />
-                                Agregar Interface
+                                <FiPlus size={16} />
+                                Agregar interfaz
                             </button>
                         )}
                     </div>
 
                     {interfaces.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">
-                            <p>No hay interfaces de equipos configuradas</p>
+                        <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-200">
+                            <p className="text-gray-500 font-medium">No hay interfaces de equipos configuradas</p>
                             {canEdit && (
                                 <button
                                     onClick={handleAddInterface}
-                                    className="mt-2 text-blue-600 hover:underline"
+                                    className="mt-3 text-blue-600 hover:text-blue-700 font-medium hover:underline transition-all"
                                 >
-                                    Agregar primera interface
+                                    Agregar primera interfaz
                                 </button>
                             )}
                         </div>
@@ -303,71 +356,68 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                             {interfaces.map((iface, idx) => (
                                 <div
                                     key={iface.id}
-                                    className="flex gap-4 items-start p-4 bg-gray-50 rounded-lg"
+                                    className="flex flex-col md:flex-row gap-4 items-start p-5 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-100 transition-all group"
                                 >
-                                    <span className="text-sm font-medium text-gray-500 mt-2">
+                                    <span className="text-sm font-bold text-gray-400 mt-3 md:w-8">
                                         #{idx + 1}
                                     </span>
-                                    <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-4">
-                                        <input
-                                            type="text"
-                                            value={iface.equipment_name}
-                                            onChange={(e) =>
-                                                handleInterfaceChange(iface.id, "equipment_name", e.target.value)
-                                            }
-                                            disabled={!canEdit}
-                                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                                            placeholder="Nombre del equipo"
-                                        />
-                                        <input
-                                            type="text"
-                                            value={iface.interface_type}
-                                            onChange={(e) =>
-                                                handleInterfaceChange(iface.id, "interface_type", e.target.value)
-                                            }
-                                            disabled={!canEdit}
-                                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                                            placeholder="Tipo de interface"
-                                        />
-                                        <input
-                                            type="text"
-                                            value={iface.notes}
-                                            onChange={(e) =>
-                                                handleInterfaceChange(iface.id, "notes", e.target.value)
-                                            }
-                                            disabled={!canEdit}
-                                            className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
-                                            placeholder="Notas"
-                                        />
+                                    <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4 w-full">
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-gray-500 ml-1">Modelo</label>
+                                            <input
+                                                type="text"
+                                                value={iface.model}
+                                                onChange={(e) =>
+                                                    handleInterfaceChange(iface.id, "model", e.target.value)
+                                                }
+                                                disabled={!canEdit}
+                                                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                                                placeholder="Modelo del equipo"
+                                            />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs font-medium text-gray-500 ml-1">Proveedor</label>
+                                            <input
+                                                type="text"
+                                                value={iface.provider}
+                                                onChange={(e) =>
+                                                    handleInterfaceChange(iface.id, "provider", e.target.value)
+                                                }
+                                                disabled={!canEdit}
+                                                className="w-full border border-gray-200 rounded-xl px-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white"
+                                                placeholder="Proveedor del equipo"
+                                            />
+                                        </div>
                                     </div>
                                     {canEdit && (
                                         <button
                                             onClick={() => handleRemoveInterface(iface.id)}
-                                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                                            className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all mt-2 md:mt-4 opacity-0 group-hover:opacity-100"
+                                            title="Eliminar interfaz"
                                         >
-                                            <FiTrash2 size={16} />
+                                            <FiTrash2 size={18} />
                                         </button>
                                     )}
                                 </div>
                             ))}
                         </div>
                     )}
-                </Card>
+                </div>
             )}
 
             {/* Info Card */}
-            <Card className="p-4 bg-blue-50 border-blue-200">
+            <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-xl">
                 <div className="flex items-start gap-3">
-                    <div className="text-blue-600 mt-0.5">ℹ️</div>
+                    <div className="text-blue-600 mt-0.5 text-lg">Info</div>
                     <div>
-                        <h4 className="font-medium text-blue-900">Información</h4>
-                        <p className="text-sm text-blue-700 mt-1">
-                            La integración LIS afecta los costos de inversión y la complejidad del proyecto.
+                        <h4 className="font-semibold text-blue-900 text-sm">Información Importante</h4>
+                        <p className="text-sm text-blue-700/80 mt-1 leading-relaxed">
+                            La integraci?n LIS afecta los costos de inversión y la complejidad del proyecto.
                             Configure correctamente las interfaces para una estimación precisa.
                         </p>
                     </div>
                 </div>
-            </Card>
+            </div>
         </div>
     );
 };

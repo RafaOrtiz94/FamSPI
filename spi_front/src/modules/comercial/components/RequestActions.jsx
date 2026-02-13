@@ -129,9 +129,21 @@ const StatusBasedActions = ({
     switch (status) {
         case "waiting_provider_response":
             return (
-                <Button size="sm" onClick={onOpenResponse} fullWidth>
-                    Registrar respuesta
-                </Button>
+                <div className="w-full space-y-2">
+                    <Button
+                        size="sm"
+                        onClick={onOpenResponse}
+                        fullWidth
+                        disabled={!request.availability_email_sent_at}
+                    >
+                        Registrar respuesta
+                    </Button>
+                    {!request.availability_email_sent_at && (
+                        <p className="text-[11px] text-amber-600">
+                            Envia el correo al proveedor antes de registrar respuesta.
+                        </p>
+                    )}
+                </div>
             );
 
         case "waiting_proforma":

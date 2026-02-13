@@ -10,6 +10,9 @@ import {
   FiUser,
   FiUsers,
   FiCalendar,
+  FiEdit2,
+  FiFileText,
+  FiPhone,
 } from "react-icons/fi";
 
 import Card from "../../../core/ui/components/Card";
@@ -21,8 +24,10 @@ import {
   assignClient,
   endClientVisit,
   fetchClients,
+  getClientDetail,
   startClientVisit,
-  registerProspectVisit
+  registerProspectVisit,
+  updateClient
 } from "../../../core/api/clientsApi";
 import { getUsers } from "../../../core/api/usersApi";
 import ClientApprovalsWidget from "../../backoffice/components/ClientApprovalsWidget";
@@ -36,6 +41,17 @@ const roleIsManager = (role) =>
   ["jefe_comercial", "gerencia", "gerente", "admin", "administrador", "ti"].includes(role);
 
 const advisorRoles = new Set(["comercial", "acp_comercial", "backoffice"]);
+const albumAllAccessRoles = new Set([
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+  "jefe_comercial",
+  "gerencia",
+  "gerente",
+  "admin",
+  "administrador",
+  "ti",
+]);
 
 const normalizeStatus = (status) => {
   const value = (status || "").toLowerCase();
@@ -70,11 +86,15 @@ const ClientesPage = () => {
   const isManager = roleIsManager(normalizedRole);
   const isBackofficeUser = normalizedRole.includes("backoffice");
   const isAcpCommercial = normalizedRole.includes("acp_comercial");
-  const canSeeRegisteredWidget =
-    normalizedRole.includes("comercial") && !isBackofficeUser;
+  const roleTokens = (normalizedRole || "")
+    .split(/[\s,|]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const canManageAllClients = roleTokens.some((token) => albumAllAccessRoles.has(token));
   const currentEmail = user?.email?.toLowerCase?.() || "";
 
   const [clientes, setClientes] = useState([]);
+  const [registeredClients, setRegisteredClients] = useState([]);
   const [loading, setLoading] = useState(false);
   const [assignments, setAssignments] = useState({});
   const [advisors, setAdvisors] = useState([]);
@@ -94,6 +114,14 @@ const ClientesPage = () => {
   const [filterBySchedule, setFilterBySchedule] = useState(true);
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [summary, setSummary] = useState({});
+  const [albumSearch, setAlbumSearch] = useState("");
+  const [showAllClients, setShowAllClients] = useState(false);
+  const [allClientsSearch, setAllClientsSearch] = useState("");
+  const [editDetail, setEditDetail] = useState(null);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSubmitting, setEditSubmitting] = useState(false);
+  const [editForm, setEditForm] = useState({});
+  const [editFiles, setEditFiles] = useState({});
 
   const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
 
@@ -208,11 +236,18 @@ const ClientesPage = () => {
   const loadClientes = useCallback(async () => {
     setLoading(true);
     try {
+      console.log("[Clientes] loadClientes params:", {
+        selectedDate,
+        filterBySchedule,
+        role: normalizedRole,
+        canManageAllClients,
+      });
       const result = await fetchClients({
         date: selectedDate,
         include_schedule_info: true,
         filter_by_schedule: filterBySchedule,
       });
+      console.log("[Clientes] fetchClients result:", result);
 
       let loadedClients = [];
       let loadedProspects = [];
@@ -250,9 +285,22 @@ const ClientesPage = () => {
       }
 
       setClientes([...loadedProspects, ...loadedClients]);
+      setRegisteredClients(loadedClients);
       setSummary(loadedSummary);
+      console.log("[Clientes] counts:", {
+        clients: loadedClients.length,
+        prospects: loadedProspects.length,
+        summary: loadedSummary,
+      });
 
-      if (filterBySchedule && !loadedSummary?.has_approved_schedule) {
+      // Solo mostrar alerta de cronograma si es comercial puro (no backoffice, no acp, no jefe)
+      // Esto evita que admins/otros vean la alerta antes de que el useEffect actualice filterBySchedule
+      const isComercialPuro = normalizedRole.includes("comercial") && 
+                              !normalizedRole.includes("backoffice") && 
+                              !normalizedRole.includes("acp") &&
+                              !normalizedRole.includes("jefe");
+
+      if (filterBySchedule && !loadedSummary?.has_approved_schedule && isComercialPuro) {
         showToast(
           "No tienes un cronograma aprobado para este mes. Mostrando todos los clientes.",
           "info",
@@ -263,11 +311,12 @@ const ClientesPage = () => {
       console.error(error);
       showToast("No pudimos cargar tus clientes", "error");
       setClientes([]);
+      setRegisteredClients([]);
       setSummary({});
     } finally {
       setLoading(false);
     }
-  }, [filterBySchedule, selectedDate, showToast, currentEmail]);
+  }, [filterBySchedule, selectedDate, showToast, currentEmail, normalizedRole, canManageAllClients]);
 
   useEffect(() => {
     loadClientes();
@@ -278,11 +327,11 @@ const ClientesPage = () => {
   }, [isManager]);
 
   useEffect(() => {
-    if (isAcpCommercial) {
+    if (isAcpCommercial || canManageAllClients) {
       setFilterBySchedule(false);
       setStatusFilter("all");
     }
-  }, [isAcpCommercial]);
+  }, [isAcpCommercial, canManageAllClients]);
 
   const visitedCount = useMemo(() => {
     if (typeof summary?.visited === "number") return summary.visited;
@@ -337,6 +386,58 @@ const ClientesPage = () => {
     return merged;
   }, [clientes, assignedToMe, createdByMe]);
 
+  const albumClients = useMemo(() => {
+    if (!Array.isArray(registeredClients)) return [];
+    let base = registeredClients;
+
+    if (!canManageAllClients) {
+      base = base.filter((c) => {
+        const assigned = normalizeAsignados(c.asignados);
+        const isAssigned = assigned.some((mail) => (mail || "").toLowerCase?.() === currentEmail);
+        const isCreator = (c.created_by || "").toLowerCase?.() === currentEmail;
+        return isAssigned || isCreator;
+      });
+    }
+
+    if (!albumSearch) return [];
+    const q = albumSearch.toLowerCase();
+    return base.filter((c) => {
+      const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [registeredClients, canManageAllClients, currentEmail, albumSearch]);
+
+  const allAlbumClients = useMemo(() => {
+    if (!Array.isArray(registeredClients)) return [];
+    if (canManageAllClients) return registeredClients;
+    return registeredClients.filter((c) => {
+      const assigned = normalizeAsignados(c.asignados);
+      const isAssigned = assigned.some((mail) => (mail || "").toLowerCase?.() === currentEmail);
+      const isCreator = (c.created_by || "").toLowerCase?.() === currentEmail;
+      return isAssigned || isCreator;
+    });
+  }, [registeredClients, canManageAllClients, currentEmail]);
+
+  const filteredAllAlbumClients = useMemo(() => {
+    if (!Array.isArray(allAlbumClients)) return [];
+    if (!allClientsSearch) return allAlbumClients;
+    const q = allClientsSearch.toLowerCase();
+    return allAlbumClients.filter((c) => {
+      const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [allAlbumClients, allClientsSearch]);
+
+  useEffect(() => {
+    console.log("[Clientes] albumClients:", {
+      registered: Array.isArray(registeredClients) ? registeredClients.length : 0,
+      album: Array.isArray(albumClients) ? albumClients.length : 0,
+      canManageAllClients,
+      currentEmail,
+      albumSearch,
+    });
+  }, [albumClients, registeredClients, canManageAllClients, currentEmail, albumSearch]);
+
   const filteredAssignedList = useMemo(() => {
     let base = assignedToMe;
 
@@ -353,16 +454,6 @@ const ClientesPage = () => {
       return haystack.includes(q);
     });
   }, [assignedViewFilter, assignedToMe, createdByMe, allMine, assignedSearch]);
-
-  const acpCreatedList = useMemo(() => {
-    if (!Array.isArray(createdByMe)) return [];
-    if (!assignedSearch) return createdByMe;
-    const q = assignedSearch.toLowerCase();
-    return createdByMe.filter((c) => {
-      const haystack = `${c.nombre || ""} ${c.identificador || ""} ${c.shipping_contact_name || ""} ${c.shipping_address || ""}`.toLowerCase();
-      return haystack.includes(q);
-    });
-  }, [createdByMe, assignedSearch]);
 
   const handleAssign = async (clientId) => {
     const email = assignments[clientId];
@@ -409,6 +500,105 @@ const ClientesPage = () => {
     setActiveClient(null);
     setModalType(null);
     setVisitModal({ timestamp: null, coords: null, note: "", loadingLocation: false, error: null });
+    setEditDetail(null);
+    setEditForm({});
+    setEditFiles({});
+    setEditLoading(false);
+    setEditSubmitting(false);
+  };
+
+  const openEditModal = async (client) => {
+    setActiveClient(client);
+    setModalType("edit");
+    setEditLoading(true);
+    setEditDetail(null);
+    setEditFiles({});
+
+    try {
+      const detail = await getClientDetail(client.id);
+      setEditDetail(detail);
+      setEditForm({
+        client_type: detail?.client_type || "",
+        legal_person_business_name: detail?.legal_person_business_name || "",
+        nationality: detail?.nationality || "",
+        natural_person_firstname: detail?.natural_person_firstname || "",
+        natural_person_lastname: detail?.natural_person_lastname || "",
+        commercial_name: detail?.commercial_name || detail?.nombre || "",
+        establishment_name: detail?.establishment_name || "",
+        ruc_cedula: detail?.ruc_cedula || detail?.identificador || "",
+        establishment_province: detail?.establishment_province || "",
+        establishment_city: detail?.establishment_city || "",
+        establishment_address: detail?.establishment_address || "",
+        establishment_reference: detail?.establishment_reference || "",
+        establishment_phone: detail?.establishment_phone || "",
+        establishment_cellphone: detail?.establishment_cellphone || "",
+        legal_rep_name: detail?.legal_rep_name || "",
+        legal_rep_position: detail?.legal_rep_position || "",
+        legal_rep_id_document: detail?.legal_rep_id_document || "",
+        legal_rep_cellphone: detail?.legal_rep_cellphone || "",
+        legal_rep_email: detail?.legal_rep_email || "",
+        shipping_contact_name: detail?.shipping_contact_name || "",
+        shipping_address: detail?.shipping_address || "",
+        shipping_city: detail?.shipping_city || "",
+        shipping_province: detail?.shipping_province || "",
+        shipping_reference: detail?.shipping_reference || "",
+        shipping_phone: detail?.shipping_phone || "",
+        shipping_cellphone: detail?.shipping_cellphone || "",
+        shipping_delivery_hours: detail?.shipping_delivery_hours || "",
+        operating_permit_status: detail?.operating_permit_status || "",
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("No pudimos cargar el detalle del cliente", "error");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleEditChange = (key, value) => {
+    setEditForm((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const handleEditFile = (key, file) => {
+    setEditFiles((prev) => ({ ...prev, [key]: file }));
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!activeClient) return;
+
+    const limitedPayload = {
+      commercial_name: editForm.commercial_name,
+      shipping_contact_name: editForm.shipping_contact_name,
+      shipping_phone: editForm.shipping_phone,
+      shipping_cellphone: editForm.shipping_cellphone,
+    };
+
+    const payload = canManageAllClients ? editForm : limitedPayload;
+    const files = canManageAllClients ? editFiles : {};
+
+    setEditSubmitting(true);
+    try {
+      const updated = await updateClient(activeClient.id, payload, files);
+      setRegisteredClients((prev) =>
+        Array.isArray(prev)
+          ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+          : prev,
+      );
+      setClientes((prev) =>
+        Array.isArray(prev)
+          ? prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c))
+          : prev,
+      );
+      setEditDetail(updated);
+      showToast("Cliente actualizado correctamente", "success");
+      closeModal();
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo actualizar el cliente", "error");
+    } finally {
+      setEditSubmitting(false);
+    }
   };
 
   const handleConfirmVisit = async () => {
@@ -496,7 +686,7 @@ const ClientesPage = () => {
     return (
       <div
         key={cliente.id}
-        className="relative flex flex-col rounded-2xl border border-gray-100 bg-white/80 p-4 shadow-sm backdrop-blur hover:shadow-md transition hover:-translate-y-0.5 cursor-pointer"
+        className="relative flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-4 shadow-none backdrop-blur transition cursor-pointer sm:rounded-2xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md sm:hover:-translate-y-0.5"
         onClick={() => openReportModal(cliente)}
       >
         {isPlanned && (
@@ -640,18 +830,17 @@ const ClientesPage = () => {
     );
   };
 
-  const renderAcpCard = (cliente) => {
-    const clientName = cliente.nombre || cliente.commercial_name || "Cliente sin nombre";
+  const renderAlbumCard = (cliente) => {
+    const clientName = cliente.commercial_name || cliente.nombre || "Cliente sin nombre";
     const identifier = cliente.identificador || cliente.ruc_cedula || "Identificador no disponible";
-    const address = cliente.shipping_address || "Dirección no disponible";
-    const city = cliente.shipping_city || getCityFromAddress(address);
-    const province = cliente.shipping_province || getProvinceFromAddress(address);
-    const clientType = formatClientType(cliente.client_type);
+    const address = cliente.shipping_address || "Direccion no disponible";
+    const contactName = cliente.shipping_contact_name || "Sin contacto";
+    const contactPhone = cliente.shipping_phone || cliente.shipping_cellphone || "Sin telefono";
 
     return (
       <div
-        key={cliente.id}
-        className="flex flex-col rounded-2xl border border-gray-100 bg-white/90 p-4 shadow-sm hover:shadow-md transition"
+        key={`album-${cliente.id}`}
+        className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/95 p-4 shadow-none transition sm:rounded-2xl sm:border sm:bg-white/90 sm:shadow-sm"
       >
         <div className="flex items-start justify-between gap-3">
           <div className="space-y-1">
@@ -659,25 +848,35 @@ const ClientesPage = () => {
             <p className="text-xs text-gray-500">{identifier}</p>
           </div>
           <span className="rounded-full bg-emerald-50 px-2 py-[2px] text-xs font-semibold text-emerald-700">
-            Registrado
+            Aprobado
           </span>
         </div>
 
-        <div className="mt-3 space-y-2 text-sm text-gray-700">
-          <p className="text-xs text-gray-600">
-            <span className="font-semibold text-gray-700">Tipo:</span> {clientType}
+        <div className="mt-3 space-y-2 text-xs text-gray-700">
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiMapPin className="text-gray-400" /> {address}
           </p>
-          <p className="text-xs text-gray-600 flex items-center gap-1">
-            <FiMapPin className="text-gray-400" />
-            {address}
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiUser className="text-gray-400" /> {contactName}
           </p>
-          <p className="text-xs text-gray-500">
-            {city}, {province}
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiPhone className="text-gray-400" /> {contactPhone}
           </p>
-          <p className="text-xs text-gray-500">
-            <span className="font-semibold text-gray-700">Contacto:</span>{" "}
-            {cliente.shipping_contact_name || "No definido"}
-          </p>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            className="px-3 py-1.5 text-xs"
+            onClick={() => openEditModal(cliente)}
+          >
+            <FiEdit2 className="mr-1" /> Editar
+          </Button>
+          {canManageAllClients && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+              <FiFileText /> Documentos disponibles
+            </span>
+          )}
         </div>
       </div>
     );
@@ -686,14 +885,14 @@ const ClientesPage = () => {
   const showVisitFlow = !isBackofficeUser && !isAcpCommercial;
 
   return (
-    <div className="p-6 space-y-6">
-      <header className="space-y-3">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+    <div className="space-y-4 sm:space-y-6 pb-6 px-3 sm:px-0">
+      <header className="space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
               <FiUsers className="text-blue-600" /> Gestión de Clientes
             </h1>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500 max-w-xl">
               Clientes aprobados que puedes gestionar, con enfoque en tu ruta diaria de visitas.
             </p>
           </div>
@@ -733,23 +932,29 @@ const ClientesPage = () => {
         ) : (
           <>
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <div className="flex items-center gap-3">
-                <RequestActionButton type="CLIENT" size="sm" />
-                <Button variant="secondary" onClick={() => setModalType("prospect")}>
-                  Visita a Prospecto
-                </Button>
-                <div className="flex items-center gap-2 text-sm">
-                  <label className="text-gray-700">Fecha</label>
+              <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:gap-3">
+                  <RequestActionButton type="CLIENT" size="xs" className="w-full sm:w-auto" />
+                  <Button
+                    variant="secondary"
+                    onClick={() => setModalType("prospect")}
+                    className="w-full sm:w-auto text-xs sm:text-sm px-3 py-1.5 sm:px-4 sm:py-2"
+                  >
+                    Visita Prospecto
+                  </Button>
+                </div>
+                <div className="flex flex-col gap-1 text-sm sm:flex-row sm:items-center sm:gap-2 sm:min-w-[210px]">
+                  <label className="text-gray-700 text-xs sm:text-sm">Fecha</label>
                   <input
                     type="date"
                     value={selectedDate}
                     onChange={(e) => setSelectedDate(e.target.value)}
-                    className="rounded-lg border border-gray-300 px-3 py-2"
+                    className="w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-xs sm:w-[180px] sm:px-3 sm:py-2 sm:text-sm"
                   />
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700">
+              <div className="flex items-start gap-2 sm:items-center">
+                <label className="flex items-start gap-2 cursor-pointer text-xs text-gray-700 sm:items-center sm:text-sm">
                   <input
                     type="checkbox"
                     checked={filterBySchedule}
@@ -762,7 +967,7 @@ const ClientesPage = () => {
             </div>
 
             {summary?.has_approved_schedule && (
-              <Card className="p-4 bg-blue-50 border-blue-200">
+              <Card className="rounded-none border-x-0 border-blue-200 bg-blue-50 p-4 shadow-none sm:rounded-3xl sm:border sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-semibold text-blue-900 flex items-center gap-2">
@@ -812,7 +1017,7 @@ const ClientesPage = () => {
       {
         showVisitFlow && (
           <>
-            <Card className="p-5 space-y-4">
+            <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">Tarjetas de clientes para check-in/check-out</h2>
@@ -823,7 +1028,7 @@ const ClientesPage = () => {
               </div>
 
               {Array.isArray(filteredClientes) && filteredClientes.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
                   {filteredClientes.map((cliente) => renderCard(cliente))}
                 </div>
               ) : (
@@ -834,7 +1039,7 @@ const ClientesPage = () => {
             </Card>
 
             {/* Widget: Clientes asignados / registrados por mí */}
-            <Card className="p-5 space-y-4">
+            <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <h2 className="text-lg font-semibold text-gray-900">
@@ -850,7 +1055,7 @@ const ClientesPage = () => {
               </div>
 
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="inline-flex rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700">
+                <div className="flex w-full flex-wrap rounded-full bg-gray-100 p-1 text-xs font-medium text-gray-700 sm:w-auto">
                   <button
                     type="button"
                     onClick={() => setAssignedViewFilter("assigned")}
@@ -896,7 +1101,7 @@ const ClientesPage = () => {
               </div>
 
               {Array.isArray(filteredAssignedList) && filteredAssignedList.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-5">
                   {filteredAssignedList.map((cliente) => {
                     const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
                     const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
@@ -907,7 +1112,7 @@ const ClientesPage = () => {
                     return (
                       <div
                         key={`mini-${cliente.id}`}
-                        className="flex flex-col rounded-xl border border-gray-100 bg-white/80 p-3 shadow-sm hover:shadow-md transition cursor-pointer"
+                        className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-3 shadow-none transition cursor-pointer sm:rounded-xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md"
                         onClick={() => openReportModal(cliente)}
                       >
                         <div className="flex items-start justify-between gap-2">
@@ -957,30 +1162,88 @@ const ClientesPage = () => {
         )
       }
 
-      {canSeeRegisteredWidget && (
-        <Card className="p-5 space-y-4">
-          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-900">
-                Clientes registrados
-              </h2>
-              <p className="text-sm text-gray-500">
-                Lista de clientes creados por tu usuario ACP comercial.
-              </p>
-            </div>
+      <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">
+              Clientes registrados
+            </h2>
+            <p className="text-sm text-gray-500">
+              Gestiona clientes aprobados. Puedes editar nombre comercial y contacto; los roles avanzados pueden ver documentos.
+            </p>
           </div>
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+            <div className="relative w-full md:max-w-xs">
+              <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <input
+                type="text"
+                placeholder="Buscar cliente..."
+                value={albumSearch}
+                onChange={(e) => setAlbumSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <p className="text-xs text-gray-500 md:max-w-xs">
+              Ingresa aquÃ­ el nombre del cliente que deseas encontrar.
+            </p>
+            <Button
+              variant="secondary"
+              className="w-full md:w-auto"
+              onClick={() => setShowAllClients(true)}
+            >
+              Ver todos los clientes
+            </Button>
+          </div>
+        </div>
 
-          {Array.isArray(acpCreatedList) && acpCreatedList.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-              {acpCreatedList.map((cliente) => renderAcpCard(cliente))}
+          {Array.isArray(albumClients) && albumClients.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              {albumClients.map((cliente) => renderAlbumCard(cliente))}
             </div>
           ) : (
             <div className="py-10 text-center text-gray-500">
-              {loading ? "Cargando clientes..." : "No has registrado clientes"}
+              {loading
+                ? "Cargando clientes..."
+                : albumSearch
+                ? "No se encontraron clientes con ese criterio."
+                : "Busca un cliente para mostrar resultados."}
+            </div>
+        )}
+      </Card>
+
+      <Modal
+        isOpen={showAllClients}
+        onClose={() => setShowAllClients(false)}
+        title="Todos los clientes registrados"
+        maxWidth="max-w-5xl"
+      >
+        <div className="space-y-4">
+          <div className="relative w-full md:max-w-sm">
+            <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <input
+              type="text"
+              placeholder="Buscar cliente..."
+              value={allClientsSearch}
+              onChange={(e) => setAllClientsSearch(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 rounded-lg border border-gray-300 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+          </div>
+
+          {Array.isArray(filteredAllAlbumClients) && filteredAllAlbumClients.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+              {filteredAllAlbumClients.map((cliente) => renderAlbumCard(cliente))}
+            </div>
+          ) : (
+            <div className="py-10 text-center text-gray-500">
+              {loading
+                ? "Cargando clientes..."
+                : allClientsSearch
+                ? "No se encontraron clientes con ese criterio."
+                : "No hay clientes para mostrar"}
             </div>
           )}
-        </Card>
-      )}
+        </div>
+      </Modal>
 
       {/* Modal de visita normal (usuario registrado) */}
       <Modal
@@ -1069,6 +1332,333 @@ const ClientesPage = () => {
           }}
           captureLocation={captureLocation}
         />
+      </Modal>
+
+      {/* Modal de edicion de cliente */}
+      <Modal
+        isOpen={modalType === "edit" && !!activeClient}
+        onClose={editSubmitting ? undefined : closeModal}
+        title={`Editar cliente: ${editDetail?.commercial_name || activeClient?.nombre || ""}`}
+        maxWidth="max-w-4xl"
+      >
+        {editLoading ? (
+          <div className="py-6 text-center text-sm text-gray-500">Cargando detalle...</div>
+        ) : (
+          <form onSubmit={handleEditSubmit} className="space-y-6">
+            <div className="rounded-xl border border-gray-100 bg-gray-50/60 p-4">
+              <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Datos principales</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-600">Nombre comercial</label>
+                  <input
+                    type="text"
+                    value={editForm.commercial_name || ""}
+                    onChange={(e) => handleEditChange("commercial_name", e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-600">Contacto principal</label>
+                  <input
+                    type="text"
+                    value={editForm.shipping_contact_name || ""}
+                    onChange={(e) => handleEditChange("shipping_contact_name", e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-600">Telefono</label>
+                  <input
+                    type="text"
+                    value={editForm.shipping_phone || ""}
+                    onChange={(e) => handleEditChange("shipping_phone", e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-600">Celular</label>
+                  <input
+                    type="text"
+                    value={editForm.shipping_cellphone || ""}
+                    onChange={(e) => handleEditChange("shipping_cellphone", e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {canManageAllClients && (
+              <>
+                <div className="rounded-xl border border-gray-100 bg-white p-4">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Informacion legal</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Tipo de cliente</label>
+                      <select
+                        value={editForm.client_type || ""}
+                        onChange={(e) => handleEditChange("client_type", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      >
+                        <option value="">Selecciona...</option>
+                        <option value="persona_juridica">Persona juridica</option>
+                        <option value="persona_natural">Persona natural</option>
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">RUC / Cedula</label>
+                      <input
+                        type="text"
+                        value={editForm.ruc_cedula || ""}
+                        onChange={(e) => handleEditChange("ruc_cedula", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Razon social</label>
+                      <input
+                        type="text"
+                        value={editForm.legal_person_business_name || ""}
+                        onChange={(e) => handleEditChange("legal_person_business_name", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Nombre establecimiento</label>
+                      <input
+                        type="text"
+                        value={editForm.establishment_name || ""}
+                        onChange={(e) => handleEditChange("establishment_name", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-white p-4">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Direccion de establecimiento</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Provincia</label>
+                      <input
+                        type="text"
+                        value={editForm.establishment_province || ""}
+                        onChange={(e) => handleEditChange("establishment_province", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Ciudad</label>
+                      <input
+                        type="text"
+                        value={editForm.establishment_city || ""}
+                        onChange={(e) => handleEditChange("establishment_city", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-gray-600">Direccion</label>
+                      <input
+                        type="text"
+                        value={editForm.establishment_address || ""}
+                        onChange={(e) => handleEditChange("establishment_address", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-gray-600">Referencia</label>
+                      <input
+                        type="text"
+                        value={editForm.establishment_reference || ""}
+                        onChange={(e) => handleEditChange("establishment_reference", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-white p-4">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Representante legal</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Nombre</label>
+                      <input
+                        type="text"
+                        value={editForm.legal_rep_name || ""}
+                        onChange={(e) => handleEditChange("legal_rep_name", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Cargo</label>
+                      <input
+                        type="text"
+                        value={editForm.legal_rep_position || ""}
+                        onChange={(e) => handleEditChange("legal_rep_position", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Cedula</label>
+                      <input
+                        type="text"
+                        value={editForm.legal_rep_id_document || ""}
+                        onChange={(e) => handleEditChange("legal_rep_id_document", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Email</label>
+                      <input
+                        type="email"
+                        value={editForm.legal_rep_email || ""}
+                        onChange={(e) => handleEditChange("legal_rep_email", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Celular</label>
+                      <input
+                        type="text"
+                        value={editForm.legal_rep_cellphone || ""}
+                        onChange={(e) => handleEditChange("legal_rep_cellphone", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-white p-4">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Direccion de envio</h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-gray-600">Direccion</label>
+                      <input
+                        type="text"
+                        value={editForm.shipping_address || ""}
+                        onChange={(e) => handleEditChange("shipping_address", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Provincia</label>
+                      <input
+                        type="text"
+                        value={editForm.shipping_province || ""}
+                        onChange={(e) => handleEditChange("shipping_province", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Ciudad</label>
+                      <input
+                        type="text"
+                        value={editForm.shipping_city || ""}
+                        onChange={(e) => handleEditChange("shipping_city", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1 sm:col-span-2">
+                      <label className="text-xs font-semibold text-gray-600">Referencia</label>
+                      <input
+                        type="text"
+                        value={editForm.shipping_reference || ""}
+                        onChange={(e) => handleEditChange("shipping_reference", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Horario de entrega</label>
+                      <input
+                        type="text"
+                        value={editForm.shipping_delivery_hours || ""}
+                        onChange={(e) => handleEditChange("shipping_delivery_hours", e.target.value)}
+                        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-white p-4">
+                  <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Documentos</h4>
+                  {Array.isArray(editDetail?.attachments) && editDetail.attachments.length > 0 ? (
+                    <div className="mb-4 space-y-2 text-xs">
+                      {editDetail.attachments.map((doc) => (
+                        <a
+                          key={doc.key}
+                          href={doc.link}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-flex items-center gap-2 text-blue-600 hover:underline"
+                        >
+                          <FiFileText /> {doc.label}
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-500 mb-4">No hay documentos cargados.</p>
+                  )}
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Documento de identificacion (PDF)</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => handleEditFile("id_file", e.target.files?.[0])}
+                        className="w-full text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">RUC (PDF)</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => handleEditFile("ruc_file", e.target.files?.[0])}
+                        className="w-full text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Permiso de funcionamiento</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => handleEditFile("operating_permit_file", e.target.files?.[0])}
+                        className="w-full text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Nombramiento representante legal</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => handleEditFile("legal_rep_appointment_file", e.target.files?.[0])}
+                        className="w-full text-xs"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs font-semibold text-gray-600">Evidencia LOPDP</label>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/*"
+                        onChange={(e) => handleEditFile("consent_evidence_file", e.target.files?.[0])}
+                        className="w-full text-xs"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-3 pt-2">
+              <Button variant="secondary" onClick={closeModal} disabled={editSubmitting}>
+                Cancelar
+              </Button>
+              <Button type="submit" isLoading={editSubmitting}>
+                Guardar cambios
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* Modal de reporte final */}

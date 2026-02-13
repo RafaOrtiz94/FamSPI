@@ -162,6 +162,20 @@ function fillVacacionesFields(form, solicitud) {
  */
 function fillCommonFields(form, solicitud) {
   try {
+    const setTextField = (candidateNames = [], value) => {
+      if (value === null || value === undefined || String(value).trim() === "") return;
+      for (const fieldName of candidateNames) {
+        try {
+          form.getTextField(fieldName).setText(String(value));
+          return true;
+        } catch (e) {
+          // try next alias
+        }
+      }
+      console.warn(`Campos no encontrados en formulario: ${candidateNames.join(", ")}`);
+      return false;
+    };
+
     // Observaciones
     if (solicitud.observaciones && Array.isArray(solicitud.observaciones)) {
       try {
@@ -177,36 +191,31 @@ function fillCommonFields(form, solicitud) {
 
     // Solicitante
     if (solicitud.user_fullname) {
-      try {
-        form.getTextField("sol_por").setText(solicitud.user_fullname);
-      } catch (e) {
-        console.warn("Campo sol_por no encontrado");
-      }
+      setTextField(["Sol_por", "sol_por"], solicitud.user_fullname);
+    }
+
+    if (solicitud.user_document_id) {
+      setTextField(["DI", "di"], solicitud.user_document_id);
     }
 
     if (solicitud.created_at) {
-      try {
-        form.getTextField("Fecha").setText(formatDate(solicitud.created_at));
-      } catch (e) {
-        console.warn("Campo Fecha no encontrado");
-      }
+      setTextField(["Fecha", "fecha"], formatDate(solicitud.created_at));
     }
 
     // Aprobador
-    if (solicitud.aprobacion_final_por) {
-      try {
-        form.getTextField("apr_por").setText(solicitud.aprobacion_final_por);
-      } catch (e) {
-        console.warn("Campo apr_por no encontrado");
-      }
+    if (solicitud.approver_fullname || solicitud.aprobacion_final_por) {
+      setTextField(
+        ["Apr_por", "apr_por"],
+        solicitud.approver_fullname || solicitud.aprobacion_final_por
+      );
+    }
+
+    if (solicitud.approver_document_id) {
+      setTextField(["DI_2", "di_2"], solicitud.approver_document_id);
     }
 
     if (solicitud.aprobacion_final_at) {
-      try {
-        form.getTextField("Fecha_2").setText(formatDate(solicitud.aprobacion_final_at));
-      } catch (e) {
-        console.warn("Campo Fecha_2 no encontrado");
-      }
+      setTextField(["Fecha_2", "fecha_2"], formatDate(solicitud.aprobacion_final_at));
     }
   } catch (error) {
     console.error("Error llenando campos comunes:", error);

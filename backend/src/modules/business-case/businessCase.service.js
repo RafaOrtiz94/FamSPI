@@ -298,7 +298,16 @@ async function getBusinessCaseById(id) {
     throw error;
   }
 
-  return mapBusinessCase(rows[0]);
+  const mapped = mapBusinessCase(rows[0]);
+  const consumptionData = await loadConsumptionData(id);
+  if (consumptionData) {
+    mapped.modern_bc_metadata = {
+      ...(mapped.modern_bc_metadata || {}),
+      consumption_items: consumptionData.items,
+      consumption_excluded: consumptionData.excluded,
+    };
+  }
+  return mapped;
 }
 
 async function listBusinessCases(filters = {}) {
@@ -398,6 +407,8 @@ async function updateBusinessCase(id, data) {
   const allowedFields = [
     "client_name",
     "client_id",
+    "process_code",
+    "contract_object",
     "bc_purchase_type",
     "bc_duration_years",
     "bc_equipment_cost",
@@ -454,11 +465,112 @@ async function updateBusinessCase(id, data) {
 
   await db.query(query, values);
 
+  if (
+    data?.modern_bc_metadata &&
+    (Array.isArray(data.modern_bc_metadata.consumption_items) ||
+      Array.isArray(data.modern_bc_metadata.consumption_excluded))
+  ) {
+    await syncConsumptionData(id, data.modern_bc_metadata);
+  }
+
   logger.info({
     business_case_id: id
   }, "✅ [FLUJO_BUSINESS_CASE] Actualización exitosa - obteniendo datos actualizados");
 
   return getBusinessCaseById(id);
+}
+
+async function loadConsumptionData(businessCaseId) {
+  try {
+    const { rows: items } = await db.query(
+      `SELECT item_key, item_id, name, item_type, source, catalog_id, annual_qty, equipment_id, equipment_name
+       FROM bc_consumption_items
+       WHERE business_case_id = $1
+       ORDER BY name`,
+      [businessCaseId],
+    );
+    const { rows: excluded } = await db.query(
+      `SELECT item_key FROM bc_consumption_excluded WHERE business_case_id = $1`,
+      [businessCaseId],
+    );
+
+    return {
+      items: items.map((row) => ({
+        key: row.item_key,
+        itemId: row.item_id,
+        name: row.name,
+        type: row.item_type,
+        source: row.source,
+        catalogId: row.catalog_id,
+        annualQty: row.annual_qty,
+        equipmentId: row.equipment_id,
+        equipmentName: row.equipment_name,
+      })),
+      excluded: excluded.map((row) => row.item_key),
+    };
+  } catch (error) {
+    logger.warn({ error: error.message, businessCaseId }, "No se pudo cargar consumos de BC");
+    return null;
+  }
+}
+
+async function syncConsumptionData(businessCaseId, metadata = {}) {
+  const items = Array.isArray(metadata.consumption_items) ? metadata.consumption_items : [];
+  const excluded = Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [];
+
+  await db.query("BEGIN");
+  try {
+    await db.query(`DELETE FROM bc_consumption_items WHERE business_case_id = $1`, [businessCaseId]);
+    await db.query(`DELETE FROM bc_consumption_excluded WHERE business_case_id = $1`, [businessCaseId]);
+
+    for (const item of items) {
+      await db.query(
+        `INSERT INTO bc_consumption_items
+          (business_case_id, item_key, item_id, name, item_type, source, catalog_id, annual_qty, equipment_id, equipment_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          businessCaseId,
+          item.key,
+          item.itemId || null,
+          item.name,
+          item.type || "consumible",
+          item.source || "catalog",
+          item.catalogId || null,
+          Number(item.annualQty || 0),
+          item.equipmentId || item.equipment_id || null,
+          item.equipmentName || item.equipment_name || null,
+        ],
+      );
+    }
+
+    for (const key of excluded) {
+      await db.query(
+        `INSERT INTO bc_consumption_excluded (business_case_id, item_key)
+         VALUES ($1, $2)`,
+        [businessCaseId, key],
+      );
+    }
+
+    await db.query("COMMIT");
+  } catch (error) {
+    await db.query("ROLLBACK");
+    logger.error({ error: error.message, businessCaseId }, "Error sincronizando consumos de BC");
+    throw error;
+  }
+}
+
+async function getConsumptionItems(businessCaseId) {
+  await assertModernBusinessCase(businessCaseId);
+  return loadConsumptionData(businessCaseId);
+}
+
+async function saveConsumptionItems(businessCaseId, items = [], excluded = []) {
+  await assertModernBusinessCase(businessCaseId);
+  await syncConsumptionData(businessCaseId, {
+    consumption_items: Array.isArray(items) ? items : [],
+    consumption_excluded: Array.isArray(excluded) ? excluded : []
+  });
+  return loadConsumptionData(businessCaseId);
 }
 
 async function deleteBusinessCase(id) {
@@ -653,6 +765,8 @@ module.exports = {
   recalculateBusinessCase,
   updateEconomicData,
   assertModernBusinessCase,
+  getConsumptionItems,
+  saveConsumptionItems,
   getBusinessCaseType,
   isPublicComodato,
   isPrivateComodato,

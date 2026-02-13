@@ -352,6 +352,8 @@ const CreateRequestModal = ({
   const allowUnassignedEquipment = type === "inspection";
   const hasSelectedClient = !!(formData?.nombre_cliente || "").trim();
   const needsClientEquipment = type === "retiro" || type === "mantenimiento";
+  const equipmentRequiresClient = needsClientEquipment;
+  const usesEquipmentModels = type === "inspection";
 
   const submissionSteps = useMemo(
     () => [
@@ -389,6 +391,9 @@ const CreateRequestModal = ({
       setType(presetType || (initialData.client_type ? "cliente" : "inspection"));
       if (presetType !== "cliente") {
         setFormData(initialData);
+      }
+      if (Array.isArray(initialData?.equipos)) {
+        setEquipos(initialData.equipos);
       }
       const initialClientId =
         initialData?.cliente_id ||
@@ -485,7 +490,7 @@ const CreateRequestModal = ({
         if (requestTypes[type].equipos.cantidad !== undefined && (!eq.cantidad || eq.cantidad < 1)) {
           newErrors.equipos = newErrors.equipos || "Indica la cantidad de equipos a retirar.";
         }
-        if (!eq.serial || !`${eq.serial}`.trim()) {
+        if (type !== "inspection" && (!eq.serial || !`${eq.serial}`.trim())) {
           newErrors.equipos = newErrors.equipos || `Captura el serial del equipo #${idx + 1}`;
         }
       });
@@ -526,7 +531,7 @@ const CreateRequestModal = ({
       if (!open || !requestTypes[type]?.equipos) return;
 
       const needsClient = needsClientEquipment;
-      if (needsClient && !selectedClientId) {
+      if (!usesEquipmentModels && needsClient && !selectedClientId) {
         setEquipmentOptions([]);
         return;
       }
@@ -534,12 +539,25 @@ const CreateRequestModal = ({
       setLoadingEquipment(true);
       setEquipmentError("");
       try {
-        const filters = needsClient ? { cliente_id: selectedClientId } : {};
-        if (includeUnassigned || allowUnassignedEquipment) {
-          filters.incluir_no_asignados = true;
+        if (usesEquipmentModels) {
+          const models = await getEquipmentModels();
+          const normalized = Array.isArray(models)
+            ? models.map((model) => ({
+                id: model.id,
+                nombre: model.nombre || model.modelo || model.name || "Equipo",
+                modelo: model.modelo || model.nombre || model.name || null,
+                sku: model.sku || null,
+              }))
+            : [];
+          setEquipmentOptions(normalized);
+        } else {
+          const filters = needsClient ? { cliente_id: selectedClientId } : {};
+          if (includeUnassigned || allowUnassignedEquipment) {
+            filters.incluir_no_asignados = true;
+          }
+          const data = await getEquiposDisponibles(filters);
+          setEquipmentOptions(Array.isArray(data) ? data : []);
         }
-        const data = await getEquiposDisponibles(filters);
-        setEquipmentOptions(Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error cargando equipos", error);
         setEquipmentError("No pudimos cargar los equipos disponibles.");
@@ -550,7 +568,7 @@ const CreateRequestModal = ({
     };
 
     loadEquipmentOptions();
-  }, [open, type, selectedClientId, includeUnassigned]);
+  }, [open, type, selectedClientId, includeUnassigned, usesEquipmentModels]);
 
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {
@@ -941,9 +959,11 @@ const CreateRequestModal = ({
                     Equipos
                   </p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                    {requiresEquipment
-                      ? "Selecciona un equipo disponible y registra su estado/serial para dejarlo ligado al cliente."
-                      : "Agrega equipos solo si aplica. No es obligatorio que estén vinculados al cliente para inspección."}
+                    {type === "inspection"
+                      ? "Selecciona el equipo desde el catálogo. No requiere que esté asignado a un cliente en esta etapa."
+                      : requiresEquipment
+                        ? "Selecciona un equipo disponible y registra su estado/serial."
+                        : "Agrega equipos solo si aplica."}
                   </p>
                   {equipos.map((eq, i) => (
                     <EquipoInput
@@ -956,12 +976,12 @@ const CreateRequestModal = ({
                       equipmentOptions={equipmentOptions}
                       equipmentLoading={loadingEquipment}
                       equipmentError={equipmentError}
-                      disabled={clientSelectionRequired && !hasSelectedClient}
+                      disabled={equipmentRequiresClient && !hasSelectedClient}
                       onViewUnassigned={handleViewUnassigned}
                       includeUnassigned={includeUnassigned}
                       needsClientEquipment={needsClientEquipment}
                       allowUnassignedEquipment={allowUnassignedEquipment}
-                      onRegisterNewEquipment={openRegisterEquipmentModal}
+                      onRegisterNewEquipment={type === "inspection" ? null : openRegisterEquipmentModal}
                     />
                     ))}
                   {errors.equipos && (
@@ -971,11 +991,11 @@ const CreateRequestModal = ({
                     type="button"
                     onClick={addEquipo}
                     className="bg-gray-200 hover:bg-gray-300 text-gray-800 flex items-center gap-2 disabled:opacity-60"
-                    disabled={clientSelectionRequired && !hasSelectedClient}
+                    disabled={equipmentRequiresClient && !hasSelectedClient}
                   >
                     <FiPlus /> Agregar equipo
                   </Button>
-                  {clientSelectionRequired && !hasSelectedClient && (
+                  {equipmentRequiresClient && !hasSelectedClient && (
                     <p className="text-xs text-gray-500 mt-2">Selecciona un cliente para habilitar el listado de equipos.</p>
                   )}
                 </div>

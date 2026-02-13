@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { FiCheck, FiX, FiEye, FiFileText, FiAlertTriangle, FiClock } from 'react-icons/fi';
 import {
   getPrivatePurchaseTimeline,
@@ -12,6 +12,7 @@ import { formatDateEC, formatDateTimeEC, parseToDate } from '../../../core/utils
 import {
   PRIVATE_PURCHASE_ERROR_CODES,
 } from '../../shared/constants/privatePurchaseConstants';
+import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
 
 /**
  * PrivatePurchaseApprovalsWidget - Widget para gerencia general
@@ -55,11 +56,7 @@ const PrivatePurchaseApprovalsWidget = () => {
   const [actionLoading, setActionLoading] = useState({});
   const [detailsOpen, setDetailsOpen] = useState(false);
 
-  useEffect(() => {
-    loadPendingApprovals();
-  }, []);
-
-  const loadPendingApprovals = async () => {
+  const loadPendingApprovals = useCallback(async () => {
     try {
       setLoading(true);
       console.log('[PURCHASE_FLOW][FASE5][GERENCIA_WIDGET] Loading pending contract approvals');
@@ -93,7 +90,24 @@ const PrivatePurchaseApprovalsWidget = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [showToast]);
+
+  useEffect(() => {
+    loadPendingApprovals();
+  }, [loadPendingApprovals]);
+
+  usePurchaseSSE({
+    type: 'private',
+    debounceMs: 8000,
+    onEvent: loadPendingApprovals,
+    filter: (payload) => {
+      const target = 'pending_contract_approval';
+      const status = payload?.request?.status;
+      const fromState = payload?.meta?.from;
+      const toState = payload?.meta?.to;
+      return status === target || fromState === target || toState === target;
+    }
+  });
 
   const handleViewDetails = async (purchase) => {
     try {

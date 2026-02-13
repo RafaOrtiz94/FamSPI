@@ -53,6 +53,43 @@ export const getPersonnelRequestStats = async (departmentId = null) => {
     return response.data;
 };
 
+/**
+ * Obtener perfil del personal seleccionado
+ */
+export const getPersonnelRequestProfile = async (id) => {
+    const response = await api.get(`/personnel-requests/${id}/profile`);
+    return response.data;
+};
+
+/**
+ * Crear/actualizar perfil del personal seleccionado
+ */
+export const updatePersonnelRequestProfile = async (id, payload) => {
+    const response = await api.put(`/personnel-requests/${id}/profile`, payload);
+    return response.data;
+};
+
+/**
+ * Subir documento del personal seleccionado
+ */
+export const uploadPersonnelRequestDocument = async (id, docType, file) => {
+    const formData = new FormData();
+    formData.append('doc_type', docType);
+    formData.append('file', file);
+    const response = await api.post(`/personnel-requests/${id}/documents`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+};
+
+/**
+ * Contratar postulante y cerrar solicitud
+ */
+export const hirePersonnelRequest = async (id) => {
+    const response = await api.post(`/personnel-requests/${id}/hire`);
+    return response.data;
+};
+
 export default {
     createPersonnelRequest,
     getPersonnelRequests,
@@ -60,4 +97,24 @@ export default {
     updatePersonnelRequestStatus,
     addPersonnelRequestComment,
     getPersonnelRequestStats,
+    getPersonnelRequestProfile,
+    updatePersonnelRequestProfile,
+    uploadPersonnelRequestDocument,
+    hirePersonnelRequest,
 };
+/**
+ * Vincular colaborador a solicitud de personal
+ */
+export const linkPersonnelRequestCollaborator = async (id, collaborator_user_id) => {
+  const response = await api.patch(`/personnel-requests/${id}/collaborator`, { collaborator_user_id });
+  return response.data;
+};
+
+/**
+ * Vincular postulante a solicitud de personal
+ */
+export const linkPersonnelRequestApplicant = async (id, applicant_id) => {
+  const response = await api.patch(`/personnel-requests/${id}/applicant`, { applicant_id });
+  return response.data;
+};
+

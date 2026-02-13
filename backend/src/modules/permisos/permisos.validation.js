@@ -98,10 +98,14 @@ function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fec
 
 function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
   const diasNum = Number(duracion_dias || 0);
-  switch (subtipo_calamidad) {
+  const normalized = String(subtipo_calamidad || "").trim().toLowerCase();
+  if (!normalized) {
+    throw new Error("Debe indicar el tipo de calamidad");
+  }
+  switch (normalized) {
     case "fallecimiento":
       if (diasNum > 3) {
-        throw new Error("Permiso por fallecimiento: máximo 3 días");
+        throw new Error("Permiso por fallecimiento: m??ximo 3 d??as");
       }
       return { valid: true, justificantes_requeridos: ["certificado_defuncion", "documento_parentesco"] };
     case "accidente":
@@ -109,9 +113,10 @@ function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
     case "desastre":
       return { valid: true, justificantes_requeridos: ["evidencia_fotografica"] };
     default:
-      throw new Error("Subtipo de calamidad no válido");
+      return { valid: true, justificantes_requeridos: ["evidencia_general"] };
   }
 }
+
 
 async function validatePermisoRequest(data) {
   const { tipo_permiso, duracion_horas, duracion_dias, fecha_inicio, fecha_fin } = data;

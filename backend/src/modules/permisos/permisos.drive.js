@@ -32,8 +32,8 @@ async function createSolicitudFolder({ user, fecha_inicio, solicitudId }) {
  * Se guarda en: Talento Humano/Permisos/NombreColaborador_Fecha/
  */
 async function uploadVacationDocument({ user, fecha_inicio, fecha_fin, fecha_regreso, periodo, dias, solicitudId }) {
-  if (!fs.existsSync(VACATION_TEMPLATE_PATH)) {
-    console.warn("Plantilla de vacaciones no encontrada:", VACATION_TEMPLATE_PATH);
+  if (!VACATION_TEMPLATE_ID) {
+    console.warn("VACATION_TEMPLATE_ID no configurado. No se puede generar documento de vacaciones.");
     return {};
   }
 
@@ -41,32 +41,23 @@ async function uploadVacationDocument({ user, fecha_inicio, fecha_fin, fecha_reg
   const { folderId, folderName } = await createSolicitudFolder({ user, fecha_inicio, solicitudId });
 
   const name = `Vacaciones - ${user.fullname || user.name || user.email} - ${fecha_inicio}`;
-  const media = fs.createReadStream(VACATION_TEMPLATE_PATH);
 
-  const { data: created } = await drive.files.create({
-    supportsAllDrives: true,
-    requestBody: {
-      name,
-      mimeType: "application/vnd.google-apps.document",
-      parents: [folderId],
-    },
-    media: {
-      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      body: media,
-    },
-    fields: "id, name, webViewLink",
-  });
-
-  await replaceTags(created.id, {
-    F_Solicitud: new Date().toLocaleDateString("es-EC"),
-    F_Inicio: fecha_inicio,
-    F_Final: fecha_fin,
-    Periodo: periodo || "",
-    Dias: dias?.toString() || "",
-    F_Regreso: fecha_regreso,
-    Nombre_Solicitante: user.fullname || user.name || user.email,
-    Cedula_Solicitante: user.cedula || user.identificacion || "",
-  });
+  // Crear documento desde plantilla
+  const created = await templateService.createDocumentFromTemplate(
+    VACATION_TEMPLATE_ID,
+    folderId,
+    name,
+    {
+      F_Solicitud: new Date().toLocaleDateString("es-EC"),
+      F_Inicio: fecha_inicio,
+      F_Final: fecha_fin,
+      Periodo: periodo || "",
+      Dias: dias?.toString() || "",
+      F_Regreso: fecha_regreso,
+      Nombre_Solicitante: user.fullname || user.name || user.email,
+      Cedula_Solicitante: user.cedula || user.identificacion || "",
+    }
+  );
 
   let pdf = null;
   try {

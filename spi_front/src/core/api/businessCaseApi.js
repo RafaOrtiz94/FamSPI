@@ -10,26 +10,36 @@ export const normalizeUIGuidanceResponse = (response) => {
   try {
     const data = response?.data || response;
 
+    const businessCase = data.businessCase || null;
+    const businessCaseId = businessCase?.id || data.businessCaseId || data.business_case_id || data.id || null;
+
     return {
-      businessCase: data.businessCase || null,
+      businessCase,
+      businessCaseId,
+      workspaceData: data.workspaceData || null,
       sectionOwnership: {
         rules: data.sectionOwnership?.rules || {},
         completionSummary: {
           completedSections: data.sectionOwnership?.completionSummary?.completedSections ?? 0,
           totalSections: data.sectionOwnership?.completionSummary?.totalSections ?? 0,
           inProgressSections: data.sectionOwnership?.completionSummary?.inProgressSections ?? 0,
-          pendingSections: data.sectionOwnership?.completionSummary?.pendingSections ?? 0
+          pendingSections: data.sectionOwnership?.completionSummary?.pendingSections ?? 0,
+          sectionDetails: data.sectionOwnership?.completionSummary?.sectionDetails || {}
         }
       },
       permissions: {
+        userRole: data.permissions?.userRole ?? 'comercial',
         canEdit: data.permissions?.canEdit ?? true,
         canCompleteSections: data.permissions?.canCompleteSections ?? true,
         canPromoteStage: data.permissions?.canPromoteStage ?? true,
-        canAddObservations: data.permissions?.canAddObservations ?? true
+        canAddObservations: data.permissions?.canAddObservations ?? true,
+        canBlockSections: data.permissions?.canBlockSections ?? false,
+        canUnblockSections: data.permissions?.canUnblockSections ?? false
       },
       observationData: data.observationData || null,
       workflowState: {
         currentStage: data.workflowState?.currentStage || 'draft',
+        currentState: data.workflowState?.currentState || data.workflowState?.canonicalState || data.workflowState?.state || null,
         availableTransitions: data.workflowState?.availableTransitions || []
       }
     };
@@ -443,5 +453,15 @@ export const recordSectionCompletion = async (businessCaseId, section, reason = 
  */
 export const getDataOwnership = async (businessCaseId) => {
   const { data } = await api.get(`/business-case/${businessCaseId}/ownership`);
+  return data.data || data;
+};
+
+export const lockSection = async (businessCaseId, section) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/sections/${section}/lock`);
+  return data.data || data;
+};
+
+export const unlockSection = async (businessCaseId, section) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/sections/${section}/unlock`);
   return data.data || data;
 };

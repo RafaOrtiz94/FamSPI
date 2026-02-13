@@ -10,6 +10,21 @@ const router = express.Router();
 
 // Middleware de autenticación y roles
 const { verifyToken, requireRole } = require('../../middlewares/auth');
+const { streamPrivatePurchaseUpdates } = require('./privatePurchaseEvents');
+
+const managerRoles = ['acp_comercial', 'gerencia', 'gerencia_general', 'jefe_comercial'];
+const creatorRoles = ['comercial', ...managerRoles];
+const viewerRoles = Array.from(new Set([...creatorRoles, 'jefe_tecnico', 'jefe_operaciones']));
+
+const attachTokenFromQuery = (req, _res, next) => {
+  const token = req.query?.token;
+  if (token) {
+    req.headers.authorization = `Bearer ${token}`;
+  }
+  next();
+};
+
+router.get('/events', attachTokenFromQuery, verifyToken, requireRole(viewerRoles), streamPrivatePurchaseUpdates);
 
 // Aplicar autenticación a todas las rutas
 router.use(verifyToken);

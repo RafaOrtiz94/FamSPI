@@ -28,6 +28,9 @@ router.post(
         'jefe_calidad',
         'gerencia',
         'admin',
+        'talento_humano',
+        'jefe_talento_humano',
+        'gerencia_general',
     ]),
     personnelRequestsController.createRequest
 );
@@ -64,14 +67,74 @@ router.get(
 );
 
 /**
+ * @route   PATCH /api/personnel-requests/:id/collaborator
  * @route   PATCH /api/personnel-requests/:id/status
  * @desc    Actualizar estado de solicitud
  * @access  Talento Humano, Gerencia
  */
 router.patch(
+    '/:id/collaborator',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    personnelRequestsController.linkCollaborator
+);
+
+router.patch(
+    '/:id/applicant',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    personnelRequestsController.linkApplicant
+);
+
+router.patch(
     '/:id/status',
-    requireRole(['talento_humano', 'gerente', 'admin']),
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
     personnelRequestsController.updateRequestStatus
+);
+
+/**
+ * @route   POST /api/personnel-requests/:id/hire
+ * @desc    Contratar postulante y cerrar solicitud
+ * @access  Talento Humano, Gerencia General
+ */
+router.post(
+    '/:id/hire',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    personnelRequestsController.hireApplicant
+);
+
+/**
+ * @route   GET /api/personnel-requests/:id/profile
+ * @desc    Obtener perfil del personal seleccionado
+ * @access  Talento Humano, Gerencia General
+ */
+router.get(
+    '/:id/profile',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    personnelRequestsController.getPersonnelProfile
+);
+
+/**
+ * @route   PUT /api/personnel-requests/:id/profile
+ * @desc    Crear/actualizar perfil del personal seleccionado
+ * @access  Talento Humano, Gerencia General
+ */
+router.put(
+    '/:id/profile',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    personnelRequestsController.updatePersonnelProfile
+);
+
+/**
+ * @route   POST /api/personnel-requests/:id/documents
+ * @desc    Subir documentos del personal seleccionado
+ * @access  Talento Humano, Gerencia General
+ */
+const multer = require('multer');
+const upload = multer({ storage: multer.memoryStorage() });
+router.post(
+    '/:id/documents',
+    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    upload.single('file'),
+    personnelRequestsController.uploadPersonnelDocument
 );
 
 /**

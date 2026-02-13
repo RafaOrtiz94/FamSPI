@@ -1,26 +1,15 @@
-# Cloud Run Dockerfile for SPI Backend
-FROM node:18-alpine
+FROM node:20-slim
 
-# Crear usuario no-root
-RUN addgroup -g 1001 -S nodejs && adduser -S nodejs -u 1001
-
-# Crear directorio de trabajo
 WORKDIR /app
 
-# Copiar archivos de dependencias primero (para cache)
 COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Instalar dependencias
-RUN npm ci --only=production && npm cache clean --force
+COPY . .
 
-# Copiar código fuente
-COPY --chown=nodejs:nodejs . .
+ENV NODE_ENV=production
+ENV PORT=8080
 
-# Cambiar a usuario no-root
-USER nodejs
-
-# Puerto (Cloud Run lo inyecta, pero mantener compatibilidad)
 EXPOSE 8080
 
-# Comando de inicio
-CMD ["npm", "start"]
+CMD ["node", "src/server.js"]

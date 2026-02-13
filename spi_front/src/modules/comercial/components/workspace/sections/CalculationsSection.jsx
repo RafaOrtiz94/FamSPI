@@ -20,48 +20,61 @@ ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Tooltip, Le
 /**
  * SummaryCard - Reusable card for displaying key metrics
  */
-const SummaryCard = ({ label, value, accent = "gray" }) => (
-    <div className={`p-4 rounded-lg border bg-${accent}-50 border-${accent}-200`}>
-        <p className="text-xs uppercase text-gray-500 font-medium">{label}</p>
-        <p className="text-xl font-bold text-gray-900">{value}</p>
-    </div>
-);
+const SummaryCard = ({ label, value, accent = "gray" }) => {
+    const accents = {
+        blue: { bg: "bg-blue-50/50", border: "border-blue-100", text: "text-blue-600", val: "text-blue-900" },
+        green: { bg: "bg-green-50/50", border: "border-green-100", text: "text-green-600", val: "text-green-900" },
+        purple: { bg: "bg-purple-50/50", border: "border-purple-100", text: "text-purple-600", val: "text-purple-900" },
+        orange: { bg: "bg-orange-50/50", border: "border-orange-100", text: "text-orange-600", val: "text-orange-900" },
+        gray: { bg: "bg-gray-50/50", border: "border-gray-100", text: "text-gray-600", val: "text-gray-900" }
+    };
+    const style = accents[accent] || accents.gray;
+
+    return (
+        <div className={`p-5 rounded-2xl border ${style.bg} ${style.border} transition-all hover:shadow-sm`}>
+            <p className={`text-xs uppercase tracking-wide font-semibold mb-1 ${style.text}`}>{label}</p>
+            <p className={`text-2xl font-bold ${style.val}`}>{value}</p>
+        </div>
+    );
+};
 
 /**
  * Gauge - Simple utilization gauge component
  */
 const Gauge = ({ utilization = 0, label = "Utilización" }) => {
     const percentage = Math.min(100, Math.max(0, utilization));
-    const color = percentage > 90 ? "red" : percentage > 70 ? "yellow" : "green";
+    const color = percentage > 90 ? "#ef4444" : percentage > 70 ? "#eab308" : "#22c55e"; // red, yellow, green
 
     return (
         <div className="text-center">
-            <div className="relative w-32 h-32 mx-auto">
-                <svg className="w-32 h-32 transform -rotate-90">
+            <div className="relative w-40 h-40 mx-auto">
+                <svg className="w-40 h-40 transform -rotate-90">
                     <circle
-                        cx="64"
-                        cy="64"
-                        r="56"
-                        stroke="#e5e7eb"
+                        cx="80"
+                        cy="80"
+                        r="70"
+                        stroke="#f3f4f6"
                         strokeWidth="12"
                         fill="none"
                     />
                     <circle
-                        cx="64"
-                        cy="64"
-                        r="56"
-                        stroke={color === "green" ? "#22c55e" : color === "yellow" ? "#eab308" : "#ef4444"}
+                        cx="80"
+                        cy="80"
+                        r="70"
+                        stroke={color}
                         strokeWidth="12"
                         fill="none"
-                        strokeDasharray={`${percentage * 3.51} 351`}
+                        strokeDasharray={`${percentage * 4.4} 440`}
                         strokeLinecap="round"
+                        className="transition-all duration-1000 ease-out"
                     />
                 </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-2xl font-bold text-gray-900">{percentage.toFixed(0)}%</span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
+                    <span className="text-3xl font-bold text-gray-900 tracking-tight">{percentage.toFixed(0)}%</span>
+                    <span className="text-xs text-gray-400 font-medium uppercase tracking-wider">Carga</span>
                 </div>
             </div>
-            <p className="text-sm text-gray-600 mt-2">{label}</p>
+            <p className="text-sm font-medium text-gray-600 mt-2">{label}</p>
         </div>
     );
 };
@@ -160,6 +173,7 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                         "#8b5cf6",
                         "#6b7280",
                     ],
+                    borderWidth: 0,
                 },
             ],
         };
@@ -177,6 +191,7 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                     label: "Volumen Anual",
                     data: top5.map((d) => d.annual_quantity || 0),
                     backgroundColor: "#3b82f6",
+                    borderRadius: 8,
                 },
             ],
         };
@@ -184,53 +199,67 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
 
     if (loading) {
         return (
-            <div className="space-y-6">
-                <div className="flex items-center gap-4">
-                    <div className="text-3xl">🧮</div>
+            <div className="space-y-6 animate-fadeIn">
+                <div className="flex items-center gap-3">
+                    <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
+                        <span className="text-2xl">🧮</span>
+                    </div>
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Cálculos Técnicos</h2>
-                        <p className="text-sm text-gray-600">Análisis de viabilidad técnica y operativa</p>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-xl font-bold text-gray-900 tracking-tight">Cálculos Técnicos</h2>
+                            <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                En desarrollo
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-500">Análisis de viabilidad técnica y operativa</p>
                     </div>
                 </div>
-                <Card className="p-8">
+                <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
                     <div className="flex items-center justify-center py-8">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                     </div>
-                </Card>
+                </div>
             </div>
         );
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-fadeIn">
             {/* Section Header */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    <div className="text-3xl">🧮</div>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                    <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
+                        <span className="text-2xl">🧮</span>
+                    </div>
                     <div>
-                        <h2 className="text-2xl font-bold text-gray-900">Cálculos Técnicos</h2>
-                        <p className="text-sm text-gray-600">Análisis de viabilidad técnica y operativa</p>
+                        <div className="flex items-center gap-2">
+                            <h2 className="text-xl font-bold text-gray-900 tracking-tight">Cálculos Técnicos</h2>
+                            <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                                En desarrollo
+                            </span>
+                        </div>
+                        <p className="text-sm text-gray-500">Análisis de viabilidad técnica y operativa</p>
                     </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     <button
                         onClick={handleRecalculate}
                         disabled={recalculating}
-                        className="flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+                        className="flex items-center gap-2 px-4 py-2 border border-blue-200 text-blue-600 rounded-full hover:bg-blue-50 active:scale-95 transition-all disabled:opacity-50 font-medium"
                     >
                         <FiRefreshCw size={16} className={recalculating ? "animate-spin" : ""} />
                         Recalcular
                     </button>
                     <button
                         onClick={() => handleExport("pdf")}
-                        className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
+                        className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 border border-red-100 rounded-full hover:bg-red-100 active:scale-95 transition-all font-medium"
                     >
                         <FiDownload size={16} />
                         PDF
                     </button>
                     <button
                         onClick={() => handleExport("xlsx")}
-                        className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+                        className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 border border-green-100 rounded-full hover:bg-green-100 active:scale-95 transition-all font-medium"
                     >
                         <FiDownload size={16} />
                         Excel
@@ -239,25 +268,25 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
             </div>
 
             {!calculations ? (
-                <Card className="p-8">
-                    <div className="text-center space-y-4">
-                        <FiAlertTriangle size={48} className="mx-auto text-yellow-500" />
-                        <h3 className="text-lg font-semibold text-gray-900">No hay cálculos disponibles</h3>
-                        <p className="text-gray-600">
-                            Configure equipos y determinaciones primero, luego presione "Recalcular"
-                        </p>
-                        <button
-                            onClick={handleRecalculate}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-                        >
-                            Ejecutar Cálculos
-                        </button>
+                <div className="bg-white rounded-2xl p-12 border border-gray-100 shadow-sm text-center">
+                    <div className="p-4 bg-yellow-50 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-6 text-yellow-500">
+                        <FiAlertTriangle size={40} />
                     </div>
-                </Card>
+                    <h3 className="text-xl font-bold text-gray-900 mb-2">No hay cálculos disponibles</h3>
+                    <p className="text-gray-500 mb-8 max-w-md mx-auto">
+                        Configure equipos y determinaciones primero, luego presione "Recalcular" para ver los resultados.
+                    </p>
+                    <button
+                        onClick={handleRecalculate}
+                        className="px-6 py-2.5 bg-blue-600 text-white rounded-full font-semibold hover:bg-blue-700 active:scale-95 transition-all shadow-sm hover:shadow-blue-200"
+                    >
+                        Ejecutar Cálculos
+                    </button>
+                </div>
             ) : (
                 <>
                     {/* Key Metrics */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
                         <SummaryCard
                             label="Tests Anuales"
                             value={calculations.total_annual_tests?.toLocaleString() || "0"}
@@ -283,8 +312,8 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                     {/* Utilization and Charts */}
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         {/* Utilization Gauge */}
-                        <Card className="p-6">
-                            <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
+                        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300">
+                            <h3 className="text-lg font-bold text-gray-900 mb-6 text-center">
                                 Utilización del Equipo
                             </h3>
                             <Gauge
@@ -292,19 +321,19 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                                 label="Capacidad Utilizada"
                             />
                             {calculations.equipment_utilization > 90 && (
-                                <div className="mt-4 p-2 bg-red-50 text-red-700 text-xs rounded text-center">
+                                <div className="mt-6 p-3 bg-red-50 text-red-700 text-xs rounded-xl text-center font-medium border border-red-100">
                                     ⚠️ Alta utilización - considere equipo adicional
                                 </div>
                             )}
-                        </Card>
+                        </div>
 
                         {/* Cost Breakdown Pie */}
                         {costBreakdownData && (
-                            <Card className="p-6">
-                                <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
+                            <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300">
+                                <h3 className="text-lg font-bold text-gray-900 mb-6 text-center">
                                     Distribución de Costos
                                 </h3>
-                                <div className="h-48">
+                                <div className="h-56">
                                     <Pie
                                         data={costBreakdownData}
                                         options={{
@@ -313,22 +342,30 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                                             plugins: {
                                                 legend: {
                                                     position: "bottom",
-                                                    labels: { boxWidth: 12, font: { size: 10 } },
+                                                    labels: { 
+                                                        boxWidth: 10, 
+                                                        font: { size: 11, family: 'system-ui' },
+                                                        padding: 20,
+                                                        usePointStyle: true
+                                                    },
                                                 },
                                             },
+                                            layout: {
+                                                padding: 10
+                                            }
                                         }}
                                     />
                                 </div>
-                            </Card>
+                            </div>
                         )}
 
                         {/* Volume Bar Chart */}
                         {determinationVolumeData && (
-                            <Card className="p-6">
-                                <h3 className="text-lg font-semibold text-gray-800 mb-4 text-center">
+                            <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm hover:shadow-md transition-shadow duration-300">
+                                <h3 className="text-lg font-bold text-gray-900 mb-6 text-center">
                                     Top 5 Determinaciones
                                 </h3>
-                                <div className="h-48">
+                                <div className="h-56">
                                     <Bar
                                         data={determinationVolumeData}
                                         options={{
@@ -338,54 +375,64 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
                                                 legend: { display: false },
                                             },
                                             scales: {
-                                                y: { beginAtZero: true },
-                                                x: { ticks: { font: { size: 9 } } },
+                                                y: { 
+                                                    beginAtZero: true,
+                                                    grid: { borderDash: [2, 4], color: '#f3f4f6' },
+                                                    ticks: { font: { size: 10 } }
+                                                },
+                                                x: { 
+                                                    grid: { display: false },
+                                                    ticks: { font: { size: 10 }, maxRotation: 45, minRotation: 45 } 
+                                                },
                                             },
                                         }}
                                     />
                                 </div>
-                            </Card>
+                            </div>
                         )}
                     </div>
 
                     {/* Detailed Breakdown */}
-                    <Card className="p-6">
-                        <h3 className="text-lg font-semibold text-gray-800 mb-4">Desglose Detallado</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                            <div>
-                                <span className="text-gray-500">Capacidad Requerida:</span>
-                                <span className="ml-2 font-medium">{calculations.required_capacity || 0} tests/hora</span>
+                    <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
+                        <h3 className="text-lg font-bold text-gray-900 mb-6 flex items-center gap-2">
+                             <div className="w-1.5 h-6 rounded-full bg-blue-500"></div>
+                             Desglose Detallado
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
+                            <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
+                                <span className="text-gray-500 block text-xs uppercase tracking-wide font-semibold mb-1">Capacidad Requerida</span>
+                                <span className="font-bold text-gray-900 text-lg">{calculations.required_capacity || 0} <span className="text-xs font-normal text-gray-500">tests/hora</span></span>
                             </div>
-                            <div>
-                                <span className="text-gray-500">Consumo Reactivos:</span>
-                                <span className="ml-2 font-medium">${calculations.reagent_consumption?.toFixed(2) || "0.00"}/mes</span>
+                            <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
+                                <span className="text-gray-500 block text-xs uppercase tracking-wide font-semibold mb-1">Consumo Reactivos</span>
+                                <span className="font-bold text-gray-900 text-lg">${calculations.reagent_consumption?.toFixed(2) || "0.00"}<span className="text-xs font-normal text-gray-500">/mes</span></span>
                             </div>
-                            <div>
-                                <span className="text-gray-500">Horas Operativas:</span>
-                                <span className="ml-2 font-medium">{calculations.operating_hours || 0} hrs/mes</span>
+                            <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
+                                <span className="text-gray-500 block text-xs uppercase tracking-wide font-semibold mb-1">Horas Operativas</span>
+                                <span className="font-bold text-gray-900 text-lg">{calculations.operating_hours || 0} <span className="text-xs font-normal text-gray-500">hrs/mes</span></span>
                             </div>
-                            <div>
-                                <span className="text-gray-500">Personal Requerido:</span>
-                                <span className="ml-2 font-medium">{calculations.required_personnel || 0} FTE</span>
+                            <div className="p-4 rounded-xl bg-gray-50 border border-gray-100">
+                                <span className="text-gray-500 block text-xs uppercase tracking-wide font-semibold mb-1">Personal Requerido</span>
+                                <span className="font-bold text-gray-900 text-lg">{calculations.required_personnel || 0} <span className="text-xs font-normal text-gray-500">FTE</span></span>
                             </div>
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Warnings */}
                     {calculations.warnings?.length > 0 && (
-                        <Card className="p-4 bg-yellow-50 border-yellow-200">
-                            <div className="flex items-start gap-3">
-                                <FiAlertTriangle className="text-yellow-600 mt-0.5" />
-                                <div>
-                                    <h4 className="font-medium text-yellow-900">Advertencias</h4>
-                                    <ul className="text-sm text-yellow-700 mt-1 list-disc ml-4">
-                                        {calculations.warnings.map((w, i) => (
-                                            <li key={i}>{w}</li>
-                                        ))}
-                                    </ul>
-                                </div>
+                        <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl flex items-start gap-3">
+                            <div className="p-1 bg-amber-100 rounded-full mt-0.5 text-amber-600">
+                                <FiAlertTriangle size={18} />
                             </div>
-                        </Card>
+                            <div>
+                                <h4 className="font-semibold text-amber-900">Advertencias</h4>
+                                <ul className="text-sm text-amber-800 mt-1 space-y-1 list-disc ml-4 marker:text-amber-500">
+                                    {calculations.warnings.map((w, i) => (
+                                        <li key={i}>{w}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
                     )}
                 </>
             )}
@@ -394,3 +441,6 @@ const CalculationsSection = ({ permissions = {}, ownership = {}, onSave }) => {
 };
 
 export default CalculationsSection;
+
+
+

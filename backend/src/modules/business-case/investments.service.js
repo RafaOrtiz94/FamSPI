@@ -132,10 +132,134 @@ async function deleteInvestment(id) {
     return true;
 }
 
+async function listInvestmentCatalog() {
+    const { rows } = await db.query(
+        `SELECT id, code, name, category, is_active
+         FROM bc_investment_catalog
+         WHERE is_active = true
+         ORDER BY name`
+    );
+    return rows;
+}
+
+async function createInvestmentCatalogItem(payload) {
+    const name = (payload?.name || '').trim();
+    if (!name) {
+        const error = new Error("name es requerido");
+        error.status = 400;
+        throw error;
+    }
+    const category = payload?.category ? String(payload.category).trim() : null;
+    const code = name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '');
+
+    const existing = await db.query(
+        `SELECT id, code, name, category, is_active
+         FROM bc_investment_catalog
+         WHERE lower(name) = lower($1)
+         LIMIT 1`,
+        [name]
+    );
+    if (existing.rows.length) {
+        return existing.rows[0];
+    }
+
+    const { rows } = await db.query(
+        `INSERT INTO bc_investment_catalog (code, name, category, is_active)
+         VALUES ($1, $2, $3, true)
+         ON CONFLICT (code) DO UPDATE
+         SET name = EXCLUDED.name,
+             category = COALESCE(EXCLUDED.category, bc_investment_catalog.category),
+             updated_at = now()
+         RETURNING id, code, name, category, is_active`,
+        [code || null, name, category || null]
+    );
+    return rows[0];
+}
+
+async function getInvestmentSelections(businessCaseId) {
+    const { rows } = await db.query(
+        `SELECT catalog_id, selected, notes, quantity, characteristics, unit_price, updated_by_role, updated_by_email
+         FROM bc_investment_selections
+         WHERE business_case_id = $1`,
+        [businessCaseId]
+    );
+    return rows;
+}
+
+async function getCatalogWithSelections(businessCaseId) {
+    const { rows } = await db.query(
+        `SELECT c.id, c.code, c.name, c.category, c.is_active,
+                COALESCE(s.selected, false) AS selected,
+                s.notes,
+                s.quantity,
+                s.characteristics,
+                s.unit_price,
+                s.updated_by_role,
+                s.updated_by_email
+         FROM bc_investment_catalog c
+         LEFT JOIN bc_investment_selections s
+           ON s.catalog_id = c.id
+          AND s.business_case_id = $1
+         WHERE c.is_active = true
+         ORDER BY c.name`,
+        [businessCaseId]
+    );
+    return rows;
+}
+
+async function upsertInvestmentSelection(businessCaseId, data, user) {
+    const { catalog_id, selected = true, notes = null, quantity = null, characteristics = null, unit_price = null } = data;
+    if (!catalog_id) {
+        const error = new Error("catalog_id es requerido");
+        error.status = 400;
+        throw error;
+    }
+
+    const { rows } = await db.query(
+        `INSERT INTO bc_investment_selections
+           (business_case_id, catalog_id, selected, notes, quantity, characteristics, unit_price, updated_by_role, updated_by_email)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ON CONFLICT (business_case_id, catalog_id)
+         DO UPDATE SET
+           selected = EXCLUDED.selected,
+           notes = EXCLUDED.notes,
+           quantity = EXCLUDED.quantity,
+           characteristics = EXCLUDED.characteristics,
+           unit_price = EXCLUDED.unit_price,
+           updated_by_role = EXCLUDED.updated_by_role,
+           updated_by_email = EXCLUDED.updated_by_email,
+           updated_at = now()
+         RETURNING *`,
+        [
+            businessCaseId,
+            catalog_id,
+            selected,
+            notes,
+            quantity,
+            characteristics,
+            unit_price,
+            user?.role || null,
+            user?.email || null
+        ]
+    );
+
+    return rows[0];
+}
+
 module.exports = {
     addInvestment,
     getInvestments,
     getInvestmentTotals,
     updateInvestment,
     deleteInvestment,
+    listInvestmentCatalog,
+    createInvestmentCatalogItem,
+    getInvestmentSelections,
+    getCatalogWithSelections,
+    upsertInvestmentSelection,
 };

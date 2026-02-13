@@ -5,7 +5,7 @@
  * Proporciona vista unificada para todos los roles del workflow.
  */
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUI } from '../../../core/ui/useUI';
 import Button from '../../../core/ui/components/Button';
 import { formatDateEC } from '../../../core/utils/dateUtils';
@@ -24,6 +24,7 @@ import {
     uploadPrivateSignedOffer,
     PRIVATE_PURCHASE_STATES
 } from '../../../core/api/privatePurchasesApi';
+import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
 
 const PrivatePurchasesRoleView = ({ role, title }) => {
     const { showToast } = useUI();
@@ -35,9 +36,33 @@ const PrivatePurchasesRoleView = ({ role, title }) => {
     const [offerDocs, setOfferDocs] = useState({});
 
     // Cargar datos iniciales
+    const loadData = useCallback(async () => {
+        try {
+            setLoading(true);
+            const [purchasesData, statsData] = await Promise.all([
+                getPrivatePurchasesByRole(role),
+                getPrivatePurchaseStats(role)
+            ]);
+
+            setPurchases(purchasesData);
+            setStats(statsData);
+        } catch (error) {
+            console.error('Error cargando datos:', error);
+            showToast('Error cargando solicitudes', 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [role, showToast]);
+
     useEffect(() => {
         loadData();
-    }, [role]);
+    }, [loadData]);
+
+    usePurchaseSSE({
+        type: 'private',
+        debounceMs: 8000,
+        onEvent: loadData
+    });
 
     // Consultar estado de aprobación de clientes para backoffice_comercial
     useEffect(() => {
@@ -88,24 +113,6 @@ const PrivatePurchasesRoleView = ({ role, title }) => {
             }
         }
     }, [role, purchases, clientApprovalStatuses]);
-
-    const loadData = async () => {
-        try {
-            setLoading(true);
-            const [purchasesData, statsData] = await Promise.all([
-                getPrivatePurchasesByRole(role),
-                getPrivatePurchaseStats(role)
-            ]);
-
-            setPurchases(purchasesData);
-            setStats(statsData);
-        } catch (error) {
-            console.error('Error cargando datos:', error);
-            showToast('Error cargando solicitudes', 'error');
-        } finally {
-            setLoading(false);
-        }
-    };
 
     const loadOfferDocument = async (purchaseId) => {
         if (offerDocs[purchaseId]) return;

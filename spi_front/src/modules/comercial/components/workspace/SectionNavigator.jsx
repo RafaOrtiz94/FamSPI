@@ -1,5 +1,5 @@
 import React from "react";
-import { FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare } from "react-icons/fi";
+import { FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare, FiTarget } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { useAuth } from "../../../../core/auth/AuthContext";
 
@@ -10,47 +10,55 @@ import { useAuth } from "../../../../core/auth/AuthContext";
 const ROLE_SECTION_CONFIG = {
   // Comercial roles - operational data
   comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations"],
-    canEdit: ["general", "lab", "equipment", "lis"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+  },
+  asesor_comercial: {
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
   },
   acp_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "investments", "prices"],
-    canEdit: ["general", "lab", "equipment", "lis", "investments"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export"],
+    canEdit: ["general", "lab", "equipment", "lis", "requirement", "investments", "consumption_export"],
+  },
+  backoffice_comercial: {
+    visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "calculations"],
+    canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments"],
   },
   // Manager roles - full access
   jefe_comercial: {
-    visible: "all",
-    canEdit: "all",
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
   },
   gerencia: {
-    visible: "all",
-    canEdit: ["calculations", "rentability", "prices"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    canEdit: [],
   },
   gerencia_general: {
-    visible: "all",
-    canEdit: "all",
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability"],
+    canEdit: [],
   },
   // Technical roles - equipment/determinations focus
   operaciones: {
-    visible: ["equipment", "determinations", "calculations"],
+    visible: ["equipment", "determinations"],
     canEdit: ["equipment", "determinations"],
   },
   jefe_operaciones: {
-    visible: ["equipment", "determinations", "calculations", "investments"],
-    canEdit: ["equipment", "determinations", "investments"],
+    visible: ["equipment", "determinations", "requirement", "investments"],
+    canEdit: ["equipment", "determinations", "requirement", "investments"],
   },
   servicio_tecnico: {
     visible: ["equipment", "determinations"],
     canEdit: [],
   },
   jefe_tecnico: {
-    visible: ["equipment", "determinations", "calculations", "investments"],
+    visible: ["equipment", "determinations", "requirement", "investments"],
     canEdit: ["equipment", "investments"],
   },
   // Admin - full access
   admin: {
-    visible: "all",
-    canEdit: "all",
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
   },
 };
 
@@ -74,56 +82,71 @@ const SectionNavigator = ({
     {
       id: "general",
       title: "Datos Generales",
-      description: "Cliente, contrato y requerimientos básicos",
-      icon: "📋"
+      description: "Cliente, contrato y requerimientos basicos",
+      icon: "DG"
     },
     {
       id: "lab",
       title: "Entorno Laboratorio",
-      description: "Configuración y operación del laboratorio",
-      icon: "🏥"
+      description: "Configuracion y operacion del laboratorio",
+      icon: "LAB"
+    },
+    {
+      id: "requirement",
+      title: "Requerimiento del BC",
+      description: "Plazos, entregas y observaciones clave",
+      icon: "BC"
     },
     {
       id: "equipment",
       title: "Equipamiento",
-      description: "Selección y configuración de equipos",
-      icon: "💻"
+      description: "Seleccion y configuracion de equipos",
+      icon: "EQ"
     },
     {
       id: "lis",
-      title: "Integración LIS",
-      description: "Sistema de información laboratorio",
-      icon: "🔗"
+      title: "Integracion LIS",
+      description: "Sistema de informacion laboratorio",
+      icon: "LIS"
     },
     {
       id: "determinations",
       title: "Determinaciones",
-      description: "Análisis y cuantificaciones",
-      icon: "📊"
+      description: "Analisis y cuantificaciones",
+      icon: "DET"
     },
     {
       id: "investments",
       title: "Inversiones",
       description: "Costos adicionales y presupuestos",
-      icon: "💰"
+      icon: "INV"
     },
     {
       id: "prices",
       title: "Precios",
-      description: "Definición de precios y márgenes",
-      icon: "💵"
+      description: "Definicion de precios y margenes",
+      icon: "PR",
+      dev: true
     },
     {
       id: "calculations",
-      title: "Cálculos",
-      description: "Análisis técnico y viabilidad",
-      icon: "🧮"
+      title: "Calculos",
+      description: "Analisis tecnico y viabilidad",
+      icon: "CAL",
+      dev: true
     },
     {
       id: "rentability",
       title: "Rentabilidad",
-      description: "ROI y análisis financiero",
-      icon: "📈"
+      description: "ROI y analisis financiero",
+      icon: "ROI",
+      dev: true
+    },
+    {
+      id: "consumption_export",
+      title: "Exportacion Reactivos",
+      description: "Salida ordenada para Excel/Sheets",
+      icon: "EXP"
     }
   ];
 
@@ -142,7 +165,8 @@ const SectionNavigator = ({
     const rule = rules[sectionId];
     const isObserved = observationData?.observedSections?.includes(sectionId);
     const hasComment = observationData?.comments?.[sectionId];
-    const isLocked = !canEditSection(sectionId);
+    const isLocked = Boolean(rule?.isLocked);
+    const isReadOnly = !canEditSection(sectionId);
 
     // Priority: locked > observed > completed > in-progress > pending
     if (isLocked && !rule?.isCompleted) {
@@ -189,77 +213,85 @@ const SectionNavigator = ({
   };
 
   return (
-    <Card className="p-4">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 lg:p-6 h-auto lg:h-[calc(100vh-200px)] lg:overflow-y-auto custom-scrollbar sticky top-4">
       <div className="space-y-2">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-lg font-semibold text-gray-900">Secciones</h3>
-          <span className="text-xs text-gray-500 px-2 py-1 bg-gray-100 rounded">
+        <div className="flex items-center justify-between mb-4 lg:mb-6">
+          <h3 className="text-lg font-bold text-gray-900 tracking-tight">Secciones</h3>
+          <span className="text-xs font-semibold text-gray-500 px-2 py-1 bg-gray-100 rounded-full">
             {visibleSections.length} de {allSections.length}
           </span>
         </div>
 
+        <div className="grid grid-cols-1 gap-2">
         {visibleSections.map((section) => {
           const status = getSectionStatus(section.id);
           const isSelected = selectedSection === section.id;
+          const isReadOnly = !canEditSection(section.id);
 
           return (
             <button
               key={section.id}
               onClick={() => onSectionSelect(section.id)}
-              disabled={status.isLocked}
-              className={`w-full text-left p-3 rounded-lg transition-all ${status.isLocked
-                  ? "opacity-60 cursor-not-allowed bg-gray-50 border border-gray-200"
+              className={`w-full text-left p-3 rounded-xl transition-all duration-200 ${status.isLocked
+                  ? "opacity-60 cursor-not-allowed bg-gray-50 border border-gray-100"
                   : isSelected
                     ? status.isObserved
-                      ? "bg-amber-50 border border-amber-300"
-                      : "bg-blue-50 border border-blue-200"
+                      ? "bg-amber-50 border border-amber-200 shadow-sm ring-1 ring-amber-200"
+                      : "bg-blue-50 border border-blue-200 shadow-sm ring-1 ring-blue-200"
                     : status.isObserved
-                      ? "hover:bg-amber-50 border border-amber-200"
-                      : "hover:bg-gray-50 border border-transparent"
+                      ? "hover:bg-amber-50 border border-transparent hover:shadow-sm"
+                      : "hover:bg-gray-50 border border-transparent hover:shadow-sm"
                 }`}
             >
               <div className="flex items-start gap-3">
                 {/* Status icon */}
                 <div className={`flex-shrink-0 mt-0.5 ${status.color}`}>
-                  <status.icon size={16} />
+                  <status.icon size={18} />
                 </div>
 
                 {/* Section content */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm">{section.icon}</span>
-                    <h4 className={`text-sm font-medium truncate ${status.isLocked ? "text-gray-500" : isSelected ? "text-blue-900" : "text-gray-900"
-                      }`}>
-                      {section.title}
-                    </h4>
+                  <h4 className={`text-sm font-semibold truncate ${status.isLocked ? "text-gray-500" : isSelected ? "text-blue-900" : "text-gray-900"
+                    }`}>
+                    {section.title}
+                  </h4>
+                  {section.dev && (
+                    <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
+                      En desarrollo
+                    </span>
+                  )}
                     {status.hasComment && (
                       <FiMessageSquare
                         size={12}
                         className="text-amber-600 flex-shrink-0"
-                        title="Tiene comentario de observación"
+                        title="Tiene comentario de observacion"
                       />
                     )}
-                    {status.isLocked && (
-                      <span className="text-xs text-gray-400">(Solo lectura)</span>
+                    {(status.isLocked || isReadOnly) && (
+                      <span className="text-xs text-gray-400 font-normal ml-auto">
+                        {status.isLocked ? "(Bloqueado)" : "(Solo lectura)"}
+                      </span>
                     )}
                   </div>
 
-                  <p className="text-xs text-gray-600 mb-2 line-clamp-2">
+                  <p className="text-xs text-gray-500 mb-2 line-clamp-2 leading-relaxed">
                     {section.description}
                   </p>
 
                   {/* Ownership info */}
                   {status.completedBy && (
-                    <div className="flex items-center gap-1 text-xs text-gray-500">
-                      <FiUser size={12} />
-                      <span>Completado por {status.completedBy}</span>
+                    <div className="flex items-center gap-1.5 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full w-fit">
+                      <FiUser size={10} />
+                      <span>{status.completedBy}</span>
                     </div>
                   )}
 
                   {status.currentOwner && (
-                    <div className="flex items-center gap-1 text-xs text-yellow-600">
-                      <FiUser size={12} />
-                      <span>En edición: {status.currentOwner}</span>
+                    <div className="flex items-center gap-1.5 text-xs text-yellow-700 font-medium bg-yellow-50 px-2 py-0.5 rounded-full w-fit">
+                      <FiUser size={10} />
+                      <span>Edit: {status.currentOwner}</span>
                     </div>
                   )}
                 </div>
@@ -267,9 +299,12 @@ const SectionNavigator = ({
             </button>
           );
         })}
+        </div>
       </div>
-    </Card>
+    </div>
   );
 };
 
 export default SectionNavigator;
+
+

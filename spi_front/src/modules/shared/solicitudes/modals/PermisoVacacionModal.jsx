@@ -146,7 +146,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             if (tipoSolicitud === "permiso") {
                 payload.tipo_permiso = tipoPermiso;
                 if (tipoPermiso === "calamidad") {
-                    payload.subtipo_calamidad = subtipoCalamidad;
+                    payload.subtipo_calamidad = subtipoCalamidad.trim();
                 }
                 if (tipoPermiso === "salud" && saludDuracionTipo === "horas") {
                     payload.duracion_dias = "";
@@ -263,117 +263,122 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             (isSalud && saludDuracionTipo === "horas");
 
         return (
-        <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Tipo de Permiso</h3>
+            <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-900">Tipo de Permiso</h3>
 
-            <div className="grid grid-cols-2 gap-3">
-                <button
-                    type="button"
-                    onClick={() => setTipoPermiso("estudios")}
-                    className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "estudios"
+                <div className="grid grid-cols-2 gap-3">
+                    <button
+                        type="button"
+                        onClick={() => setTipoPermiso("estudios")}
+                        className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "estudios"
                             ? "border-indigo-500 bg-indigo-50"
                             : "border-gray-200 hover:border-indigo-300"
-                        }`}
-                >
-                    <p className="font-semibold text-sm">Por Estudios</p>
-                    <p className="text-xs text-gray-500 mt-1">Máx 3h recuperables</p>
-                </button>
-
-                <button
-                    type="button"
-                    onClick={() => setTipoPermiso("personal")}
-                    className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "personal"
-                            ? "border-indigo-500 bg-indigo-50"
-                            : "border-gray-200 hover:border-indigo-300"
-                        }`}
-                >
-                    <p className="font-semibold text-sm">Asuntos Personales</p>
-                    <p className="text-xs text-gray-500 mt-1">Máx 2h/semana</p>
-                </button>
-
-                <button
-                    type="button"
-                    onClick={() => setTipoPermiso("salud")}
-                    className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "salud"
-                            ? "border-indigo-500 bg-indigo-50"
-                            : "border-gray-200 hover:border-indigo-300"
-                        }`}
-                >
-                    <p className="font-semibold text-sm">Por Salud</p>
-                    <p className="text-xs text-gray-500 mt-1">Con certificado médico</p>
-                </button>
-
-                <button
-                    type="button"
-                    onClick={() => setTipoPermiso("calamidad")}
-                    className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "calamidad"
-                            ? "border-indigo-500 bg-indigo-50"
-                            : "border-gray-200 hover:border-indigo-300"
-                        }`}
-                >
-                    <p className="font-semibold text-sm">Calamidad Doméstica</p>
-                    <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
-                </button>
-            </div>
-
-            {tipoPermiso === "calamidad" && (
-                <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700">Tipo de Calamidad</label>
-                    <select
-                        value={subtipoCalamidad}
-                        onChange={(e) => setSubtipoCalamidad(e.target.value)}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                        required
+                            }`}
                     >
-                        <option value="">Selecciona...</option>
-                        <option value="fallecimiento">Fallecimiento de familiar (hasta 2do grado)</option>
-                        <option value="accidente">Accidente de familiar directo</option>
-                        <option value="desastre">Desastre natural</option>
-                    </select>
+                        <p className="font-semibold text-sm">Por Estudios</p>
+                        <p className="text-xs text-gray-500 mt-1">Máx 3h recuperables</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setTipoPermiso("personal")}
+                        className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "personal"
+                            ? "border-indigo-500 bg-indigo-50"
+                            : "border-gray-200 hover:border-indigo-300"
+                            }`}
+                    >
+                        <p className="font-semibold text-sm">Asuntos Personales</p>
+                        <p className="text-xs text-gray-500 mt-1">Máx 2h/semana</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setTipoPermiso("salud")}
+                        className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "salud"
+                            ? "border-indigo-500 bg-indigo-50"
+                            : "border-gray-200 hover:border-indigo-300"
+                            }`}
+                    >
+                        <p className="font-semibold text-sm">Por Salud</p>
+                        <p className="text-xs text-gray-500 mt-1">Con certificado médico</p>
+                    </button>
+
+                    <button
+                        type="button"
+                        onClick={() => setTipoPermiso("calamidad")}
+                        className={`p-4 border-2 rounded-lg transition-all ${tipoPermiso === "calamidad"
+                            ? "border-indigo-500 bg-indigo-50"
+                            : "border-gray-200 hover:border-indigo-300"
+                            }`}
+                    >
+                        <p className="font-semibold text-sm">Calamidad Doméstica</p>
+                        <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
+                    </button>
                 </div>
-            )}
 
-            {tipoPermiso && (
-                <>
-                    {isSalud && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
-                            <select
-                                value={saludDuracionTipo}
-                                onChange={(e) => setSaludDuracionTipo(e.target.value)}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                            >
-                                <option value="dias">Días</option>
-                                <option value="horas">Horas</option>
-                            </select>
+                {tipoPermiso === "calamidad" && (
+                    <div className="space-y-2">
+                        <label className="block text-sm font-medium text-gray-700">Tipo de Calamidad</label>
+                        <input
+                            type="text"
+                            value={subtipoCalamidad}
+                            onChange={(e) => setSubtipoCalamidad(e.target.value)}
+                            placeholder="Ej: fallecimiento, accidente, desastre, etc."
+                            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            required
+                        />
+                    </div>
+                )}
+
+                {tipoPermiso && (
+                    <>
+                        {isSalud && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
+                                <select
+                                    value={saludDuracionTipo}
+                                    onChange={(e) => setSaludDuracionTipo(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                >
+                                    <option value="dias">Días</option>
+                                    <option value="horas">Horas</option>
+                                </select>
+                            </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha desde</label>
+                                <input
+                                    type="date"
+                                    value={formData.fecha_inicio}
+                                    onChange={(e) => {
+                                        const value = e.target.value;
+                                        setFormData((prev) => ({
+                                            ...prev,
+                                            fecha_inicio: value,
+                                        }));
+                                    }}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    required
+                                />
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
+                                <input
+                                    type="date"
+                                    value={formData.fecha_fin}
+                                    onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
+                                    min={formData.fecha_inicio || undefined}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    required
+                                />
+                            </div>
                         </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                {isSalud ? "Fecha desde" : "Fecha"}
-                            </label>
-                            <input
-                                type="date"
-                                value={formData.fecha_inicio}
-                                onChange={(e) => {
-                                    const value = e.target.value;
-                                    setFormData((prev) => ({
-                                        ...prev,
-                                        fecha_inicio: value,
-                                        ...(isSalud ? {} : { fecha_fin: "" }),
-                                    }));
-                                }}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                required
-                            />
-                        </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                {usesHoras ? "Horas" : "Días"}
-                            </label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">{usesHoras ? "Horas" : "Días"}</label>
                             <input
                                 type="number"
                                 step={usesHoras ? "0.5" : "1"}
@@ -390,47 +395,32 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
                             />
                         </div>
-                    </div>
 
-                    {isSalud && (
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
-                            <input
-                                type="date"
-                                value={formData.fecha_fin}
-                                onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
-                                min={formData.fecha_inicio || undefined}
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                required
-                            />
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                            <p className="text-xs text-blue-700">
+                                <strong>Nota:</strong> Después de la aprobación parcial, deberás subir los documentos
+                                justificantes correspondientes.
+                            </p>
                         </div>
-                    )}
 
-                    <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        <p className="text-xs text-blue-700">
-                            <strong>Nota:</strong> Después de la aprobación parcial, deberás subir los documentos
-                            justificantes correspondientes.
-                        </p>
-                    </div>
-
-                    <div className="flex gap-3 pt-4">
-                        <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
-                            Atrás
-                        </Button>
-                        <Button
-                            type="button"
-                            variant="primary"
-                            onClick={() => setStep(3)}
-                            className="flex-1"
-                            disabled={!tipoPermiso || (tipoPermiso === "calamidad" && !subtipoCalamidad)}
-                        >
-                            Continuar
-                        </Button>
-                    </div>
-                </>
-            )}
-        </div>
-    );
+                        <div className="flex gap-3 pt-4">
+                            <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
+                                Atrás
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="primary"
+                                onClick={() => setStep(3)}
+                                className="flex-1"
+                                disabled={!tipoPermiso || (tipoPermiso === "calamidad" && !subtipoCalamidad.trim())}
+                            >
+                                Continuar
+                            </Button>
+                        </div>
+                    </>
+                )}
+            </div>
+        );
     };
 
     const renderVacacionesForm = () => {
@@ -447,11 +437,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
             ? toNumber(summaryRemaining)
             : summaryAllowance - summaryTaken - summaryPending;
-        const remaining = Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays);
+        const isAdvanceRequest = vacationSummary?.eligible === false && !vacationSummary?.missing_hire_date;
+        const remaining = isAdvanceRequest
+            ? baseRemaining - approvedVacationDays - pendingVacationDays
+            : Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays);
         const usedDisplay = summaryTaken + approvedVacationDays;
         const pendingDisplay = summaryPending + pendingVacationDays;
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
-        const canSubmit = days > 0 && days <= remaining && hasDates;
+        const allowMissingHireDate = vacationSummary?.missing_hire_date;
+        const canSubmit = days > 0 && hasDates && (allowMissingHireDate || isAdvanceRequest || days <= remaining);
 
         return (
             <div className="space-y-4">
@@ -475,6 +469,34 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             <p className="text-xs text-purple-600 font-medium">Pendientes</p>
                             <p className="text-xl font-bold text-purple-700">{pendingDisplay}</p>
                         </div>
+                    </div>
+                )}
+
+                {vacationSummary && !allowMissingHireDate && !isAdvanceRequest && remaining <= 3 && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs text-amber-700">
+                            Estás cerca de completar tus vacaciones. Te quedan{" "}
+                            <strong>{remaining}</strong> días disponibles.
+                        </p>
+                    </div>
+                )}
+
+                {isAdvanceRequest && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                        <p className="text-xs text-blue-700">
+                            Aun no cumples un ano de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
+                            acreditara/descontara cuando cumplas el ano ({vacationSummary?.eligible_from || "fecha de aniversario"}).
+                        </p>
+                    </div>
+                )}
+
+                {vacationSummary?.missing_hire_date && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <p className="text-xs text-amber-700">
+                            Falta registrar la <strong>fecha de ingreso</strong> en tu perfil.
+                            Puedes enviar la solicitud, pero Talento Humano debe completar ese dato
+                            para calcular correctamente tus vacaciones.
+                        </p>
                     </div>
                 )}
 
@@ -632,52 +654,52 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     if (!open) return null;
 
     return (
-    <AnimatePresence>
-      {open && (
-        <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
-          <LoadingOverlay message={loading ? "Enviando solicitud..." : ""} />
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
-          <div className="fixed inset-0 overflow-y-auto">
-            <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
-              <Dialog.Panel className="w-full max-w-3xl">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  className="overflow-hidden rounded-2xl bg-white shadow-2xl"
-                >
-                  <div className="flex items-center justify-between gap-3 border-b px-6 py-5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-indigo-100 rounded-lg">
-                        <FiFileText className="w-6 h-6 text-indigo-600" />
-                      </div>
-                      <div>
-                        <h2 className="text-xl font-bold text-gray-900">Nueva Solicitud</h2>
-                        <p className="text-sm text-gray-500">Permisos y Vacaciones</p>
-                      </div>
+        <AnimatePresence>
+            {open && (
+                <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
+                    <LoadingOverlay message={loading ? "Enviando solicitud..." : ""} />
+                    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
+                    <div className="fixed inset-0 overflow-y-auto">
+                        <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
+                            <Dialog.Panel className="w-full max-w-3xl">
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.95 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    exit={{ opacity: 0, scale: 0.95 }}
+                                    className="overflow-hidden rounded-2xl bg-white shadow-2xl"
+                                >
+                                    <div className="flex items-center justify-between gap-3 border-b px-6 py-5">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-indigo-100 rounded-lg">
+                                                <FiFileText className="w-6 h-6 text-indigo-600" />
+                                            </div>
+                                            <div>
+                                                <h2 className="text-xl font-bold text-gray-900">Nueva Solicitud</h2>
+                                                <p className="text-sm text-gray-500">Permisos y Vacaciones</p>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={handleClose}
+                                            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                                            disabled={loading}
+                                        >
+                                            <FiX className="w-5 h-5 text-gray-500" />
+                                        </button>
+                                    </div>
+                                    <div className="p-6">
+                                        {renderStepIndicator()}
+                                        {step === 1 && renderStep1()}
+                                        {step === 2 && renderStep2()}
+                                        {step === 3 && renderStep3()}
+                                    </div>
+                                </motion.div>
+                            </Dialog.Panel>
+                        </div>
                     </div>
-                    <button
-                      onClick={handleClose}
-                      className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                      disabled={loading}
-                    >
-                      <FiX className="w-5 h-5 text-gray-500" />
-                    </button>
-                  </div>
-                  <div className="p-6">
-                    {renderStepIndicator()}
-                    {step === 1 && renderStep1()}
-                    {step === 2 && renderStep2()}
-                    {step === 3 && renderStep3()}
-                  </div>
-                </motion.div>
-              </Dialog.Panel>
-            </div>
-          </div>
-        </Dialog>
-      )}
-    </AnimatePresence>
-);
+                </Dialog>
+            )}
+        </AnimatePresence>
+    );
 };
 
 export default PermisoVacacionModal;

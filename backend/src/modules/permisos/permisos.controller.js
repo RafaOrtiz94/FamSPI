@@ -2,7 +2,14 @@ const permisosService = require("./permisos.service");
 const { normalizeRow } = require("../../utils/normalizers");
 const { uploadJustificante } = require("./permisos.drive");
 const multer = require("multer");
-const upload = multer({ storage: multer.memoryStorage() }); // Corrected multer storage
+const upload = multer({ 
+  storage: multer.diskStorage({
+    destination: '/tmp',
+    filename: (req, file, cb) => {
+      cb(null, `permiso_${Date.now()}_${file.originalname}`);
+    }
+  })
+});
 
 async function create(req, res) {
   try {

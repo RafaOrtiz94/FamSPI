@@ -74,7 +74,7 @@ const DocumentChecklist = ({
 
   // Determinar si el documento es requerido para el estado actual
   const isRequiredForCurrentState = (item) => {
-    // LÃ³gica simplificada - en implementaciÃ³n real esto vendrÃ­a del backend
+    // Lógica simplificada - en implementación real esto vendrÃ­a del backend
     return item.required;
   };
 

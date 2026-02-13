@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 
@@ -12,14 +12,21 @@ import ACPComercialView from "../components/dashboard/ACPComercialView";
 import { getCommercialSummary } from "../../../core/api/dashboardApi";
 import { useApi } from "../../../core/hooks/useApi";
 
+const transformResponseIdentity = (response) => response;
+
 const ComercialDashboard = () => {
   const { user } = useAuth();
 
   // API call for commercial summary
   const { data: summaryData, execute: fetchSummary, loading: summaryLoading, error: summaryError } = useApi(
     getCommercialSummary,
-    { globalLoader: false, transformResponse: (response) => response }
+    { globalLoader: false, transformResponse: transformResponseIdentity }
   );
+
+  // Trigger initial fetch
+  useEffect(() => {
+    fetchSummary();
+  }, [fetchSummary]);
 
   // Debug log in development
   if (process.env.NODE_ENV !== 'production') {
@@ -39,6 +46,9 @@ const ComercialDashboard = () => {
       return (
         <JefeComercialView
           onRefresh={handleRefresh}
+          summaryData={summaryData}
+          summaryLoading={summaryLoading}
+          summaryError={summaryError}
         />
       );
     }

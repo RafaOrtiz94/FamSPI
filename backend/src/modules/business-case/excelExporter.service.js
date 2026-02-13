@@ -1,6 +1,6 @@
 const XLSX = require("xlsx");
 const businessCaseService = require("./businessCase.service");
-const determinationsService = require("./determinations.service");
+const investmentsService = require("./investments.service");
 
 function buildGeneralSheet(bc, calculations) {
   const bcId = bc.business_case_id || bc.id;
@@ -19,15 +19,16 @@ function buildGeneralSheet(bc, calculations) {
   return XLSX.utils.json_to_sheet(rows);
 }
 
-function buildDeterminationsSheet(determinations = []) {
-  const rows = determinations.map((det) => ({
-    Determinacion: det.name || det.roche_code || "-",
-    Categoria: det.category || "-",
-    "Cantidad Mensual": det.monthly_quantity ?? "-",
-    Consumo: det.calculated_consumption ?? "-",
-    "Costo Calculado": det.calculated_cost ?? "-",
+function buildConsumptionSheet(items = []) {
+  const rows = items.map((item) => ({
+    Equipo: item.equipmentName || item.equipment_name || "-",
+    Tipo: item.type || item.item_type || "-",
+    Item: item.name || "-",
+    "ID Item": item.itemId || item.item_id || "",
+    "Cantidad Anual": item.annualQty ?? item.annual_qty ?? 0,
+    Fuente: item.source || "-",
   }));
-  return XLSX.utils.json_to_sheet(rows.length ? rows : [{ Nota: "Sin determinaciones" }]);
+  return XLSX.utils.json_to_sheet(rows.length ? rows : [{ Nota: "Sin consumos registrados" }]);
 }
 
 function buildInvestmentsSheet(bc) {
@@ -42,13 +43,22 @@ function buildInvestmentsSheet(bc) {
 
 async function generateBusinessCaseExcel(businessCaseId) {
   const bc = await businessCaseService.getBusinessCaseById(businessCaseId);
-  const determinations = await determinationsService.getDeterminations(businessCaseId);
+  const consumptionData = await businessCaseService.getConsumptionItems(businessCaseId);
+  const consumptionItems = Array.isArray(consumptionData?.items) ? consumptionData.items : [];
   const calculations = (await businessCaseService.getCalculations(businessCaseId)) || {};
+  const investments = await investmentsService.getCatalogWithSelections(businessCaseId);
+  const selectedInvestments = Array.isArray(investments)
+    ? investments.filter((inv) => inv.selected)
+    : [];
 
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, buildGeneralSheet(bc, calculations), "BusinessCase");
-  XLSX.utils.book_append_sheet(workbook, buildDeterminationsSheet(determinations), "Determinaciones");
-  XLSX.utils.book_append_sheet(workbook, buildInvestmentsSheet(bc), "Inversiones");
+  XLSX.utils.book_append_sheet(workbook, buildConsumptionSheet(consumptionItems), "Consumos");
+  XLSX.utils.book_append_sheet(
+    workbook,
+    buildInvestmentsSheet({ ...bc, modern_bc_metadata: { investments: selectedInvestments } }),
+    "Inversiones"
+  );
 
   return XLSX.write(workbook, { type: "buffer", bookType: "xlsx" });
 }

@@ -17,3 +17,4 @@ const AlertDescription = ({ children, className = '' }) => {
 };
 
 export { Alert, AlertDescription };
+export default Alert;

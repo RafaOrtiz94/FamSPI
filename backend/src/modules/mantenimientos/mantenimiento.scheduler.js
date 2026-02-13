@@ -165,17 +165,25 @@ function startReminderScheduler() {
   const minutes = Number.isFinite(DEFAULT_INTERVAL_MINUTES)
     ? Math.max(DEFAULT_INTERVAL_MINUTES, 15)
     : 60;
-  const intervalMs = minutes * 60 * 1000;
 
   logger.info(
-    `⏱️ Scheduler de mantenimientos activo (cada ${minutes} min, recordatorios en ${REMINDER_STATUS.PENDING})`
+    `⚠️  Scheduler de mantenimientos DESACTIVADO (Cloud Scheduler mode). Intervalo configurado: ${minutes} min`
   );
-  schedulerInterval = setInterval(processReminders, intervalMs);
+  logger.info(
+    "ℹ️  Los recordatorios de mantenimiento ahora se ejecutan via Cloud Scheduler + endpoint HTTP"
+  );
 
-  // Ejecutar una vez en el arranque
-  processReminders().catch((err) =>
-    logger.error({ err }, "Error inicial al disparar recordatorios")
-  );
+  // Ejecutar una vez en el arranque (solo si ENABLE_JOBS=true)
+  if (process.env.ENABLE_JOBS === 'true') {
+    processReminders().catch((err) =>
+      logger.error({ err }, "Error inicial al disparar recordatorios")
+    );
+  }
 }
 
-module.exports = { startReminderScheduler };
+// Función runOnce para Cloud Scheduler
+async function runOnce() {
+  return processReminders();
+}
+
+module.exports = { startReminderScheduler, runOnce };

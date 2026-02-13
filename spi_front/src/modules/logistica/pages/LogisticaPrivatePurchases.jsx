@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '../../../core/ui/components/Card';
 import { Button } from '../../../core/ui/components/Button';
 import { Select } from '../../../core/ui/components/Select';
@@ -24,6 +24,7 @@ import {
   uploadPrivatePurchaseDeliveryAct,
   updatePrivatePurchaseDispatchDetails
 } from '../../../core/api/privatePurchasesApi';
+import { usePurchaseSSE } from '../../../core/hooks/usePurchaseSSE';
 
 const LogisticaPrivatePurchases = () => {
   const [purchases, setPurchases] = useState([]);
@@ -53,11 +54,7 @@ const LogisticaPrivatePurchases = () => {
     'delivered_signed'
   ];
 
-  useEffect(() => {
-    loadPurchases();
-  }, [statusFilter]);
-
-  const loadPurchases = async () => {
+  const loadPurchases = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -81,7 +78,29 @@ const LogisticaPrivatePurchases = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [statusFilter]);
+
+  useEffect(() => {
+    loadPurchases();
+  }, [loadPurchases]);
+
+  const logisticsStatusSet = useMemo(() => new Set(logisticsStatuses), [logisticsStatuses]);
+
+  usePurchaseSSE({
+    type: 'private',
+    debounceMs: 8000,
+    onEvent: loadPurchases,
+    filter: (payload) => {
+      const status = payload?.request?.status;
+      const fromState = payload?.meta?.from;
+      const toState = payload?.meta?.to;
+      return (
+        logisticsStatusSet.has(status) ||
+        logisticsStatusSet.has(fromState) ||
+        logisticsStatusSet.has(toState)
+      );
+    }
+  });
 
   const handleViewDetail = async (purchase) => {
     try {

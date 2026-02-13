@@ -27,11 +27,10 @@ import UserRequestsView from "../components/solicitudes/UserRequestsView";
 import {
   MaintenanceRequestModal,
   PrivatePurchaseRequestModal,
-  EquipmentRequestModal,
-  BusinessCaseRequestModal
-} from "../../../core/ui/components/RequestModals";
+  EquipmentRequestModal,} from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
+import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
 import { createRequest } from "../../../core/api/requestsApi";
 import PurchaseTypeSelector from "../../../shared/purchases/PurchaseTypeSelector";
 import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
@@ -49,7 +48,6 @@ const SolicitudesPage = () => {
   // Hook para manejar modales
   const {
     privatePurchaseModalOpen,
-    businessCaseModalOpen,
     maintenanceModalOpen,
     equipmentModalOpen,
     openModal,
@@ -67,12 +65,14 @@ const SolicitudesPage = () => {
   const [createCompraModalOpen, setCreateCompraModalOpen] = useState(false);
   const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
   const [permisosModalOpen, setPermisosModalOpen] = useState(false);
+  const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
 
   // Determinar configuración basada en el rol
   const roleConfig = useMemo(() => {
     const roleName = (user?.role_name || user?.role || "").toLowerCase();
     const isACP = roleName.includes('acp');
     const isBackofficeCommercial = roleName === "backoffice_comercial";
+    const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
 
     const baseActions = ["cliente", "compra", "permisos"];
     const acpActions = ["cliente", "compra", "permisos"];
@@ -84,6 +84,8 @@ const SolicitudesPage = () => {
       availableActionIds = backofficeCommercialActions;
     } else if (isACP) {
       availableActionIds = acpActions;
+    } else if (isJefeComercial) {
+      availableActionIds = [...fullActions, "personal"];
     } else {
       availableActionIds = fullActions;
     }
@@ -91,6 +93,7 @@ const SolicitudesPage = () => {
     return {
       isACP,
       isBackofficeCommercial,
+      isJefeComercial,
       viewComponent: isBackofficeCommercial ? null : (isACP ? ACPComercialSolicitudesView : ComercialSolicitudesView),
       availableActions: availableActionIds.map(id => REQUEST_TYPES_CONFIG[id]).filter(Boolean)
     };
@@ -115,6 +118,9 @@ const SolicitudesPage = () => {
         break;
       case 'permisos':
         setPermisosModalOpen(true);
+        break;
+      case 'personal':
+        setPersonnelModalOpen(true);
         break;
       case 'inspection':
         setCreateInspectionModalOpen(true);
@@ -164,10 +170,10 @@ const SolicitudesPage = () => {
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="space-y-6"
+            className="space-y-4 sm:space-y-6"
           >
             {/* KPIs Principales - iOS Style - Responsive */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4 sm:gap-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
               <StatsCard
                 title="Total Solicitudes"
                 value={stats.total}
@@ -179,7 +185,7 @@ const SolicitudesPage = () => {
                 iconBg="bg-gradient-to-br from-blue-500 to-blue-600"
                 textColor="text-blue-800"
                 valueColor="text-blue-900"
-                className="rounded-2xl border-0 shadow-lg"
+                className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
               />
               <StatsCard
                 title="Aprobadas"
@@ -192,7 +198,7 @@ const SolicitudesPage = () => {
                 iconBg="bg-gradient-to-br from-green-500 to-green-600"
                 textColor="text-green-800"
                 valueColor="text-green-900"
-                className="rounded-2xl border-0 shadow-lg"
+                className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
               />
               <StatsCard
                 title="En Proceso"
@@ -205,7 +211,7 @@ const SolicitudesPage = () => {
                 iconBg="bg-gradient-to-br from-yellow-500 to-yellow-600"
                 textColor="text-yellow-800"
                 valueColor="text-yellow-900"
-                className="rounded-2xl border-0 shadow-lg"
+                className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
               />
               <StatsCard
                 title="Rechazadas"
@@ -218,41 +224,42 @@ const SolicitudesPage = () => {
                 iconBg="bg-gradient-to-br from-red-500 to-red-600"
                 textColor="text-red-800"
                 valueColor="text-red-900"
-                className="rounded-2xl border-0 shadow-lg"
+                className="rounded-2xl border-0 shadow-lg text-xs sm:text-sm"
               />
             </div>
 
             {/* Accesos rápidos - iOS Style */}
-            <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
-              <div className="flex items-center justify-between mb-6">
+            <Card className="p-4 sm:p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
+              <div className="flex items-center justify-between mb-3 sm:mb-5">
                 <div>
-                  <h3 className="text-xl font-bold text-gray-900 tracking-tight">Accesos rápidos</h3>
-                  <p className="text-gray-600 mt-1 text-sm">
+                  <h3 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight">Accesos rápidos</h3>
+                  <p className="text-gray-600 mt-1 text-[11px] sm:text-sm">
                     {roleConfig.isACP ? 'Operaciones disponibles para ACP Comercial' : 'Operaciones disponibles para tu rol'}
                   </p>
                 </div>
               </div>
 
-              <div className={`grid gap-3 ${roleConfig.isACP ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
+              <div className={`grid gap-2 sm:gap-3 ${roleConfig.isACP ? 'grid-cols-2 sm:grid-cols-2' : 'grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4'}`}>
                 {roleConfig.availableActions.map((action) => (
                   <Button
                     key={action.id}
                     onClick={() => handleQuickAction(action.id)}
-                    className={`p-4 h-16 transition-all duration-200 rounded-xl border-0 shadow-sm hover:shadow-md active:scale-95 ${
+                    className={`p-3 h-12 sm:h-16 transition-all duration-200 rounded-xl border-0 shadow-sm hover:shadow-md active:scale-95 ${
                       action.color === 'blue' ? 'bg-gradient-to-br from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700' :
                       action.color === 'amber' ? 'bg-gradient-to-br from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700' :
                       action.color === 'emerald' ? 'bg-gradient-to-br from-emerald-500 to-emerald-600 hover:from-emerald-600 hover:to-emerald-700' :
                       action.color === 'indigo' ? 'bg-gradient-to-br from-indigo-500 to-indigo-600 hover:from-indigo-600 hover:to-indigo-700' :
+                      action.color === 'teal' ? 'bg-gradient-to-br from-teal-500 to-teal-600 hover:from-teal-600 hover:to-teal-700' :
                       'bg-gradient-to-br from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700'
                     }`}
                   >
-                    <div className="flex items-center gap-3 w-full">
-                      <div className="p-2 bg-white/20 rounded-lg backdrop-blur-sm">
-                        <action.icon size={16} className="text-white" />
+                    <div className="flex items-center gap-2 w-full">
+                      <div className="p-1.5 sm:p-2 bg-white/20 rounded-lg backdrop-blur-sm">
+                        <action.icon size={14} className="text-white" />
                       </div>
                       <div className="text-left flex-1 min-w-0">
-                        <div className="font-semibold text-white text-sm leading-tight truncate">{action.label}</div>
-                        <div className="text-white/80 text-xs leading-tight truncate">{action.subtitle}</div>
+                        <div className="font-semibold text-white text-xs sm:text-sm leading-tight truncate">{action.label}</div>
+                        <div className="text-white/80 text-[10px] sm:text-xs leading-tight truncate">{action.subtitle}</div>
                       </div>
                     </div>
                   </Button>
@@ -268,62 +275,62 @@ const SolicitudesPage = () => {
             )}
 
             {/* Actividad Reciente - iOS Style Unificado */}
-            <Card className="p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
-              <div className="flex items-center justify-between mb-6">
+            <Card className="p-4 sm:p-6 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">
+              <div className="flex items-center justify-between mb-3 sm:mb-5">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 bg-gradient-to-br from-gray-600 to-gray-700 rounded-lg shadow-sm">
-                    <FiActivity className="text-white" size={20} />
+                  <div className="p-1.5 sm:p-2 bg-gradient-to-br from-gray-600 to-gray-700 rounded-lg shadow-sm">
+                    <FiActivity className="text-white" size={18} />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold text-gray-900 tracking-tight">Actividad Reciente</h3>
-                    <p className="text-gray-600 mt-1 text-sm">Últimas actualizaciones en tus solicitudes</p>
+                    <h3 className="text-base sm:text-lg font-bold text-gray-900 tracking-tight">Actividad Reciente</h3>
+                    <p className="text-gray-600 mt-1 text-[11px] sm:text-sm">Últimas actualizaciones en tus solicitudes</p>
                   </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2 sm:space-y-3">
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.1 }}
-                  className="flex items-center justify-between p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200/60 hover:bg-gradient-to-br hover:from-indigo-100 hover:to-indigo-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
+                  className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 rounded-xl border border-indigo-200/60 hover:bg-gradient-to-br hover:from-indigo-100 hover:to-indigo-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 bg-white rounded-lg shadow-sm">
-                      <FiCreditCard className="text-indigo-600" size={16} />
+                  <div className="flex items-center gap-3">
+                    <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
+                      <FiCreditCard className="text-indigo-600" size={14} />
                     </div>
                     <div>
-                      <p className="font-semibold text-gray-900 text-sm">
+                      <p className="font-semibold text-gray-900 text-xs sm:text-sm">
                         Requerimiento de Equipos
                       </p>
-                      <p className="text-xs text-gray-600">
+                      <p className="text-[11px] sm:text-xs text-gray-600">
                         Aprobado hace 2 días
                       </p>
                     </div>
                   </div>
-                  <FiCheckCircle className="text-green-600" size={18} />
+                  <FiCheckCircle className="text-green-600" size={16} />
                 </motion.div>
 
                 <motion.div
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.2 }}
-                  className="flex items-center justify-between p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200/60 hover:bg-gradient-to-br hover:from-orange-100 hover:to-orange-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
+                  className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-orange-50 to-orange-100 rounded-xl border border-orange-200/60 hover:bg-gradient-to-br hover:from-orange-100 hover:to-orange-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="p-2 bg-white rounded-lg shadow-sm">
-                      <FiUsers className="text-orange-600" size={16} />
+                  <div className="flex items-center gap-3">
+                    <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
+                      <FiUsers className="text-orange-600" size={14} />
                     </div>
                     <div>
-                      <p className="font-semibold text-gray-900 text-sm">
+                      <p className="font-semibold text-gray-900 text-xs sm:text-sm">
                         Permiso de Vacaciones
                       </p>
-                      <p className="text-xs text-gray-600">
+                      <p className="text-[11px] sm:text-xs text-gray-600">
                         En proceso de aprobación
                       </p>
                     </div>
                   </div>
-                  <FiClock className="text-yellow-600" size={18} />
+                  <FiClock className="text-yellow-600" size={16} />
                 </motion.div>
 
                 {!roleConfig.isACP && !roleConfig.isBackofficeCommercial && (
@@ -331,22 +338,22 @@ const SolicitudesPage = () => {
                     initial={{ opacity: 0, x: -20 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.3 }}
-                    className="flex items-center justify-between p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200/60 hover:bg-gradient-to-br hover:from-blue-100 hover:to-blue-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
+                    className="flex items-center justify-between p-3 sm:p-4 bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl border border-blue-200/60 hover:bg-gradient-to-br hover:from-blue-100 hover:to-blue-200 transition-all duration-200 cursor-pointer hover:shadow-sm"
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="p-2 bg-white rounded-lg shadow-sm">
-                        <FiClipboard className="text-blue-600" size={16} />
+                    <div className="flex items-center gap-3">
+                      <div className="p-1.5 sm:p-2 bg-white rounded-lg shadow-sm">
+                        <FiClipboard className="text-blue-600" size={14} />
                       </div>
                       <div>
-                        <p className="font-semibold text-gray-900 text-sm">
+                        <p className="font-semibold text-gray-900 text-xs sm:text-sm">
                           Inspección Técnica
                         </p>
-                        <p className="text-xs text-gray-600">
+                        <p className="text-[11px] sm:text-xs text-gray-600">
                           Programada para mañana
                         </p>
                       </div>
                     </div>
-                    <FiTarget className="text-blue-600" size={18} />
+                    <FiTarget className="text-blue-600" size={16} />
                   </motion.div>
                 )}
               </div>
@@ -442,24 +449,24 @@ const SolicitudesPage = () => {
         animate={{ opacity: 1, y: 0 }}
         className="bg-white border-b border-gray-200/60 rounded-t-3xl shadow-sm"
       >
-        <div className="px-6 py-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-md">
-                <FiClipboard className="text-white" size={28} />
+        <div className="px-4 py-4 sm:px-6 sm:py-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4 sm:mb-6">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="p-2 sm:p-3 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-md">
+                <FiClipboard className="text-white" size={22} />
               </div>
               <div>
-                <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Solicitudes</h1>
-                <p className="text-gray-600 mt-1 text-sm">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 tracking-tight">Solicitudes</h1>
+                <p className="text-gray-600 mt-1 text-xs sm:text-sm">
                   {roleConfig.isACP ? 'Gestión ACP - Solicitudes y requerimientos' : 'Gestión comercial - Solicitudes y seguimiento'}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-4 bg-gray-50 px-4 py-2 rounded-xl border border-gray-200/60">
+            <div className="flex items-center gap-3 bg-gray-50 px-3 py-2 rounded-xl border border-gray-200/60">
               <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">{stats.total} Solicitudes</p>
-                <p className="text-xs text-gray-600">
+                <p className="text-xs sm:text-sm font-semibold text-gray-900">{stats.total} Solicitudes</p>
+                <p className="text-[11px] sm:text-xs text-gray-600">
                   {stats.approved} aprobadas • {stats.pending} pendientes
                 </p>
               </div>
@@ -478,17 +485,17 @@ const SolicitudesPage = () => {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`
-                      flex items-center gap-2 px-5 py-3 text-sm font-semibold rounded-xl transition-all duration-200 min-w-max
+                      flex items-center gap-2 px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 min-w-max
                       ${isActive
                         ? 'bg-gradient-to-r from-blue-500 to-blue-600 text-white shadow-md shadow-blue-500/25'
                         : 'text-gray-600 bg-white border border-gray-200 hover:bg-gray-50 hover:text-gray-900 hover:shadow-sm'
                       }
                     `}
                   >
-                    <Icon size={16} className={isActive ? 'text-white' : 'text-gray-500'} />
+                    <Icon size={14} className={isActive ? 'text-white' : 'text-gray-500'} />
                     <span className="hidden sm:inline">{tab.label}</span>
                     {tab.id === 'overview' && stats.total > 0 && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full ml-1 ${
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full ml-1 ${
                         isActive ? 'bg-white/20 text-white' : 'bg-blue-100 text-blue-600'
                       }`}>
                         {stats.total}
@@ -526,6 +533,12 @@ const SolicitudesPage = () => {
           // Aquí podríamos recargar datos si fuera necesario
         }}
       />
+      {personnelModalOpen && (
+        <PersonnelRequestForm
+          onClose={() => setPersonnelModalOpen(false)}
+          onSuccess={() => setPersonnelModalOpen(false)}
+        />
+      )}
 
       <CreateRequestModal
         open={createClienteModalOpen}
@@ -697,14 +710,7 @@ const SolicitudesPage = () => {
             timestamp: new Date().toISOString()
           });
         }}
-      />
-
-      <BusinessCaseRequestModal
-        isOpen={businessCaseModalOpen}
-        onClose={() => closeModal('BUSINESS_CASE')}
-      />
-
-      <EquipmentRequestModal
+      /><EquipmentRequestModal
         isOpen={equipmentModalOpen}
         onClose={() => closeModal('EQUIPMENT')}
       />
@@ -741,3 +747,5 @@ const SolicitudesPage = () => {
 };
 
 export default SolicitudesPage;
+
+

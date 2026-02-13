@@ -23,7 +23,7 @@ const pool = new Pool({
   database: process.env.DB_NAME || "spi_fam",
   application_name:
     process.env.DB_APPLICATION_NAME || process.env.PGAPPNAME || "spi_fam_api",
-  max: intFromEnv("DB_POOL_MAX", 20),
+  max: intFromEnv("DB_POOL_MAX", 10),
   min: intFromEnv("DB_POOL_MIN", 0),
   idleTimeoutMillis: intFromEnv("DB_IDLE_TIMEOUT_MS", 30000),
   connectionTimeoutMillis: intFromEnv("DB_CONN_TIMEOUT_MS", 5000),

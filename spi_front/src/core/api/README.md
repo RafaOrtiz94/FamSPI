@@ -96,25 +96,6 @@ useAutoUpdate(() => {
 }, [user]);
 ```
 
-### BusinessCaseWidget
-```javascript
-// Actualización automática de business cases
-useAutoUpdate(() => {
-  loadBusinessCases();
-}, []);
-```
-
-## 🔄 Ciclo de Actualización
-
-```
-1. Usuario realiza acción (POST/PUT/PATCH/DELETE)
-2. API emite evento 'data-updated' con debouncing
-3. Componentes suscritos reciben notificación
-4. Componentes actualizan datos automáticamente
-5. UI refleja cambios sin recarga manual
-```
-
-## ⚡ Beneficios
 
 ### Para Usuarios
 - ✅ **Sin recargas manuales**: UI siempre actualizada
@@ -203,3 +184,4 @@ const cachedResponse = getCachedResponse(`GET:/api/users/${userId}`);
 ---
 
 *Sistema implementado para optimizar la experiencia de usuario sin comprometer la performance del sistema.*
+

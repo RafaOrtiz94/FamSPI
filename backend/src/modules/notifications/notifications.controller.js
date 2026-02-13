@@ -55,9 +55,36 @@ const markAll = async (req, res) => {
   }
 };
 
+const remove = async (req, res) => {
+  try {
+    const removed = await service.deleteNotification(req.user.id, req.params.id);
+    if (!removed) return res.status(404).json({ ok: false, message: "No encontrada" });
+    return res.status(200).json({ ok: true, data: removed });
+  } catch (err) {
+    console.error("Error eliminando notificación", err);
+    return res
+      .status(500)
+      .json({ ok: false, message: "No se pudo eliminar la notificación" });
+  }
+};
+
+const clear = async (req, res) => {
+  try {
+    const removed = await service.clearNotifications(req.user.id);
+    return res.status(200).json({ ok: true, data: removed });
+  } catch (err) {
+    console.error("Error limpiando notificaciones", err);
+    return res
+      .status(500)
+      .json({ ok: false, message: "No se pudieron eliminar las notificaciones" });
+  }
+};
+
 module.exports = {
   list,
   create,
   markRead,
   markAll,
+  remove,
+  clear,
 };

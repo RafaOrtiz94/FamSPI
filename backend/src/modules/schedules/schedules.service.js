@@ -158,7 +158,20 @@ async function listPendingApproval(user) {
        vs.reviewed_by_email,
        vs.reviewed_at,
        vs.rejection_reason,
-       COUNT(sv.id) AS visits_count,
+       COUNT(DISTINCT sv.id) AS visits_count,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'visited') AS visits_visited,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'skipped') AS visits_skipped,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'pending') AS visits_pending,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'in_visit') AS visits_in_visit,
+       COUNT(vl.id) FILTER (
+         WHERE vl.hora_entrada IS NOT NULL
+           AND vl.hora_salida IS NOT NULL
+           AND vl.lat_entrada IS NOT NULL
+           AND vl.lng_entrada IS NOT NULL
+           AND vl.lat_salida IS NOT NULL
+           AND vl.lng_salida IS NOT NULL
+       ) AS visits_with_details,
+       AVG(vl.duracion_minutos) FILTER (WHERE vl.duracion_minutos IS NOT NULL) AS avg_duration_minutes,
        COALESCE(array_remove(array_agg(DISTINCT sv.city), NULL), '{}') AS cities,
        COALESCE(
          json_agg(
@@ -176,6 +189,10 @@ async function listPendingApproval(user) {
      FROM visit_schedules vs
      LEFT JOIN scheduled_visits sv ON sv.schedule_id = vs.id
      LEFT JOIN client_requests cr ON cr.id = sv.client_request_id
+     LEFT JOIN client_visit_logs vl
+       ON vl.client_request_id = sv.client_request_id
+      AND vl.user_email = vs.user_email
+      AND vl.visit_date = sv.planned_date
      LEFT JOIN users u ON u.email = vs.user_email
      WHERE vs.status = 'pending_approval'
      GROUP BY vs.id, u.fullname, u.name
@@ -184,6 +201,20 @@ async function listPendingApproval(user) {
   return rows.map((row) => ({
     ...row,
     visits_count: Number(row.visits_count || 0),
+    visits_visited: Number(row.visits_visited || 0),
+    visits_skipped: Number(row.visits_skipped || 0),
+    visits_pending: Number(row.visits_pending || 0),
+    visits_in_visit: Number(row.visits_in_visit || 0),
+    visits_with_details: Number(row.visits_with_details || 0),
+    avg_duration_minutes: row.avg_duration_minutes !== null ? Number(row.avg_duration_minutes) : null,
+    efficiency_ratio:
+      Number(row.visits_count || 0) > 0
+        ? Number(row.visits_visited || 0) / Number(row.visits_count || 0)
+        : null,
+    details_completion_ratio:
+      Number(row.visits_count || 0) > 0
+        ? Number(row.visits_with_details || 0) / Number(row.visits_count || 0)
+        : null,
     cities: Array.isArray(row.cities) ? row.cities : [],
     visits: Array.isArray(row.visits) ? row.visits : [],
   }));
@@ -192,15 +223,78 @@ async function listPendingApproval(user) {
 async function listTeamSchedules(user) {
   assertManager(user);
   const { rows } = await db.query(
-    `SELECT * FROM visit_schedules ORDER BY year DESC, month DESC, user_email ASC LIMIT 500`,
+    `SELECT
+       vs.*,
+       COALESCE(u.fullname, u.name, vs.user_email) AS user_name,
+       COUNT(DISTINCT sv.id) AS visits_count,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'visited') AS visits_visited,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'skipped') AS visits_skipped,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'pending') AS visits_pending,
+       COUNT(vl.id) FILTER (WHERE vl.status = 'in_visit') AS visits_in_visit,
+       COUNT(vl.id) FILTER (
+         WHERE vl.hora_entrada IS NOT NULL
+           AND vl.hora_salida IS NOT NULL
+           AND vl.lat_entrada IS NOT NULL
+           AND vl.lng_entrada IS NOT NULL
+           AND vl.lat_salida IS NOT NULL
+           AND vl.lng_salida IS NOT NULL
+       ) AS visits_with_details,
+       AVG(vl.duracion_minutos) FILTER (WHERE vl.duracion_minutos IS NOT NULL) AS avg_duration_minutes,
+       COALESCE(array_remove(array_agg(DISTINCT sv.city), NULL), '{}') AS cities,
+       (
+         SELECT COUNT(1)
+         FROM client_visit_logs cvl
+         WHERE cvl.user_email = vs.user_email
+           AND EXTRACT(MONTH FROM cvl.visit_date) = vs.month
+           AND EXTRACT(YEAR FROM cvl.visit_date) = vs.year
+           AND NOT EXISTS (
+             SELECT 1
+             FROM scheduled_visits sv2
+             WHERE sv2.schedule_id = vs.id
+               AND sv2.client_request_id = cvl.client_request_id
+               AND sv2.planned_date = cvl.visit_date
+           )
+       ) AS unexpected_client_visits
+     FROM visit_schedules vs
+     LEFT JOIN scheduled_visits sv ON sv.schedule_id = vs.id
+     LEFT JOIN client_visit_logs vl
+       ON vl.client_request_id = sv.client_request_id
+      AND vl.user_email = vs.user_email
+      AND vl.visit_date = sv.planned_date
+     LEFT JOIN users u ON u.email = vs.user_email
+     WHERE COALESCE(LOWER(u.role), '') IN ('comercial','acp_comercial','backoffice','backoffice_comercial','asesor_comercial')
+     GROUP BY vs.id, u.fullname, u.name
+     ORDER BY vs.user_email ASC, vs.year DESC, vs.month DESC
+     LIMIT 500`,
   );
-  return rows;
+  return rows.map((row) => ({
+    ...row,
+    visits_count: Number(row.visits_count || 0),
+    visits_visited: Number(row.visits_visited || 0),
+    visits_skipped: Number(row.visits_skipped || 0),
+    visits_pending: Number(row.visits_pending || 0),
+    visits_in_visit: Number(row.visits_in_visit || 0),
+    visits_with_details: Number(row.visits_with_details || 0),
+    avg_duration_minutes: row.avg_duration_minutes !== null ? Number(row.avg_duration_minutes) : null,
+    unexpected_client_visits: Number(row.unexpected_client_visits || 0),
+    efficiency_ratio:
+      Number(row.visits_count || 0) > 0
+        ? Number(row.visits_visited || 0) / Number(row.visits_count || 0)
+        : null,
+    details_completion_ratio:
+      Number(row.visits_count || 0) > 0
+        ? Number(row.visits_with_details || 0) / Number(row.visits_count || 0)
+        : null,
+    cities: Array.isArray(row.cities) ? row.cities : [],
+  }));
 }
 
 async function getScheduleDetail({ id, user }) {
-  assertAdvisor(user);
+  assertCommercial(user);
   const schedule = await findScheduleOrThrow(id);
-  ensureOwner(schedule, user);
+  if (!isManager(user)) {
+    ensureOwner(schedule, user);
+  }
   const { rows: visits } = await db.query(
     `SELECT
        sv.id,
@@ -215,14 +309,91 @@ async function getScheduleDetail({ id, user }) {
        cr.commercial_name AS client_name,
        cr.shipping_city AS client_city,
        cr.shipping_province AS client_province,
-       cr.shipping_address AS client_address
+       cr.shipping_address AS client_address,
+       vl.status AS visit_status,
+       vl.hora_entrada,
+       vl.hora_salida,
+       vl.lat_entrada,
+       vl.lng_entrada,
+       vl.lat_salida,
+       vl.lng_salida,
+       vl.observaciones,
+       vl.duracion_minutos
      FROM scheduled_visits sv
      JOIN client_requests cr ON cr.id = sv.client_request_id
+     LEFT JOIN client_visit_logs vl
+       ON vl.client_request_id = sv.client_request_id
+      AND vl.user_email = $2
+      AND vl.visit_date = sv.planned_date
      WHERE sv.schedule_id = $1
      ORDER BY sv.planned_date ASC, sv.priority ASC`,
-    [id],
+    [id, schedule.user_email],
   );
-  return { ...schedule, visits };
+  const startDate = new Date(Number(schedule.year), Number(schedule.month) - 1, 1);
+  const endDate = new Date(Number(schedule.year), Number(schedule.month), 1);
+
+  const { rows: unexpectedVisits } = await db.query(
+    `SELECT
+       id,
+       prospect_name,
+       visit_date,
+       status,
+       check_in_time,
+       check_out_time,
+       check_in_lat,
+       check_in_lng,
+       check_out_lat,
+       check_out_lng,
+       observations
+     FROM prospect_visits
+     WHERE user_email = $1
+       AND visit_date >= $2
+       AND visit_date < $3
+     ORDER BY visit_date DESC`,
+    [schedule.user_email, startDate.toISOString().slice(0, 10), endDate.toISOString().slice(0, 10)],
+  );
+
+  const { rows: unexpectedClientVisits } = await db.query(
+    `SELECT
+       vl.id,
+       vl.client_request_id,
+       cr.commercial_name AS client_name,
+       vl.visit_date,
+       vl.status,
+       vl.hora_entrada,
+       vl.hora_salida,
+       vl.lat_entrada,
+       vl.lng_entrada,
+       vl.lat_salida,
+       vl.lng_salida,
+       vl.observaciones
+     FROM client_visit_logs vl
+     JOIN client_requests cr ON cr.id = vl.client_request_id
+     WHERE vl.user_email = $1
+       AND vl.visit_date >= $2
+       AND vl.visit_date < $3
+       AND NOT EXISTS (
+         SELECT 1
+         FROM scheduled_visits sv
+         WHERE sv.schedule_id = $4
+           AND sv.client_request_id = vl.client_request_id
+           AND sv.planned_date = vl.visit_date
+       )
+     ORDER BY vl.visit_date DESC, vl.hora_entrada DESC NULLS LAST`,
+    [
+      schedule.user_email,
+      startDate.toISOString().slice(0, 10),
+      endDate.toISOString().slice(0, 10),
+      schedule.id,
+    ],
+  );
+
+  return {
+    ...schedule,
+    visits,
+    unexpected_visits: unexpectedVisits,
+    unexpected_client_visits: unexpectedClientVisits,
+  };
 }
 
 async function createSchedule({ month, year, notes, user }) {

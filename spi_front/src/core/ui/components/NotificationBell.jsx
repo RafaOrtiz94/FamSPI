@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FiBell, FiCheckCircle, FiAlertTriangle, FiInfo, FiZap } from "react-icons/fi";
+import { FiBell, FiCheckCircle, FiAlertTriangle, FiInfo, FiZap, FiX } from "react-icons/fi";
 import { useNotifications } from "../NotificationContext";
 
 const typeIcon = {
@@ -16,7 +16,15 @@ const formatDate = (dateString) => {
 };
 
 export default function NotificationBell() {
-  const { notifications, unreadCount, markAsRead, markAll, loading } = useNotifications();
+  const {
+    notifications,
+    unreadCount,
+    markAsRead,
+    markAll,
+    removeNotification,
+    clearAll,
+    loading,
+  } = useNotifications();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
@@ -45,9 +53,26 @@ export default function NotificationBell() {
     );
   };
 
+  const resolveTargetPath = (notification) => {
+    const meta = notification?.meta || {};
+    return (
+      meta.target_path ||
+      meta.targetPath ||
+      meta.data?.target_path ||
+      meta.data?.targetPath ||
+      null
+    );
+  };
+
   const handleItemClick = async (notification) => {
     if (!notification) return;
     await markAsRead(notification.id);
+    const targetPath = resolveTargetPath(notification);
+    if (targetPath) {
+      setOpen(false);
+      navigate(targetPath);
+      return;
+    }
     const purchaseId = resolvePurchaseId(notification);
     if (purchaseId) {
       setOpen(false);
@@ -79,12 +104,21 @@ export default function NotificationBell() {
                 {loading ? "Cargando..." : `${unreadCount} sin leer`}
               </p>
             </div>
-            <button
-              onClick={markAll}
-              className="text-[12px] text-accent hover:text-accent-dark"
-            >
-              Marcar todas
-            </button>
+            <div className="flex items-center gap-2 text-[12px]">
+              <button
+                onClick={markAll}
+                className="text-accent hover:text-accent-dark"
+              >
+                Marcar todas
+              </button>
+              <span className="text-slate-300">|</span>
+              <button
+                onClick={clearAll}
+                className="text-rose-500 hover:text-rose-600"
+              >
+                Limpiar
+              </button>
+            </div>
           </div>
 
           <div className="max-h-[70vh] overflow-y-auto">
@@ -92,10 +126,18 @@ export default function NotificationBell() {
               <p className="p-4 text-sm text-slate-500">No hay notificaciones</p>
             )}
             {recent.map((notif) => (
-              <button
+              <div
                 key={notif.id}
+                role="button"
+                tabIndex={0}
                 onClick={() => handleItemClick(notif)}
-                className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-slate-50 transition ${notif.status !== "read" ? "bg-amber-50/70" : ""
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    handleItemClick(notif);
+                  }
+                }}
+                className={`flex w-full gap-3 px-4 py-3 text-left hover:bg-slate-50 transition cursor-pointer ${notif.status !== "read" ? "bg-amber-50/70" : ""
                   }`}
               >
                 <div className="mt-1">
@@ -118,10 +160,21 @@ export default function NotificationBell() {
                   )}
                   <p className="text-[11px] text-slate-400 mt-1">{formatDate(notif.created_at)}</p>
                 </div>
+                <button
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    removeNotification(notif.id);
+                  }}
+                  className="mt-1 text-slate-300 hover:text-rose-500"
+                  title="Eliminar"
+                  aria-label="Eliminar notificacion"
+                >
+                  <FiX size={16} />
+                </button>
                 {notif.status !== "read" && (
                   <span className="mt-1 h-2 w-2 rounded-full bg-accent" />
                 )}
-              </button>
+              </div>
             ))}
           </div>
           <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500">

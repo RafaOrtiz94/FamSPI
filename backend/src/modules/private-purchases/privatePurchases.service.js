@@ -14,6 +14,7 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const { sendAndArchive } = require("../../utils/emailArchive");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
+const businessCaseService = require('../business-case/businessCase.service');
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
 const RESERVATION_REMINDER_OFFSET_DAYS = 55;
@@ -29,6 +30,111 @@ const formatEquipmentList = (equipment = []) => {
 };
 
 class PrivatePurchasesService {
+  async ensureBusinessCaseForComodato(purchaseId, user, purchaseRow = null) {
+    const row =
+      purchaseRow ||
+      (await db.query(
+        `SELECT
+            id,
+            business_case_id,
+            offer_kind,
+            client_snapshot,
+            drive_folder_id,
+            status
+         FROM private_purchase_requests
+        WHERE id = $1
+        LIMIT 1`,
+        [purchaseId]
+      )).rows[0];
+
+    if (!row) {
+      return null;
+    }
+
+    if (row.offer_kind !== 'comodato') {
+      return null;
+    }
+
+    if (row.business_case_id) {
+      return row.business_case_id;
+    }
+
+    logger.info({
+      purchaseId,
+      status: row.status,
+      message: 'Comodato sin BC, creando automáticamente'
+    }, '[FLOW_PRIVADA][BE][BC_AUTO][START]');
+
+    const clientSnapshot = row.client_snapshot || {};
+    const rawClientId =
+      clientSnapshot.client_identifier ||
+      clientSnapshot.ruc_cedula ||
+      clientSnapshot.nit ||
+      null;
+    const safeClientId = this._toSafeInt(rawClientId);
+
+    const bcPayload = {
+      client_name:
+        clientSnapshot.commercial_name ||
+        clientSnapshot.name ||
+        clientSnapshot.legal_person_business_name ||
+        'Cliente',
+      client_id:
+        clientSnapshot.client_identifier ||
+        clientSnapshot.ruc_cedula ||
+        clientSnapshot.nit ||
+        null,
+      bc_purchase_type: 'private_comodato',
+      bc_stage: 'pending_backoffice',
+      bc_progress: { source: 'private_purchase', purchaseId },
+      extra: { private_purchase_id: purchaseId },
+      modern_bc_metadata: { private_purchase_id: purchaseId, offer_kind: row.offer_kind },
+      assigned_to_email: user?.email,
+      assigned_to_name: user?.fullname || user?.name || null
+    };
+
+    try {
+      const bcRecord = await businessCaseService.createBusinessCase(
+        { ...bcPayload, client_id: safeClientId },
+        user
+      );
+      const bcId = bcRecord?.business_case_id || bcRecord?.id || null;
+      if (!bcId) {
+        logger.warn({ purchaseId }, 'Business Case automático creado sin ID');
+        return null;
+      }
+
+      await db.query(
+        'UPDATE private_purchase_requests SET business_case_id = $1, updated_at = NOW() WHERE id = $2',
+        [bcId, purchaseId]
+      );
+
+      try {
+        if (row.status !== PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS) {
+          await this.transitionState(
+            purchaseId,
+            PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS,
+            user,
+            'Business Case creado automáticamente'
+          );
+        }
+      } catch (transitionError) {
+        logger.warn({ transitionError, purchaseId }, 'No se pudo transicionar tras crear BC automático');
+      }
+
+      logger.info({
+        purchaseId,
+        bcId,
+        status: row.status
+      }, '[FLOW_PRIVADA][BE][BC_AUTO][CREATED]');
+
+      return bcId;
+    } catch (bcError) {
+      logger.error({ bcError, purchaseId }, 'Error creando Business Case automático para comodato');
+      return null;
+    }
+  }
+
   /**
    * Crear nueva solicitud de compra privada
    */
@@ -102,8 +208,9 @@ class PrivatePurchasesService {
         AND created_at > NOW() - INTERVAL '24 hours'
       `, [user.id, clientData.name]);
 
-      if (recentCheck.rows.length > 0) {
-        throw new Error('Ya existe una solicitud similar creada en las รบltimas 24 horas');
+      // Se permite hasta 3 solicitudes similares por día (antes era 1)
+      if (recentCheck.rows.length >= 3) {
+        throw new Error('Has alcanzado el límite de 3 solicitudes similares creadas en las últimas 24 horas');
       }
 
       // Crear registro en private_purchase_requests
@@ -136,25 +243,60 @@ class PrivatePurchasesService {
         role: userRole
       });
 
-      // Enviar notificaciรณn de creaciรณn
-      setImmediate(async () => {
+      // Enviar notificaciรณn de creaciรณn (síncrono para Cloud Run)
+      try {
+        await notificationManager.sendNotification({
+          userId: user.id,
+          template: 'private_purchase_created',
+          data: {
+            creator_name: user.fullname || user.name || 'Usuario',
+            client_name: clientData.name || 'Cliente sin nombre',
+            purchase_id: purchaseId
+          },
+          source: 'private_purchase.creation',
+          email: true,
+          chat: false
+        });
+      } catch (error) {
+        console.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
+      }
+
+      // Notificar a backoffice (síncrono para Cloud Run)
+      try {
+        const recipients = await PrivatePurchaseStateMachine._getUsersByRole('backoffice_comercial');
+        if (!recipients.length) return;
+        const payload = {
+          purchase_id: purchaseId,
+          client_name: clientData.name || clientData.commercial_name || 'Cliente sin nombre',
+          offer_kind: offerKind
+        };
+        await Promise.all(recipients.map((recipient) => notificationManager.sendNotification({
+          userId: recipient.id,
+          template: 'private_purchase_request_submitted',
+          data: payload,
+          email: true,
+          chat: true,
+          source: 'private_purchase.request'
+        })));
+      } catch (error) {
+        logger.warn({ error, purchaseId }, 'No se pudo notificar a backoffice de nueva solicitud');
+      }
+
+      if (offerKind === 'comodato') {
+        await this.ensureBusinessCaseForComodato(purchaseId, user, {
+          business_case_id: null,
+          offer_kind: offerKind,
+          client_snapshot: clientData,
+          drive_folder_id: null,
+          status: PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE
+        });
+
         try {
-          await notificationManager.sendNotification({
-            userId: user.id,
-            template: 'private_purchase_created',
-            data: {
-              creator_name: user.fullname || user.name || 'Usuario',
-              client_name: clientData.name || 'Cliente sin nombre',
-              purchase_id: purchaseId
-            },
-            source: 'private_purchase.creation',
-            email: true,
-            chat: false
-          });
-        } catch (error) {
-          console.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
+          await this.forwardToAcp(purchaseId, user);
+        } catch (forwardError) {
+          logger.warn({ forwardError, purchaseId }, 'No se pudo enviar automáticamente a ACP para comodato');
         }
-      });
+      }
 
       return {
         id: purchaseId,
@@ -251,6 +393,7 @@ class PrivatePurchasesService {
       `SELECT offer_document_id, offer_signed_document_id, contract_document_id, contract_client_signed_document_id, contract_signed_document_id,
               comodato_document_id, delivery_act_document_id, delivery_act_draft_document_id, delivery_act_logistics_signed_document_id, delivery_guides_json,
               inspection_acta_document_id,
+              availability_email_file_id, reservation_email_file_id, reservation_calendar_event_link,
               client_snapshot, client_request_id
          FROM private_purchase_requests
         WHERE id = $1`,
@@ -261,17 +404,30 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    const row = rows[0];
-    const documents = [];
-    const addDoc = (docType, fileId, fileName = null) => {
-      if (!fileId) return;
-      documents.push({
-        doc_type: docType,
-        drive_file_id: fileId,
-        doc_name: fileName,
-        link: driveLink(fileId)
-      });
-    };
+    const row = rows[0];      const documents = [];
+      const normalizeLink = (fileRef) => {
+        if (!fileRef) return null;
+        if (typeof fileRef === 'string' && fileRef.startsWith('http')) return fileRef;
+        return driveLink(fileRef);
+      };
+      const addDoc = (docType, fileId, fileName = null) => {
+        if (!fileId) return;
+        documents.push({
+          doc_type: docType,
+          drive_file_id: fileId,
+          doc_name: fileName,
+          link: normalizeLink(fileId)
+        });
+      };
+      const addDocLink = (docType, link, fileName = null) => {
+        if (!link) return;
+        documents.push({
+          doc_type: docType,
+          drive_file_id: null,
+          doc_name: fileName,
+          link
+        });
+      };
 
     const clientRequestId =
       row.client_request_id ||
@@ -305,7 +461,10 @@ class PrivatePurchasesService {
     addDoc('DELIVERY_ACT_DRAFT', row.delivery_act_draft_document_id);
     addDoc('DELIVERY_ACT_LOGISTICS_SIGNED', row.delivery_act_logistics_signed_document_id);
     addDoc('DELIVERY_ACT', row.delivery_act_document_id);
-    addDoc('COMODATO', row.comodato_document_id);
+      addDoc('COMODATO', row.comodato_document_id);
+      addDoc('AVAILABILITY_EMAIL', row.availability_email_file_id);
+      addDoc('RESERVATION_EMAIL', row.reservation_email_file_id);
+      addDocLink('RESERVATION_EVENT', row.reservation_calendar_event_link);
     const deliveryGuides = Array.isArray(row.delivery_guides_json) ? row.delivery_guides_json : [];
     deliveryGuides.forEach((guide) => {
       addDoc(
@@ -862,21 +1021,6 @@ class PrivatePurchasesService {
 
     await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SIGNED, user, 'Oferta firmada recibida');
 
-    const updated = rows[0];
-    if (updated && !updated.client_registered_at) {
-      const approval = await this.checkClientApprovalStatus(updated.client_snapshot, updated);
-      if (approval?.isApproved) {
-        await this.updateClientRegistration(purchaseId, approval.clientId, user);
-      } else {
-        await this.transitionState(
-          purchaseId,
-          PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED,
-          user,
-          'Cliente no registrado, solicitar registro'
-        );
-      }
-    }
-
     return rows[0];
   }
 
@@ -908,7 +1052,7 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    if (!isManagerRole && (!existingRows[0].inspection_request_id || !existingRows[0].inspection_acta_document_id)) {
+    if (!isManagerRole && !existingRows[0].inspection_request_id) {
       const error = new Error('Debe solicitar inspeccion de ambiente antes de subir el contrato');
       error.status = 409;
       error.code = 'INSPECTION_REQUIRED';
@@ -1077,6 +1221,8 @@ class PrivatePurchasesService {
       'Contrato firmado por cliente cargado, pendiente aprobacion de gerencia'
     );
 
+    await this.ensureBusinessCaseForComodato(purchaseId, user, updatedRows[0]);
+
     return updatedRows[0];
   }
 
@@ -1229,7 +1375,7 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(
       `SELECT id, status, provider_response_at, equipment, provider_email, reservation_email_sent_at,
-              client_snapshot, drive_folder_id
+              availability_email_sent_at, client_snapshot, drive_folder_id
          FROM private_purchase_requests
         WHERE id = $1`,
       [id]
@@ -1250,6 +1396,13 @@ class PrivatePurchasesService {
       const error = new Error('La respuesta del proveedor ya fue registrada');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
+      throw error;
+    }
+
+    if (!purchase.availability_email_sent_at) {
+      const error = new Error('Debe enviar el correo de disponibilidad antes de registrar respuesta');
+      error.status = 409;
+      error.code = 'AVAILABILITY_EMAIL_NOT_SENT';
       throw error;
     }
 
@@ -1402,7 +1555,6 @@ class PrivatePurchasesService {
   async requestClientRegistration(purchaseId, user) {
     console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][REQUEST] Solicitando registro de cliente para purchase ${purchaseId}`);
 
-    // Obtener datos de la compra privada
     const purchaseQuery = `SELECT status, client_snapshot FROM private_purchase_requests WHERE id = $1`;
     const { rows: purchaseRows } = await db.query(purchaseQuery, [purchaseId]);
 
@@ -1412,22 +1564,42 @@ class PrivatePurchasesService {
 
     const purchase = purchaseRows[0];
 
-    // Validar que esté en estado correcto para solicitar registro
-    if (purchase.status !== PRIVATE_PURCHASE_STATES.OFFER_SIGNED) {
-      throw new Error('La solicitud debe estar en estado "Oferta firmada" para solicitar registro de cliente');
+    const allowedStates = new Set([
+      PRIVATE_PURCHASE_STATES.OFFER_SIGNED,
+      PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED
+    ]);
+
+    if (!allowedStates.has(purchase.status)) {
+      const error = new Error('La solicitud debe estar en estado "Oferta firmada" o "Registro solicitado" para enviar o actualizar la solicitud de registro de cliente');
+      error.status = 409;
+      error.code = 'INVALID_STATE';
+      throw error;
     }
 
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][REQUEST] Cambiando estado a CLIENT_REGISTRATION_REQUESTED`);
+    const clientName = purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente';
 
-    // Cambiar estado a registro solicitado
-    await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED, user, 'Solicitud de registro de cliente enviada');
+    const approval = await this.checkClientApprovalStatus(purchase.client_snapshot, { id: purchaseId });
+    if (approval?.isApproved) {
+      await this.updateClientRegistration(purchaseId, approval.clientId, user);
+      return {
+        registered: true,
+        autoRegistered: true,
+        clientId: approval.clientId,
+      };
+    }
 
-    // Notificar a backoffice que hay una solicitud pendiente
-    setImmediate(async () => {
+    const alreadyRequested = purchase.status === PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED;
+
+    if (!alreadyRequested) {
+      await this.transitionState(
+        purchaseId,
+        PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED,
+        user,
+        'Solicitud de registro de cliente enviada'
+      );
+
       try {
         const backofficeUsers = await this._getUsersByRole('backoffice_comercial');
-        const clientName = purchase.client_snapshot?.commercial_name || purchase.client_snapshot?.name || 'Cliente';
-
         for (const recipient of backofficeUsers) {
           await notificationManager.sendNotification({
             userId: recipient.id,
@@ -1445,9 +1617,13 @@ class PrivatePurchasesService {
       } catch (error) {
         console.warn('Error notificando solicitud de registro cliente:', error);
       }
-    });
+    }
 
-    return { requested: true };
+    return {
+      requested: true,
+      alreadyRequested,
+      clientName
+    };
   }
 
   /**
@@ -1545,28 +1721,26 @@ class PrivatePurchasesService {
       `Cliente aprobado registrado: ${approvedClient.commercial_name}`
     );
 
-    // Notificar a backoffice que puede subir el contrato
-    setImmediate(async () => {
-      try {
-        const backofficeUsers = await this._getUsersByRole('backoffice_comercial');
+    // Notificar a backoffice que puede subir el contrato (síncrono para Cloud Run)
+    try {
+      const backofficeUsers = await this._getUsersByRole('backoffice_comercial');
 
-        for (const recipient of backofficeUsers) {
-          await notificationManager.sendNotification({
-            userId: recipient.id,
-            template: 'private_purchase_client_approved_contract_pending',
-            data: {
-              client_name: approvedClient.commercial_name || 'Cliente',
-              purchase_id: purchaseId
-            },
-            source: 'private_purchase.client_registration',
-            email: true,
-            chat: true
-          });
-        }
-      } catch (error) {
-        console.warn('Error enviando notificacion de cliente aprobado:', error);
+      for (const recipient of backofficeUsers) {
+        await notificationManager.sendNotification({
+          userId: recipient.id,
+          template: 'private_purchase_client_approved_contract_pending',
+          data: {
+            client_name: approvedClient.commercial_name || 'Cliente',
+            purchase_id: purchaseId
+          },
+          source: 'private_purchase.client_registration',
+          email: true,
+          chat: true
+        });
       }
-    });
+    } catch (error) {
+      console.warn('Error enviando notificacion de cliente aprobado:', error);
+    }
 
     return rows[0];
   }
@@ -1676,30 +1850,28 @@ class PrivatePurchasesService {
     const result = rows[0];
     result.calendar = calendarStatus;
 
-    // Notificacion de fechas establecidas (asincrona)
-    setImmediate(async () => {
-      try {
-        const logisticsUsers = await this._getUsersByRole('jefe_logistica');
-        const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
+    // Notificacion de fechas establecidas (síncrona para Cloud Run)
+    try {
+      const logisticsUsers = await this._getUsersByRole('jefe_logistica');
+      const deliveryLabel = `${startDate?.toLocaleDateString('es-ES')} - ${endDate?.toLocaleDateString('es-ES')}`;
 
-        for (const recipient of logisticsUsers) {
-          await notificationManager.sendNotification({
-            userId: recipient.id,
-            template: 'private_purchase_delivery_date_set',
-            data: {
-              client_name: clientData.name || 'Cliente',
-              delivery_dates: deliveryLabel,
-              purchase_id: purchaseId
-            },
-            source: 'private_purchase.delivery_dates',
-            email: true,
-            chat: true
-          });
-        }
-      } catch (error) {
-        console.warn('Error enviando notificacion de fechas entrega:', error);
+      for (const recipient of logisticsUsers) {
+        await notificationManager.sendNotification({
+          userId: recipient.id,
+          template: 'private_purchase_delivery_date_set',
+          data: {
+            client_name: clientData.name || 'Cliente',
+            delivery_dates: deliveryLabel,
+            purchase_id: purchaseId
+          },
+          source: 'private_purchase.delivery_dates',
+          email: true,
+          chat: true
+        });
       }
-    });
+    } catch (error) {
+      console.warn('Error enviando notificacion de fechas entrega:', error);
+    }
 
     return result;
   }
@@ -2515,48 +2687,73 @@ class PrivatePurchasesService {
 
     const query = `
       SELECT
-        id,
-        client_snapshot,
-        equipment,
-        status,
-        offer_kind,
-        offer_valid_until,
-        created_at,
-        updated_at,
-        created_by,
-        created_by_email,
-        notes,
-        offer_document_id,
-        offer_signed_document_id,
-        contract_document_id,
-        contract_client_signed_document_id,
-        contract_signed_document_id,
-        delivery_act_document_id,
-        delivery_act_draft_document_id,
-        delivery_act_logistics_signed_document_id,
-        delivery_act_assigned_to_user_id,
-        delivery_act_assigned_to_email,
-        delivery_act_assigned_to_name,
-        delivery_act_assigned_at,
-        delivery_act_assigned_by,
-        delivery_act_logistics_signed_at,
-        delivery_act_logistics_signed_by,
-        delivery_start_at,
-        delivery_end_at,
-        delivery_notes,
-        comodato_document_id,
-        client_registered_at,
-        provider_email,
-        availability_request_notes,
-        availability_email_sent_at,
-        availability_email_file_id,
-        provider_response,
-        provider_response_at,\n        reservation_email_sent_at,\n        reservation_email_file_id,\n        reservation_calendar_event_id,\n        reservation_calendar_event_link,\n        includes_starter_kit,\n        operations_notes,\n        estimated_arrival_at,\n        estimated_arrival_updated_at,\n        equipment_arrived_at,\n        equipment_arrived_by,
-        dispatch_items_json,
-        dispatch_notes,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at\n      FROM private_purchase_requests
+        p.id,
+        p.client_snapshot,
+        p.equipment,
+        p.status,
+        p.offer_kind,
+        p.offer_valid_until,
+        p.created_at,
+        p.updated_at,
+        p.created_by,
+        p.created_by_email,
+        p.notes,
+        p.offer_document_id,
+        p.offer_signed_document_id,
+        p.offer_signed_uploaded_at,
+        p.contract_document_id,
+        p.contract_client_signed_document_id,
+        p.contract_client_signed_uploaded_at,
+        p.contract_signed_document_id,
+        p.contract_signed_uploaded_at,
+        p.manager_contract_decision,
+        p.manager_contract_decision_at,
+        p.manager_contract_decision_by,
+        p.delivery_act_document_id,
+        p.delivery_act_draft_document_id,
+        p.delivery_act_logistics_signed_document_id,
+        p.delivery_act_assigned_to_user_id,
+        p.delivery_act_assigned_to_email,
+        p.delivery_act_assigned_to_name,
+        p.delivery_act_assigned_at,
+        p.delivery_act_assigned_by,
+        p.delivery_act_logistics_signed_at,
+        p.delivery_act_logistics_signed_by,
+        p.delivery_start_at,
+        p.delivery_end_at,
+        p.delivery_notes,
+        p.delivery_guides_json,
+        p.delivery_guides_uploaded_at,
+        p.comodato_document_id,
+        p.client_registered_at,
+        p.provider_email,
+        p.availability_request_notes,
+        p.availability_email_sent_at,
+        p.availability_email_file_id,
+        p.provider_response,
+        p.provider_response_at,
+        p.reservation_email_sent_at,
+        p.reservation_email_file_id,
+        p.reservation_calendar_event_id,
+        p.reservation_calendar_event_link,
+        p.includes_starter_kit,
+        p.operations_notes,
+        p.estimated_arrival_at,
+        p.estimated_arrival_updated_at,
+        p.equipment_arrived_at,
+        p.equipment_arrived_by,
+        p.dispatch_items_json,
+        p.dispatch_notes,
+        p.inspection_request_id,
+        p.inspection_acta_document_id,
+        p.inspection_requested_at,
+        COALESCE(u_creator.fullname, u_creator.name) AS created_by_name,
+        COALESCE(u_manager.fullname, u_manager.name) AS manager_contract_decision_by_name
+      FROM private_purchase_requests p
+      LEFT JOIN users u_creator ON u_creator.id = p.created_by
+      LEFT JOIN users u_manager ON u_manager.id = p.manager_contract_decision_by
       WHERE ${whereClause}
-      ORDER BY created_at DESC
+      ORDER BY p.created_at DESC
     `;
 
     const { rows } = await db.query(query, params);
@@ -2790,6 +2987,17 @@ class PrivatePurchasesService {
       .map((line) => line.trim())
       .filter(Boolean)
       .slice(0, 3);
+  }
+
+  _toSafeInt(value) {
+    if (value === undefined || value === null) return null;
+    const digits = String(value).trim().replace(/[^\d-]/g, '');
+    if (digits === '') return null;
+    const num = Number(digits);
+    if (!Number.isFinite(num) || num > 2147483647 || num < -2147483648) {
+      return null;
+    }
+    return num;
   }
 
   _getSnapshotSources(snapshot) {

@@ -36,17 +36,10 @@ export const clearTokens = () => {
    ========================================================== */
 export const googleLogin = () => {
   try {
-    // Para build con Caddy, usar URL relativa para que Caddy haga proxy
-    // Para desarrollo con npm start, usar la configuración del proxy setupProxy.js
-    const isProductionBuild = process.env.NODE_ENV === 'production';
-
-    if (isProductionBuild) {
-      // En build, usar URL relativa - Caddy hará proxy de /api/*
-      return '/api/v1/auth/google';
-    } else {
-      // En desarrollo con npm start, usar setupProxy.js
-      return '/api/v1/auth/google';
-    }
+    const baseUrl = process.env.REACT_APP_API_ABSOLUTE_URL || "";
+    // Asegurarse de que no termine en /api/v1 si ya está incluido o manejarlo
+    const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+    return `${cleanBaseUrl}/auth/google`;
   } catch (err) {
     console.error("❌ Error generando URL de login:", err);
     alert("No se pudo conectar con el servidor de autenticación.");

@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
     FiTool,
@@ -7,6 +7,15 @@ import {
     FiShield,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
+import Button from "../../../../core/ui/components/Button";
+import Table from "../../../../core/ui/components/Table";
+import Alert from "../../../../core/ui/components/Alert";
+import EquiposManagement from "./EquiposManagement";
+import DeterminacionesManagement from "./DeterminacionesManagement";
+import ConsumiblesManagement from "./ConsumiblesManagement";
+import ControlesManagement from "./ControlesManagement";
+import ReactivosManagement from "./ReactivosManagement";
+import PiezasMantenimientoManagement from "./PiezasMantenimientoManagement";
 
 import { DashboardHeader, SectionTitle } from "../../../../core/ui/layouts/DashboardLayout";
 import AttendanceWidget from "../../../../core/ui/widgets/AttendanceWidget";

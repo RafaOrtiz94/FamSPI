@@ -2,6 +2,7 @@ import {
   FiUserPlus,
   FiCreditCard,
   FiUsers,
+  FiUser,
   FiClipboard,
   FiTruck,
   FiCheckCircle,
@@ -47,6 +48,17 @@ export const REQUEST_TYPES_CONFIG = {
     bgClass: "bg-gradient-to-r from-orange-600 to-orange-700 hover:from-orange-700 hover:to-orange-800",
     iconBgClass: "bg-orange-100 text-orange-600",
     emptyMessage: "No has solicitado permisos"
+  },
+  personal: {
+    id: 'personal',
+    label: "Solicitud de Personal",
+    title: "Solicitudes de Personal",
+    icon: FiUser,
+    color: "teal",
+    subtitle: "Personal",
+    bgClass: "bg-gradient-to-r from-teal-600 to-teal-700 hover:from-teal-700 hover:to-teal-800",
+    iconBgClass: "bg-teal-100 text-teal-600",
+    emptyMessage: "No has creado solicitudes de personal"
   },
   inspection: {
     id: 'inspection',
@@ -179,6 +191,7 @@ export const getAvailableActions = (user) => {
   const roleName = (user?.role_name || user?.role || "").toLowerCase();
   const isACP = roleName.includes('acp');
   const isBackofficeCommercial = roleName === "backoffice_comercial";
+  const isJefeComercial = roleName.includes("jefe_comercial") || roleName.includes("jefe comercial");
 
   const baseActions = ["cliente", "compra", "permisos"];
   const acpActions = ["cliente", "compra", "permisos"];
@@ -190,6 +203,8 @@ export const getAvailableActions = (user) => {
     availableActionIds = backofficeCommercialActions;
   } else if (isACP) {
     availableActionIds = acpActions;
+  } else if (isJefeComercial) {
+    availableActionIds = [...fullActions, "personal"];
   } else {
     availableActionIds = fullActions;
   }

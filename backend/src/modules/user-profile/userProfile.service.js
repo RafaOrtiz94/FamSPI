@@ -121,6 +121,83 @@ const getIdentity = async (userId) => {
   return rows[0];
 };
 
+const PROFILE_SYNC_KEYS = [
+  'personal.telefono_personal',
+  'personal.email_personal',
+  'personal.estado_civil',
+  'personal.genero',
+  'personal.tipo_sangre',
+  'personal.lugar_nacimiento',
+  'personal.fecha_nacimiento',
+  'domicilio.ciudad_domicilio',
+  'domicilio.direccion_domicilio',
+  'domicilio.telefono_fijo',
+  'emergencia.persona_contacto',
+  'emergencia.telefono_contacto',
+  'estudios.nivel_instruccion',
+  'estudios.titulo_tercer_nivel',
+  'estudios.universidad_tercer_nivel',
+  'estudios.titulo_cuarto_nivel',
+  'estudios.universidad_cuarto_nivel',
+  'laboral.fecha_ingreso',
+  'laboral.cargo',
+  'laboral.area',
+  'laboral.telefono_celular_famproject',
+  'laboral.email_famproject'
+];
+
+const getNested = (obj, path) => {
+  if (!obj) return undefined;
+  return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
+};
+
+const setNested = (obj, path, value) => {
+  let ref = obj;
+  path.forEach((key, idx) => {
+    if (idx === path.length - 1) {
+      ref[key] = value;
+    } else {
+      if (!ref[key] || typeof ref[key] !== 'object') ref[key] = {};
+      ref = ref[key];
+    }
+  });
+};
+
+const pickCollaboratorProfile = (profile = {}) => {
+  const result = {};
+  PROFILE_SYNC_KEYS.forEach((key) => {
+    const path = key.split('.');
+    const value = getNested(profile, path);
+    if (value !== undefined) {
+      setNested(result, path, value);
+    }
+  });
+  return result;
+};
+
+const mergeCollaboratorIntoProfile = (metadata = {}, collaboratorProfile = {}) => {
+  const safe = sanitizeMetadata(metadata);
+  const merged = { ...safe };
+  const synced = pickCollaboratorProfile(collaboratorProfile);
+  Object.entries(synced).forEach(([section, data]) => {
+    merged[section] = { ...(merged[section] || {}), ...data };
+  });
+  return merged;
+};
+
+const mergeProfileIntoCollaborator = (collabProfile = {}, metadata = {}) => {
+  const next = { ...(collabProfile || {}) };
+  PROFILE_SYNC_KEYS.forEach((key) => {
+    const path = key.split('.');
+    const incoming = getNested(metadata, path);
+    if (incoming !== undefined) {
+      setNested(next, path, incoming);
+    }
+  });
+  return next;
+};
+
+
 const getProfile = async (userId) => {
   const { rows } = await db.query(
     `SELECT id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at
@@ -132,6 +209,19 @@ const getProfile = async (userId) => {
   if (!rows[0]) return null;
   return mapProfileRow(rows[0]);
 };
+
+const ensureUserProfileMeta = async (userId, defaults = {}) => {
+  const { rows } = await db.query(
+    `INSERT INTO user_profile (user_id, metadata, preferences, created_at, updated_at)
+     VALUES ($1, $2, $3, NOW(), NOW())
+     ON CONFLICT (user_id)
+     DO UPDATE SET metadata = user_profile.metadata
+     RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
+    [userId, defaults, {}]
+  );
+  return mapProfileRow(rows[0]);
+};
+
 
 const createProfile = async ({ userId, metadata = {}, preferences = {}, avatar }) => {
   const identity = await getIdentity(userId);
@@ -199,6 +289,26 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
   );
 
   const profile = mapProfileRow(rows[0]);
+
+  try {
+    const { rows: collabRows } = await db.query(
+      `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
+      [userId]
+    );
+    const collabProfile = collabRows[0]?.profile || {};
+    const mergedCollaboratorProfile = mergeProfileIntoCollaborator(collabProfile, mergedMetadata);
+
+    await db.query(
+      `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id)
+       DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+      [userId, mergedCollaboratorProfile, userId]
+    );
+  } catch (syncErr) {
+    logger.warn({ syncErr, userId }, "No se pudo sincronizar perfil con colaborador");
+  }
+
   await auditChange({ userId, action: "actualizar", before: current, after: profile });
   return profile;
 };
@@ -309,7 +419,34 @@ const auditChange = async ({ userId, action, before, after }) => {
 
 const getProfileWithIdentity = async (userId) => {
   const identity = await getIdentity(userId);
-  const profile = (await getProfile(userId)) || null;
+  let profile = (await getProfile(userId)) || null;
+
+  const { rows: collabRows } = await db.query(
+    `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
+    [userId]
+  );
+  const collaboratorProfile = collabRows[0]?.profile || {};
+
+  if (!profile) {
+    profile = await ensureUserProfileMeta(userId, {});
+  }
+
+  const mergedMetadata = mergeCollaboratorIntoProfile(profile.metadata || {}, collaboratorProfile);
+
+  if (JSON.stringify(mergedMetadata) !== JSON.stringify(profile.metadata || {})) {
+    const { rows } = await db.query(
+      `UPDATE user_profile
+       SET metadata = $2,
+           updated_at = NOW()
+       WHERE user_id = $1
+       RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
+      [userId, mergedMetadata]
+    );
+    profile = mapProfileRow(rows[0]);
+  } else {
+    profile = mapProfileRow({ ...profile, metadata: mergedMetadata });
+  }
+
   return { identity, profile };
 };
 

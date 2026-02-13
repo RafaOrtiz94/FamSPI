@@ -345,9 +345,11 @@ const Usuarios = () => {
             </div>
           </form>
         </Modal>
-      )}
     </div>
   );
 };
 
 export default Usuarios;
+
+
+

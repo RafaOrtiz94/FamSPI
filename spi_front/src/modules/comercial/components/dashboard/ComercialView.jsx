@@ -444,12 +444,6 @@ const ComercialView = ({ onRefresh, summaryData, summaryLoading, summaryError })
             </section>
 
             {/* COMPONENTE UNIFICADO PARA SELECCIÓN DE TIPO DE COMPRA */}
-            <PurchaseTypeSelector
-                isOpen={showPurchaseTypeModal}
-                onClose={() => setShowPurchaseTypeModal(false)}
-                origin="dashboard"
-                onSelect={handlePurchaseTypeSelection}
-            />
 
 
         </>

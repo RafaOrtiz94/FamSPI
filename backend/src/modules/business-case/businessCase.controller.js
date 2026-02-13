@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const db = require("../../config/db");
 const logger = require("../../config/logger");
 const businessCaseService = require("./businessCase.service");
 const equipmentSelectionService = require("./equipmentSelection.service");
@@ -13,6 +14,10 @@ const orchestrator = require("./BusinessCaseOrchestrator.service");
 const pdfGenerator = require("./pdfGenerator.service");
 const excelExporter = require("./excelExporter.service");
 const equipmentCompatibilityService = require("./equipmentCompatibility.service");
+const { BusinessCaseDataOwnership } = require("./businessCaseDataOwnership");
+const notificationManager = require("../notifications/notificationManager");
+const BusinessCaseStateMachine = require("./businessCaseStateMachine");
+const { STATES } = require("./businessCaseStates.constants");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -36,18 +41,121 @@ const updateSchema = Joi.object({
   assigned_to_name: Joi.string().optional(),
   extra: Joi.object().optional(),
   modern_bc_metadata: Joi.object().optional(),
+  process_code: Joi.string().allow(null, '').optional(),
+  contract_object: Joi.string().allow(null, '').optional(),
 });
 
 const equipmentSchema = Joi.object({
   equipmentId: Joi.number().integer().required(),
   isPrimary: Joi.boolean().default(true),
 });
+const equipmentDetailsV2Schema = Joi.object({
+  equipment_pairs: Joi.array()
+    .items(
+      Joi.object({
+        primary_id: Joi.number().integer().required(),
+        backup_id: Joi.number().integer().allow(null),
+        backup_install_simultaneous: Joi.boolean().default(false),
+        requires_backup: Joi.boolean().default(false),
+      }),
+    )
+    .min(1)
+    .required(),
+});
 
 const determinationSchema = Joi.object({
   determinationId: Joi.number().integer().required(),
   monthlyQty: Joi.number().integer().positive(),
   annualQty: Joi.number().integer().positive(),
-}).or("monthlyQty", "annualQty");
+  monthlyQuantity: Joi.number().integer().positive(),
+  annualQuantity: Joi.number().integer().positive(),
+}).or("monthlyQty", "annualQty", "monthlyQuantity", "annualQuantity");
+
+const SECTION_ALIASES = {
+  general: "general",
+  lab: "lab",
+  equipment: "equipment",
+  lis: "lis",
+  determinations: "determinations",
+  requirement: "requirement",
+  investments: "investments",
+  prices: "prices",
+};
+
+const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
+const LOCK_ROLES = ["acp_comercial", "backoffice_comercial"];
+const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
+
+async function getUsersByRoles(roles = []) {
+  if (!roles.length) return [];
+  const { rows } = await db.query(
+    `SELECT id, email, fullname, role FROM users WHERE role = ANY($1) AND active = true`,
+    [roles]
+  );
+  return rows;
+}
+
+async function notifySectionReview({ businessCaseId, section, actor }) {
+  const recipients = await getUsersByRoles(REVIEW_ROLES);
+  await Promise.all(
+    recipients.map((user) =>
+      notificationManager.sendNotification({
+        userId: user.id,
+        template: "bc_section_review_requested",
+        data: { business_case_id: businessCaseId, section_name: section },
+        email: true,
+        chat: false,
+        source: "business_case.section_review",
+        meta: { businessCaseId, section, actor }
+      }).catch(() => null)
+    )
+  );
+}
+
+async function notifySectionLocked({ businessCaseId, section, actor }) {
+  const recipients = await getUsersByRoles(["acp_comercial", "backoffice_comercial", "jefe_comercial"]);
+  await Promise.all(
+    recipients.map((user) =>
+      notificationManager.sendNotification({
+        userId: user.id,
+        template: "bc_section_locked",
+        data: { business_case_id: businessCaseId, section_name: section },
+        email: true,
+        chat: false,
+        source: "business_case.section_locked",
+        meta: { businessCaseId, section, actor }
+      }).catch(() => null)
+    )
+  );
+}
+
+async function notifyPhase1Completed({ businessCaseId, actor }) {
+  const recipients = await getUsersByRoles(["acp_comercial", "backoffice_comercial", "jefe_comercial"]);
+  await Promise.all(
+    recipients.map((user) =>
+      notificationManager.sendNotification({
+        userId: user.id,
+        template: "bc_phase1_completed",
+        data: { business_case_id: businessCaseId },
+        email: true,
+        chat: false,
+        source: "business_case.phase1_completed",
+        meta: { businessCaseId, actor }
+      }).catch(() => null)
+    )
+  );
+}
+
+async function assertSectionEditable(businessCaseId, section, user) {
+  if (section === "investments") return;
+  const lockMap = await BusinessCaseDataOwnership.getLockStatus(businessCaseId);
+  const lockInfo = lockMap?.[section];
+  if (lockInfo?.isLocked) {
+    const error = new Error("Seccion bloqueada para edicion");
+    error.status = 409;
+    throw error;
+  }
+}
 
 async function list(req, res) {
   try {
@@ -101,7 +209,16 @@ async function update(req, res) {
     const { error, value } = updateSchema.validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
+    await assertSectionEditable(req.params.id, "general", req.user);
+
     const bc = await businessCaseService.updateBusinessCase(req.params.id, value);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({
+        businessCaseId: req.params.id,
+        section: "general",
+        actor: req.user?.email || "system",
+      });
+    }
     res.json({ ok: true, data: bc });
   } catch (err) {
     logger.error(err);
@@ -142,10 +259,13 @@ async function addDetermination(req, res) {
     const { error, value } = determinationSchema.validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
+    const monthlyQty = value.monthlyQty ?? value.monthlyQuantity;
+    const annualQty = value.annualQty ?? value.annualQuantity;
+
     const determination = await determinationsService.addDetermination(
       req.params.id,
       value.determinationId,
-      { monthlyQty: value.monthlyQty, annualQty: value.annualQty },
+      { monthlyQty, annualQty },
       req.user,
     );
     res.status(201).json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
@@ -157,16 +277,21 @@ async function addDetermination(req, res) {
 
 async function updateDetermination(req, res) {
   try {
-  const { error, value } = Joi.object({
-    monthlyQty: Joi.number().integer().positive(),
-    annualQty: Joi.number().integer().positive(),
-  }).or("monthlyQty", "annualQty").validate(req.body);
+    const { error, value } = Joi.object({
+      monthlyQty: Joi.number().integer().positive(),
+      annualQty: Joi.number().integer().positive(),
+      monthlyQuantity: Joi.number().integer().positive(),
+      annualQuantity: Joi.number().integer().positive(),
+    }).or("monthlyQty", "annualQty", "monthlyQuantity", "annualQuantity").validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
+
+    const monthlyQty = value.monthlyQty ?? value.monthlyQuantity;
+    const annualQty = value.annualQty ?? value.annualQuantity;
 
     const determination = await determinationsService.updateDeterminationQuantity(
       req.params.id,
       req.params.detId,
-      { monthlyQty: value.monthlyQty, annualQty: value.annualQty },
+      { monthlyQty, annualQty },
     );
     res.json({ ok: true, data: determination, warnings: res.locals.warnings || [] });
   } catch (err) {
@@ -334,7 +459,11 @@ async function saveLabEnvironment(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "lab", req.user);
     const result = await bcLabEnvironmentService.createLabEnvironment(id, req.body);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "lab", actor: req.user?.email || "system" });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving lab environment');
@@ -358,7 +487,11 @@ async function saveEquipmentDetails(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "equipment", req.user);
     const result = await bcEquipmentDetailsService.createEquipmentDetails(id, req.body);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving equipment details');
@@ -377,12 +510,176 @@ async function getEquipmentDetails(req, res) {
   }
 }
 
+async function getInvestmentCatalog(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const rows = await investmentsService.getCatalogWithSelections(id);
+    res.json({ ok: true, data: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error getting investment catalog');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function saveInvestmentSelection(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const role = (req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+    const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
+    const payload = { ...req.body };
+    if (!canEditPrice) {
+      delete payload.unit_price;
+    }
+    const selection = await investmentsService.upsertInvestmentSelection(id, payload, req.user);
+    res.json({ ok: true, data: selection });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error saving investment selection');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function createInvestmentCatalogItem(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const catalog = await investmentsService.createInvestmentCatalogItem(req.body);
+    let selection = null;
+    if (req.body?.selected !== false) {
+      const role = (req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+      const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
+      selection = await investmentsService.upsertInvestmentSelection(
+        id,
+        {
+          catalog_id: catalog.id,
+          selected: true,
+          notes: req.body?.notes || null,
+          quantity: req.body?.quantity ?? null,
+          characteristics: req.body?.characteristics || null,
+          unit_price: canEditPrice ? (req.body?.unit_price ?? null) : null
+        },
+        req.user
+      );
+    }
+    res.json({
+      ok: true,
+      data: {
+        ...catalog,
+        selected: selection?.selected ?? false,
+        notes: selection?.notes ?? null,
+        quantity: selection?.quantity ?? null,
+        characteristics: selection?.characteristics ?? null,
+        unit_price: selection?.unit_price ?? null,
+        updated_by_role: selection?.updated_by_role ?? null,
+        updated_by_email: selection?.updated_by_email ?? null
+      }
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error creating investment catalog item');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getConsumptionItems(req, res) {
+  try {
+    const { id } = req.params;
+    const data = await businessCaseService.getConsumptionItems(id);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error getting consumption items');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function saveConsumptionItems(req, res) {
+  try {
+    const { id } = req.params;
+    await assertSectionEditable(id, "determinations", req.user);
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    const excluded = Array.isArray(req.body?.excluded) ? req.body.excluded : [];
+    const data = await businessCaseService.saveConsumptionItems(id, items, excluded);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "determinations", actor: req.user?.email || "system" });
+    }
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error saving consumption items');
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+// Equipment Details V2 (pairs + backup optional)
+async function saveEquipmentDetailsV2(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "equipment", req.user);
+
+    const { error, value } = equipmentDetailsV2Schema.validate(req.body);
+    if (error) return res.status(400).json({ success: false, message: error.message });
+
+    // Persist in extra.equipment_details to allow UI rehydration
+    const payload = {
+      equipment_details: value.equipment_pairs.map((pair, index) => ({
+        id: index + 1,
+        requires_backup: pair.requires_backup,
+        primary_id: pair.primary_id,
+        backup_id: pair.requires_backup ? pair.backup_id : null,
+        backup_install_simultaneous: pair.backup_install_simultaneous || false,
+      })),
+    };
+
+    await db.query(
+      `
+        UPDATE equipment_purchase_requests
+        SET extra = jsonb_set(
+              COALESCE(extra, '{}'::jsonb),
+              '{equipment_details}',
+              $1::jsonb,
+              true
+            ),
+            updated_at = now()
+        WHERE id = $2
+      `,
+      [JSON.stringify(payload.equipment_details), id],
+    );
+
+    // Keep bc_equipment_selection in sync for determinations and calculations
+    const primaryPair = value.equipment_pairs.find((pair) => pair.primary_id);
+    if (primaryPair?.primary_id) {
+      await equipmentSelectionService.selectEquipment(
+        id,
+        primaryPair.primary_id,
+        true,
+        req.user,
+      );
+      logger.info(
+        { businessCaseId: id, equipmentId: primaryPair.primary_id },
+        "[BC][EQUIPMENT][SYNC] Primary equipment synced from equipment-details-v2",
+      );
+    }
+
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
+    }
+    res.json({ success: true, data: payload });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error saving equipment details v2');
+    res.status(error.status || 500).json({ success: false, message: error.message });
+  }
+}
+
 // LIS Integration
 async function saveLisIntegration(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "lis", req.user);
     const result = await bcLisIntegrationService.createLisIntegration(id, req.body);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "lis", actor: req.user?.email || "system" });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving LIS integration');
@@ -436,7 +733,11 @@ async function saveRequirements(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "requirement", req.user);
     const result = await bcRequirementsService.createRequirements(id, req.body);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "requirement", actor: req.user?.email || "system" });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving requirements');
@@ -460,7 +761,11 @@ async function saveDeliveries(req, res) {
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
+    await assertSectionEditable(id, "requirement", req.user);
     const result = await bcDeliveriesService.createDeliveries(id, req.body);
+    if ((req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "requirement", actor: req.user?.email || "system" });
+    }
     res.json({ success: true, data: result });
   } catch (error) {
     logger.error({ error: error.message }, 'Error saving deliveries');
@@ -683,32 +988,203 @@ async function getUIGuidance(req, res) {
       return res.status(404).json({ ok: false, message: "Business Case not found" });
     }
 
-    // Get ownership data (simplified - assuming empty for now)
-    const ownership = {
-      rules: {
-        general: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        lab: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        equipment: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        lis: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        determinations: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        investments: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        prices: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        calculations: { canUserEdit: true, canUserComplete: true, isCompleted: false },
-        rentability: { canUserEdit: true, canUserComplete: true, isCompleted: false }
-      }
+    // Helpers to evaluate section completion/progress
+    const isFilled = (value) => {
+      if (value === null || value === undefined) return false;
+      if (typeof value === "string") return value.trim() !== "";
+      if (Array.isArray(value)) return value.length > 0;
+      if (typeof value === "object") return Object.keys(value).length > 0;
+      return true;
     };
 
-    // Get section completion status (simplified)
+    const hasAny = (obj, fields) =>
+      fields.some((field) => isFilled(obj?.[field]));
+
+    const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
+    const ownershipSectionMap = {
+      general: "general",
+      lab: "laboratory_environment",
+      equipment: "equipment",
+      lis: "lis",
+      determinations: "determinations",
+      investments: "investments",
+      prices: "prices",
+    };
+    const ownershipUserIds = Object.values(ownershipInfo || {})
+      .map((entry) => entry?.completedBy)
+      .filter(Boolean);
+    const uniqueOwnershipUserIds = [...new Set(ownershipUserIds)];
+    const ownershipUserMap = {};
+    if (uniqueOwnershipUserIds.length) {
+      const { rows } = await db.query(
+        `SELECT id, email, fullname FROM users WHERE id = ANY($1)`,
+        [uniqueOwnershipUserIds],
+      );
+      rows.forEach((row) => {
+        ownershipUserMap[row.id] = row.email || row.fullname || "system";
+      });
+    }
+
+    const getOwnershipEntry = (sectionKey) => {
+      const mappedKey = ownershipSectionMap[sectionKey] || sectionKey;
+      return ownershipInfo?.[mappedKey] || null;
+    };
+
+    const getOwnershipEmail = (sectionKey) => {
+      const entry = getOwnershipEntry(sectionKey);
+      if (!entry?.completedBy) return null;
+      return ownershipUserMap[entry.completedBy] || null;
+    };
+
+    const completionRule = (completed, inProgress, sectionKey) => {
+      const completedBy = getOwnershipEmail(sectionKey);
+      const completedAt = getOwnershipEntry(sectionKey)?.completedAt || null;
+      return ({
+        canUserEdit: true,
+        canUserComplete: true,
+        isCompleted: completed,
+        currentOwner: !completed && inProgress ? (completedBy || null) : null,
+        completedBy: completed ? (completedBy || null) : null,
+        completedAt: completed ? (completedAt || null) : null,
+      });
+    };
+
+    // Load workspace data for completion checks
+    const labEnvironment = await bcLabEnvironmentService.getLabEnvironment(id);
+    const equipmentDetails = await bcEquipmentDetailsService.getEquipmentDetails(id);
+    const lisIntegration = await bcLisIntegrationService.getLisIntegration(id);
+
+    const extraEquipment = Array.isArray(bc?.extra?.equipment_details)
+      ? bc.extra.equipment_details
+      : [];
+    const equipmentPairs = extraEquipment.length ? extraEquipment : (equipmentDetails || []);
+
+    const hasLabData =
+      labEnvironment &&
+      Object.entries(labEnvironment).some(([key, value]) => {
+        if (["id", "business_case_id", "created_at", "updated_at"].includes(key)) return false;
+        return isFilled(value);
+      });
+
+    const hasEquipmentData = Array.isArray(equipmentPairs) && equipmentPairs.length > 0;
+    const equipmentComplete = hasEquipmentData && equipmentPairs.every((pair) => {
+      if (!pair?.primary_id) return false;
+      if (pair?.requires_backup) {
+        return Boolean(pair?.backup_id);
+      }
+      return true;
+    });
+
+    const hasLisData =
+      lisIntegration &&
+      Object.entries(lisIntegration).some(([key, value]) => {
+        if (["id", "business_case_id", "created_at", "updated_at"].includes(key)) return false;
+        return isFilled(value);
+      });
+
+    const lisComplete =
+      lisIntegration &&
+      lisIntegration.includes_lis !== null &&
+      lisIntegration.includes_lis !== undefined &&
+      (lisIntegration.includes_lis === false || isFilled(lisIntegration.lis_provider));
+
+    const requirementData = await bcRequirementsService.getRequirements(id);
+    const deliveryData = await bcDeliveriesService.getDeliveries(id);
+
+    const hasRequirementData =
+      requirementData &&
+      (isFilled(requirementData.deadline_months) ||
+        isFilled(requirementData.projected_deadline_months) ||
+        isFilled(requirementData.observations));
+
+    const hasDeliveryData =
+      deliveryData &&
+      (isFilled(deliveryData.delivery_type) ||
+        typeof deliveryData.effective_determination === "boolean");
+
+    const requirementComplete =
+      isFilled(requirementData?.deadline_months) &&
+      isFilled(requirementData?.projected_deadline_months) &&
+      Boolean(deliveryData?.delivery_type);
+
+    const consumptionData = await businessCaseService.getConsumptionItems(id);
+    const consumptionItems = Array.isArray(consumptionData?.items)
+      ? consumptionData.items
+      : [];
+    const hasDeterminationsData = consumptionItems.length > 0;
+    const determinationsComplete = consumptionItems.some((item) => Number(item?.annualQty) > 0);
+
+    const hasGeneralData = hasAny(bc, [
+      "client_name",
+      "client_id",
+      "process_code",
+      "contract_object",
+    ]) || hasAny(bc?.modern_bc_metadata, [
+      "clientType",
+      "contractingEntity",
+      "provinceCity",
+      "notes",
+    ]);
+
+    const generalComplete =
+      isFilled(bc?.client_name) &&
+      isFilled(bc?.process_code) &&
+      isFilled(bc?.contract_object);
+
+    const investmentSelections = await investmentsService.getInvestmentSelections(id);
+    const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
+
+    const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
+    const ownershipRules = {
+      general: completionRule(generalComplete, hasGeneralData, "general"),
+      lab: completionRule(hasLabData, hasLabData, "lab"),
+      equipment: completionRule(equipmentComplete, hasEquipmentData, "equipment"),
+      lis: completionRule(lisComplete, hasLisData, "lis"),
+      determinations: completionRule(determinationsComplete, hasDeterminationsData, "determinations"),
+      requirement: completionRule(requirementComplete, hasRequirementData || hasDeliveryData, "requirement"),
+      investments: completionRule(hasInvestmentsData, hasInvestmentsData, "investments"),
+      prices: completionRule(false, false, "prices"),
+      calculations: completionRule(false, false, "calculations"),
+      rentability: completionRule(false, false, "rentability"),
+    };
+
+    Object.keys(ownershipRules).forEach((section) => {
+      const lockInfo = lockMap?.[section];
+      if (!lockInfo) return;
+      ownershipRules[section].isLocked = Boolean(lockInfo.isLocked);
+      if (section !== "investments" && lockInfo.isLocked) {
+        ownershipRules[section].canUserEdit = false;
+      }
+      ownershipRules[section].lockedBy = lockInfo.lockedBy || null;
+      ownershipRules[section].lockedAt = lockInfo.lockedAt || null;
+    });
+
+    const ruleEntries = Object.values(ownershipRules);
+    const completionSummary = {
+      totalSections: ruleEntries.length,
+      completedSections: ruleEntries.filter((r) => r.isCompleted).length,
+      inProgressSections: ruleEntries.filter((r) => !r.isCompleted && r.currentOwner).length,
+    };
+    completionSummary.pendingSections =
+      completionSummary.totalSections -
+      completionSummary.completedSections -
+      completionSummary.inProgressSections;
+
     const sectionOwnership = {
-      rules: ownership.rules
+      rules: ownershipRules,
+      completionSummary,
     };
 
     // Get permissions based on user role
+    const userRole = (req.user?.role || req.user?.scope || req.user?.role_name || 'comercial').toLowerCase();
     const permissions = {
-      canEdit: true,
+      userRole: userRole,
+      canEdit: true, // Default to true for all roles
       canCompleteSections: true,
-      canPromoteStage: true,
-      canAddObservations: true
+      canPromoteStage: ['gerencia', 'jefe_comercial', 'jefe_operaciones'].includes(userRole),
+      canAddObservations: true,
+      canBlockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole),
+      canUnblockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole)
     };
 
     // Build UI guidance response
@@ -716,9 +1192,14 @@ async function getUIGuidance(req, res) {
       businessCase: bc,
       sectionOwnership,
       permissions,
+      workspaceData: {
+        lab_environment: labEnvironment,
+        requirements: requirementData,
+        deliveries: deliveryData
+      },
       observationData: null, // No observations for now
       workflowState: {
-        currentStage: bc.current_stage || 'draft',
+        currentStage: bc.bc_stage || bc.current_stage || 'draft',
         availableTransitions: ['promote', 'observe']
       }
     };
@@ -799,6 +1280,64 @@ async function getDataOwnership(req, res) {
       ok: false,
       message: error.message || "Error obteniendo información de ownership"
     });
+  }
+}
+
+async function lockSection(req, res) {
+  try {
+    const { id, section } = req.params;
+    const canonicalSection = SECTION_ALIASES[section] || section;
+    await BusinessCaseDataOwnership.lockSection(id, canonicalSection, req.user, null, {
+      source: "workspace",
+    });
+    await notifySectionLocked({
+      businessCaseId: id,
+      section: canonicalSection,
+      actor: req.user?.email || "system",
+    });
+
+    const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
+    const allLocked = PHASE1_SECTIONS.every((sec) => lockMap?.[sec]?.isLocked);
+    if (allLocked) {
+      try {
+        const currentState = await BusinessCaseStateMachine.getCurrentState(id);
+        if (currentState === STATES.DRAFT_INICIAL) {
+          await BusinessCaseStateMachine.transition(
+            id,
+            STATES.DATOS_BASE_COMPLETOS,
+            req.user?.id,
+            "Secciones bloqueadas por revision",
+            { source: "workspace", actor: req.user?.email || "system" }
+          );
+        }
+      } catch (error) {
+        logger.warn({ error: error.message, businessCaseId: id }, "No se pudo avanzar estado en fase 1");
+      }
+
+      await notifyPhase1Completed({
+        businessCaseId: id,
+        actor: req.user?.email || "system",
+      });
+    }
+
+    res.json({ ok: true, data: { section: canonicalSection, locked: true } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error locking section");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function unlockSection(req, res) {
+  try {
+    const { id, section } = req.params;
+    const canonicalSection = SECTION_ALIASES[section] || section;
+    await BusinessCaseDataOwnership.unlockSection(id, canonicalSection, req.user, null, {
+      source: "workspace",
+    });
+    res.json({ ok: true, data: { section: canonicalSection, locked: false } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error unlocking section");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
 
@@ -973,15 +1512,23 @@ module.exports = {
   getInvestments,
   updateInvestment,
   deleteInvestment,
+  getInvestmentCatalog,
+  createInvestmentCatalogItem,
+  saveInvestmentSelection,
+  getConsumptionItems,
+  saveConsumptionItems,
   // UI Guidance endpoints (Workspace)
   getUIGuidance,
   getDataOwnership,
   recordSectionCompletion,
+  lockSection,
+  unlockSection,
   // Manual BC Form endpoints
   saveLabEnvironment,
   getLabEnvironment,
   saveEquipmentDetails,
   getEquipmentDetails,
+  saveEquipmentDetailsV2,
   saveLisIntegration,
   getLisIntegration,
   addLisEquipmentInterface,

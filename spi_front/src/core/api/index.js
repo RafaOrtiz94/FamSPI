@@ -13,8 +13,10 @@ export * from "./signatureApi";
  * ==========================================================
  */
 
+console.log("🚀 API URL CONFIGURADA (index.js):", process.env.REACT_APP_API_ABSOLUTE_URL);
+
 const api = axios.create({
-  baseURL: "/api/v1", // Proxy configurado en setupProxy.js
+  baseURL: process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1",
   withCredentials: false, // ❌ Sin cookies
 });
 
@@ -44,6 +46,8 @@ export const clearTokens = () => {
   localStorage.removeItem("refreshToken");
   localStorage.removeItem("user");
 };
+
+export const getAccessToken = () => accessToken;
 
 const redirectToLogin = () => {
   if (!window.location.pathname.startsWith("/login")) {
@@ -85,8 +89,11 @@ api.interceptors.response.use(
     ) {
       originalRequest._retry = true;
       try {
+        const baseUrl = process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1";
+        const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+
         const res = await axios.post(
-          "/auth/refresh",
+          `${cleanBaseUrl}/auth/refresh`,
           {},
           {
             headers: { "x-refresh-token": refreshToken },
@@ -258,8 +265,8 @@ export const cachedApiCall = async (method, url, config = {}) => {
 
     // Emitir evento de actualización para componentes suscritos
     if (response.config.url.includes('/requests/') ||
-        response.config.url.includes('/attendance/') ||
-        response.config.url.includes('/business-case/')) {
+      response.config.url.includes('/attendance/') ||
+      response.config.url.includes('/business-case/')) {
       eventEmitter.emitDebounced('data-updated', {
         endpoint: url,
         method,

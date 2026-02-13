@@ -20,6 +20,7 @@ import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import StatusBadge from "./StatusBadge";
 import EquipmentSelector from "./EquipmentSelector";
 import RequestActions from "./RequestActions";
+import { subscribeToPurchaseUpdates } from "../../../core/services/purchaseEvents";
 import {
   STATUS_CONFIG,
   VALIDATION_MESSAGES,
@@ -82,6 +83,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [processingAction, setProcessingAction] = useState(null);
   const [processingStep, setProcessingStep] = useState(null);
   const [expandedRequestId, setExpandedRequestId] = useState(null);
+  const refreshTimerRef = React.useRef(null);
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -105,6 +107,28 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
   useEffect(() => {
     loadAll();
+  }, [loadAll]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToPurchaseUpdates(({ request }) => {
+      if (!request) return;
+      setRequests((prev) => {
+        const list = Array.isArray(prev) ? [...prev] : [];
+        const idx = list.findIndex((item) => item.id === request.id);
+        if (idx >= 0) {
+          list[idx] = request;
+        } else {
+          list.unshift(request);
+        }
+        return list;
+      });
+      if (refreshTimerRef.current) return;
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null;
+        loadAll();
+      }, 800);
+    });
+    return unsubscribe;
   }, [loadAll]);
 
   useEffect(() => {

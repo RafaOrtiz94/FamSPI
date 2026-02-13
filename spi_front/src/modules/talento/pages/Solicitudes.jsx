@@ -1,7 +1,6 @@
 import React, { useEffect } from "react";
 
 import { DashboardLayout, DashboardHeader } from "../../../core/ui/layouts/DashboardLayout";
-import PermisosStatusWidget from "../../shared/solicitudes/components/PermisosStatusWidget";
 import HRPersonnelRequestsWidget from "../../../core/ui/widgets/HRPersonnelRequestsWidget";
 import PersonnelRequestWidget from "../../../core/ui/widgets/PersonnelRequestWidget";
 
@@ -21,7 +20,6 @@ const TalentoSolicitudes = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 <div className="space-y-6">
-                    <PermisosStatusWidget />
                     <PersonnelRequestWidget />
                 </div>
                 <div>

@@ -14,7 +14,8 @@ async function inspect() {
     } catch (err) {
         console.error("Error inspecting table:", err);
     } finally {
-        process.exit(0);
+        // Script de utilidad - no necesita process.exit() en Cloud Run
+        await db.end();
     }
 }
 

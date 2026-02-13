@@ -3,20 +3,30 @@ import { useParams } from "react-router-dom";
 import { FiDollarSign, FiTrendingUp, FiAlertTriangle, FiRefreshCw } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
-import Card from "../../../../../core/ui/components/Card";
 
 /**
- * MetricCard - Reusable card for displaying financial metrics
+ * MetricCard - Reusable card for displaying financial metrics (iOS style)
  */
-const MetricCard = ({ label, value, accent = "gray", icon: Icon }) => (
-    <div className={`p-4 rounded-lg border bg-${accent}-50 border-${accent}-200`}>
-        <div className="flex items-center gap-2 mb-1">
-            {Icon && <Icon size={14} className={`text-${accent}-600`} />}
-            <p className="text-xs uppercase text-gray-500 font-medium">{label}</p>
+const MetricCard = ({ label, value, accent = "gray", icon: Icon }) => {
+    const accents = {
+        blue: { bg: "bg-blue-50/50", border: "border-blue-100", text: "text-blue-600", val: "text-blue-900" },
+        green: { bg: "bg-green-50/50", border: "border-green-100", text: "text-green-600", val: "text-green-900" },
+        purple: { bg: "bg-purple-50/50", border: "border-purple-100", text: "text-purple-600", val: "text-purple-900" },
+        orange: { bg: "bg-orange-50/50", border: "border-orange-100", text: "text-orange-600", val: "text-orange-900" },
+        gray: { bg: "bg-gray-50/50", border: "border-gray-100", text: "text-gray-600", val: "text-gray-900" }
+    };
+    const style = accents[accent] || accents.gray;
+
+    return (
+        <div className={`p-5 rounded-2xl border ${style.bg} ${style.border} transition-all hover:shadow-sm animate-fadeIn`}>
+            <div className="flex items-center gap-2 mb-1">
+                {Icon && <Icon size={14} className={style.text} />}
+                <p className="text-xs uppercase font-medium tracking-wide ${style.text}">{label}</p>
+            </div>
+            <p className={`text-xl font-bold ${style.val}`}>{value}</p>
         </div>
-        <p className="text-xl font-bold text-gray-900">{value}</p>
-    </div>
-);
+    );
+};
 
 /**
  * RentabilitySection - Workspace section for ROI and financial analysis
@@ -75,7 +85,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
 
     if (loading) {
         return (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fadeIn">
                 <div className="flex items-center gap-4">
                     <div className="text-3xl">📈</div>
                     <div>
@@ -83,11 +93,11 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                         <p className="text-sm text-gray-600">ROI, payback y análisis financiero</p>
                     </div>
                 </div>
-                <Card className="p-8">
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
                     <div className="flex items-center justify-center py-8">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                     </div>
-                </Card>
+                </div>
             </div>
         );
     }
@@ -97,7 +107,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
     return (
         <div className="space-y-6">
             {/* Section Header */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between animate-fadeIn">
                 <div className="flex items-center gap-4">
                     <div className="text-3xl">📈</div>
                     <div>
@@ -108,7 +118,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                 <button
                     onClick={handleRecalculate}
                     disabled={recalculating}
-                    className="flex items-center gap-2 px-4 py-2 border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 disabled:opacity-50"
+                    className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow-md"
                 >
                     <FiRefreshCw size={16} className={recalculating ? "animate-spin" : ""} />
                     Recalcular
@@ -116,7 +126,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
             </div>
 
             {!calculations ? (
-                <Card className="p-8">
+                <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 animate-fadeIn">
                     <div className="text-center space-y-4">
                         <FiAlertTriangle size={48} className="mx-auto text-yellow-500" />
                         <h3 className="text-lg font-semibold text-gray-900">No hay cálculos de rentabilidad</h3>
@@ -125,16 +135,16 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                         </p>
                         <button
                             onClick={handleRecalculate}
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                            className="px-5 py-2.5 bg-blue-600 text-white rounded-full hover:bg-blue-700 active:scale-95 transition-all shadow-sm hover:shadow-md"
                         >
                             Calcular Rentabilidad
                         </button>
                     </div>
-                </Card>
+                </div>
             ) : (
                 <>
                     {/* ROI Highlight */}
-                    <Card className={`p-6 bg-${roiStatus?.color || "gray"}-50 border-${roiStatus?.color || "gray"}-200`}>
+                    <div className={`p-6 rounded-2xl border bg-${roiStatus?.color || "gray"}-50/50 border-${roiStatus?.color || "gray"}-100 animate-fadeIn`}>
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-gray-600">Retorno sobre Inversión (ROI)</p>
@@ -145,11 +155,11 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                                     {roiStatus?.label || "Sin datos"}
                                 </p>
                             </div>
-                            <div className={`p-4 rounded-full bg-${roiStatus?.color || "gray"}-100`}>
+                            <div className={`p-4 rounded-full bg-${roiStatus?.color || "gray"}-100 shadow-sm`}>
                                 <FiTrendingUp size={32} className={`text-${roiStatus?.color || "gray"}-600`} />
                             </div>
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Key Financial Metrics */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -174,7 +184,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                     </div>
 
                     {/* Revenue vs Cost */}
-                    <Card className="p-6">
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-fadeIn">
                         <h3 className="text-lg font-semibold text-gray-800 mb-4">Ingresos vs Costos</h3>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-3">
@@ -208,7 +218,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                         </div>
 
                         {/* Profit Bar */}
-                        <div className="mt-6 pt-4 border-t">
+                        <div className="mt-6 pt-4 border-t border-gray-100">
                             <div className="flex justify-between items-center mb-2">
                                 <span className="font-medium text-gray-700">Utilidad Anual Neta</span>
                                 <span className={`text-xl font-bold ${calculations.annual_profit >= 0 ? "text-green-600" : "text-red-600"}`}>
@@ -224,36 +234,36 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                                 />
                             </div>
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Investment Summary */}
-                    <Card className="p-6">
+                    <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 animate-fadeIn">
                         <h3 className="text-lg font-semibold text-gray-800 mb-4">Resumen de Inversión</h3>
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div className="p-4 bg-gray-50 rounded-lg">
+                            <div className="p-5 bg-gray-50/50 rounded-2xl border border-gray-100">
                                 <p className="text-sm text-gray-500">Inversión Total</p>
                                 <p className="text-lg font-bold text-gray-900">
                                     ${calculations.total_investment?.toLocaleString("en-US", { minimumFractionDigits: 2 }) || "0.00"}
                                 </p>
                             </div>
-                            <div className="p-4 bg-gray-50 rounded-lg">
+                            <div className="p-5 bg-gray-50/50 rounded-2xl border border-gray-100">
                                 <p className="text-sm text-gray-500">TIR (IRR)</p>
                                 <p className="text-lg font-bold text-gray-900">
                                     {calculations.irr?.toFixed(2) || "0"}%
                                 </p>
                             </div>
-                            <div className="p-4 bg-gray-50 rounded-lg">
+                            <div className="p-5 bg-gray-50/50 rounded-2xl border border-gray-100">
                                 <p className="text-sm text-gray-500">Duración del Contrato</p>
                                 <p className="text-lg font-bold text-gray-900">
                                     {calculations.contract_duration || 3} años
                                 </p>
                             </div>
                         </div>
-                    </Card>
+                    </div>
 
                     {/* Warnings */}
                     {calculations.warnings?.length > 0 && (
-                        <Card className="p-4 bg-yellow-50 border-yellow-200">
+                        <div className="p-4 bg-yellow-50/50 border border-yellow-100 rounded-2xl shadow-sm animate-fadeIn">
                             <div className="flex items-start gap-3">
                                 <FiAlertTriangle className="text-yellow-600 mt-0.5" />
                                 <div>
@@ -265,12 +275,12 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                                     </ul>
                                 </div>
                             </div>
-                        </Card>
+                        </div>
                     )}
 
                     {/* Approval Status */}
                     {calculations.approved !== undefined && (
-                        <Card className={`p-4 ${calculations.approved ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200"}`}>
+                        <div className={`p-4 rounded-2xl border shadow-sm animate-fadeIn ${calculations.approved ? "bg-green-50/50 border-green-100" : "bg-red-50/50 border-red-100"}`}>
                             <div className="flex items-center gap-3">
                                 <div className={`p-2 rounded-full ${calculations.approved ? "bg-green-100" : "bg-red-100"}`}>
                                     {calculations.approved ? "✅" : "❌"}
@@ -286,7 +296,7 @@ const RentabilitySection = ({ permissions = {}, ownership = {}, onSave }) => {
                                     </p>
                                 </div>
                             </div>
-                        </Card>
+                        </div>
                     )}
                 </>
             )}

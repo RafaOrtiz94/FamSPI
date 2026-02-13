@@ -58,8 +58,8 @@ const BusinessCasePicker = () => {
           client_name: bc.client_name || '',
           created_at: bc.created_at || bc.createdAt || bc.created || bc.updated_at || bc.updatedAt || bc.updated || null,
           updated_at: bc.updated_at || bc.updatedAt || bc.updated || bc.created_at || bc.createdAt || bc.created || null,
-          current_stage: bc.status || bc.current_stage || '',
-          status: bc.current_stage || bc.stage || bc.status || bc.state || 'draft'
+          current_stage: bc.current_stage || bc.bc_stage || bc.stage || bc.status || '',
+          status: bc.status || bc.state || 'draft'
         }));
 
         // Log limited sample of date types (only once per fetch)

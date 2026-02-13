@@ -11,6 +11,8 @@ import {
   listNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
+  deleteNotification,
+  clearNotifications,
 } from "../api/notificationsApi";
 import { useAuth } from "../auth/useAuth";
 import { useUI } from "./UIContext";
@@ -159,6 +161,39 @@ export const NotificationProvider = ({ children }) => {
     }
   }, [showToast]);
 
+  const removeNotification = useCallback(
+    async (id) => {
+      try {
+        await deleteNotification(id);
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        setUnreadCount((prev) => {
+          const removed = notifications.find((n) => n.id === id);
+          if (removed && removed.status !== "read") return Math.max(0, prev - 1);
+          return prev;
+        });
+        return true;
+      } catch (err) {
+        console.error("No se pudo eliminar la notificación", err);
+        showToast?.("No se pudo eliminar la notificación", "error");
+        return false;
+      }
+    },
+    [notifications, showToast]
+  );
+
+  const clearAll = useCallback(async () => {
+    try {
+      await clearNotifications();
+      setNotifications([]);
+      setUnreadCount(0);
+      return true;
+    } catch (err) {
+      console.error("No se pudieron limpiar notificaciones", err);
+      showToast?.("No se pudieron limpiar las notificaciones", "error");
+      return false;
+    }
+  }, [showToast]);
+
   const addNotification = useCallback(
     (notification) => {
       if (!notification) return;
@@ -185,9 +220,22 @@ export const NotificationProvider = ({ children }) => {
       refresh,
       markAsRead,
       markAll,
+      removeNotification,
+      clearAll,
       addNotification,
     }),
-    [notifications, unreadCount, loading, error, refresh, markAsRead, markAll, addNotification]
+    [
+      notifications,
+      unreadCount,
+      loading,
+      error,
+      refresh,
+      markAsRead,
+      markAll,
+      removeNotification,
+      clearAll,
+      addNotification,
+    ]
   );
 
   return <NotificationContext.Provider value={value}>{children}</NotificationContext.Provider>;

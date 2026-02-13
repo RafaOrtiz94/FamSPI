@@ -1,71 +1,68 @@
-/**
- * src/server.js
- * ------------------------------------------------------------
- * 🚀 Entry point SPI Fam Backend
- * - Manejo de errores globales
- * - Logs estructurados
- * - Cierre limpio en SIGINT / SIGTERM
- */
+console.log("🎬 Bootstrapping SPI FAM API [Cloud Run Mode]...");
 
-require("dotenv").config();
-
-const app = require("./app");
-const logger = require("./config/logger");
-const { checkDbSchema } = require("./utils/dbHealth");
-const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
-const startExpiredReservationsJob = require("./jobs/checkExpiredReservations");
-
-const PORT = process.env.PORT || 4000;
-const ENV = process.env.NODE_ENV || "development";
-
-const server = app.listen(PORT, () => {
-  logger.info(`✅ Server iniciado en puerto ${PORT} [${ENV}]`);
-  checkDbSchema().catch((err) => {
-    logger.error({ err }, "❌ Falló la verificación de tablas críticas");
-  });
-  startReminderScheduler();
-  startExpiredReservationsJob();
-});
+if (process.env.NODE_ENV !== "production") {
+  require("dotenv").config();
+  require("dotenv").config({ path: "./.env.jobs" });
+}
 
 // ======================================================
-// 🧹 Helper de cierre limpio
+// 🛡️  Cloud Run Safe Error Handling (DEFINIR ANTES DE NADA)
 // ======================================================
-const shutDown = (reason, exitCode = 0) => {
-  logger.info(`🧹 Apagando servidor por: ${reason}`);
-  if (server && server.close) {
-    server.close(() => {
-      logger.info("✅ Servidor cerrado correctamente");
-      process.exit(exitCode);
-    });
-  } else {
-    process.exit(exitCode);
-  }
-};
+const isProduction = process.env.NODE_ENV === "production";
 
-// ======================================================
-// ⚠️ Manejo de errores no controlados
-// ======================================================
 process.on("unhandledRejection", (err) => {
-  logger.error("💥 Promesa no manejada:", err);
-  console.error(err);
-  shutDown("unhandledRejection", 1);
+  console.error("🛡️ [FATAL] Promesa no manejada:", err);
+  if (isProduction) process.exit(1);
 });
 
 process.on("uncaughtException", (err) => {
-  logger.error("💥 Excepción no capturada:", err);
-  console.error(err);
-  shutDown("uncaughtException", 1);
+  console.error("🛡️ [FATAL] Excepción no capturada:", err);
+  if (isProduction) process.exit(1);
 });
 
-// ======================================================
-// 🧹 Cierre limpio (Docker / PM2 / Ctrl+C)
-// ======================================================
-process.on("SIGINT", () => {
-  logger.info("🧹 Señal recibida: SIGINT");
-  shutDown("SIGINT", 0);
+const app = require("./app");
+const logger = require("./config/logger");
+//const { checkDbSchema } = require("./utils/dbHealth");
+
+const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
+const { startExpiredReservationsJob } = require("./jobs/checkExpiredReservations");
+
+const PORT = Number(process.env.PORT) || 8080;
+const ENV = process.env.NODE_ENV || "development";
+
+console.log(`🔌 Intentando escuchar en el puerto ${PORT}...`);
+
+const ENABLE_JOBS =
+  process.env.ENABLE_JOBS === "true" ||
+  (ENV !== "production");
+
+const server = app.listen(PORT, "0.0.0.0", async () => {
+  logger.info(`🚀 SPI FAM API running on port ${PORT} [${ENV}]`);
+
+  if (ENABLE_JOBS) {
+    logger.info("⏰ Jobs internos habilitados");
+    startReminderScheduler();
+    startExpiredReservationsJob();
+  } else {
+    logger.info("⏸️ Jobs deshabilitados (usar Cloud Scheduler)");
+  }
 });
 
-process.on("SIGTERM", () => {
-  logger.info("🧹 Señal recibida: SIGTERM");
-  shutDown("SIGTERM", 0);
-});
+// Graceful shutdown solo para señales del sistema
+const gracefulShutdown = (signal) => {
+  logger.info(`🧹 Señal recibida: ${signal}, cerrando servidor gracefulmente`);
+
+  server.close(() => {
+    logger.info("✅ Servidor cerrado correctamente");
+    // En Cloud Run, NO usamos process.exit() - el contenedor se maneja automáticamente
+  });
+
+  // Timeout de seguridad para Cloud Run
+  setTimeout(() => {
+    logger.warn(`⏰ Timeout de ${signal}, forzando cierre`);
+    // Cloud Run maneja la terminación del contenedor
+  }, 10000).unref();
+};
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));

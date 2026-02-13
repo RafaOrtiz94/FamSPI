@@ -21,17 +21,17 @@ const StatsCard = ({
 }) => {
   return (
     <Card
-      className={`p-6 border-0 shadow-xl ${shadowColor} rounded-2xl bg-gradient-to-br ${colors} border-l-4 ${borderColor} ${onClick ? 'cursor-pointer hover:scale-[1.02] transition-transform' : ''} ${className}`}
+      className={`p-1 sm:p-3 border-0 shadow-xl ${shadowColor} rounded-2xl bg-gradient-to-br ${colors} border-l-4 ${borderColor} min-h-[80px] sm:min-h-[108px] ${onClick ? 'cursor-pointer hover:scale-[1.02] transition-transform' : ''} ${className}`}
       onClick={onClick}
     >
-      <div className="flex items-center justify-between">
-        <div>
-          <p className={`text-sm font-semibold ${textColor} uppercase tracking-wide`}>{title}</p>
-          <p className={`text-3xl font-bold ${valueColor} mt-2`}>{value}</p>
-          <p className={`text-xs ${textColor} mt-1`}>{subtitle}</p>
+      <div className="grid grid-cols-[1fr_auto] items-start gap-1.5 sm:gap-2">
+        <div className="min-w-0">
+          <p className={`text-[9px] sm:text-xs font-semibold ${textColor} uppercase tracking-wide truncate`}>{title}</p>
+          <p className={`text-[20px] sm:text-3xl font-bold ${valueColor} mt-0.5 leading-none`}>{value}</p>
+          <p className={`text-[9px] sm:text-xs ${textColor} mt-0.5 leading-snug max-h-[2.2em] overflow-hidden`}>{subtitle}</p>
         </div>
-        <div className={`p-3 ${iconBg} rounded-xl`}>
-          <Icon className="text-white" size={24} />
+        <div className={`p-1.5 sm:p-2.5 ${iconBg} rounded-xl self-start`}>
+          <Icon className="text-white" size={16} />
         </div>
       </div>
     </Card>

@@ -118,6 +118,111 @@ const STATE_OWNERSHIP_TRANSITIONS = {
 
 class BusinessCaseDataOwnership {
   /**
+   * Get lock status for all sections
+   */
+  static async getLockStatus(businessCaseId) {
+    const { rows } = await db.query(
+      `SELECT section_name, is_locked, locked_by, locked_by_role, locked_at
+       FROM business_case_section_ownership
+       WHERE business_case_id = $1`,
+      [businessCaseId]
+    );
+    const map = {};
+    rows.forEach((row) => {
+      map[row.section_name] = {
+        isLocked: row.is_locked,
+        lockedBy: row.locked_by,
+        lockedByRole: row.locked_by_role,
+        lockedAt: row.locked_at,
+      };
+    });
+    return map;
+  }
+
+  /**
+   * Lock a section
+   */
+  static async lockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
+    const now = new Date();
+    await db.query(
+      `INSERT INTO business_case_section_ownership
+        (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
+       VALUES ($1,$2,true,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (business_case_id, section_name)
+       DO UPDATE SET is_locked = true, locked_by = EXCLUDED.locked_by, locked_by_role = EXCLUDED.locked_by_role,
+                     locked_at = EXCLUDED.locked_at, canonical_state = EXCLUDED.canonical_state,
+                     metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at`,
+      [
+        businessCaseId,
+        section,
+        user?.id || null,
+        user?.role || null,
+        now,
+        canonicalState || null,
+        JSON.stringify(metadata || {}),
+        now,
+        now,
+      ],
+    );
+
+    await db.query(
+      `INSERT INTO business_case_section_ownership_audit
+        (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
+       VALUES ($1,$2,'locked',$3,$4,$5,$6,$7)`,
+      [
+        businessCaseId,
+        section,
+        user?.id || null,
+        user?.role || null,
+        canonicalState || null,
+        JSON.stringify(metadata || {}),
+        now,
+      ],
+    );
+  }
+
+  /**
+   * Unlock a section
+   */
+  static async unlockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
+    const now = new Date();
+    await db.query(
+      `INSERT INTO business_case_section_ownership
+        (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
+       VALUES ($1,$2,false,$3,$4,$5,$6,$7,$8,$9)
+       ON CONFLICT (business_case_id, section_name)
+       DO UPDATE SET is_locked = false, locked_by = NULL, locked_by_role = NULL,
+                     locked_at = NULL, canonical_state = EXCLUDED.canonical_state,
+                     metadata = EXCLUDED.metadata, updated_at = EXCLUDED.updated_at`,
+      [
+        businessCaseId,
+        section,
+        user?.id || null,
+        user?.role || null,
+        null,
+        canonicalState || null,
+        JSON.stringify(metadata || {}),
+        now,
+        now,
+      ],
+    );
+
+    await db.query(
+      `INSERT INTO business_case_section_ownership_audit
+        (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
+       VALUES ($1,$2,'unlocked',$3,$4,$5,$6,$7)`,
+      [
+        businessCaseId,
+        section,
+        user?.id || null,
+        user?.role || null,
+        canonicalState || null,
+        JSON.stringify(metadata || {}),
+        now,
+      ],
+    );
+  }
+  /**
    * Record section completion by a user
    * @param {string} businessCaseId - Business case UUID
    * @param {string} section - Section name

@@ -10,12 +10,16 @@ const {
 // ===============================================================
 // 🔐 Cargar clave JSON de la Service Account
 // ===============================================================
-let key;
+const fs = require("fs");
+let key = null;
 try {
-  key = require(googleKeyPath);
+  if (fs.existsSync(googleKeyPath)) {
+    key = require(googleKeyPath);
+  } else {
+    logger.warn("⚠️ Archivo de clave de Service Account no encontrado. Las funcionalidades de Google (Drive, Gmail, etc.) estarán deshabilitadas.", { path: googleKeyPath });
+  }
 } catch (err) {
-  logger.error("❌ No se pudo cargar la clave de la Service Account:", err.message);
-  throw err;
+  logger.warn("⚠️ No se pudo cargar la clave de la Service Account. Las funcionalidades de Google (Drive, Gmail, etc.) estarán deshabilitadas.", { path: googleKeyPath, error: err.message });
 }
 
 // ===============================================================
@@ -28,30 +32,32 @@ const scopes = [
   "https://www.googleapis.com/auth/spreadsheets",
   "https://www.googleapis.com/auth/documents",
   "https://www.googleapis.com/auth/gmail.send",
-  "https://www.googleapis.com/auth/calendar", // 👈 agregado correctamente
+  "https://www.googleapis.com/auth/calendar",
 ];
 
 // ===============================================================
 // 👤 Impersonación obligatoria (Domain-wide Delegation)
 // ===============================================================
 if (!googleDelegatedUser) {
-  logger.error(`
-❌ ERROR FATAL: No se definió GOOGLE_SUBJECT en el archivo .env
-
-Debes agregar por ejemplo:
-
-GOOGLE_SUBJECT=automatizaciones@famproject.com.ec
-
-`);
-  process.exit(1);
+  logger.warn("⚠️ GOOGLE_SUBJECT no definido. La delegación de dominio para Google APIs no funcionará.");
 }
 
-const jwtClient = new google.auth.JWT({
-  email: key.client_email,
-  key: key.private_key.replace(/\\n/g, "\n"), // versión correcta
-  scopes,
-  subject: googleDelegatedUser,
-});
+let jwtClient = null;
+if (key && googleDelegatedUser) {
+  try {
+    jwtClient = new google.auth.JWT({
+      email: key.client_email,
+      key: key.private_key.replace(/\\n/g, "\n"),
+      scopes,
+      subject: googleDelegatedUser,
+    });
+    logger.info("✅ Google JWT Client inicializado correctamente");
+  } catch (err) {
+    logger.error("❌ Error inicializando Google JWT Client:", err.message);
+  }
+} else {
+  logger.warn("⏸️ Google JWT Client NO inicializado (faltan credenciales o subject)");
+}
 
 // ===============================================================
 // 🔧 Clientes Google API

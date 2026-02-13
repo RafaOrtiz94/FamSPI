@@ -37,3 +37,29 @@ export const endClientVisit = async (clientId, payload = {}) => {
   const { data } = await api.post(`/clients/${clientId}/visit-status`, body);
   return data.data || data;
 };
+
+export const getClientDetail = async (clientId) => {
+  const { data } = await api.get(`/clients/${clientId}`);
+  return data.data || data;
+};
+
+export const updateClient = async (clientId, formData = {}, files = {}) => {
+  const data = new FormData();
+
+  Object.entries(formData).forEach(([key, value]) => {
+    if (value === undefined || value === null || value === "") return;
+    const normalized = typeof value === "string" ? value.trim() : value;
+    data.append(key, normalized);
+  });
+
+  Object.entries(files).forEach(([key, file]) => {
+    if (!file) return;
+    data.append(key, file);
+  });
+
+  const response = await api.put(`/clients/${clientId}`, data, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  return response.data?.data || response.data;
+};

@@ -89,7 +89,17 @@ export const useScheduleApproval = () => {
     loadAnalytics();
   }, [loadPending, loadTeamSchedules, loadAnalytics]);
 
-  return { pending, teamSchedules, analytics, loading, error, approve, reject, loadPending };
+  return {
+    pending,
+    teamSchedules,
+    analytics,
+    loading,
+    error,
+    approve,
+    reject,
+    loadPending,
+    loadTeamSchedules,
+  };
 };
 
 export default useScheduleApproval;

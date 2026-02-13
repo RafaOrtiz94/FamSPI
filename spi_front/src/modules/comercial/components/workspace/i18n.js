@@ -1,27 +1,12 @@
 /**
  * Traducciones para el workspace del Business Case
- * Centraliza todos los textos en español para mantener consistencia
+ * Centraliza todos los textos en espanol para mantener consistencia
  */
 
 export const WORKSPACE_TEXTS = {
-  // Ownership Panel
-  ownership: {
-    title: 'Propiedad y Finalización',
-    currentSection: 'Sección actual',
-    owner: 'Responsable',
-    lastModified: 'Última modificación',
-    takeOwnership: 'Tomar propiedad',
-    markComplete: 'Marcar como completado',
-    sectionStatus: 'Estado por sección',
-    refresh: 'Actualizar',
-    errorLoading: 'Error cargando ownership',
-    errorTaking: 'Error tomando ownership',
-    errorCompleting: 'Error completando sección'
-  },
-
   // UI Guidance Panel
   guidance: {
-    title: 'Guía de interfaz',
+    title: 'Guia de interfaz',
     refresh: 'Actualizar',
     errorLoading: 'Error cargando guidance',
     noGuidance: 'No hay guidance disponible'
@@ -31,105 +16,133 @@ export const WORKSPACE_TEXTS = {
   sections: {
     general: {
       title: 'Datos Generales',
-      description: 'Información básica del cliente y requerimientos del proyecto',
+      description: 'Datos base del cliente y del proceso antes de iniciar el analisis',
       tips: [
-        'Complete toda la información del cliente',
-        'Especifique claramente los requerimientos del proyecto',
-        'Indique urgencia y fecha esperada de entrega'
+        'Complete datos del cliente, entidad contratante y objeto de contratacion',
+        'Indique el codigo del proceso y notas de contexto cuando aplique',
+        'Verifique que la informacion coincida con el registro del cliente'
       ],
-      warnings: ['Complete esta sección primero']
+      warnings: [
+        'Complete esta seccion antes de avanzar al resto',
+        'Al guardar se notifica a ACP y Backoffice para revision'
+      ]
     },
     lab: {
       title: 'Entorno Laboratorio',
-      description: 'Configuración operativa y parámetros del laboratorio',
+      description: 'Operacion del laboratorio y condiciones tecnicas del servicio',
       tips: [
-        'Defina horas operativas del laboratorio',
-        'Indique capacidad para emergencias',
-        'Especifique volumen de muestras esperado'
+        'Defina horarios y volumen estimado de muestras',
+        'Incluya informacion de personal, turnos y urgencias',
+        'Registre cualquier restriccion operativa relevante'
       ],
-      warnings: ['Asegúrese de que los parámetros sean realistas']
+      warnings: [
+        'Use datos reales del laboratorio para evitar reprocesos',
+        'ACP y Backoffice pueden bloquear la seccion tras revision'
+      ]
+    },
+    requirement: {
+      title: 'Requerimiento del BC',
+      description: 'Plazos, entregas y observaciones clave antes del calculo',
+      tips: [
+        'Registre el plazo y la proyeccion de plazo solicitados',
+        'Defina si las entregas son totales o parciales y el tiempo estimado',
+        'Marque si la determinacion efectiva aplica y agregue observaciones'
+      ],
+      warnings: ['Sin plazos y entregas no se puede evaluar factibilidad']
     },
     equipment: {
       title: 'Equipamiento',
-      description: 'Selección y configuración de equipos médicos',
+      description: 'Seleccion de equipos principales y respaldo (opcional)',
       tips: [
-        'Seleccione equipos compatibles',
-        'Defina cantidades necesarias',
-        'Considere equipos primarios vs respaldo'
+        'Seleccione el equipo principal obligatorio',
+        'El respaldo es opcional y solo si el cliente lo solicita',
+        'Revise que los equipos correspondan al requerimiento del laboratorio'
       ],
-      warnings: ['Verifique compatibilidad entre equipos']
+      warnings: ['Evite seleccionar respaldo si el cliente no lo requiere']
     },
     lis: {
-      title: 'Integración LIS',
-      description: 'Sistema de información laboratorio y interfaces',
+      title: 'Integracion LIS',
+      description: 'Datos del sistema LIS e interfaces con equipos',
       tips: [
-        'Defina el sistema LIS actual',
-        'Especifique interfaces necesarias',
-        'Calcule horas de entrenamiento requeridas'
+        'Indique si incluye LIS y proveedor del sistema',
+        'Registre interfaces con el sistema actual y modelos de equipos',
+        'Complete numero de pacientes mensual y hardware requerido'
       ],
-      warnings: ['La integración LIS es crítica para el éxito del proyecto']
+      warnings: ['La integracion LIS impacta el cronograma y costos']
     },
     determinations: {
-      title: 'Determinaciones',
-      description: 'Análisis clínicos y cuantificaciones por período',
+      title: 'Consumos anuales',
+      description: 'Registro anual de determinaciones, reactivos, controles, calibradores y consumibles',
       tips: [
-        'Especifique determinaciones por mes y año',
-        'Indique pruebas de urgencia',
-        'Considere picos de demanda'
+        'Ingrese el consumo anual de cada item segun el laboratorio',
+        'Puede editar, eliminar o agregar nuevos items',
+        'Use nombres claros y unicos para identificar cada item'
       ],
-      warnings: ['Los números deben ser realistas y justificables']
+      warnings: [
+        'Sin consumos anuales no se puede evaluar factibilidad',
+        'Los reactivos los completan Comercial/ACP/Backoffice, los demas items el area tecnica'
+      ]
     },
     investments: {
       title: 'Inversiones Adicionales',
-      description: 'Costos adicionales y presupuesto de inversiones',
+      description: 'Seleccion de inversiones y necesidades del cliente',
       tips: [
-        'Incluya todos los costos asociados',
-        'Especifique tiempos de entrega',
-        'Considere requerimientos de instalación'
+        'Use la barra de busqueda para agregar inversiones del catalogo',
+        'Si no existe, cree una inversion nueva para reutilizarla en futuros casos',
+        'Registre cantidad, caracteristicas y observaciones requeridas'
       ],
-      warnings: ['No subestime costos adicionales']
+      warnings: ['Complete cantidad y caracteristicas para evitar retrabajos']
     },
     prices: {
-      title: 'Definición de Precios',
-      description: 'Establecimiento de precios y márgenes',
+      title: 'Definicion de Precios',
+      description: 'Establecimiento de precios y margenes',
       tips: [
-        'Calcule márgenes apropiados',
-        'Considere competencia local',
-        'Incluya costos operativos'
+        'Calcule margenes apropiados',
+        'Considere competencia local y costos operativos',
+        'Documente supuestos de precios'
       ],
-      warnings: ['Los precios deben ser competitivos pero rentables']
+      warnings: ['Los precios deben ser competitivos y rentables']
     },
     calculations: {
-      title: 'Cálculos Técnicos',
-      description: 'Análisis de viabilidad técnica y operativa',
+      title: 'Calculos Tecnicos',
+      description: 'Analisis de viabilidad tecnica y operativa',
       tips: [
-        'Verifique todos los cálculos',
-        'Compare con estándares de la industria',
-        'Documente supuestos realizados'
+        'Verifique consistencia de datos antes de calcular',
+        'Compare contra estandares internos',
+        'Documente supuestos y riesgos'
       ],
-      warnings: ['Los cálculos deben ser verificables']
+      warnings: ['Los calculos deben ser verificables']
     },
     rentability: {
-      title: 'Análisis de Rentabilidad',
-      description: 'ROI, payback y análisis financiero',
+      title: 'Analisis de Rentabilidad',
+      description: 'ROI, payback y analisis financiero',
       tips: [
-        'Calcule período de recuperación',
+        'Calcule periodo de recuperacion',
         'Analice sensibilidad de variables',
         'Compare con alternativas'
       ],
-      warnings: ['El análisis financiero es crucial para la aprobación']
+      warnings: ['El analisis financiero es clave para aprobacion']
+    },
+    consumption_export: {
+      title: 'Exportacion de Reactivos',
+      description: 'Salida ordenada para Excel o Google Sheets',
+      tips: [
+        'Use este reporte temporal para enviar consumos',
+        'Revise que los equipos y cantidades anuales esten completos'
+      ],
+      warnings: ['Solo disponible para Jefe Comercial y ACP Comercial']
     }
   },
 
   // Common labels
   common: {
-    tips: '💡 Consejos:',
-    warnings: '⚠️ Advertencias:',
+    tips: 'Consejos:',
+    warnings: 'Advertencias:',
     currentStatus: 'Estado actual:',
     availableTransitions: 'Transiciones disponibles:',
     permissions: 'Permisos:',
-    readOnly: '👁️ Solo lectura',
-    edit: '✏️ Editar'
+    readOnly: 'Solo lectura',
+    edit: 'Editar'
   },
 
   // Status mappings
@@ -143,11 +156,11 @@ export const WORKSPACE_TEXTS = {
   }
 };
 
-// Helper function para obtener guidance de sección
+// Helper function para obtener guidance de seccion
 export const getSectionGuidance = (section) => {
   return WORKSPACE_TEXTS.sections[section] || {
-    title: 'Sección',
-    description: 'Seleccione una sección para ver guidance',
+    title: 'Seccion',
+    description: 'Seleccione una seccion para ver guidance',
     tips: [],
     warnings: []
   };

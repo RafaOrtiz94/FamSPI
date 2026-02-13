@@ -6,7 +6,12 @@ const ctrl = require("./userProfile.controller");
 const { verifyToken } = require("../../middlewares/auth");
 
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage: multer.diskStorage({
+    destination: '/tmp',
+    filename: (req, file, cb) => {
+      cb(null, `avatar_${Date.now()}_${file.originalname}`);
+    }
+  }),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/png", "image/jpeg", "image/webp"];

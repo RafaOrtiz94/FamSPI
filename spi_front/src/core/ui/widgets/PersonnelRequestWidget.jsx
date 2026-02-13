@@ -7,7 +7,7 @@ import { formatDateSafe } from '../../../shared/utils/dateUtils';
 import PersonnelRequestForm from './PersonnelRequestForm';
 import { getPersonnelRequests } from '../../api/personnelRequestsApi';
 
-const PersonnelRequestWidget = () => {
+const PersonnelRequestWidget = ({ onNewRequest }) => {
     const [showForm, setShowForm] = useState(false);
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -124,7 +124,7 @@ const PersonnelRequestWidget = () => {
                     <Button
                         variant="primary"
                         icon={FiPlus}
-                        onClick={() => setShowForm(true)}
+                        onClick={() => onNewRequest ? onNewRequest() : setShowForm(true)}
                         size="sm"
                     >
                         Nueva Solicitud

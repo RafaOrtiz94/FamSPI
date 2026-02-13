@@ -1,0 +1,38 @@
+[
+  {
+    "user_email": "colaborador1@fam-project.com",
+    "user_fullname": "Colaborador Uno",
+    "tipo_solicitud": "permiso",
+    "tipo_permiso": "salud",
+    "duracion_dias": 2,
+    "fecha_inicio": "2025-05-20",
+    "fecha_fin": "2025-05-21",
+    "justificacion_requerida": ["certificado_medico"],
+    "justificantes_urls": ["https://drive.google.com/file/d/xxx/view"],
+    "status": "approved",
+    "approver_email": "jefe@fam-project.com",
+    "approver_role": "jefe_comercial",
+    "aprobacion_parcial_at": "2025-05-20T10:00:00-05:00",
+    "aprobacion_parcial_por": "Jefe Comercial",
+    "aprobacion_final_at": "2025-05-20T12:00:00-05:00",
+    "aprobacion_final_por": "Jefe Comercial",
+    "pdf_generado_url": "https://drive.google.com/file/d/yyy/view",
+    "observaciones": ["Carga historica inicial"],
+    "created_at": "2025-05-20T09:00:00-05:00",
+    "updated_at": "2025-05-20T12:00:00-05:00"
+  },
+  {
+    "user_email": "colaborador2@fam-project.com",
+    "tipo_solicitud": "vacaciones",
+    "duracion_dias": 5,
+    "fecha_inicio": "2025-06-10",
+    "fecha_fin": "2025-06-14",
+    "fecha_regreso": "2025-06-15",
+    "periodo_vacaciones": "2025",
+    "status": "approved",
+    "approver_email": "gerencia@fam-project.com",
+    "aprobacion_final_at": "2025-06-01T11:30:00-05:00",
+    "aprobacion_final_por": "Gerencia General",
+    "observaciones": ["Vacacion historica migrada"]
+  }
+]
