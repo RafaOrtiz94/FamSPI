@@ -1,37 +1,32 @@
 // src/core/api/privatePurchasesApi.js
-import api from "./index";
+import api from ".";
 
-export const listPrivatePurchases = async (params = {}) => {
-  const response = await api.get("/private-purchases", { params });
-  return response.data?.data || response.data;
+const getPrivatePurchases = (params = {}) => {
+  return api.get("/private-purchases", { params });
 };
 
-export const getPrivatePurchase = async (id) => {
-  const response = await api.get(`/private-purchases/${id}`);
-  return response.data?.data || response.data;
+const getPrivatePurchaseById = (id) => {
+  return api.get(`/private-purchases/${id}`);
 };
 
-export const createPrivatePurchase = async (payload = {}) => {
-  const response = await api.post("/private-purchases", payload);
-  return response.data?.data || response.data;
+const sendOffer = (id, payload) => {
+  return api.post(`/private-purchases/${id}/offer`, payload);
 };
 
-export const sendPrivatePurchaseOffer = async (id, payload = {}) => {
-  const response = await api.post(`/private-purchases/${id}/offer`, payload);
-  return response.data?.data || response.data;
+const uploadSignedOffer = (id, payload) => {
+  return api.post(`/private-purchases/${id}/offer/signed`, payload);
 };
 
-export const uploadPrivateSignedOffer = async (id, payload = {}) => {
-  const response = await api.post(`/private-purchases/${id}/offer/signed`, payload);
-  return response.data?.data || response.data;
+const registerClient = (id) => {
+  return api.post(`/private-purchases/${id}/register-client`);
 };
 
-export const registerPrivateClient = async (id) => {
-  const response = await api.post(`/private-purchases/${id}/register-client`);
-  return response.data?.data || response.data;
+const forwardToACP = (id) => {
+  return api.post(`/private-purchases/${id}/send-to-acp`);
 };
 
-export const forwardPrivatePurchaseToAcp = async (id) => {
-  const response = await api.post(`/private-purchases/${id}/send-to-acp`);
-  return response.data?.data || response.data;
+const createPrivatePurchase = (payload) => {
+  return api.post("/private-purchases", payload);
 };
+
+export { getPrivatePurchases, getPrivatePurchaseById, sendOffer, uploadSignedOffer, registerClient, forwardToACP, createPrivatePurchase };

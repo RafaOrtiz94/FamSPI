@@ -45,7 +45,7 @@ import DashboardOperaciones from "../modules/operaciones/Dashboard";
 import DashboardCalidad from "../modules/calidad/Dashboard";
 import ClientRequests from "../modules/backoffice/pages/ClientRequests";
 import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
-import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
+import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchasesPage";
 import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
 
 // 📋 Páginas de Talento Humano
