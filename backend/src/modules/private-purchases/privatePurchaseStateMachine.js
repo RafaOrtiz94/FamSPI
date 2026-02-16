@@ -93,10 +93,10 @@ class PrivatePurchaseStateMachine {
 
         // FASE 3: Rechazo con motivo obligatorio
         if (toState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED) {
-            console.log(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][START] Validando motivo para rejection de purchase ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][START] Validando motivo para rejection de purchase ${purchaseId}`);
 
             if (!reason || reason.trim().length === 0) {
-                console.log(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][BLOCKED_NO_REASON] Motivo faltante para purchase ${purchaseId}`);
+                logger.debug(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][BLOCKED_NO_REASON] Motivo faltante para purchase ${purchaseId}`);
                 const error = new Error('Motivo de rechazo es obligatorio');
                 error.status = 400;
                 error.code = 'GERENCIA_REJECTION_REASON_REQUIRED';
@@ -104,17 +104,17 @@ class PrivatePurchaseStateMachine {
                 throw error;
             }
 
-            console.log(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][OK] Motivo válido para purchase ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE3][GERENCIA][REJECT][OK] Motivo válido para purchase ${purchaseId}`);
         }
 
         // FASE 3: Corrección sin reiniciar - validar docs antes de resubmit desde contract_rejected
         if (fromState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED && toState === PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL) {
-            console.log(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][CHECK_DOCS] Verificando docs completos para resubmit desde rejected ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][CHECK_DOCS] Verificando docs completos para resubmit desde rejected ${purchaseId}`);
 
             const documentsCheck = await this._checkRequiredDocumentsForGerencia(purchaseId);
 
             if (!documentsCheck.allPresent) {
-                console.log(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][BLOCKED_DOCS] Faltan docs para resubmit: ${documentsCheck.missingDocs.join(', ')}`);
+                logger.debug(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][BLOCKED_DOCS] Faltan docs para resubmit: ${documentsCheck.missingDocs.join(', ')}`);
                 const error = new Error('Documentos incompletos para reenviar a gerencia');
                 error.status = 409;
                 error.code = 'DOCS_INCOMPLETE_FOR_GERENCIA';
@@ -122,16 +122,16 @@ class PrivatePurchaseStateMachine {
                 throw error;
             }
 
-            console.log(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][OK] Docs completos para resubmit ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE3][CORRECTION][RESUBMIT][OK] Docs completos para resubmit ${purchaseId}`);
         }
         // FASE 2: Gate duro - documentos completos antes de enviar a gerencia
         if (toState === PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL) {
-            console.log(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][CHECK] Verificando documentos para purchase ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][CHECK] Verificando documentos para purchase ${purchaseId}`);
 
             const documentsCheck = await this._checkRequiredDocumentsForGerencia(purchaseId);
 
             if (!documentsCheck.allPresent) {
-                console.log(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][BLOCKED] Faltan documentos: ${documentsCheck.missingDocs.join(', ')}`);
+                logger.debug(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][BLOCKED] Faltan documentos: ${documentsCheck.missingDocs.join(', ')}`);
 
                 const error = new Error('Documentos incompletos para enviar a gerencia');
                 error.status = 409;
@@ -140,7 +140,7 @@ class PrivatePurchaseStateMachine {
                 throw error;
             }
 
-            console.log(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][OK] Todos los documentos presentes para purchase ${purchaseId}`);
+            logger.debug(`[FLOW_PRIVADA][BE][FASE2][GERENCIA_DOC_GATE][OK] Todos los documentos presentes para purchase ${purchaseId}`);
         }
         // Validate transition
         if (!this.canTransition(fromState, toState)) {
@@ -175,7 +175,7 @@ class PrivatePurchaseStateMachine {
                 throw new Error(`Failed to update status for private purchase ${purchaseId}`);
             }
 
-            console.log('[FLOW_PRIVADA][BE][STATE][TRANSITION]', {
+            logger.debug('[FLOW_PRIVADA][BE][STATE][TRANSITION]', {
                 requestId: purchaseId,
                 fromState,
                 toState

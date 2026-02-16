@@ -1,6 +1,5 @@
 import api from "./index";
-
-console.log("DEBUG ENV →", process.env.REACT_APP_API_BASE_URL);
+import { API_BASE_URL } from "./index";
 
 /**
  * ==========================================================
@@ -36,9 +35,7 @@ export const clearTokens = () => {
    ========================================================== */
 export const googleLogin = () => {
   try {
-    const baseUrl = process.env.REACT_APP_API_ABSOLUTE_URL || "";
-    // Asegurarse de que no termine en /api/v1 si ya está incluido o manejarlo
-    const cleanBaseUrl = baseUrl.replace(/\/$/, "");
+    const cleanBaseUrl = API_BASE_URL.replace(/\/$/, "");
     return `${cleanBaseUrl}/auth/google`;
   } catch (err) {
     console.error("❌ Error generando URL de login:", err);

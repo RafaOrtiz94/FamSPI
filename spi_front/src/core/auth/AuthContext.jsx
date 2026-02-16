@@ -37,6 +37,16 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const forceLogoutAndRedirect = () => {
+    clearSessionTimer();
+    setUser(null);
+    setIsAuthenticated(false);
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
+    localStorage.removeItem("user");
+    redirectToLogin();
+  };
+
   const decodeJwtExp = (token) => {
     try {
       const [, payload] = token.split(".");
@@ -69,10 +79,7 @@ export const AuthProvider = ({ children }) => {
       } catch (err) {
         // fall through
       }
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
-      redirectToLogin();
+      forceLogoutAndRedirect();
       return;
     }
 
@@ -86,22 +93,46 @@ export const AuthProvider = ({ children }) => {
       } catch (err) {
         // ignore and redirect
       }
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
-      redirectToLogin();
+      forceLogoutAndRedirect();
     }, delayMs);
+  };
+
+  const ensureActiveSession = async () => {
+    const accessToken = localStorage.getItem("accessToken");
+    const refreshToken = localStorage.getItem("refreshToken");
+
+    if (!accessToken) {
+      if (isAuthenticated) {
+        forceLogoutAndRedirect();
+      }
+      return;
+    }
+
+    const exp = decodeJwtExp(accessToken);
+    if (!exp) return;
+
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (exp > nowSeconds) return;
+
+    try {
+      if (refreshToken) {
+        const newAccess = await refreshAccessToken();
+        if (newAccess) {
+          scheduleSessionExpiry();
+          return;
+        }
+      }
+    } catch (err) {
+      // fall through
+    }
+
+    forceLogoutAndRedirect();
   };
 
   /* ============================================================
      🚀 Sincronizar sesión desde tokens locales o refresh
   ============================================================ */
   const refresh = async () => {
-    console.log("🧭 AuthContext.refresh start", {
-      hasRefreshToken: hasRefreshToken(),
-      hasAccessToken: Boolean(localStorage.getItem("accessToken")),
-      hasUser: Boolean(localStorage.getItem("user")),
-    });
     if (!hasRefreshToken()) {
       setLoading(false);
       return false;
@@ -115,23 +146,13 @@ export const AuthProvider = ({ children }) => {
       setUser(profile);
       setIsAuthenticated(true);
       localStorage.setItem("user", JSON.stringify(profile));
-      console.log("✅ AuthContext.refresh profile set", {
-        email: profile?.email,
-        role: profile?.role,
-        scope: profile?.scope,
-      });
       scheduleSessionExpiry();
-
-      console.log(`✅ Sesión sincronizada: ${profile.email}`);
       return profile; // 👈 importante
     } catch (err) {
       console.warn("⚠️ No se pudo sincronizar sesión:", err.message);
       setIsAuthenticated(false);
       console.warn("⚠️ AuthContext.refresh failed", err);
-      localStorage.removeItem("accessToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("user");
-      redirectToLogin();
+      forceLogoutAndRedirect();
       return false;
     } finally {
       setLoading(false);
@@ -147,12 +168,7 @@ export const AuthProvider = ({ children }) => {
     } catch (err) {
       console.error("❌ Error cerrando sesión:", err);
     } finally {
-      clearSessionTimer();
-      setUser(null);
-      setIsAuthenticated(false);
-      localStorage.removeItem("user");
-      redirectToLogin();
-      console.log("👋 Sesión finalizada correctamente");
+      forceLogoutAndRedirect();
     }
   };
 
@@ -175,11 +191,6 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const init = async () => {
       const storedUser = localStorage.getItem("user");
-      console.log("🧭 AuthContext.init", {
-        storedUser: Boolean(storedUser),
-        accessToken: Boolean(localStorage.getItem("accessToken")),
-        refreshToken: Boolean(localStorage.getItem("refreshToken")),
-      });
       if (storedUser) {
         setUser(JSON.parse(storedUser));
         setIsAuthenticated(true);
@@ -191,8 +202,26 @@ export const AuthProvider = ({ children }) => {
         await refresh();
       }
     };
+
+    const handleSessionExpiredEvent = () => {
+      forceLogoutAndRedirect();
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState && document.visibilityState !== "visible") return;
+      ensureActiveSession();
+    };
+
     init();
-    return () => clearSessionTimer();
+    window.addEventListener("auth:session-expired", handleSessionExpiredEvent);
+    window.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+    return () => {
+      clearSessionTimer();
+      window.removeEventListener("auth:session-expired", handleSessionExpiredEvent);
+      window.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+    };
   }, []);
 
   // ✅ Alias esperados por otros componentes

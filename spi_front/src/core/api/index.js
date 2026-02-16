@@ -13,10 +13,32 @@ export * from "./signatureApi";
  * ==========================================================
  */
 
-console.log("🚀 API URL CONFIGURADA (index.js):", process.env.REACT_APP_API_ABSOLUTE_URL);
+const DEFAULT_PROD_API_ORIGIN = "https://spi-backend-983537733948.us-central1.run.app";
+
+const normalizeApiBase = (rawValue) => {
+  const raw = String(rawValue || "").trim().replace(/\/+$/, "");
+  if (!raw) return "";
+  if (/\/api\/v1$/i.test(raw)) return raw;
+  if (/\/api$/i.test(raw)) return `${raw}/v1`;
+  return `${raw}/api/v1`;
+};
+
+const envBase =
+  process.env.REACT_APP_API_ABSOLUTE_URL ||
+  process.env.REACT_APP_API_URL ||
+  process.env.REACT_APP_API_BASE_URL ||
+  "";
+
+const isLocalhost =
+  typeof window !== "undefined" &&
+  ["localhost", "127.0.0.1"].includes(window.location.hostname);
+
+export const API_BASE_URL = normalizeApiBase(
+  envBase || (isLocalhost ? "http://localhost:3001" : DEFAULT_PROD_API_ORIGIN),
+);
 
 const api = axios.create({
-  baseURL: process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1",
+  baseURL: API_BASE_URL,
   withCredentials: false, // ❌ Sin cookies
 });
 
@@ -25,6 +47,7 @@ const api = axios.create({
 // ==========================================================
 let accessToken = localStorage.getItem("accessToken") || null;
 let refreshToken = localStorage.getItem("refreshToken") || null;
+let refreshPromise = null;
 
 /** Guarda tokens en memoria + localStorage */
 export const setTokens = (access, refresh) => {
@@ -56,8 +79,43 @@ const redirectToLogin = () => {
 };
 
 const handleSessionExpiration = () => {
+  try {
+    window.dispatchEvent(new CustomEvent("auth:session-expired"));
+  } catch (_err) {
+    // no-op
+  }
   clearTokens();
   redirectToLogin();
+};
+
+const refreshAccessTokenSingleFlight = async () => {
+  if (!refreshToken) {
+    throw new Error("No refresh token");
+  }
+
+  if (!refreshPromise) {
+    const cleanBaseUrl = API_BASE_URL.replace(/\/$/, "");
+    refreshPromise = axios
+      .post(
+        `${cleanBaseUrl}/auth/refresh`,
+        {},
+        { headers: { "x-refresh-token": refreshToken } },
+      )
+      .then((res) => {
+        const newAccess = res.data?.accessToken;
+        const newRefresh = res.data?.refreshToken || refreshToken;
+        if (!newAccess) {
+          throw new Error("Refresh sin access token");
+        }
+        setTokens(newAccess, newRefresh);
+        return newAccess;
+      })
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+
+  return refreshPromise;
 };
 
 // ==========================================================
@@ -79,35 +137,20 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error?.config || {};
 
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
       refreshToken &&
-      !originalRequest.url.includes("/auth/refresh")
+      !String(originalRequest.url || "").includes("/auth/refresh")
     ) {
       originalRequest._retry = true;
       try {
-        const baseUrl = process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1";
-        const cleanBaseUrl = baseUrl.replace(/\/$/, "");
-
-        const res = await axios.post(
-          `${cleanBaseUrl}/auth/refresh`,
-          {},
-          {
-            headers: { "x-refresh-token": refreshToken },
-          }
-        );
-
-        const newAccess = res.data?.accessToken;
-        const newRefresh = res.data?.refreshToken || refreshToken;
-
-        if (newAccess) {
-          setTokens(newAccess, newRefresh);
-          originalRequest.headers.Authorization = `Bearer ${newAccess}`;
-          return api(originalRequest); // reintenta
-        }
+        const newAccess = await refreshAccessTokenSingleFlight();
+        originalRequest.headers = originalRequest.headers || {};
+        originalRequest.headers.Authorization = `Bearer ${newAccess}`;
+        return api(originalRequest); // reintenta
       } catch (refreshErr) {
         console.warn("⚠️ Token expirado, requiere login:", refreshErr.message);
         handleSessionExpiration();

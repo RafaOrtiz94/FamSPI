@@ -7,6 +7,7 @@
 const service = require('./privatePurchases.service');
 const { PrivatePurchaseStateMachine } = require('./privatePurchaseStateMachine');
 const db = require("../../config/db");
+const logger = require("../../config/logger");
 
 const normalizeDates = (row) => {
   if (!row || typeof row !== 'object') return row;
@@ -24,10 +25,10 @@ const normalizeDates = (row) => {
 function logContractStates() {
   try {
     const { PRIVATE_PURCHASE_STATES } = require('./privatePurchaseStateMachine');
-    console.log(`[FLOW_PRIVADA][BE][FASE5][CONTRACT][VERIFY] Endpoints contrato API cargados y validados`);
-    console.log(`[FLOW_PRIVADA][BE][FASE5][CONTRACT][VERIFY] Estados disponibles: ${Object.values(PRIVATE_PURCHASE_STATES).join(', ')}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE5][CONTRACT][VERIFY] Endpoints contrato API cargados y validados`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE5][CONTRACT][VERIFY] Estados disponibles: ${Object.values(PRIVATE_PURCHASE_STATES).join(', ')}`);
   } catch (error) {
-    console.warn('[FLOW_PRIVADA][BE][FASE5][CONTRACT][WARN] Error cargando estados:', error.message);
+    logger.warn('[FLOW_PRIVADA][BE][FASE5][CONTRACT][WARN] Error cargando estados:', error.message);
   }
 }
 
@@ -39,7 +40,7 @@ setImmediate(logContractStates);
  */
 exports.create = async (req, res, next) => {
   try {
-    console.log(`[FLOW_PRIVADA][BE][FASE2][RBAC][DENY] Verificando rol asesor_comercial para create`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][RBAC][DENY] Verificando rol asesor_comercial para create`);
     // RBAC check is done at route level with requireRole
 
     const {
@@ -50,7 +51,7 @@ exports.create = async (req, res, next) => {
     } = req.body;
 
     const flowId = req.headers['x-flow-id'] || null;
-    console.log('[FLOW_PRIVADA][BE][CREATE][START]', {
+    logger.debug('[FLOW_PRIVADA][BE][CREATE][START]', {
       flowId,
       userId: req.user?.id,
       offerKind: offer_kind,
@@ -65,14 +66,14 @@ exports.create = async (req, res, next) => {
       notes
     });
 
-    console.log('[FLOW_PRIVADA][BE][CREATE][SUCCESS]', {
+    logger.debug('[FLOW_PRIVADA][BE][CREATE][SUCCESS]', {
       flowId,
       requestId: result?.id,
       status: result?.status
     });
     res.status(201).json({ ok: true, data: result });
   } catch (error) {
-    console.error('[FLOW_PRIVADA][BE][CREATE][ERROR]', {
+    logger.error('[FLOW_PRIVADA][BE][CREATE][ERROR]', {
       flowId: req.headers['x-flow-id'] || null,
       error: error.message
     });
@@ -107,7 +108,7 @@ exports.list = async (req, res, next) => {
     }));
     if (Array.isArray(data) && data.length > 0) {
       const sample = data[0] || {};
-      console.log('[FLOW_PRIVADA][BE][LIST][DATE_SAMPLE]', {
+      logger.debug('[FLOW_PRIVADA][BE][LIST][DATE_SAMPLE]', {
         id: sample.id,
         created_at: sample.created_at,
         updated_at: sample.updated_at,
@@ -146,7 +147,7 @@ exports.listByRole = async (req, res, next) => {
     }));
     if (Array.isArray(data) && data.length > 0) {
       const sample = data[0] || {};
-      console.log('[FLOW_PRIVADA][BE][LIST_BY_ROLE][DATE_SAMPLE]', {
+      logger.debug('[FLOW_PRIVADA][BE][LIST_BY_ROLE][DATE_SAMPLE]', {
         role,
         id: sample.id,
         created_at: sample.created_at,
@@ -218,19 +219,19 @@ exports.uploadSignedOffer = async (req, res, next) => {
 exports.forwardToAcp = async (req, res, next) => {
   try {
     const flowId = req.headers['x-flow-id'] || null;
-    console.log('[FLOW_PRIVADA][BE][ACP_FORWARD][START]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][START]', {
       flowId,
       requestId: req.params.id,
       userId: req.user?.id
     });
     const result = await service.forwardToAcp(req.params.id, req.user);
-    console.log('[FLOW_PRIVADA][BE][ACP_FORWARD][SUCCESS]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][SUCCESS]', {
       flowId,
       requestId: req.params.id
     });
     res.json({ ok: true, data: result });
   } catch (error) {
-    console.error('[FLOW_PRIVADA][BE][ACP_FORWARD][ERROR]', {
+    logger.error('[FLOW_PRIVADA][BE][ACP_FORWARD][ERROR]', {
       flowId: req.headers['x-flow-id'] || null,
       requestId: req.params.id,
       error: error.message
@@ -266,7 +267,7 @@ exports.requestClientRegistration = async (req, res, next) => {
     const { id } = req.params;
     const user = req.user;
 
-    console.log(`[CONTROLLER] Solicitando registro de cliente para purchase ${id} por usuario ${user.id}`);
+    logger.debug(`[CONTROLLER] Solicitando registro de cliente para purchase ${id} por usuario ${user.id}`);
 
     const result = await service.requestClientRegistration(id, user);
 
@@ -276,7 +277,7 @@ exports.requestClientRegistration = async (req, res, next) => {
       message: 'Solicitud de registro de cliente enviada exitosamente'
     });
   } catch (error) {
-    console.error('Error solicitando registro de cliente:', error);
+    logger.error('Error solicitando registro de cliente:', error);
     next(error);
   }
 };
@@ -659,7 +660,7 @@ exports.validateTransition = async (req, res, next) => {
  */
 exports.getTimeline = async (req, res, next) => {
   try {
-    console.log(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][VERIFY_ROUTE] Endpoint timeline llamado para purchase ${req.params.id}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][VERIFY_ROUTE] Endpoint timeline llamado para purchase ${req.params.id}`);
 
     const purchaseId = req.params.id;
 
@@ -667,8 +668,8 @@ exports.getTimeline = async (req, res, next) => {
     const purchaseData = await service.getById(purchaseId, req.user);
     const currentState = purchaseData.status;
 
-    console.log(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][ORDER_OK] Estado actual: ${currentState}, created_at: ${purchaseData.created_at}`);
-    console.log('[FLOW_PRIVADA][BE][FASE5][TIMELINE][DATE_SAMPLE]', {
+    logger.debug(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][ORDER_OK] Estado actual: ${currentState}, created_at: ${purchaseData.created_at}`);
+    logger.debug('[FLOW_PRIVADA][BE][FASE5][TIMELINE][DATE_SAMPLE]', {
       id: purchaseId,
       created_at: purchaseData.created_at,
       updated_at: purchaseData.updated_at,
@@ -679,7 +680,7 @@ exports.getTimeline = async (req, res, next) => {
     try {
       documents = await service.getDocuments(purchaseId);
     } catch (error) {
-      console.warn('[FLOW_PRIVADA][BE][FASE5][TIMELINE][DOCS_WARN] Error obteniendo documentos:', error.message);
+      logger.warn('[FLOW_PRIVADA][BE][FASE5][TIMELINE][DOCS_WARN] Error obteniendo documentos:', error.message);
     }
 
     let checklist = null;
@@ -690,7 +691,7 @@ exports.getTimeline = async (req, res, next) => {
         present: Array.isArray(docsCheck.presentDocs) && docsCheck.presentDocs.includes(docType)
       }));
     } catch (error) {
-      console.warn('[FLOW_PRIVADA][BE][FASE5][TIMELINE][CHECKLIST_WARN] Error generando checklist:', error.message);
+      logger.warn('[FLOW_PRIVADA][BE][FASE5][TIMELINE][CHECKLIST_WARN] Error generando checklist:', error.message);
     }
 
     // Get state transitions (if table exists)
@@ -712,10 +713,10 @@ exports.getTimeline = async (req, res, next) => {
 
       transitionRows = rows;
 
-      console.log(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][ORDER_OK] Encontradas ${transitionRows.length} transiciones persistidas`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][ORDER_OK] Encontradas ${transitionRows.length} transiciones persistidas`);
     } catch (err) {
       // Table might not exist, fallback to derived timeline
-      console.log(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][FALLBACK_OK] Tabla transitions no disponible, usando fallback derivado`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE5][TIMELINE][FALLBACK_OK] Tabla transitions no disponible, usando fallback derivado`);
     }
 
     const userIds = new Set();

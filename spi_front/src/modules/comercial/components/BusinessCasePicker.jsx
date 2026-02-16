@@ -38,19 +38,6 @@ const BusinessCasePicker = () => {
         // Normalize API response to get the array safely
         const bcList = normalizeBusinessCases(response.data);
 
-        console.log('[WORKSPACE_DEBUG] fetchBusinessCases - bcList length:', bcList.length);
-        if (bcList.length > 0) {
-          console.log('[WORKSPACE_DEBUG] fetchBusinessCases - sample bc item:', bcList[0]);
-          console.log('[WORKSPACE_DEBUG] fetchBusinessCases - date fields:', {
-            created_at: bcList[0].created_at,
-            updated_at: bcList[0].updated_at,
-            createdAt: bcList[0].createdAt,
-            updatedAt: bcList[0].updatedAt,
-            created: bcList[0].created,
-            updated: bcList[0].updated
-          });
-        }
-
         // Map to our component structure with tolerance for field names
         const normalizedCases = bcList.map(bc => ({
           id: bc.businessCaseId || bc.id, // businessCaseId como principal
@@ -59,18 +46,10 @@ const BusinessCasePicker = () => {
           created_at: bc.created_at || bc.createdAt || bc.created || bc.updated_at || bc.updatedAt || bc.updated || null,
           updated_at: bc.updated_at || bc.updatedAt || bc.updated || bc.created_at || bc.createdAt || bc.created || null,
           current_stage: bc.current_stage || bc.bc_stage || bc.stage || bc.status || '',
-          status: bc.status || bc.state || 'draft'
+          status: bc.status || bc.state || 'draft',
+          modern_bc_metadata: bc.modern_bc_metadata || {},
+          extra: bc.extra || {},
         }));
-
-        // Log limited sample of date types (only once per fetch)
-        if (normalizedCases.length > 0) {
-          console.log('[WORKSPACE_DEBUG] sample date types received:', {
-            created_at: normalizedCases[0]?.created_at,
-            updated_at: normalizedCases[0]?.updated_at,
-            created_at_type: typeof normalizedCases[0]?.created_at,
-            updated_at_type: typeof normalizedCases[0]?.updated_at
-          });
-        }
 
         setBusinessCases(normalizedCases);
       } catch (err) {
@@ -325,6 +304,18 @@ const BusinessCasePicker = () => {
                       {getStageLabel(bc.current_stage)}
                     </span>
                   </div>
+
+                  {(bc.modern_bc_metadata?.source_module === "equipment_purchases" ||
+                    bc.modern_bc_metadata?.auto_created === true) && (
+                    <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-semibold text-emerald-800">
+                      <span>Auto desde Compras Publicas</span>
+                      {bc.modern_bc_metadata?.source_purchase_request_id && (
+                        <span className="text-emerald-700">
+                          #{String(bc.modern_bc_metadata.source_purchase_request_id).slice(0, 8)}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   <div className="space-y-2 text-sm text-gray-500">
                     <div className="flex items-center gap-2">

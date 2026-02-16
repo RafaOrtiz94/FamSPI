@@ -270,9 +270,14 @@ app.use((err, req, res, next) => {
 
   if (res.headersSent) return next(err);
 
-  res.status(err.status || 500).json({
+  const statusCode = err.status || 500;
+  res.status(statusCode).json({
     ok: false,
     message: err.message || "Error interno del servidor",
+    code: err.code || (statusCode >= 500 ? "INTERNAL_ERROR" : "REQUEST_ERROR"),
+    details: err.details || err.meta || null,
+    retryable: typeof err.retryable === "boolean" ? err.retryable : statusCode >= 500,
+    request_id: res.getHeader("x-correlation-id") || null,
   });
 });
 

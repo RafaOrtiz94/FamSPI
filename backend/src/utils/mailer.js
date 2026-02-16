@@ -13,6 +13,15 @@ const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText, sendChatMessage } = require("./googleChat");
 require("dotenv").config();
 
+const EMAIL_NOTIFICATIONS_ENABLED = !["false", "0"].includes(
+  String(process.env.EMAIL_NOTIFICATIONS_ENABLED ?? "true").trim().toLowerCase()
+);
+const MAIL_GLOBALLY_DISABLED = String(process.env.DISABLE_MAIL || "false").trim().toLowerCase() === "true";
+const EMAIL_SUPPRESS_SOURCES = String(process.env.EMAIL_SUPPRESS_SOURCES || "")
+  .split(",")
+  .map((value) => value.trim().toLowerCase())
+  .filter(Boolean);
+
 function logGoogleApiError(err, context = {}) {
   const payload = {
     ...context,
@@ -32,6 +41,32 @@ const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
 
 const normalizeRecipients = (value) =>
   Array.isArray(value) ? value.filter(Boolean).join(",") : value;
+
+const normalizeSource = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s./-]+/g, "_");
+
+function inferSourceFromStack() {
+  try {
+    const stack = new Error().stack || "";
+    if (stack.includes("/modules/private-purchases/")) return "private_purchases";
+    if (stack.includes("/modules/equipment-purchases/")) return "equipment_purchases";
+    if (stack.includes("/modules/business-case/")) return "business_case";
+    if (stack.includes("/modules/approvals/")) return "approvals";
+    if (stack.includes("/modules/requests/")) return "requests";
+    return "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
+function isSuppressedSource(source) {
+  if (!EMAIL_SUPPRESS_SOURCES.length) return false;
+  if (EMAIL_SUPPRESS_SOURCES.includes("*")) return true;
+  return EMAIL_SUPPRESS_SOURCES.some((item) => source === item || source.startsWith(`${item}_`));
+}
 
 const resolveFrom = ({ from, senderName }) => {
   if (from && typeof from === "object" && from.email) {
@@ -235,9 +270,38 @@ async function sendMail({
   bcc = null,
   delegatedUser = null,
   gmailUserId = null,
+  source = null,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
+  }
+
+  if (!EMAIL_NOTIFICATIONS_ENABLED || MAIL_GLOBALLY_DISABLED) {
+    logger.info("[MAILER] Envio omitido por configuracion global", {
+      to: normalizeRecipients(to),
+      subject,
+      reason: !EMAIL_NOTIFICATIONS_ENABLED ? "EMAIL_NOTIFICATIONS_ENABLED=false" : "DISABLE_MAIL=true",
+    });
+    return {
+      delivered: false,
+      via: "none",
+      reason: "disabled_globally",
+    };
+  }
+
+  const resolvedSource = normalizeSource(source) || inferSourceFromStack();
+  if (isSuppressedSource(resolvedSource)) {
+    logger.info("[MAILER] Envio omitido por supresion de modulo", {
+      source: resolvedSource,
+      to: normalizeRecipients(to),
+      subject,
+    });
+    return {
+      delivered: false,
+      via: "none",
+      reason: "disabled_for_source",
+      source: resolvedSource,
+    };
   }
 
   const fromAddress = resolveFrom({ from, senderName });

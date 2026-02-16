@@ -216,6 +216,15 @@ const BusinessCaseWorkspace = () => {
           <p className="text-sm text-gray-500 mt-1">
             Gestión colaborativa de casos de negocio por secciones
           </p>
+          {(businessCase?.modern_bc_metadata?.source_module === "equipment_purchases" ||
+            businessCase?.modern_bc_metadata?.auto_created === true) && (
+              <div className="mt-2 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">
+                <span>Auto desde Compras Publicas</span>
+                {businessCase?.modern_bc_metadata?.source_purchase_request_id && (
+                  <span>#{String(businessCase.modern_bc_metadata.source_purchase_request_id).slice(0, 8)}</span>
+                )}
+              </div>
+            )}
         </div>
       </div>
 

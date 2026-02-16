@@ -68,16 +68,6 @@ export const ProtectedRoute = ({ allowedRoles = [] }) => {
     }
   }, [loading, isAuthenticated, hasPermission, showToast, lopdpPending]);
 
-  console.log("🛡️ ProtectedRoute snapshot:", {
-    loading,
-    isAuthenticated,
-    userRole,
-    normalizedUserRoles,
-    normalizedScopes,
-    hasPermission,
-    path: location.pathname,
-  });
-
   // 🕐 Mientras se verifica sesión
   if (loading) {
     return (
@@ -177,7 +167,6 @@ export const RoleRedirect = () => {
     (role.includes("pendiente") || role.includes("pending") || scope.includes("pendiente") || scope.includes("pending")
       ? "/registro-en-proceso"
       : "/unauthorized");
-  console.log(`🎯 Redirigiendo según rol [${role}] → ${target}`);
 
   return <Navigate to={target} replace />;
 };

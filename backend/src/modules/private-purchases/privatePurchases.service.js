@@ -18,6 +18,25 @@ const businessCaseService = require('../business-case/businessCase.service');
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
 const RESERVATION_REMINDER_OFFSET_DAYS = 55;
+const PRIVATE_CHECKLIST_ITEM_LABELS = {
+  client_data_complete: "Datos del cliente completos",
+  equipment_defined: "Equipos definidos",
+  availability_email_sent: "Correo de disponibilidad enviado al proveedor",
+  provider_response_registered: "Respuesta del proveedor registrada",
+  business_case_created: "Business Case creado",
+  offer_uploaded: "Oferta cargada",
+  signed_offer_uploaded: "Oferta firmada del cliente cargada",
+  client_registered: "Cliente registrado",
+  inspection_requested: "Inspección de ambiente solicitada",
+  inspection_act_uploaded: "Acta de inspección cargada",
+  lopdp_approved: "Aprobación LOPDP confirmada",
+  client_id_uploaded: "Documento de identificación del cliente cargado",
+  operating_permit_if_required: "Permiso de funcionamiento cargado (si aplica)",
+  contract_draft_uploaded: "Contrato borrador cargado",
+  contract_client_signed_uploaded: "Contrato firmado por cliente cargado",
+  equipment_arrived: "Equipo marcado como arribado",
+  delivery_dates_submitted: "Fechas de entrega registradas",
+};
 
 const formatEquipmentList = (equipment = []) => {
   return equipment
@@ -30,6 +49,49 @@ const formatEquipmentList = (equipment = []) => {
 };
 
 class PrivatePurchasesService {
+  _getUserRoles(user) {
+    const candidates = [];
+    if (Array.isArray(user?.role)) {
+      candidates.push(...user.role);
+    } else if (user?.role) {
+      candidates.push(user.role);
+    }
+    if (Array.isArray(user?.roles)) {
+      candidates.push(...user.roles);
+    }
+    if (user?.scope) {
+      candidates.push(user.scope);
+    }
+    return Array.from(
+      new Set(
+        candidates
+          .flatMap((value) => String(value || "").split(/[,\s]+/))
+          .map((role) => role.trim().toLowerCase())
+          .filter(Boolean)
+      )
+    );
+  }
+
+  _hasRoleToken(user, token) {
+    if (!token) return false;
+    const tokenText = String(token).toLowerCase();
+    return this._getUserRoles(user).some((role) => role.includes(tokenText));
+  }
+
+  _hasAnyRoleToken(user, tokens = []) {
+    return tokens.some((token) => this._hasRoleToken(user, token));
+  }
+
+  _isRoleAllowedForList(user, requestedRole) {
+    const role = String(requestedRole || "").toLowerCase();
+    const userRoles = this._getUserRoles(user);
+    if (userRoles.includes(role)) return true;
+    if (role === "comercial" && userRoles.includes("jefe_comercial")) return true;
+    if (role === "backoffice_comercial" && userRoles.includes("jefe_comercial")) return true;
+    if (role === "gerencia_general" && userRoles.includes("gerente_general")) return true;
+    return false;
+  }
+
   async ensureBusinessCaseForComodato(purchaseId, user, purchaseRow = null) {
     const row =
       purchaseRow ||
@@ -145,7 +207,7 @@ class PrivatePurchasesService {
     offerKind = 'venta',
     notes = ''
   }) {
-    console.log('[FLOW_PRIVADA][BE][CREATE][INPUT]', {
+    logger.debug('[FLOW_PRIVADA][BE][CREATE][INPUT]', {
       userId: user?.id,
       offerKind,
       equipmentCount: Array.isArray(equipment) ? equipment.length : 0
@@ -237,7 +299,7 @@ class PrivatePurchasesService {
 
       await client.query('COMMIT');
 
-      console.log('[FLOW_PRIVADA][BE][CREATE][COMMIT]', {
+      logger.debug('[FLOW_PRIVADA][BE][CREATE][COMMIT]', {
         requestId: purchaseId,
         userId: user.id,
         role: userRole
@@ -258,7 +320,7 @@ class PrivatePurchasesService {
           chat: false
         });
       } catch (error) {
-        console.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
+        logger.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
       }
 
       // Notificar a backoffice (síncrono para Cloud Run)
@@ -306,7 +368,7 @@ class PrivatePurchasesService {
 
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('[PRIVATE_PURCHASE] Error creando solicitud:', error);
+      logger.error('[PRIVATE_PURCHASE] Error creando solicitud:', error);
       throw error;
     } finally {
       client.release();
@@ -342,10 +404,10 @@ class PrivatePurchasesService {
     let root;
     try {
       root = await ensureFolder('Compras Privadas', baseFolderId);
-      console.log('[FLOW_PRIVADA][BE][DRIVE][SUCCESS] Carpeta padre encontrada:', baseFolderId);
+      logger.debug('[FLOW_PRIVADA][BE][DRIVE][SUCCESS] Carpeta padre encontrada:', baseFolderId);
     } catch (error) {
       if (error.message?.includes('File not found') && baseFolderId) {
-        console.log('[FLOW_PRIVADA][BE][DRIVE][FALLBACK] Carpeta padre no existe, creando en raíz:', baseFolderId);
+        logger.debug('[FLOW_PRIVADA][BE][DRIVE][FALLBACK] Carpeta padre no existe, creando en raíz:', baseFolderId);
         // Si la carpeta padre no existe, crear en la raíz de Drive
         root = await ensureFolder('Compras Privadas', null);
       } else {
@@ -382,6 +444,7 @@ class PrivatePurchasesService {
     const purchase = rows[0];
     await this._attachClientRequestSnapshot(purchase);
     await this._ensureArrivalStates([purchase], user);
+    await this._attachChecklistState([purchase]);
 
     // Verificar permisos bรกsicos (por ahora todos pueden ver, pero se puede restringir)
     return purchase;
@@ -497,6 +560,9 @@ class PrivatePurchasesService {
         equipment,
         status,
         offer_kind,
+        business_case_id,
+        client_request_id,
+        client_approved_at,
         offer_valid_until,
         created_at,
         updated_at,
@@ -540,6 +606,7 @@ class PrivatePurchasesService {
     await this._autoResolveClientRegistration(rows, user);
     await this._attachClientRequestSnapshot(rows);
     await this._ensureArrivalStates(rows, user);
+    await this._attachChecklistState(rows);
     return rows;
   }
 
@@ -583,21 +650,16 @@ class PrivatePurchasesService {
    */
   async listByRole(user, role) {
     // FASE 6: Verificar que el rol solicitado coincida con permisos del usuario
-    console.log(`[FLOW_PRIVADA][BE][FASE6][ACCESS][CHECK] Usuario ${user.id} solicita listByRole: ${role}, roles usuario: ${user.role}`);
-
-    // Validar que el usuario tenga el rol solicitado o superior
-    const userRoles = Array.isArray(user.role) ? user.role : [user.role];
-    const hasRequestedRole = userRoles.includes(role) ||
-      (role === 'comercial' && userRoles.includes('jefe_comercial')) ||
-      (role === 'backoffice_comercial' && userRoles.includes('jefe_comercial')) ||
-      (role === 'gerencia_general' && userRoles.includes('gerente_general'));
+    logger.debug(`[FLOW_PRIVADA][BE][FASE6][ACCESS][CHECK] Usuario ${user.id} solicita listByRole: ${role}`);
+    const userRoles = this._getUserRoles(user);
+    const hasRequestedRole = this._isRoleAllowedForList(user, role);
 
     if (!hasRequestedRole) {
-      console.log(`[FLOW_PRIVADA][BE][FASE6][ACCESS][DENY] Usuario ${user.id} no tiene rol ${role}, roles: ${userRoles.join(', ')}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE6][ACCESS][DENY] Usuario ${user.id} no tiene rol ${role}, roles: ${userRoles.join(', ')}`);
       throw new Error(`Acceso denegado: rol ${role} no autorizado`);
     }
 
-    console.log(`[FLOW_PRIVADA][BE][FASE6][ACCESS][ALLOW] Usuario ${user.id} autorizado para rol ${role}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE6][ACCESS][ALLOW] Usuario ${user.id} autorizado para rol ${role}`);
 
     let whereClause = '';
     let params = [];
@@ -703,6 +765,9 @@ class PrivatePurchasesService {
         equipment,
         status,
         offer_kind,
+        business_case_id,
+        client_request_id,
+        client_approved_at,
         offer_valid_until,
         created_at,
         updated_at,
@@ -762,7 +827,7 @@ class PrivatePurchasesService {
         created_at DESC
     `;
 
-    console.log('[FLOW_PRIVADA][BE][LIST_BY_ROLE][QUERY]', {
+    logger.debug('[FLOW_PRIVADA][BE][LIST_BY_ROLE][QUERY]', {
       role,
       userId: user?.id,
       userRole: user?.role,
@@ -770,12 +835,13 @@ class PrivatePurchasesService {
       params
     });
     const { rows } = await db.query(query, params);
-    console.log('[FLOW_PRIVADA][BE][LIST_BY_ROLE][RESULT]', {
+    logger.debug('[FLOW_PRIVADA][BE][LIST_BY_ROLE][RESULT]', {
       role,
       count: rows.length
     });
     await this._autoResolveClientRegistration(rows, user);
     await this._attachClientRequestSnapshot(rows);
+    await this._attachChecklistState(rows);
     return rows;
   }
 
@@ -783,11 +849,11 @@ class PrivatePurchasesService {
    * Transiciรณn de estado con validaciรณn - FASE 6: auditoría contrato errores
    */
   async transitionState(purchaseId, toState, user, reason = '') {
-    console.log(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Verificando contrato error para transitionState`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Verificando contrato error para transitionState`);
 
     // FASE 6: Validar contrato de errores consistente
     if (toState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED && (!reason || reason.trim().length === 0)) {
-      console.log(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Falta reason obligatorio para contract_rejected`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Falta reason obligatorio para contract_rejected`);
       const error = new Error('Motivo de rechazo es obligatorio');
       error.status = 400;
       error.code = 'GERENCIA_REJECTION_REASON_REQUIRED';
@@ -796,7 +862,7 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    console.log(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][FIXED] Contrato errores validado para transitionState`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][FIXED] Contrato errores validado para transitionState`);
 
     return await PrivatePurchaseStateMachine.transition(purchaseId, toState, user.id, reason, {
       user_role: user.role,
@@ -857,10 +923,7 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isOperationsRole = normalizedRoles.some((role) => role.includes('operaciones'));
+    const isOperationsRole = this._hasRoleToken(user, 'operaciones');
 
     if (!isOperationsRole) {
       const error = new Error('Solo operaciones puede solicitar fecha de entrega');
@@ -915,10 +978,7 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryAct(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isLogisticsRole = normalizedRoles.some((role) => role.includes('logistica'));
+    const isLogisticsRole = this._hasRoleToken(user, 'logistica');
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para subir acta de entrega');
@@ -980,7 +1040,7 @@ class PrivatePurchasesService {
    * FASE 2: Upload signed offer with idempotency check
    */
   async uploadSignedOffer(purchaseId, { fileId, signedOfferBase64, fileName, mimeType } = {}, user) {
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado signed offer para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado signed offer para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
       'SELECT offer_signed_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
@@ -992,7 +1052,7 @@ class PrivatePurchasesService {
     }
 
     if (existingRows[0].offer_signed_document_id) {
-      console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Signed offer ya existe para purchase ${purchaseId}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Signed offer ya existe para purchase ${purchaseId}`);
       const error = new Error('Oferta firmada ya fue subida anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
@@ -1012,7 +1072,7 @@ class PrivatePurchasesService {
       resolvedFileId = stored.id;
     }
 
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Signed offer no existe, permitiendo upload para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Signed offer no existe, permitiendo upload para purchase ${purchaseId}`);
 
     const { rows } = await db.query(
       'UPDATE private_purchase_requests SET offer_signed_document_id = $1, offer_signed_uploaded_at = NOW(), signed_offer_received_at = NOW(), updated_at = NOW() WHERE id = $2 RETURNING *',
@@ -1028,7 +1088,7 @@ class PrivatePurchasesService {
    * FASE 2: Upload contract with idempotency check
    */
   async uploadContract(purchaseId, { fileId, contractBase64, fileName, mimeType, decisionReason } = {}, user) {
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contract para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contract para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
       'SELECT contract_document_id, contract_client_signed_document_id, contract_signed_document_id, inspection_request_id, inspection_acta_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
@@ -1039,11 +1099,8 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isManagerRole = normalizedRoles.some((role) => role.includes('gerencia') || role.includes('gerente'));
-    const isBackofficeRole = normalizedRoles.some((role) => role.includes('backoffice'));
+    const isManagerRole = this._hasAnyRoleToken(user, ['gerencia', 'gerente']);
+    const isBackofficeRole = this._hasRoleToken(user, 'backoffice');
 
     if (!isManagerRole && !isBackofficeRole) {
       const error = new Error('Acceso denegado para subir contrato');
@@ -1060,7 +1117,7 @@ class PrivatePurchasesService {
     }
 
     if (!isManagerRole && existingRows[0].contract_document_id) {
-      console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract draft ya existe para purchase ${purchaseId}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract draft ya existe para purchase ${purchaseId}`);
       const error = new Error('Contrato ya fue subido anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
@@ -1069,7 +1126,7 @@ class PrivatePurchasesService {
     }
 
     if (isManagerRole && existingRows[0].contract_signed_document_id) {
-      console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract signed ya existe para purchase ${purchaseId}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Contract signed ya existe para purchase ${purchaseId}`);
       const error = new Error('Contrato firmado ya fue subido anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
@@ -1098,7 +1155,7 @@ class PrivatePurchasesService {
       resolvedFileId = stored.id;
     }
 
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Contract no existe, permitiendo upload para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Contract no existe, permitiendo upload para purchase ${purchaseId}`);
 
     const updateQuery = isManagerRole
       ? `UPDATE private_purchase_requests
@@ -1141,7 +1198,7 @@ class PrivatePurchasesService {
    * FASE 2: Upload client-signed contract
    */
   async uploadClientSignedContract(purchaseId, { fileId, contractBase64, fileName, mimeType } = {}, user) {
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contrato firmado cliente para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contrato firmado cliente para purchase ${purchaseId}`);
 
     const { rows } = await db.query(
       'SELECT status, contract_document_id, contract_client_signed_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
@@ -1153,12 +1210,9 @@ class PrivatePurchasesService {
     }
 
     const purchase = rows[0];
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isManagerRole = normalizedRoles.some((role) => role.includes('gerencia') || role.includes('gerente'));
-    const isBackofficeRole = normalizedRoles.some((role) => role.includes('backoffice'));
-    const isCommercialRole = normalizedRoles.some((role) => role.includes('comercial') || role.includes('asesor'));
+    const isManagerRole = this._hasAnyRoleToken(user, ['gerencia', 'gerente']);
+    const isBackofficeRole = this._hasRoleToken(user, 'backoffice');
+    const isCommercialRole = this._hasAnyRoleToken(user, ['comercial', 'asesor']);
 
     if (!isCommercialRole || isBackofficeRole || isManagerRole) {
       const error = new Error('Acceso denegado para subir contrato firmado por cliente');
@@ -1228,7 +1282,7 @@ class PrivatePurchasesService {
 
 
   async forwardToAcp(purchaseId, user) {
-    console.log('[FLOW_PRIVADA][BE][ACP_FORWARD][REQUEST]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][REQUEST]', {
       requestId: purchaseId,
       userId: user?.id
     });
@@ -1259,19 +1313,19 @@ class PrivatePurchasesService {
       'SELECT status FROM private_purchase_requests WHERE id = $1',
       [purchaseId]
     );
-    console.log('[FLOW_PRIVADA][BE][ACP_FORWARD][STATUS_CHECK]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][STATUS_CHECK]', {
       requestId: purchaseId,
       status: statusRows[0]?.status
     });
 
-    console.log('[FLOW_PRIVADA][BE][ACP_FORWARD][DONE]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP_FORWARD][DONE]', {
       requestId: purchaseId
     });
     return { forwarded: true };
   }
 
   async startAvailabilityRequest(purchaseId, user, providerEmail, notes = '') {
-    console.log('[FLOW_PRIVADA][BE][ACP][EMAIL][START]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][START]', {
       requestId: purchaseId,
       userId: user?.id,
       providerEmail
@@ -1358,7 +1412,7 @@ class PrivatePurchasesService {
       [providerEmail, notes || null, emailFileId, purchaseId]
     );
 
-    console.log('[FLOW_PRIVADA][BE][ACP][EMAIL][SUCCESS]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][EMAIL][SUCCESS]', {
       requestId: purchaseId,
       providerEmail
     });
@@ -1366,7 +1420,7 @@ class PrivatePurchasesService {
   }
 
   async saveProviderResponse({ id, user, outcome, items, notes }) {
-    console.log('[FLOW_PRIVADA][BE][ACP][RESPONSE][START]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][START]', {
       requestId: id,
       userId: user?.id,
       outcome,
@@ -1406,21 +1460,48 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    // Normalizar items de respuesta (similar a EquipmentPurchaseWidget)
-    const requestedMap = new Map((purchase.equipment || []).map((item) => [item.id, item]));
+    // Normalizar items de respuesta (id/equipment_id/inventory_id) y resolver nombre de equipo
+    const requestedEquipment = Array.isArray(purchase.equipment) ? purchase.equipment : [];
+    const requestedMap = new Map();
+    requestedEquipment.forEach((item) => {
+      const keys = [item?.id, item?.equipment_id, item?.inventory_id]
+        .map((value) => (value === undefined || value === null ? "" : String(value).trim()))
+        .filter(Boolean);
+      keys.forEach((key) => requestedMap.set(key, item));
+    });
+
+    const resolveRequestedItem = (responseItem) => {
+      const keys = [responseItem?.id, responseItem?.equipment_id, responseItem?.inventory_id]
+        .map((value) => (value === undefined || value === null ? "" : String(value).trim()))
+        .filter(Boolean);
+      for (const key of keys) {
+        if (requestedMap.has(key)) {
+          return { key, item: requestedMap.get(key) };
+        }
+      }
+      return { key: keys[0] || null, item: {} };
+    };
+
     const normalizedItems = Array.isArray(items)
-      ? items.map((item) => {
-        const requestedItem = requestedMap.get(item.id) || {};
+      ? items.map((item, index) => {
+        const { key, item: requestedItem } = resolveRequestedItem(item);
         const availableType = item.available_type || "none";
         const decision = availableType === "none" ? "reject" : item.decision || "reject";
+        const fallbackName = requestedItem.name || requestedItem.label || requestedItem.sku || null;
+        const resolvedId = key || `item_${index + 1}`;
+        const resolvedName =
+          item.name ||
+          item.equipment_name ||
+          fallbackName ||
+          `Equipo ${index + 1}`;
 
         return {
-          id: item.id,
-          name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || item.id || "Equipo",
+          id: resolvedId,
+          name: resolvedName,
           requested_type: item.requested_type || requestedItem.type,
           available_type: availableType,
           decision: decision,
-          sku: item.sku || requestedItem.sku
+          sku: item.sku || requestedItem.sku || null
         };
       })
       : [];
@@ -1431,7 +1512,7 @@ class PrivatePurchasesService {
     );
     const normalizedOutcome = acceptedItems.length > 0 ? "new" : "none";
 
-    console.log('[FLOW_PRIVADA][BE][ACP][RESPONSE][NORMALIZED]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][NORMALIZED]', {
       requestId: id,
       originalOutcome: outcome,
       normalizedOutcome,
@@ -1455,14 +1536,14 @@ class PrivatePurchasesService {
       [{ outcome: normalizedOutcome, items: normalizedItems, notes, actor }, id]
     );
 
-    console.log('[FLOW_PRIVADA][BE][ACP][RESPONSE][SUCCESS]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][SUCCESS]', {
       requestId: id,
       finalOutcome: normalizedOutcome
     });
 
     // La respuesta queda registrada y se mantiene en disponibilidad ACP
     // para que backoffice apruebe o rechace.
-    console.log('[FLOW_PRIVADA][BE][ACP][RESPONSE][PENDING_BACKOFFICE_DECISION]', {
+    logger.debug('[FLOW_PRIVADA][BE][ACP][RESPONSE][PENDING_BACKOFFICE_DECISION]', {
       requestId: id,
       state: purchase.status,
       outcome: normalizedOutcome
@@ -1473,7 +1554,7 @@ class PrivatePurchasesService {
     const hasProviderEmail = Boolean(purchase.provider_email);
     const acceptedForReservation = acceptedItems || [];
     if (!hasReservation && hasProviderEmail && acceptedForReservation.length > 0) {
-      console.log('[FLOW_PRIVADA][BE][ACP][RESERVATION][START]', {
+      logger.debug('[FLOW_PRIVADA][BE][ACP][RESERVATION][START]', {
         requestId: id,
         providerEmail: purchase.provider_email,
         itemsCount: acceptedForReservation.length
@@ -1512,7 +1593,7 @@ class PrivatePurchasesService {
             attendees: [user?.email].filter(Boolean)
           });
         } catch (calendarError) {
-          console.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][CALENDAR_WARN]', calendarError.message);
+          logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][CALENDAR_WARN]', calendarError.message);
         }
 
         await db.query(
@@ -1531,13 +1612,13 @@ class PrivatePurchasesService {
           ]
         );
 
-        console.log('[FLOW_PRIVADA][BE][ACP][RESERVATION][SUCCESS]', {
+        logger.debug('[FLOW_PRIVADA][BE][ACP][RESERVATION][SUCCESS]', {
           requestId: id,
           reservationFileId,
           calendarEventId: calendarEvent?.id || null
         });
       } catch (reservationError) {
-        console.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][ERROR]', {
+        logger.warn('[FLOW_PRIVADA][BE][ACP][RESERVATION][ERROR]', {
           requestId: id,
           error: reservationError.message
         });
@@ -1553,7 +1634,7 @@ class PrivatePurchasesService {
    * Cambia el estado a CLIENT_REGISTRATION_REQUESTED para indicar que se está esperando aprobación
    */
   async requestClientRegistration(purchaseId, user) {
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][REQUEST] Solicitando registro de cliente para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][REQUEST] Solicitando registro de cliente para purchase ${purchaseId}`);
 
     const purchaseQuery = `SELECT status, client_snapshot FROM private_purchase_requests WHERE id = $1`;
     const { rows: purchaseRows } = await db.query(purchaseQuery, [purchaseId]);
@@ -1615,7 +1696,7 @@ class PrivatePurchasesService {
           });
         }
       } catch (error) {
-        console.warn('Error notificando solicitud de registro cliente:', error);
+        logger.warn('Error notificando solicitud de registro cliente:', error);
       }
     }
 
@@ -1631,7 +1712,7 @@ class PrivatePurchasesService {
    * Valida que el cliente esté aprobado antes de permitir el registro
    */
   async updateClientRegistration(purchaseId, clientId, user) {
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Iniciando validación para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Iniciando validación para purchase ${purchaseId}`);
 
     // Obtener datos de la compra privada
     const purchaseQuery = `
@@ -1648,7 +1729,7 @@ class PrivatePurchasesService {
     const purchase = purchaseRows[0];
     const clientData = purchase.client_snapshot || {};
 
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente en compra: ${clientData.commercial_name || clientData.name}`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente en compra: ${clientData.commercial_name || clientData.name}`);
 
     // Validar que el cliente esté aprobado en el sistema de solicitudes de clientes
     const clientValidationQuery = `
@@ -1681,7 +1762,7 @@ class PrivatePurchasesService {
     }
 
     const approvedClient = approvedClients[0];
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][VALIDATION] Cliente aprobado encontrado: ${approvedClient.commercial_name} (ID: ${approvedClient.id})`);
 
     // Usar el ID del cliente aprobado
     const finalClientId = clientId || approvedClient.id;
@@ -1711,7 +1792,7 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    console.log(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado exitosamente: ${approvedClient.commercial_name}`);
+    logger.debug(`[FLOW_PRIVADA][CLIENT_REGISTRATION][SUCCESS] Cliente registrado exitosamente: ${approvedClient.commercial_name}`);
 
     // Transicion automatica a CLIENT_REGISTERED (esperando contrato)
     await this.transitionState(
@@ -1739,7 +1820,7 @@ class PrivatePurchasesService {
         });
       }
     } catch (error) {
-      console.warn('Error enviando notificacion de cliente aprobado:', error);
+      logger.warn('Error enviando notificacion de cliente aprobado:', error);
     }
 
     return rows[0];
@@ -1749,7 +1830,7 @@ class PrivatePurchasesService {
    * FASE 2: Establecer fechas de entrega con idempotencia
    */
   async setDeliveryDates(purchaseId, deliveryDates, user, deliveryNotes = '') {
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado delivery dates para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado delivery dates para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
       'SELECT delivery_dates_json FROM private_purchase_requests WHERE id = $1',
@@ -1768,7 +1849,7 @@ class PrivatePurchasesService {
         : Boolean(existingDates);
 
     if (hasExistingDates) {
-      console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Delivery dates ya existen para purchase ${purchaseId}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][BLOCKED] Delivery dates ya existen para purchase ${purchaseId}`);
       const error = new Error('Fechas de entrega ya fueron establecidas anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
@@ -1776,7 +1857,7 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    console.log(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Delivery dates no existen, permitiendo set para purchase ${purchaseId}`);
+    logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Delivery dates no existen, permitiendo set para purchase ${purchaseId}`);
 
     const query = `
       UPDATE private_purchase_requests
@@ -1814,7 +1895,7 @@ class PrivatePurchasesService {
     let calendarStatus = { status: 'pending' };
 
     try {
-      console.log(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][START] Creando evento calendar para purchase ${purchaseId}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][START] Creando evento calendar para purchase ${purchaseId}`);
 
       const calendarResult = await createDeliveryEvents({
         purchaseId,
@@ -1824,14 +1905,14 @@ class PrivatePurchasesService {
       });
 
       if (calendarResult.success) {
-        console.log(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][OK] Evento creado exitosamente: ${calendarResult.eventId}`);
+        logger.debug(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][OK] Evento creado exitosamente: ${calendarResult.eventId}`);
         calendarStatus = {
           status: 'created',
           eventId: calendarResult.eventId,
           attendeesCount: calendarResult.attendees?.length || 0
         };
       } else {
-        console.log(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][FALLBACK] Evento fallo: ${calendarResult.error}`);
+        logger.debug(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][FALLBACK] Evento fallo: ${calendarResult.error}`);
         calendarStatus = {
           status: 'warning',
           code: 'CALENDAR_CREATE_FAILED',
@@ -1839,7 +1920,7 @@ class PrivatePurchasesService {
         };
       }
     } catch (calendarError) {
-      console.log(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][ERR] Error creando evento: ${calendarError.message}`);
+      logger.debug(`[FLOW_PRIVADA][BE][FASE4][CALENDAR][CREATE][ERR] Error creando evento: ${calendarError.message}`);
       calendarStatus = {
         status: 'warning',
         code: 'CALENDAR_CONFIG_MISSING',
@@ -1870,7 +1951,7 @@ class PrivatePurchasesService {
         });
       }
     } catch (error) {
-      console.warn('Error enviando notificacion de fechas entrega:', error);
+      logger.warn('Error enviando notificacion de fechas entrega:', error);
     }
 
     return result;
@@ -1914,7 +1995,7 @@ class PrivatePurchasesService {
           chat: true
         });
       } catch (error) {
-        console.warn('Error enviando notificaciรณn listo para entrega:', error);
+        logger.warn('Error enviando notificaciรณn listo para entrega:', error);
       }
     });
 
@@ -1955,10 +2036,7 @@ class PrivatePurchasesService {
   }
 
   async updateOperationsDetails(purchaseId, { includesStarterKit, operationsNotes, estimatedArrivalAt } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isOperationsRole = normalizedRoles.some((role) => role.includes('jefe_operaciones'));
+    const isOperationsRole = this._hasRoleToken(user, 'jefe_operaciones');
 
     if (!isOperationsRole) {
       const error = new Error('Rol no autorizado para actualizar detalles de operaciones');
@@ -1990,7 +2068,7 @@ class PrivatePurchasesService {
     }
 
     const shouldUpdateArrival = estimatedArrivalAt !== undefined;
-    console.log('[FLOW_PRIVADA][BE][OPS_DETAILS][INPUT]', {
+    logger.debug('[FLOW_PRIVADA][BE][OPS_DETAILS][INPUT]', {
       purchaseId,
       includesStarterKit,
       hasNotes: Boolean(operationsNotes),
@@ -2022,7 +2100,7 @@ class PrivatePurchasesService {
     if (!rows.length) {
       throw new Error('Solicitud no encontrada');
     }
-    console.log('[FLOW_PRIVADA][BE][OPS_DETAILS][UPDATED]', {
+    logger.debug('[FLOW_PRIVADA][BE][OPS_DETAILS][UPDATED]', {
       purchaseId,
       includes_starter_kit: rows[0].includes_starter_kit,
       estimated_arrival_at: rows[0].estimated_arrival_at,
@@ -2033,10 +2111,7 @@ class PrivatePurchasesService {
   }
 
   async markEquipmentArrived(purchaseId, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isOperationsRole = normalizedRoles.some((role) => role.includes('jefe_operaciones'));
+    const isOperationsRole = this._hasRoleToken(user, 'jefe_operaciones');
 
     if (!isOperationsRole) {
       const error = new Error('Rol no autorizado para marcar llegada de equipo');
@@ -2045,7 +2120,7 @@ class PrivatePurchasesService {
       throw error;
     }
 
-    console.log('[FLOW_PRIVADA][BE][OPS_ARRIVAL][INPUT]', {
+    logger.debug('[FLOW_PRIVADA][BE][OPS_ARRIVAL][INPUT]', {
       purchaseId,
       userId: user?.id,
       userRole: user?.role
@@ -2065,7 +2140,7 @@ class PrivatePurchasesService {
     }
 
     const updated = rows[0];
-    console.log('[FLOW_PRIVADA][BE][OPS_ARRIVAL][UPDATED]', {
+    logger.debug('[FLOW_PRIVADA][BE][OPS_ARRIVAL][UPDATED]', {
       purchaseId,
       status: updated?.status,
       equipment_arrived_at: updated?.equipment_arrived_at
@@ -2091,10 +2166,7 @@ class PrivatePurchasesService {
   }
 
   async updateDispatchDetails(purchaseId, { items = [], notes = '', dispatchedAt, observations } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isLogisticsRole = normalizedRoles.some((role) => role.includes('jefe_logistica') || role.includes('logistica'));
+    const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica']);
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para registrar despacho');
@@ -2221,10 +2293,7 @@ class PrivatePurchasesService {
   }
 
   async assignDeliveryActTechnician(purchaseId, { assigned_to_email, assigned_to_name } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isLeadRole = normalizedRoles.some((role) => role.includes('jefe_tecnico') || role.includes('jefe_servicio_tecnico'));
+    const isLeadRole = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
 
     if (!isLeadRole) {
       const error = new Error('Rol no autorizado para asignar tecnico');
@@ -2318,10 +2387,7 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryActLogisticsSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isLogisticsRole = normalizedRoles.some((role) => role.includes('logistica'));
+    const isLogisticsRole = this._hasRoleToken(user, 'logistica');
 
     if (!isLogisticsRole) {
       const error = new Error('Rol no autorizado para firmar acta');
@@ -2395,10 +2461,7 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryActFinalSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
-    const roleValue = user?.role || '';
-    const roleList = Array.isArray(roleValue) ? roleValue : [roleValue];
-    const normalizedRoles = roleList.map((role) => String(role || '').toLowerCase());
-    const isTechnicalRole = normalizedRoles.some((role) => role.includes('tecnico'));
+    const isTechnicalRole = this._hasRoleToken(user, 'tecnico');
 
     if (!isTechnicalRole) {
       const error = new Error('Rol no autorizado para subir acta final');
@@ -2692,6 +2755,9 @@ class PrivatePurchasesService {
         p.equipment,
         p.status,
         p.offer_kind,
+        p.business_case_id,
+        p.client_request_id,
+        p.client_approved_at,
         p.offer_valid_until,
         p.created_at,
         p.updated_at,
@@ -2758,6 +2824,7 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(query, params);
     await this._attachClientRequestSnapshot(rows);
+    await this._attachChecklistState(rows);
     return rows;
   }
 
@@ -2815,7 +2882,7 @@ class PrivatePurchasesService {
       clientData?.client_request_id ||
       null;
 
-    console.log('[CLIENT_APPROVAL_CHECK] Iniciando consulta de aprobacion para cliente:', {
+    logger.debug('[CLIENT_APPROVAL_CHECK] Iniciando consulta de aprobacion para cliente:', {
       clientData,
       clientRequestId,
       hasName: !!clientData?.name,
@@ -2825,7 +2892,7 @@ class PrivatePurchasesService {
     });
 
     if (clientRequestId) {
-      console.log('[CLIENT_APPROVAL_CHECK] Buscando cliente aprobado por ID:', {
+      logger.debug('[CLIENT_APPROVAL_CHECK] Buscando cliente aprobado por ID:', {
         clientRequestId
       });
       const { rows: clientRows } = await db.query(
@@ -2839,7 +2906,7 @@ class PrivatePurchasesService {
 
       if (clientRows.length > 0) {
         const approvedClient = clientRows[0];
-        console.log('[CLIENT_APPROVAL_CHECK] OK Cliente aprobado encontrado por ID:', {
+        logger.debug('[CLIENT_APPROVAL_CHECK] OK Cliente aprobado encontrado por ID:', {
           clientId: approvedClient.id,
           commercialName: approvedClient.commercial_name,
           rucCedula: approvedClient.ruc_cedula,
@@ -2854,7 +2921,7 @@ class PrivatePurchasesService {
         };
       }
 
-      console.log('[CLIENT_APPROVAL_CHECK] ERROR Cliente no aprobado para ID:', {
+      logger.debug('[CLIENT_APPROVAL_CHECK] ERROR Cliente no aprobado para ID:', {
         clientRequestId
       });
     }
@@ -2862,7 +2929,7 @@ class PrivatePurchasesService {
     const nameValue = clientData?.commercial_name || clientData?.name || '';
     const rucValue = clientData?.ruc_cedula || clientData?.client_identifier || '';
     if (!nameValue && !rucValue) {
-      console.log('[CLIENT_APPROVAL_CHECK] ERROR Datos del cliente incompletos');
+      logger.debug('[CLIENT_APPROVAL_CHECK] ERROR Datos del cliente incompletos');
       return { isApproved: false, message: 'Datos del cliente incompletos' };
     }
 
@@ -2870,7 +2937,7 @@ class PrivatePurchasesService {
       const commercialName = nameValue;
       const rucCedula = rucValue;
 
-      console.log('[CLIENT_APPROVAL_CHECK] Buscando cliente aprobado con:', {
+      logger.debug('[CLIENT_APPROVAL_CHECK] Buscando cliente aprobado con:', {
         commercialName,
         rucCedula
       });
@@ -2887,7 +2954,7 @@ class PrivatePurchasesService {
         LIMIT 1
       `;
 
-      console.log('[CLIENT_APPROVAL_CHECK] Ejecutando query:', {
+      logger.debug('[CLIENT_APPROVAL_CHECK] Ejecutando query:', {
         query: clientValidationQuery,
         params: [commercialName, rucCedula]
       });
@@ -2897,14 +2964,14 @@ class PrivatePurchasesService {
         rucCedula
       ]);
 
-      console.log('[CLIENT_APPROVAL_CHECK] Resultado de query:', {
+      logger.debug('[CLIENT_APPROVAL_CHECK] Resultado de query:', {
         rowsCount: rows.length,
         firstRow: rows[0] || null
       });
 
       if (rows.length > 0) {
         const approvedClient = rows[0];
-        console.log('[CLIENT_APPROVAL_CHECK] OK Cliente aprobado encontrado:', {
+        logger.debug('[CLIENT_APPROVAL_CHECK] OK Cliente aprobado encontrado:', {
           clientId: approvedClient.id,
           commercialName: approvedClient.commercial_name,
           rucCedula: approvedClient.ruc_cedula,
@@ -2920,13 +2987,13 @@ class PrivatePurchasesService {
         };
       }
 
-      console.log('[CLIENT_APPROVAL_CHECK] ERROR Cliente no encontrado como aprobado');
+      logger.debug('[CLIENT_APPROVAL_CHECK] ERROR Cliente no encontrado como aprobado');
       return {
         isApproved: false,
         message: 'Cliente pendiente de aprobacion por backoffice'
       };
     } catch (error) {
-      console.error('[CLIENT_APPROVAL_CHECK] ERROR Error consultando aprobacion:', error);
+      logger.error('[CLIENT_APPROVAL_CHECK] ERROR Error consultando aprobacion:', error);
       return {
         isApproved: false,
         message: 'Error consultando estado de aprobacion',
@@ -2963,7 +3030,7 @@ class PrivatePurchasesService {
           row.status = PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED;
         }
       } catch (error) {
-        console.warn('[FLOW_PRIVADA][BE][CLIENT_SYNC][WARN]', {
+        logger.warn('[FLOW_PRIVADA][BE][CLIENT_SYNC][WARN]', {
           purchaseId: row.id,
           error: error.message
         });
@@ -3102,6 +3169,265 @@ class PrivatePurchasesService {
     return rows;
   }
 
+  _extractClientRequestIdFromRow(row = {}) {
+    const snapshot = row?.client_snapshot || {};
+    const candidate =
+      row?.client_request_id ||
+      snapshot?.registered_client_id ||
+      snapshot?.client_request_id ||
+      snapshot?.client_request?.id ||
+      null;
+    const numeric = Number(candidate);
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+
+  _getChecklistActionByStatus(row = {}) {
+    const status = String(row?.status || "");
+    const isComodato = row?.offer_kind === "comodato";
+
+    switch (status) {
+      case PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE:
+        return {
+          action: "request_acp_availability",
+          action_label: "Solicitar disponibilidad al ACP",
+          requirements: ["client_data_complete", "equipment_defined"],
+        };
+      case PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED:
+        return {
+          action: "register_provider_response",
+          action_label: "Registrar respuesta del proveedor",
+          requirements: ["availability_email_sent", "provider_response_registered"],
+        };
+      case PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED:
+        return {
+          action: "send_offer",
+          action_label: "Enviar oferta al cliente",
+          requirements: isComodato
+            ? ["provider_response_registered", "business_case_created"]
+            : ["provider_response_registered"],
+        };
+      case PRIVATE_PURCHASE_STATES.OFFER_SENT:
+      case PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE:
+        return {
+          action: "upload_signed_offer",
+          action_label: "Subir oferta firmada del cliente",
+          requirements: ["offer_uploaded", "signed_offer_uploaded"],
+        };
+      case PRIVATE_PURCHASE_STATES.OFFER_SIGNED:
+        return {
+          action: "request_client_registration",
+          action_label: "Solicitar registro del cliente",
+          requirements: ["signed_offer_uploaded"],
+        };
+      case PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED:
+        return {
+          action: "wait_client_registration",
+          action_label: "Esperar aprobación del registro del cliente",
+          requirements: ["client_registered"],
+        };
+      case PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED:
+        return {
+          action: "request_inspection",
+          action_label: "Solicitar inspección de ambiente",
+          requirements: ["client_registered", "inspection_requested"],
+        };
+      case PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED:
+        return {
+          action: "upload_contract_draft",
+          action_label: "Subir contrato borrador",
+          requirements: ["inspection_requested", "contract_draft_uploaded"],
+        };
+      case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE:
+        return {
+          action: "upload_client_signed_contract",
+          action_label: "Subir contrato firmado por cliente",
+          requirements: ["contract_draft_uploaded", "contract_client_signed_uploaded"],
+        };
+      case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL:
+        return {
+          action: "manager_review",
+          action_label: "Revisión de gerencia",
+          requirements: [
+            "client_registered",
+            "inspection_act_uploaded",
+            "lopdp_approved",
+            "client_id_uploaded",
+            "operating_permit_if_required",
+            "provider_response_registered",
+            "offer_uploaded",
+            "signed_offer_uploaded",
+            "contract_draft_uploaded",
+            "contract_client_signed_uploaded",
+          ],
+        };
+      case PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED:
+        return {
+          action: "resubmit_to_manager",
+          action_label: "Completar documentos y reenviar a gerencia",
+          requirements: [
+            "client_registered",
+            "inspection_act_uploaded",
+            "lopdp_approved",
+            "client_id_uploaded",
+            "operating_permit_if_required",
+            "provider_response_registered",
+            "offer_uploaded",
+            "signed_offer_uploaded",
+            "contract_draft_uploaded",
+            "contract_client_signed_uploaded",
+          ],
+        };
+      case PRIVATE_PURCHASE_STATES.CONTRACT_AVAILABLE:
+        return {
+          action: "request_delivery_dates",
+          action_label: "Solicitar fechas de entrega",
+          requirements: ["equipment_arrived"],
+        };
+      case PRIVATE_PURCHASE_STATES.DELIVERY_DATES_REQUESTED:
+        return {
+          action: "submit_delivery_dates",
+          action_label: "Registrar fechas de entrega",
+          requirements: ["equipment_arrived", "delivery_dates_submitted"],
+        };
+      default:
+        return null;
+    }
+  }
+
+  _isChecklistItemComplete(row = {}, clientRequest = {}, key = "") {
+    const snapshot = row?.client_snapshot || {};
+    switch (key) {
+      case "client_data_complete": {
+        const clientName =
+          snapshot?.commercial_name ||
+          snapshot?.name ||
+          snapshot?.client_name ||
+          "";
+        const clientIdentifier =
+          snapshot?.ruc_cedula ||
+          snapshot?.client_identifier ||
+          snapshot?.identification ||
+          "";
+        return Boolean(String(clientName).trim() && String(clientIdentifier).trim());
+      }
+      case "equipment_defined":
+        return Array.isArray(row?.equipment) && row.equipment.length > 0;
+      case "availability_email_sent":
+        return Boolean(row?.availability_email_sent_at);
+      case "provider_response_registered":
+        return Boolean(row?.provider_response_at);
+      case "business_case_created":
+        return Boolean(row?.business_case_id);
+      case "offer_uploaded":
+        return Boolean(row?.offer_document_id);
+      case "signed_offer_uploaded":
+        return Boolean(row?.offer_signed_document_id);
+      case "client_registered":
+        return Boolean(row?.client_registered_at || snapshot?.registered_client_id);
+      case "inspection_requested":
+        return Boolean(row?.inspection_request_id || row?.inspection_requested_at);
+      case "inspection_act_uploaded":
+        return Boolean(row?.inspection_acta_document_id);
+      case "lopdp_approved": {
+        const lopdpStatus = String(clientRequest?.lopdp_consent_status || "").toLowerCase();
+        return Boolean(
+          lopdpStatus === "granted" ||
+          clientRequest?.consent_record_file_id ||
+          clientRequest?.consent_evidence_file_id ||
+          row?.client_approved_at
+        );
+      }
+      case "client_id_uploaded":
+        return Boolean(clientRequest?.id_file_id || snapshot?.id_file_id);
+      case "operating_permit_if_required": {
+        const permitStatus = String(clientRequest?.operating_permit_status || "").toLowerCase();
+        if (permitStatus !== "has_it") return true;
+        return Boolean(clientRequest?.operating_permit_file_id);
+      }
+      case "contract_draft_uploaded":
+        return Boolean(row?.contract_document_id);
+      case "contract_client_signed_uploaded":
+        return Boolean(row?.contract_client_signed_document_id);
+      case "equipment_arrived":
+        return Boolean(row?.equipment_arrived_at);
+      case "delivery_dates_submitted":
+        return Boolean(row?.delivery_start_at && row?.delivery_end_at);
+      default:
+        return false;
+    }
+  }
+
+  _buildChecklistState(row = {}, clientRequest = {}) {
+    const actionDef = this._getChecklistActionByStatus(row);
+    if (!actionDef) {
+      return {
+        action: null,
+        action_label: null,
+        requirements: [],
+        pending: [],
+        items: [],
+      };
+    }
+
+    const requirements = Array.isArray(actionDef.requirements) ? actionDef.requirements : [];
+    const items = requirements.map((key) => ({
+      key,
+      label: PRIVATE_CHECKLIST_ITEM_LABELS[key] || key,
+      auto: true,
+      checked: this._isChecklistItemComplete(row, clientRequest, key),
+    }));
+    const pending = items.filter((item) => !item.checked).map((item) => item.key);
+
+    return {
+      action: actionDef.action,
+      action_label: actionDef.action_label,
+      requirements,
+      pending,
+      items,
+    };
+  }
+
+  async _attachChecklistState(rows = []) {
+    const list = Array.isArray(rows) ? rows : [rows];
+    if (!list.length) return rows;
+
+    const clientRequestIds = Array.from(
+      new Set(
+        list
+          .map((row) => this._extractClientRequestIdFromRow(row))
+          .filter((id) => Number.isFinite(id))
+      )
+    );
+
+    const clientRequestMap = new Map();
+    if (clientRequestIds.length > 0) {
+      const { rows: clientRows } = await db.query(
+        `SELECT
+            id,
+            operating_permit_status,
+            operating_permit_file_id,
+            id_file_id,
+            consent_record_file_id,
+            consent_evidence_file_id,
+            lopdp_consent_status
+         FROM client_requests
+         WHERE id = ANY($1::int[])`,
+        [clientRequestIds]
+      );
+      clientRows.forEach((item) => {
+        clientRequestMap.set(item.id, item);
+      });
+    }
+
+    for (const row of list) {
+      const clientRequestId = this._extractClientRequestIdFromRow(row);
+      const clientRequest = clientRequestId ? clientRequestMap.get(clientRequestId) || {} : {};
+      row.checklist_state = this._buildChecklistState(row, clientRequest);
+    }
+
+    return rows;
+  }
+
   async _generateDeliveryActNumber() {
     const { rows } = await db.query("SELECT nextval('private_purchase_delivery_act_seq') AS seq");
     const seq = rows[0]?.seq || 1;
@@ -3227,7 +3553,7 @@ class PrivatePurchasesService {
   async _schedulePreventiveMaintenance({ purchase, baseDate, scheduledBy }) {
     const equipmentList = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
     if (!equipmentList.length) {
-      console.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Sin equipos para programar mantenimientos', {
+      logger.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Sin equipos para programar mantenimientos', {
         purchaseId: purchase?.id
       });
       return { created: 0, skipped: equipmentList.length };
@@ -3235,7 +3561,7 @@ class PrivatePurchasesService {
 
     const base = baseDate instanceof Date ? baseDate : new Date(baseDate || Date.now());
     if (Number.isNaN(base.getTime())) {
-      console.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Fecha base invalida para mantenimiento', {
+      logger.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Fecha base invalida para mantenimiento', {
         purchaseId: purchase?.id,
         baseDate
       });
@@ -3258,7 +3584,7 @@ class PrivatePurchasesService {
       const equipmentId = Number(item?.id);
       if (!Number.isFinite(equipmentId)) {
         skipped += 1;
-        console.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Equipo sin id valido, se omite', {
+        logger.warn('[FLOW_PRIVADA][BE][MAINTENANCE] Equipo sin id valido, se omite', {
           purchaseId: purchase?.id,
           equipment: item
         });
@@ -3339,7 +3665,7 @@ class PrivatePurchasesService {
       );
       return rows;
     } catch (error) {
-      console.warn('[PRIVATE_PURCHASE] Error obteniendo usuarios por rol:', error.message);
+      logger.warn('[PRIVATE_PURCHASE] Error obteniendo usuarios por rol:', error.message);
       return [];
     }
   }

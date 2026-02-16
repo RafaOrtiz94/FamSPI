@@ -310,7 +310,9 @@ export const PRIVATE_PURCHASE_MODAL_TITLES = {
         signedUpload: "Subiendo oferta firmada",
         clientRegistration: "Registrando cliente",
         sendingToAcp: "Enviando a ACP",
-        resubmit: "Reenviando a gerencia"
+        resubmit: "Reenviando a gerencia",
+        requestDates: "Solicitando fechas de entrega",
+        reject: "Rechazando contrato"
     }
 };
 
@@ -321,6 +323,8 @@ export const PRIVATE_PURCHASE_PROCESSING_STEPS = {
     clientRegistration: { id: "client_registration", label: "Registrando cliente" },
     sendingToAcp: { id: "send_to_acp", label: "Enviando a ACP" },
     resubmit: { id: "resubmit", label: "Reenviando a gerencia" },
+    requestDates: { id: "request_dates", label: "Solicitando fechas de entrega" },
+    reject: { id: "reject", label: "Rechazando contrato" },
     acpSendEmail: { id: "acp_send_email", label: "Enviando correo proveedor" },
     acpResponse: { id: "acp_response", label: "Registrando respuesta proveedor" },
     availabilityAccept: { id: "availability_accept", label: "Aceptando disponibilidad" },

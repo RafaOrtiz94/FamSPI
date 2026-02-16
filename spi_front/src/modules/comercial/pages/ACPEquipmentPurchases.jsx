@@ -346,36 +346,22 @@ const ACPEquipmentPurchasesPage = () => {
       <motion.div
         initial={{ opacity: 0, y: -20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="bg-white border-b border-slate-200 rounded-t-3xl"
+        className="bg-white border-b border-slate-200"
       >
-        <div className="px-6 py-6">
-          <div className="flex items-center justify-between mb-6">
-            <div className="flex items-center gap-4">
-              <div className="p-3 bg-indigo-100 rounded-xl">
-                <FiShoppingCart className="text-indigo-600" size={28} />
-              </div>
-              <div>
-                <h1 className="text-3xl font-bold text-slate-900">Compras Públicas ACP</h1>
-                <p className="text-slate-600 mt-1">
-                  Gestión integral del proceso de adquisiciones públicas
-                </p>
-              </div>
+        <div className="px-4 md:px-6 py-3 md:py-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3">
+            <div className="min-w-0">
+              <h1 className="text-lg md:text-xl font-semibold text-slate-900 truncate">Compras Públicas ACP</h1>
+              <p className="text-xs text-slate-500">
+                {totalRequests} solicitudes • {stats?.completed ?? 0} completadas
+              </p>
             </div>
-
-            <div className="flex items-center gap-4">
-              <RequestActionButton type="PUBLIC_PURCHASE" size="sm" />
-              <div className="text-right">
-                <p className="text-sm font-medium text-slate-900">{totalRequests} Solicitudes</p>
-                <p className="text-xs text-slate-600">
-                  {stats?.completed ?? 0} completadas • {(stats?.waiting_provider_response ?? 0) + (stats?.waiting_proforma ?? 0)} pendientes
-                </p>
-              </div>
-            </div>
+            <RequestActionButton type="PUBLIC_PURCHASE" size="sm" />
           </div>
 
           {/* Navigation Tabs */}
-          <div className="border-b border-slate-100">
-            <div className="flex space-x-1">
+          <div className="border-b border-slate-100 overflow-x-auto">
+            <div className="flex space-x-1 min-w-max">
               {tabs.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = activeTab === tab.id;
@@ -385,7 +371,7 @@ const ACPEquipmentPurchasesPage = () => {
                     key={tab.id}
                     onClick={() => setActiveTab(tab.id)}
                     className={`
-                      flex items-center gap-2 px-4 py-3 text-sm font-medium rounded-t-lg transition-all duration-200 border-b-2
+                      flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-t-md transition-all duration-200 border-b-2
                       ${isActive
                         ? 'bg-indigo-50 text-indigo-700 border-indigo-500 -mb-px'
                         : 'text-slate-600 hover:text-slate-900 hover:bg-slate-50 border-transparent'

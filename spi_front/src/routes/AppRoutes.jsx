@@ -19,44 +19,6 @@ import Unauthorized from "../modules/shared/pages/Unauthorized";
 import RolePending from "../modules/shared/pages/RolePending";
 
 // 🧭 Dashboards por rol
-import DashboardGerencia from "../modules/gerencia/Dashboard";
-import PurchasesAlbumPage from "../modules/gerencia/PurchasesAlbumPage";
-import DashboardFinanzas from "../modules/finanzas/Dashboard";
-import ViaticosWorkspace from "../modules/finanzas/pages/ViaticosWorkspace";
-import DashboardComercial from "../modules/comercial/pages/Dashboard";
-import SolicitudesPage from "../modules/comercial/pages/Solicitudes";
-import ClientesPage from "../modules/comercial/pages/Clientes";
-import NewClientRequest from "../modules/comercial/pages/NewClientRequest";
-import EquipmentPurchasesPage from "../modules/comercial/pages/EquipmentPurchases";
-import ACPEquipmentPurchasesPage from "../modules/comercial/pages/ACPEquipmentPurchases";
-import BusinessCaseWorkspace from "../modules/comercial/pages/BusinessCaseWorkspace";
-import PlanificacionMensual from "../modules/comercial/pages/PlanificacionMensual";
-import AprobacionCronogramas from "../modules/comercial/pages/AprobacionCronogramas";
-import DashboardServicio from "../modules/servicio/pages/Dashboard";
-import ServicioMantenimientos from "../modules/servicio/pages/Mantenimientos";
-import ServicioSolicitudes from "../modules/servicio/pages/Solicitudes";
-import ServicioDisponibilidad from "../modules/servicio/pages/Disponibilidad";
-import ServicioCapacitaciones from "../modules/servicio/pages/Capacitaciones";
-import ServicioEquipos from "../modules/servicio/pages/Equipos";
-import ServicioAprobaciones from "../modules/servicio/pages/Aprobaciones";
-import ServicioAplicaciones from "../modules/servicio/pages/Aplicaciones";
-import ServicioDesinfeccion from "../modules/servicio/pages/Desinfeccion";
-import ServicioAsistencia from "../modules/servicio/pages/Asistencia";
-import ServicioVerificacionEquipos from "../modules/servicio/pages/VerificacionEquipos";
-import ServicioPrivatePurchaseDeliveries from "../modules/servicio/pages/PrivatePurchaseDeliveries";
-import TecnicoPrivatePurchases from "../modules/servicio/pages/TecnicoPrivatePurchases";
-import DashboardTalento from "../modules/talento/Dashboard";
-import DashboardTI from "../modules/talento/DashboardTI";
-import TicketsWorkspace from "../modules/ti/pages/TicketsWorkspace";
-import DashboardOperaciones from "../modules/operaciones/Dashboard";
-import DashboardCalidad from "../modules/calidad/Dashboard";
-import DashboardLogistica from "../modules/logistica/Dashboard";
-import ClientRequests from "../modules/backoffice/pages/ClientRequests";
-import ClientRequestReview from "../modules/backoffice/pages/ClientRequestReview";
-import PrivatePurchasesPage from "../modules/backoffice/pages/PrivatePurchases";
-import DeterminationsCatalog from "../modules/operaciones/pages/DeterminationsCatalog";
-import OperacionesPrivatePurchases from "../modules/operaciones/pages/OperacionesPrivatePurchases";
-import LogisticaPrivatePurchases from "../modules/logistica/pages/LogisticaPrivatePurchases";
 import LinksInteres from "../modules/shared/pages/LinksInteres";
 
 // 🛒 Workspace de Compras Unificado
@@ -84,11 +46,56 @@ import SignatureDashboard from "../modules/signature/pages/SignatureDashboard";
 
 
 // Lazy loaded components
+const DashboardGerencia = lazy(() => import("../modules/gerencia/Dashboard"));
+const PurchasesAlbumPage = lazy(() => import("../modules/gerencia/PurchasesAlbumPage"));
+const DashboardFinanzas = lazy(() => import("../modules/finanzas/Dashboard"));
+const ViaticosWorkspace = lazy(() => import("../modules/finanzas/pages/ViaticosWorkspace"));
+const DashboardComercial = lazy(() => import("../modules/comercial/pages/Dashboard"));
+const SolicitudesPage = lazy(() => import("../modules/comercial/pages/Solicitudes"));
+const ClientesPage = lazy(() => import("../modules/comercial/pages/Clientes"));
+const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClientRequest"));
+const EquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/EquipmentPurchases"));
+const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
+const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
+const PlanificacionMensual = lazy(() => import("../modules/comercial/pages/PlanificacionMensual"));
+const AprobacionCronogramas = lazy(() => import("../modules/comercial/pages/AprobacionCronogramas"));
+const DashboardServicio = lazy(() => import("../modules/servicio/pages/Dashboard"));
+const ServicioMantenimientos = lazy(() => import("../modules/servicio/pages/Mantenimientos"));
+const ServicioSolicitudes = lazy(() => import("../modules/servicio/pages/Solicitudes"));
+const ServicioDisponibilidad = lazy(() => import("../modules/servicio/pages/Disponibilidad"));
+const ServicioCapacitaciones = lazy(() => import("../modules/servicio/pages/Capacitaciones"));
+const ServicioEquipos = lazy(() => import("../modules/servicio/pages/Equipos"));
+const ServicioAprobaciones = lazy(() => import("../modules/servicio/pages/Aprobaciones"));
+const ServicioAplicaciones = lazy(() => import("../modules/servicio/pages/Aplicaciones"));
+const ServicioDesinfeccion = lazy(() => import("../modules/servicio/pages/Desinfeccion"));
+const ServicioAsistencia = lazy(() => import("../modules/servicio/pages/Asistencia"));
+const ServicioVerificacionEquipos = lazy(() => import("../modules/servicio/pages/VerificacionEquipos"));
+const ServicioPrivatePurchaseDeliveries = lazy(() => import("../modules/servicio/pages/PrivatePurchaseDeliveries"));
+const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/TecnicoPrivatePurchases"));
+const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
+const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
+const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
+const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
+const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
+const DashboardLogistica = lazy(() => import("../modules/logistica/Dashboard"));
+const ClientRequests = lazy(() => import("../modules/backoffice/pages/ClientRequests"));
+const ClientRequestReview = lazy(() => import("../modules/backoffice/pages/ClientRequestReview"));
+const PrivatePurchasesPage = lazy(() => import("../modules/backoffice/pages/PrivatePurchases"));
+const DeterminationsCatalog = lazy(() => import("../modules/operaciones/pages/DeterminationsCatalog"));
+const OperacionesPrivatePurchases = lazy(() => import("../modules/operaciones/pages/OperacionesPrivatePurchases"));
+const LogisticaPrivatePurchases = lazy(() => import("../modules/logistica/pages/LogisticaPrivatePurchases"));
 const AsistenciaReportes = lazy(() => import("../modules/talento/pages/AsistenciaReportes"));
+
+const routeFallback = (
+  <div className="flex justify-center items-center min-h-[50vh]">
+    <div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" />
+  </div>
+);
 
 const AppRoutes = () => {
   return (
-    <Routes>
+    <Suspense fallback={routeFallback}>
+      <Routes>
       {/* Ruta directa para /registro-en-proceso (fallback duro) */}
       <Route path="/registro-en-proceso" element={<RolePending />} />
       {/* =======================================
@@ -266,11 +273,7 @@ const AppRoutes = () => {
           >
             <Route
               path="/dashboard/talento-humano/asistencia-reportes"
-              element={
-                <Suspense fallback={<div className="flex justify-center items-center min-h-[50vh]"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-                  <AsistenciaReportes />
-                </Suspense>
-              }
+              element={<AsistenciaReportes />}
             />
           </Route>
           <Route
@@ -386,6 +389,9 @@ const AppRoutes = () => {
                   "acp_comercial",
                   "gerencia",
                   "gerencia_general",
+                  "jefe_tecnico",
+                  "jefe_servicio_tecnico",
+                  "tecnico",
                   "jefe_operaciones",
                   "jefe_logistica",
                   "backoffice_comercial",
@@ -404,7 +410,8 @@ const AppRoutes = () => {
       ======================================= */}
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<NotFound />} />
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 };
 

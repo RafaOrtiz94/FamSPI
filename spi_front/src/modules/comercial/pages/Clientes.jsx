@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FiAlertTriangle,
   FiCheckCircle,
   FiInfo,
   FiMail,
@@ -25,6 +24,7 @@ import {
   endClientVisit,
   fetchClients,
   getClientDetail,
+  setVisitStatus,
   startClientVisit,
   registerProspectVisit,
   updateClient
@@ -37,11 +37,16 @@ import { RequestActionButton } from "../../../core/ui/components/RequestActionCa
 
 const todayStr = new Date().toISOString().slice(0, 10);
 
-const roleIsManager = (role) =>
-  ["jefe_comercial", "gerencia", "gerente", "admin", "administrador", "ti"].includes(role);
+const ASSIGN_CLIENT_ROLES = new Set([
+  "jefe_comercial",
+  "gerencia",
+  "gerente",
+  "admin",
+  "administrador",
+  "ti",
+]);
 
-const advisorRoles = new Set(["comercial", "acp_comercial", "backoffice"]);
-const albumAllAccessRoles = new Set([
+const FULL_ACCESS_ROLES = new Set([
   "acp_comercial",
   "backoffice",
   "backoffice_comercial",
@@ -52,6 +57,11 @@ const albumAllAccessRoles = new Set([
   "administrador",
   "ti",
 ]);
+const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
+const VISIT_ALLOWED_ROLES = new Set([...FULL_ACCESS_ROLES, ...ADVISOR_ROLES]);
+const BACKOFFICE_PANEL_ROLES = new Set(["backoffice", "backoffice_comercial"]);
+const ACP_COMMERCIAL_ROLES = new Set(["acp_comercial"]);
+const ASSIGNABLE_ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
 
 const normalizeStatus = (status) => {
   const value = (status || "").toLowerCase();
@@ -83,14 +93,17 @@ const ClientesPage = () => {
   const { role, user } = useAuth();
   const normalizedRole =
     (role || user?.role || user?.role_name || user?.scope || "").toLowerCase();
-  const isManager = roleIsManager(normalizedRole);
-  const isBackofficeUser = normalizedRole.includes("backoffice");
-  const isAcpCommercial = normalizedRole.includes("acp_comercial");
   const roleTokens = (normalizedRole || "")
     .split(/[\s,|]+/)
     .map((token) => token.trim())
     .filter(Boolean);
-  const canManageAllClients = roleTokens.some((token) => albumAllAccessRoles.has(token));
+  const hasAnyRole = useCallback((allowedRoles) => roleTokens.some((token) => allowedRoles.has(token)), [roleTokens]);
+  const canAssignClients = hasAnyRole(ASSIGN_CLIENT_ROLES);
+  const canManageAllClients = hasAnyRole(FULL_ACCESS_ROLES);
+  const canVisitClients = hasAnyRole(VISIT_ALLOWED_ROLES);
+  const isBackofficeUser = hasAnyRole(BACKOFFICE_PANEL_ROLES);
+  const isAcpCommercial = hasAnyRole(ACP_COMMERCIAL_ROLES);
+  const isCommercialOnly = roleTokens.includes("comercial") && !canManageAllClients;
   const currentEmail = user?.email?.toLowerCase?.() || "";
 
   const [clientes, setClientes] = useState([]);
@@ -114,21 +127,26 @@ const ClientesPage = () => {
   const [filterBySchedule, setFilterBySchedule] = useState(true);
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [summary, setSummary] = useState({});
+  const [temporaryAssignmentsFilter, setTemporaryAssignmentsFilter] = useState("all"); // all | expiring_today | expiring_7
   const [albumSearch, setAlbumSearch] = useState("");
   const [showAllClients, setShowAllClients] = useState(false);
   const [allClientsSearch, setAllClientsSearch] = useState("");
+  const [expandedTimeline, setExpandedTimeline] = useState({});
+  const [reprogramModal, setReprogramModal] = useState({
+    isOpen: false,
+    client: null,
+    date: todayStr,
+    note: "",
+    submitting: false,
+  });
   const [editDetail, setEditDetail] = useState(null);
   const [editLoading, setEditLoading] = useState(false);
   const [editSubmitting, setEditSubmitting] = useState(false);
   const [editForm, setEditForm] = useState({});
   const [editFiles, setEditFiles] = useState({});
+  const clientsCacheRef = useRef(new Map());
 
   const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
-
-  const activeStatusMeta = useMemo(
-    () => getStatusMeta(activeClient?.visit_status),
-    [activeClient],
-  );
 
   const formatTime = (value) =>
     value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—";
@@ -186,6 +204,52 @@ const ClientesPage = () => {
     return [];
   };
 
+  const normalizeAssignmentDetails = (assignmentDetails) => {
+    if (Array.isArray(assignmentDetails)) return assignmentDetails;
+    if (typeof assignmentDetails === "string") {
+      try {
+        const parsed = JSON.parse(assignmentDetails);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch (e) {
+        return [];
+      }
+    }
+    return [];
+  };
+
+  const getTemporaryAssignmentInfo = useCallback((client) => {
+    const details = normalizeAssignmentDetails(client?.assignment_details);
+    const now = new Date();
+    let nearest = null;
+
+    details.forEach((item) => {
+      if (!item?.is_temporary || !item?.ends_at) return;
+      const endDate = new Date(item.ends_at);
+      if (Number.isNaN(endDate.getTime())) return;
+      if (!nearest || endDate < nearest.endDate) {
+        const diffMs = endDate.getTime() - now.getTime();
+        nearest = {
+          endDate,
+          daysRemaining: Math.ceil(diffMs / (1000 * 60 * 60 * 24)),
+          assignment: item,
+        };
+      }
+    });
+
+    return nearest;
+  }, []);
+
+  const formatAssignment = (assignment) => {
+    const email = assignment?.assigned_to_email || assignment?.email || "sin-correo";
+    const name = assignment?.assigned_to_name || email;
+    const isTemporary = Boolean(assignment?.is_temporary);
+    const endsAt = assignment?.ends_at ? new Date(assignment.ends_at) : null;
+    if (isTemporary && endsAt && !Number.isNaN(endsAt.getTime())) {
+      return `${name} (temporal hasta ${endsAt.toLocaleDateString()})`;
+    }
+    return name;
+  };
+
   const captureLocation = () =>
     new Promise((resolve, reject) => {
       if (typeof navigator === "undefined" || !navigator.geolocation) {
@@ -225,7 +289,7 @@ const ClientesPage = () => {
     try {
       const users = await getUsers();
       const usersArray = Array.isArray(users) ? users : [];
-      const filtered = usersArray.filter((u) => advisorRoles.has(u.role?.toLowerCase?.()));
+      const filtered = usersArray.filter((u) => ASSIGNABLE_ADVISOR_ROLES.has(u.role?.toLowerCase?.()));
       setAdvisors(Array.isArray(filtered) ? filtered : []);
     } catch (error) {
       console.error(error);
@@ -233,21 +297,25 @@ const ClientesPage = () => {
     }
   };
 
-  const loadClientes = useCallback(async () => {
+  const loadClientes = useCallback(async ({ forceRefresh = false } = {}) => {
+    const cacheKey = `${currentEmail}|${selectedDate}|${filterBySchedule ? "1" : "0"}`;
+    if (!forceRefresh) {
+      const cached = clientsCacheRef.current.get(cacheKey);
+      if (cached) {
+        setClientes(cached.clients);
+        setRegisteredClients(cached.registeredClients);
+        setSummary(cached.summary);
+        return;
+      }
+    }
+
     setLoading(true);
     try {
-      console.log("[Clientes] loadClientes params:", {
-        selectedDate,
-        filterBySchedule,
-        role: normalizedRole,
-        canManageAllClients,
-      });
       const result = await fetchClients({
         date: selectedDate,
         include_schedule_info: true,
         filter_by_schedule: filterBySchedule,
       });
-      console.log("[Clientes] fetchClients result:", result);
 
       let loadedClients = [];
       let loadedProspects = [];
@@ -287,24 +355,20 @@ const ClientesPage = () => {
       setClientes([...loadedProspects, ...loadedClients]);
       setRegisteredClients(loadedClients);
       setSummary(loadedSummary);
-      console.log("[Clientes] counts:", {
-        clients: loadedClients.length,
-        prospects: loadedProspects.length,
+      clientsCacheRef.current.set(cacheKey, {
+        clients: [...loadedProspects, ...loadedClients],
+        registeredClients: loadedClients,
         summary: loadedSummary,
       });
-
       // Solo mostrar alerta de cronograma si es comercial puro (no backoffice, no acp, no jefe)
-      // Esto evita que admins/otros vean la alerta antes de que el useEffect actualice filterBySchedule
-      const isComercialPuro = normalizedRole.includes("comercial") && 
-                              !normalizedRole.includes("backoffice") && 
-                              !normalizedRole.includes("acp") &&
-                              !normalizedRole.includes("jefe");
-
-      if (filterBySchedule && !loadedSummary?.has_approved_schedule && isComercialPuro) {
+      // Si no hay cronograma aprobado, se desactiva el filtro para mostrar cartera completa.
+      if (filterBySchedule && !loadedSummary?.has_approved_schedule && isCommercialOnly) {
+        setFilterBySchedule(false);
         showToast(
-          "No tienes un cronograma aprobado para este mes. Mostrando todos los clientes.",
+          "No tienes un cronograma aprobado para este mes. Se mostrará tu cartera completa.",
           "info",
         );
+        return;
       }
 
     } catch (error) {
@@ -316,15 +380,15 @@ const ClientesPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterBySchedule, selectedDate, showToast, currentEmail, normalizedRole, canManageAllClients]);
+  }, [filterBySchedule, selectedDate, showToast, currentEmail, isCommercialOnly]);
 
   useEffect(() => {
     loadClientes();
   }, [filterBySchedule, loadClientes]);
 
   useEffect(() => {
-    if (isManager) loadAdvisors();
-  }, [isManager]);
+    if (canAssignClients) loadAdvisors();
+  }, [canAssignClients]);
 
   useEffect(() => {
     if (isAcpCommercial || canManageAllClients) {
@@ -345,6 +409,27 @@ const ClientesPage = () => {
     return clientes.filter((c) => normalizeStatus(c.visit_status) !== "visitado").length;
   }, [clientes, summary]);
 
+  const commercialKpi = useMemo(() => {
+    const base = Array.isArray(clientes) ? clientes.filter((c) => !c.is_prospect) : [];
+    const plannedToday = Number(summary?.planned_today || 0);
+    const effective = base.filter((c) => c.hora_entrada && c.hora_salida);
+    const avgDuration =
+      effective.length > 0
+        ? Math.round(
+          effective.reduce((acc, c) => acc + (c.duracion_minutos ?? calculateDuration(c) ?? 0), 0) /
+            effective.length,
+        )
+        : 0;
+
+    return {
+      plannedToday,
+      visited: visitedCount,
+      effectiveVisits: effective.length,
+      compliance: plannedToday > 0 ? Math.round((visitedCount / plannedToday) * 100) : null,
+      avgDuration,
+    };
+  }, [clientes, summary, visitedCount]);
+
   const filteredClientes = useMemo(() => {
     if (!Array.isArray(clientes)) return [];
     let base = clientes;
@@ -355,8 +440,24 @@ const ClientesPage = () => {
       base = base.filter((c) => normalizeStatus(c.visit_status) === "visitado");
     }
 
+    if (temporaryAssignmentsFilter === "expiring_today") {
+      base = base.filter((c) => {
+        const tempInfo = getTemporaryAssignmentInfo(c);
+        return tempInfo && tempInfo.daysRemaining <= 0;
+      });
+    } else if (temporaryAssignmentsFilter === "expiring_7") {
+      base = base.filter((c) => {
+        const tempInfo = getTemporaryAssignmentInfo(c);
+        return tempInfo && tempInfo.daysRemaining >= 0 && tempInfo.daysRemaining <= 7;
+      });
+    }
+
     return base;
-  }, [clientes, statusFilter]);
+  }, [clientes, statusFilter, temporaryAssignmentsFilter, getTemporaryAssignmentInfo]);
+
+  const invalidateClientsCache = () => {
+    clientsCacheRef.current.clear();
+  };
 
   const assignedToMe = useMemo(() => {
     if (!Array.isArray(clientes)) return [];
@@ -399,7 +500,7 @@ const ClientesPage = () => {
       });
     }
 
-    if (!albumSearch) return [];
+    if (!albumSearch) return base.slice(0, 12);
     const q = albumSearch.toLowerCase();
     return base.filter((c) => {
       const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
@@ -428,16 +529,6 @@ const ClientesPage = () => {
     });
   }, [allAlbumClients, allClientsSearch]);
 
-  useEffect(() => {
-    console.log("[Clientes] albumClients:", {
-      registered: Array.isArray(registeredClients) ? registeredClients.length : 0,
-      album: Array.isArray(albumClients) ? albumClients.length : 0,
-      canManageAllClients,
-      currentEmail,
-      albumSearch,
-    });
-  }, [albumClients, registeredClients, canManageAllClients, currentEmail, albumSearch]);
-
   const filteredAssignedList = useMemo(() => {
     let base = assignedToMe;
 
@@ -456,15 +547,30 @@ const ClientesPage = () => {
   }, [assignedViewFilter, assignedToMe, createdByMe, allMine, assignedSearch]);
 
   const handleAssign = async (clientId) => {
-    const email = assignments[clientId];
+    const assignment = assignments[clientId] || {};
+    const email = assignment.email || "";
     if (!email) {
       showToast("Selecciona un asesor para asignar", "warning");
       return;
     }
+    if (assignment.temporary && !assignment.ends_at) {
+      showToast("Para asignación temporal debes seleccionar fecha de fin", "warning");
+      return;
+    }
     try {
-      await assignClient(clientId, email);
-      showToast("Cliente asignado", "success");
-      loadClientes();
+      await assignClient(clientId, {
+        assignee_email: email,
+        temporary: Boolean(assignment.temporary),
+        ends_at: assignment.temporary ? assignment.ends_at : undefined,
+        reason: assignment.reason || undefined,
+      });
+      showToast(
+        assignment.temporary ? "Cliente reasignado temporalmente" : "Cliente asignado",
+        "success",
+      );
+      setAssignments((prev) => ({ ...prev, [clientId]: {} }));
+      invalidateClientsCache();
+      loadClientes({ forceRefresh: true });
     } catch (error) {
       console.error(error);
       showToast("No se pudo asignar el cliente", "error");
@@ -494,6 +600,46 @@ const ClientesPage = () => {
   const openReportModal = (client) => {
     setActiveClient(client);
     setModalType("report");
+  };
+
+  const openReprogramModal = (client) => {
+    setReprogramModal({
+      isOpen: true,
+      client,
+      date: selectedDate || todayStr,
+      note: "",
+      submitting: false,
+    });
+  };
+
+  const closeReprogramModal = () => {
+    setReprogramModal({
+      isOpen: false,
+      client: null,
+      date: todayStr,
+      note: "",
+      submitting: false,
+    });
+  };
+
+  const handleReprogramVisit = async () => {
+    if (!reprogramModal?.client?.id || !reprogramModal?.date) return;
+    setReprogramModal((prev) => ({ ...prev, submitting: true }));
+    try {
+      await setVisitStatus(reprogramModal.client.id, {
+        status: "pending",
+        date: reprogramModal.date,
+        observaciones: reprogramModal.note || null,
+      });
+      showToast("Visita reprogramada correctamente", "success");
+      invalidateClientsCache();
+      await loadClientes({ forceRefresh: true });
+      closeReprogramModal();
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo reprogramar la visita", "error");
+      setReprogramModal((prev) => ({ ...prev, submitting: false }));
+    }
   };
 
   const closeModal = () => {
@@ -592,6 +738,7 @@ const ClientesPage = () => {
       );
       setEditDetail(updated);
       showToast("Cliente actualizado correctamente", "success");
+      invalidateClientsCache();
       closeModal();
     } catch (error) {
       console.error(error);
@@ -629,17 +776,23 @@ const ClientesPage = () => {
     try {
       let response;
       if (activeClient.is_prospect) {
-        // Lógica para prospectos (solo checkout o update)
-        const prospectPayload = {
-          visit_id: activeClient.id,
-          check_out_time: payload.hora_salida,
-          check_out_lat: payload.lat_salida,
-          check_out_lng: payload.lng_salida,
-          observations: payload.observaciones
-        };
-        // Para prospectos, registerProspectVisit maneja upsert.
-        // Si es "start" (re-checkin?), se manejaría igual, pero asumimos "end".
-        response = await registerProspectVisit(prospectPayload);
+        if (modalType === "start") {
+          response = await registerProspectVisit({
+            prospect_name: activeClient.nombre || activeClient.prospect_name || "Prospecto",
+            check_in_time: payload.hora_entrada,
+            check_in_lat: payload.lat_entrada,
+            check_in_lng: payload.lng_entrada,
+            observations: payload.observaciones,
+          });
+        } else {
+          response = await registerProspectVisit({
+            visit_id: activeClient.id,
+            check_out_time: payload.hora_salida,
+            check_out_lat: payload.lat_salida,
+            check_out_lng: payload.lng_salida,
+            observations: payload.observaciones,
+          });
+        }
       } else {
         const apiCall = modalType === "start" ? startClientVisit : endClientVisit;
         response = await apiCall(activeClient.id, payload);
@@ -664,6 +817,7 @@ const ClientesPage = () => {
       });
       setActiveClient(updated);
       showToast(modalType === "start" ? "Visita iniciada" : "Visita finalizada", "success");
+      invalidateClientsCache();
       closeModal();
     } catch (error) {
       console.error(error);
@@ -677,8 +831,16 @@ const ClientesPage = () => {
     const status = normalizeStatus(cliente.visit_status);
     const meta = getStatusMeta(status);
     const duration = cliente.duracion_minutos ?? calculateDuration(cliente);
+    const temporaryInfo = getTemporaryAssignmentInfo(cliente);
+    const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
     const asignadosArray = normalizeAsignados(cliente.asignados);
-    const assigned = asignadosArray.length > 0 ? asignadosArray.join(", ") : "Sin asignar";
+    const assigned =
+      assignmentDetails.length > 0
+        ? assignmentDetails.map(formatAssignment).join(", ")
+        : asignadosArray.length > 0
+          ? asignadosArray.join(", ")
+          : "Sin asignar";
+    const timelineOpen = Boolean(expandedTimeline[cliente.id]);
     const hasEntryCoords = cliente.lat_entrada && cliente.lng_entrada;
     const hasExitCoords = cliente.lat_salida && cliente.lng_salida;
     const isPlanned = cliente.scheduled_info?.is_planned;
@@ -693,6 +855,13 @@ const ClientesPage = () => {
           <span className="absolute top-3 left-3 px-2 py-1 bg-green-500 text-white text-xs rounded-full flex items-center gap-1">
             <FiCalendar size={12} />
             Planificado
+          </span>
+        )}
+        {temporaryInfo && (
+          <span className="absolute top-3 left-24 px-2 py-1 bg-amber-500 text-white text-xs rounded-full">
+            {temporaryInfo.daysRemaining <= 0
+              ? "Temporal vencida"
+              : `Temporal vence en ${temporaryInfo.daysRemaining}d`}
           </span>
         )}
         <span className={`absolute top-3 right-3 h-2.5 w-2.5 rounded-full ${meta.led}`} />
@@ -779,6 +948,18 @@ const ClientesPage = () => {
               Detalles
             </Button>
           )}
+          {!cliente.is_prospect && (
+            <Button
+              variant="ghost"
+              className="px-3 py-2"
+              onClick={(e) => {
+                e.stopPropagation();
+                openReprogramModal(cliente);
+              }}
+            >
+              Reprogramar
+            </Button>
+          )}
         </div>
 
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
@@ -806,14 +987,43 @@ const ClientesPage = () => {
           )}
         </div>
 
-        {isManager && (
+        <div className="mt-3 border-t border-gray-100 pt-3">
+          <button
+            type="button"
+            className="text-xs font-semibold text-blue-700 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpandedTimeline((prev) => ({ ...prev, [cliente.id]: !prev[cliente.id] }));
+            }}
+          >
+            {timelineOpen ? "Ocultar timeline" : "Ver timeline"}
+          </button>
+          {timelineOpen && (
+            <div className="mt-2 space-y-1 text-xs text-gray-600">
+              <p>Entrada: {formatTime(cliente.hora_entrada)}</p>
+              <p>Salida: {formatTime(cliente.hora_salida)}</p>
+              <p>Duración: {formatDuration(duration)}</p>
+              <p>Observación: {cliente.observaciones || "Sin observaciones"}</p>
+            </div>
+          )}
+        </div>
+
+        {canAssignClients && (
           <div className="mt-4 flex flex-col gap-2 rounded-lg bg-gray-50 p-3" onClick={(e) => e.stopPropagation()}>
             <p className="text-xs font-semibold text-gray-700">Reasignar asesor</p>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <select
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                value={assignments[cliente.id] || ""}
-                onChange={(e) => setAssignments((prev) => ({ ...prev, [cliente.id]: e.target.value }))}
+                value={assignments[cliente.id]?.email || ""}
+                onChange={(e) =>
+                  setAssignments((prev) => ({
+                    ...prev,
+                    [cliente.id]: {
+                      ...(prev[cliente.id] || {}),
+                      email: e.target.value,
+                    },
+                  }))
+                }
               >
                 <option value="">Selecciona asesor</option>
                 {Array.isArray(advisors) && advisors.map((u) => (
@@ -822,6 +1032,39 @@ const ClientesPage = () => {
                   </option>
                 ))}
               </select>
+              <label className="inline-flex items-center gap-2 text-xs text-gray-700">
+                <input
+                  type="checkbox"
+                  checked={Boolean(assignments[cliente.id]?.temporary)}
+                  onChange={(e) =>
+                    setAssignments((prev) => ({
+                      ...prev,
+                      [cliente.id]: {
+                        ...(prev[cliente.id] || {}),
+                        temporary: e.target.checked,
+                        ends_at: e.target.checked ? prev[cliente.id]?.ends_at : "",
+                      },
+                    }))
+                  }
+                />
+                Asignación temporal
+              </label>
+              {Boolean(assignments[cliente.id]?.temporary) && (
+                <input
+                  type="date"
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  value={assignments[cliente.id]?.ends_at || ""}
+                  onChange={(e) =>
+                    setAssignments((prev) => ({
+                      ...prev,
+                      [cliente.id]: {
+                        ...(prev[cliente.id] || {}),
+                        ends_at: e.target.value,
+                      },
+                    }))
+                  }
+                />
+              )}
               <Button onClick={() => handleAssign(cliente.id)}>Asignar</Button>
             </div>
           </div>
@@ -836,6 +1079,14 @@ const ClientesPage = () => {
     const address = cliente.shipping_address || "Direccion no disponible";
     const contactName = cliente.shipping_contact_name || "Sin contacto";
     const contactPhone = cliente.shipping_phone || cliente.shipping_cellphone || "Sin telefono";
+    const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
+    const asignadosArray = normalizeAsignados(cliente.asignados);
+    const assigned =
+      assignmentDetails.length > 0
+        ? assignmentDetails.map(formatAssignment).join(", ")
+        : asignadosArray.length > 0
+          ? asignadosArray.join(", ")
+          : "Sin asignar";
 
     return (
       <div
@@ -862,6 +1113,9 @@ const ClientesPage = () => {
           <p className="flex items-center gap-1 text-gray-600">
             <FiPhone className="text-gray-400" /> {contactPhone}
           </p>
+          <p className="text-gray-600">
+            <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
+          </p>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -882,7 +1136,7 @@ const ClientesPage = () => {
     );
   };
 
-  const showVisitFlow = !isBackofficeUser && !isAcpCommercial;
+  const showVisitFlow = canVisitClients;
 
   return (
     <div className="space-y-4 sm:space-y-6 pb-6 px-3 sm:px-0">
@@ -907,15 +1161,15 @@ const ClientesPage = () => {
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-gray-900">
-                Clientes registrados por ti
+                Vista global de clientes
               </h2>
               <p className="text-sm text-gray-500">
-                Acceso exclusivo a tus clientes registrados, sin flujo de visitas.
+                Puedes revisar todos los clientes aprobados y sus asignaciones comerciales.
               </p>
             </div>
             <div className="flex items-center gap-3">
               <div className="rounded-full bg-emerald-50 px-3 py-1 text-[11px] font-semibold text-emerald-700">
-                {createdByMe.length} clientes
+                {allAlbumClients.length} clientes
               </div>
               <div className="relative">
                 <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -1010,6 +1264,27 @@ const ClientesPage = () => {
               pending={pendingCount}
               onFilterChange={setStatusFilter}
             />
+
+            {isCommercialOnly && (
+              <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)]">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-3">
+                    <p className="text-xs font-semibold text-emerald-700">Cumplimiento plan</p>
+                    <p className="mt-1 text-xl font-bold text-emerald-900">
+                      {commercialKpi.compliance === null ? "N/A" : `${commercialKpi.compliance}%`}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-blue-100 bg-blue-50 p-3">
+                    <p className="text-xs font-semibold text-blue-700">Visitas efectivas</p>
+                    <p className="mt-1 text-xl font-bold text-blue-900">{commercialKpi.effectiveVisits}</p>
+                  </div>
+                  <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-3">
+                    <p className="text-xs font-semibold text-indigo-700">Promedio en sitio</p>
+                    <p className="mt-1 text-xl font-bold text-indigo-900">{formatDuration(commercialKpi.avgDuration)}</p>
+                  </div>
+                </div>
+              </Card>
+            )}
           </>
         )}
       </header>
@@ -1024,6 +1299,41 @@ const ClientesPage = () => {
                   <p className="text-sm text-gray-500">
                     Usa las tarjetas para iniciar o finalizar visita y consulta el detalle completo de cada cliente.
                   </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setTemporaryAssignmentsFilter("all")}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      temporaryAssignmentsFilter === "all"
+                        ? "bg-gray-900 text-white"
+                        : "bg-gray-100 text-gray-700"
+                    }`}
+                  >
+                    Todas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemporaryAssignmentsFilter("expiring_7")}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      temporaryAssignmentsFilter === "expiring_7"
+                        ? "bg-amber-600 text-white"
+                        : "bg-amber-100 text-amber-800"
+                    }`}
+                  >
+                    Temporales (7d)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTemporaryAssignmentsFilter("expiring_today")}
+                    className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                      temporaryAssignmentsFilter === "expiring_today"
+                        ? "bg-red-600 text-white"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    Vencen hoy
+                  </button>
                 </div>
               </div>
 
@@ -1184,7 +1494,7 @@ const ClientesPage = () => {
               />
             </div>
             <p className="text-xs text-gray-500 md:max-w-xs">
-              Ingresa aquÃ­ el nombre del cliente que deseas encontrar.
+              Ingresa aquí el nombre del cliente que deseas encontrar.
             </p>
             <Button
               variant="secondary"
@@ -1206,7 +1516,7 @@ const ClientesPage = () => {
                 ? "Cargando clientes..."
                 : albumSearch
                 ? "No se encontraron clientes con ese criterio."
-                : "Busca un cliente para mostrar resultados."}
+                : "Mostrando tus clientes más recientes. Usa el buscador para filtrar."}
             </div>
         )}
       </Card>
@@ -1242,6 +1552,48 @@ const ClientesPage = () => {
                 : "No hay clientes para mostrar"}
             </div>
           )}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={reprogramModal.isOpen}
+        onClose={reprogramModal.submitting ? undefined : closeReprogramModal}
+        title={`Reprogramar visita${reprogramModal.client?.nombre ? `: ${reprogramModal.client.nombre}` : ""}`}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Nueva fecha</label>
+            <input
+              type="date"
+              value={reprogramModal.date}
+              min={todayStr}
+              onChange={(e) => setReprogramModal((prev) => ({ ...prev, date: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className="text-sm font-medium text-gray-700">Nota (opcional)</label>
+            <textarea
+              rows={3}
+              value={reprogramModal.note}
+              onChange={(e) => setReprogramModal((prev) => ({ ...prev, note: e.target.value }))}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+              placeholder="Motivo de la reprogramación"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={closeReprogramModal} disabled={reprogramModal.submitting}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleReprogramVisit}
+              isLoading={reprogramModal.submitting}
+              disabled={!reprogramModal.date || reprogramModal.submitting}
+            >
+              Confirmar
+            </Button>
+          </div>
         </div>
       </Modal>
 
@@ -1328,7 +1680,8 @@ const ClientesPage = () => {
           onSuccess={() => {
             showToast("Visita a prospecto registrada", "success");
             closeModal();
-            loadClientes(); // Reload to perhaps show prospects in a future list
+            invalidateClientsCache();
+            loadClientes({ forceRefresh: true });
           }}
           captureLocation={captureLocation}
         />

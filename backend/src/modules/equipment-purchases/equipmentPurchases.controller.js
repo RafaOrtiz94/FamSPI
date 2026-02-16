@@ -1,12 +1,5 @@
 const multer = require("multer");
-const upload = multer({ 
-  storage: multer.diskStorage({
-    destination: '/tmp',
-    filename: (req, file, cb) => {
-      cb(null, `equipment_${Date.now()}_${file.originalname}`);
-    }
-  })
-});
+const upload = multer({ storage: multer.memoryStorage() });
 
 const service = require("./equipmentPurchases.service");
 const { logAction } = require("../../utils/audit");
@@ -198,7 +191,7 @@ exports.create = async (req, res, next) => {
 
 exports.saveProviderResponse = async (req, res, next) => {
   try {
-    const { outcome, items, notes } = req.body;
+    const { outcome, items, notes, expected_updated_at } = req.body;
     const parsedItems = Array.isArray(items)
       ? items
       : typeof items === "string"
@@ -211,6 +204,7 @@ exports.saveProviderResponse = async (req, res, next) => {
       outcome,
       items: parsedItems,
       notes,
+      expected_updated_at,
     });
 
     const normalizedUpdated = normalizeDatesDeep(updated, {
@@ -230,7 +224,11 @@ exports.saveProviderResponse = async (req, res, next) => {
 
 exports.requestProforma = async (req, res, next) => {
   try {
-    const updated = await service.requestProforma({ id: req.params.id, user: req.user });
+    const updated = await service.requestProforma({
+      id: req.params.id,
+      user: req.user,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
       keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
@@ -252,6 +250,7 @@ exports.uploadProforma = async (req, res, next) => {
       id: req.params.id,
       user: req.user,
       file: req.file,
+      expected_updated_at: req.body?.expected_updated_at,
     });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
@@ -270,7 +269,11 @@ exports.uploadProforma = async (req, res, next) => {
 
 exports.reserve = async (req, res, next) => {
   try {
-    const updated = await service.reserveEquipment({ id: req.params.id, user: req.user });
+    const updated = await service.reserveEquipment({
+      id: req.params.id,
+      user: req.user,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
       keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
@@ -288,7 +291,7 @@ exports.reserve = async (req, res, next) => {
 
 exports.uploadSignedProforma = async (req, res, next) => {
   try {
-    const { inspection_min_date, inspection_max_date, includes_starter_kit } = req.body;
+    const { inspection_min_date, inspection_max_date, includes_starter_kit, expected_updated_at } = req.body;
     const updated = await service.uploadSignedProforma({
       id: req.params.id,
       user: req.user,
@@ -296,6 +299,7 @@ exports.uploadSignedProforma = async (req, res, next) => {
       inspection_min_date,
       inspection_max_date,
       includes_starter_kit: includes_starter_kit === "true" || includes_starter_kit === true,
+      expected_updated_at,
     });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
@@ -318,6 +322,7 @@ exports.uploadContract = async (req, res, next) => {
       id: req.params.id,
       user: req.user,
       file: req.file,
+      expected_updated_at: req.body?.expected_updated_at,
     });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
@@ -336,7 +341,11 @@ exports.uploadContract = async (req, res, next) => {
 
 exports.renewReservation = async (req, res, next) => {
   try {
-    const updated = await service.renewReservation({ id: req.params.id, user: req.user });
+    const updated = await service.renewReservation({
+      id: req.params.id,
+      user: req.user,
+      expected_updated_at: req.body?.expected_updated_at,
+    });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
       keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
@@ -354,8 +363,13 @@ exports.renewReservation = async (req, res, next) => {
 
 exports.cancelOrder = async (req, res, next) => {
   try {
-    const { reason } = req.body;
-    const updated = await service.cancelOrder({ id: req.params.id, user: req.user, reason });
+    const { reason, expected_updated_at } = req.body;
+    const updated = await service.cancelOrder({
+      id: req.params.id,
+      user: req.user,
+      reason,
+      expected_updated_at,
+    });
     const normalizedUpdated = normalizeDatesDeep(updated, {
       endpoint: 'equipment_purchases',
       keysToNormalize: ['created_at', 'updated_at', 'provider_response_at']
@@ -373,7 +387,7 @@ exports.cancelOrder = async (req, res, next) => {
 
 exports.submitSignedProformaWithInspection = async (req, res, next) => {
   try {
-    const { inspection_min_date, inspection_max_date, includes_starter_kit } = req.body;
+    const { inspection_min_date, inspection_max_date, includes_starter_kit, expected_updated_at } = req.body;
     const file = req.file; // Multer pone el archivo en req.file, no en req.body
 
     const result = await service.submitSignedProformaWithInspection({
@@ -382,7 +396,8 @@ exports.submitSignedProformaWithInspection = async (req, res, next) => {
       file,
       inspection_min_date,
       inspection_max_date,
-      includes_starter_kit: includes_starter_kit === 'true' || includes_starter_kit === true
+      includes_starter_kit: includes_starter_kit === 'true' || includes_starter_kit === true,
+      expected_updated_at,
     });
 
     const normalizedResult = normalizeDatesDeep(result, {
@@ -402,14 +417,41 @@ exports.submitSignedProformaWithInspection = async (req, res, next) => {
   }
 };
 
+exports.coordinateInspectionDate = async (req, res, next) => {
+  try {
+    const { inspection_date, notes, expected_updated_at } = req.body || {};
+    const updated = await service.coordinateInspectionDate({
+      id: req.params.id,
+      user: req.user,
+      inspection_date,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "inspection_coordinated",
+      meta: { inspection_date: inspection_date || null },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.startAvailability = async (req, res, next) => {
   try {
-    const { provider_email, notes } = req.body;
+    const { provider_email, notes, expected_updated_at } = req.body;
     const updated = await service.startAvailabilityRequest({
       id: req.params.id,
       user: req.user,
       providerEmail: provider_email,
       notes,
+      expected_updated_at,
     });
 
     const normalizedUpdated = normalizeDatesDeep(updated, {
@@ -427,3 +469,29 @@ exports.startAvailability = async (req, res, next) => {
   }
 };
 
+exports.updateChecklist = async (req, res, next) => {
+  try {
+    const { item_key, checked, note } = req.body || {};
+    const updated = await service.updateChecklistItem({
+      id: req.params.id,
+      user: req.user,
+      itemKey: item_key,
+      checked,
+      note,
+    });
+
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "checklist_updated",
+      meta: { item_key, checked: Boolean(checked) },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

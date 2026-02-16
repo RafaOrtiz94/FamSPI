@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../../../core/auth/AuthContext";
 import api from "../../../core/api";
 import { getMantenimientos } from "../../../core/api/mantenimientosApi";
@@ -54,6 +55,7 @@ const fetchSolicitudesTecnicas = () => getRequests({ pageSize: 30 });
 
 const ServicioDashboard = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [mantenimientos, setMantenimientos] = useState([]);
   const [equipos, setEquipos] = useState([]);
   const [capacitaciones, setCapacitaciones] = useState([]);
@@ -205,6 +207,7 @@ const ServicioDashboard = () => {
           approvals={safeApprovals}
           availability={safeAvailability}
           onRefresh={refreshSnapshots}
+          onOpenPublicPurchases={() => navigate("/dashboard/purchases/workspace?tab=public")}
         />
       );
     }

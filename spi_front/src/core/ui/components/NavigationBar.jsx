@@ -86,14 +86,6 @@ const aprobacionesPlanLink = {
   path: "/dashboard/comercial/aprobaciones-planificacion",
 };
 
-const acpLinks = [
-  {
-    name: "Compras de equipos",
-    icon: FiShoppingCart,
-    path: "/dashboard/comercial/acp-compras",
-  },
-];
-
 const privatePurchasesLink = {
   name: "Compras Privadas",
   icon: FiLayers,
@@ -272,10 +264,6 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
     if (workspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
       groups.primary.unshift(purchasesWorkspaceLink); // Workspace primero en primary
-    }
-
-    if (scope.includes("acp") || role.includes("acp")) {
-      groups.primary.unshift(...acpLinks); // ACP pone compras primero
     }
 
     if (["jefe_comercial"].includes(scope)) {
@@ -552,7 +540,6 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
-
 
 
 

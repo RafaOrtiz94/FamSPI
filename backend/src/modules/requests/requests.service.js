@@ -172,6 +172,81 @@ function getFallbackNotificationEmail() {
   return REQUEST_NOTIFICATION_EMAILS[0] || null;
 }
 
+async function ensureClientAssignmentsInfra() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_assignments (
+      id SERIAL PRIMARY KEY,
+      client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
+      assigned_to_email TEXT NOT NULL,
+      assigned_by_email TEXT,
+      assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+      is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
+      starts_at TIMESTAMPTZ DEFAULT NOW(),
+      ends_at TIMESTAMPTZ,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      reason TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE(client_request_id, assigned_to_email),
+      CONSTRAINT client_assignments_assignment_type_check
+        CHECK (assignment_type IN ('owner', 'manual', 'temporary'))
+    );
+  `);
+
+  await db.query(`
+    ALTER TABLE client_assignments
+      ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+      ADD COLUMN IF NOT EXISTS is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      ADD COLUMN IF NOT EXISTS reason TEXT;
+  `);
+
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'client_assignments_assignment_type_check'
+      ) THEN
+        ALTER TABLE client_assignments
+          ADD CONSTRAINT client_assignments_assignment_type_check
+          CHECK (assignment_type IN ('owner', 'manual', 'temporary'));
+      END IF;
+    END $$;
+  `);
+}
+
+async function ensureOwnerClientAssignment({ clientRequestId, ownerEmail, actorEmail, startsAt }) {
+  const normalizedOwner = (ownerEmail || "").trim().toLowerCase();
+  if (!normalizedOwner) return;
+
+  await ensureClientAssignmentsInfra();
+  await db.query(
+    `
+      INSERT INTO client_assignments (
+        client_request_id,
+        assigned_to_email,
+        assigned_by_email,
+        assignment_type,
+        is_temporary,
+        starts_at,
+        is_active,
+        reason
+      )
+      VALUES ($1, $2, $3, 'owner', FALSE, $4, TRUE, 'Asignacion automatica al comercial creador')
+      ON CONFLICT (client_request_id, assigned_to_email) DO NOTHING
+    `,
+    [
+      clientRequestId,
+      normalizedOwner,
+      (actorEmail || normalizedOwner).trim().toLowerCase(),
+      startsAt || new Date().toISOString(),
+    ],
+  );
+}
+
 function getRequestApproverRoles(typeCode) {
   const normalized = String(typeCode || "").toUpperCase();
   if (normalized === "F.ST-22") return ["backoffice_comercial"];
@@ -2276,6 +2351,12 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   let approvalLetter = null;
   if (newStatus === 'approved') {
     await moveClientFolderToApproved(request.drive_folder_id);
+    await ensureOwnerClientAssignment({
+      clientRequestId: request.id,
+      ownerEmail: request.created_by,
+      actorEmail: user?.email,
+      startsAt: approvedAt ? approvedAt.toISOString() : null,
+    });
     approvalLetter = await generateClientApprovalLetter({
       request: updatedRequest,
       approvedBy: user,

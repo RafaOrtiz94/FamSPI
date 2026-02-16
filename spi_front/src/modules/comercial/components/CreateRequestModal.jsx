@@ -568,7 +568,15 @@ const CreateRequestModal = ({
     };
 
     loadEquipmentOptions();
-  }, [open, type, selectedClientId, includeUnassigned, usesEquipmentModels]);
+  }, [
+    open,
+    type,
+    selectedClientId,
+    includeUnassigned,
+    usesEquipmentModels,
+    allowUnassignedEquipment,
+    needsClientEquipment,
+  ]);
 
   // ✅ Actualiza valores del formulario
   const handleChange = (e) => {

@@ -51,7 +51,6 @@ import {
   PRIVATE_PURCHASE_ERROR_CODES,
   PRIVATE_PURCHASE_ERROR_MESSAGES,
   STATES_REQUIRING_DOCS_CHECK,
-  PRIVATE_PURCHASE_ACTIONS,
 } from "../../shared/constants/privatePurchaseConstants";
 import {
   PRIVATE_PURCHASE_STATUS_CONFIG,
@@ -77,7 +76,7 @@ import {
   canPerformPrivatePurchaseAction,
 } from "./PrivatePurchasesWidget.utils";
 import PrivatePurchaseActions from "./PrivatePurchaseActions";
-import { subscribeToPrivatePurchaseUpdates } from "../../../core/services/privatePurchaseEvents";
+import { usePurchaseSSE } from "../../../core/hooks/usePurchaseSSE";
 
 const STATUS_DEFINITIONS = PRIVATE_PURCHASE_STATUS_DEFINITIONS;
 
@@ -87,6 +86,14 @@ const statusLookup = STATUS_DEFINITIONS.reduce((acc, def) => {
 }, {});
 
 const formatDate = (value) => formatDateTimeEC(value, "Sin fecha");
+const formatChecklistActionLabel = (checklistState = {}) => {
+  if (checklistState?.action_label) return checklistState.action_label;
+  const raw = String(checklistState?.action || "")
+    .replace(/_/g, " ")
+    .trim();
+  if (!raw) return "Paso no definido";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+};
 
 const PrivatePurchasesPage = () => {
   const location = useLocation();
@@ -128,7 +135,6 @@ const PrivatePurchasesPage = () => {
   const [documentLinks, setDocumentLinks] = useState([]);
   const [documentsById, setDocumentsById] = useState({});
   const [documentsLoadingById, setDocumentsLoadingById] = useState({});
-  const [lastUpdatedRequestId, setLastUpdatedRequestId] = useState(null);
   const [acpEmailModal, setAcpEmailModal] = useState({
     open: false,
     loading: false,
@@ -215,19 +221,28 @@ const PrivatePurchasesPage = () => {
       : contractMode === "manager_signed"
         ? "Subir contrato firmado"
         : "Subir contrato";
-
-  useEffect(() => {
-    console.log("[FLOW_PRIVADA][FE][ROLE_CHECK]", {
-      roleText,
-      normalizedRole,
-      normalizedScope,
-      isAcpUser,
-      isBackofficeUser,
-      isManagerUser,
-      isGerenciaGeneral,
-      isPureCommercial
-    });
-  }, [roleText, normalizedRole, normalizedScope, isAcpUser, isBackofficeUser, isManagerUser, isGerenciaGeneral, isPureCommercial]);
+  const processingActionTypeMap = {
+    register: "clientRegistration",
+    client_registration: "clientRegistration",
+    forward: "sendingToAcp",
+    resubmit: "resubmit",
+    request_dates: "requestDates",
+    reject: "reject",
+    acp_send_email: "acpSendEmail",
+    acp_response: "acpResponse",
+    availability_accept: "availabilityAccept",
+    availability_reject: "availabilityReject",
+    offer_upload: "offerUpload",
+    signed_upload: "signedUpload",
+  };
+  const processingConfigKey =
+    processingAction ? processingActionTypeMap[processingAction.type] || null : null;
+  const processingStep = processingConfigKey
+    ? PRIVATE_PURCHASE_PROCESSING_STEPS[processingConfigKey]
+    : null;
+  const processingTitle = processingConfigKey
+    ? PRIVATE_PURCHASE_MODAL_TITLES.processing?.[processingConfigKey]
+    : null;
 
   const privatePurchasesFetcher = useCallback(
     (params) => {
@@ -333,23 +348,31 @@ const PrivatePurchasesPage = () => {
     loadDocuments();
   }, [detailModalRequest]);
 
-  useEffect(() => {
-    const unsubscribe = subscribeToPrivatePurchaseUpdates(({ request }) => {
-      if (!request) return;
-      if (isPureCommercial && !isOwnedRequest(request)) return;
-      setPrivatePurchasesData((prev) => {
-        const rows = Array.isArray(prev?.rows) ? [...prev.rows] : [];
-        const idx = rows.findIndex((item) => item.id === request.id);
-        if (idx >= 0) {
-          rows[idx] = request;
-        } else {
-          rows.unshift(request);
-        }
-        return { ...prev, rows };
-      });
+  const handlePrivatePurchaseEvent = useCallback(({ request }) => {
+    if (!request) return;
+    if (isPureCommercial && !isOwnedRequest(request)) return;
+    setPrivatePurchasesData((prev) => {
+      const rows = Array.isArray(prev?.rows) ? [...prev.rows] : [];
+      const idx = rows.findIndex((item) => item.id === request.id);
+      if (idx >= 0) {
+        rows[idx] = {
+          ...rows[idx],
+          ...request,
+          checklist_state: request.checklist_state || rows[idx]?.checklist_state || null,
+        };
+      } else {
+        rows.unshift(request);
+      }
+      return { ...prev, rows };
     });
-    return unsubscribe;
   }, [isOwnedRequest, isPureCommercial, setPrivatePurchasesData]);
+
+  usePurchaseSSE({
+    type: "private",
+    onEvent: handlePrivatePurchaseEvent,
+    debounceMs: 1200,
+    enabled: canViewRequests,
+  });
 
   const visibleDocumentLinks = useMemo(() => {
     if (isGerenciaGeneral) return documentLinks;
@@ -470,7 +493,6 @@ const PrivatePurchasesPage = () => {
             return Array.isArray(prev) ? updatedRows : { ...prev, rows: updatedRows };
           });
 
-          setLastUpdatedRequestId(request.id);
         } catch (error) {
           console.error("[FLOW_PRIVADA][FE][CLIENT_APPROVAL][ERROR]", {
             requestId: request.id,
@@ -506,14 +528,11 @@ const PrivatePurchasesPage = () => {
   }, [location.search, requests]);
 
   useEffect(() => {
-    if (!lastUpdatedRequestId) return;
-    const updated = requests.find((req) => req.id === lastUpdatedRequestId);
-    console.log('[FLOW_PRIVADA][FE][STATUS_CHECK]', {
-      requestId: lastUpdatedRequestId,
-      found: Boolean(updated),
-      status: updated?.status || null
-    });
-  }, [requests, lastUpdatedRequestId]);
+    if (!detailModalRequest?.id) return;
+    const updated = requests.find((req) => req.id === detailModalRequest.id);
+    if (!updated) return;
+    setDetailModalRequest(updated);
+  }, [detailModalRequest?.id, requests]);
 
   // Calculate missing documents for resubmit gating
   useEffect(() => {
@@ -612,14 +631,6 @@ const PrivatePurchasesPage = () => {
 
     setOfferModal((prev) => ({ ...prev, loading: true }));
 
-    // Log FE: Iniciando subida de oferta
-    console.log('[FLOW_PRIVADA][FE][FASE2][OFFER_UPLOAD][START]', {
-      requestId: selectedRequest.id,
-      fileName: offerModal.file.name,
-      fileSize: offerModal.file.size,
-      role: 'backoffice_comercial'
-    });
-
     try {
       const base64 = await fileToBase64(offerModal.file);
       if (!base64 || !base64.includes(",")) {
@@ -640,13 +651,6 @@ const PrivatePurchasesPage = () => {
         folder_path: buildUnsignedFolderPath(),
       });
 
-      // Log FE: Ãƒâ€°xito en subida de oferta
-      console.log('[FLOW_PRIVADA][FE][FASE2][OFFER_UPLOAD][SUCCESS]', {
-        requestId: selectedRequest.id,
-        ok: true,
-        code: 'SUCCESS'
-      });
-
       showToast("Oferta registrada y enviada", "success");
       setOfferModal({ open: false, loading: false, file: null });
       fetchPrivatePurchases({
@@ -662,13 +666,6 @@ const PrivatePurchasesPage = () => {
       // Manejo especÃƒÂ­fico de errores BE
       const errorCode = error.response?.data?.code;
       if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.DOC_ALREADY_EXISTS) {
-        console.log('[FLOW_PRIVADA][FE][FASE2][IDEMPOTENCY_UI][BLOCKED]', {
-          requestId: selectedRequest.id,
-          errorCode,
-          action: 'offer_upload',
-          existingRef: error.response?.data?.details?.existingRef
-        });
-
         showToast(PRIVATE_PURCHASE_ERROR_MESSAGES[errorCode], "warning");
       } else {
         showToast("No se pudo enviar la oferta", "error");
@@ -684,14 +681,6 @@ const PrivatePurchasesPage = () => {
       return;
     }
     setSignedModal((prev) => ({ ...prev, loading: true }));
-
-    // Log FE: Iniciando subida de oferta firmada
-    console.log('[FLOW_PRIVADA][FE][FASE2][SIGNED_OFFER_UPLOAD][START]', {
-      requestId: selectedRequest.id,
-      fileName: signedModal.file.name,
-      fileSize: signedModal.file.size,
-      role: isManagerUser ? 'gerencia' : 'backoffice_comercial'
-    });
 
     try {
       const base64 = await fileToBase64(signedModal.file);
@@ -712,13 +701,6 @@ const PrivatePurchasesPage = () => {
         file_name: signedModal.file.name,
       });
 
-      // Log FE: Ãƒâ€°xito en subida de oferta firmada
-      console.log('[FLOW_PRIVADA][FE][FASE2][SIGNED_OFFER_UPLOAD][SUCCESS]', {
-        requestId: selectedRequest.id,
-        ok: true,
-        code: 'SUCCESS'
-      });
-
       showToast("Oferta firmada registrada", "success");
       setSignedModal({ open: false, loading: false, file: null });
       fetchPrivatePurchases({
@@ -734,13 +716,6 @@ const PrivatePurchasesPage = () => {
       // Manejo especÃƒÂ­fico de errores BE
       const errorCode = error.response?.data?.code;
       if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.DOC_ALREADY_EXISTS) {
-        console.log('[FLOW_PRIVADA][FE][FASE2][IDEMPOTENCY_UI][BLOCKED]', {
-          requestId: selectedRequest.id,
-          errorCode,
-          action: 'signed_offer_upload',
-          existingRef: error.response?.data?.details?.existingRef
-        });
-
         showToast(PRIVATE_PURCHASE_ERROR_MESSAGES[errorCode], "warning");
       } else {
         showToast("No se pudo subir la oferta firmada", "error");
@@ -967,31 +942,14 @@ const PrivatePurchasesPage = () => {
     // Check missing documents first
     const missing = calculateMissingDocuments(selectedRequest);
     if (missing.length > 0) {
-      console.log('[FLOW_PRIVADA][FE][FASE4][CORRECTION][RESUBMIT][DISABLED_MISSING_DOCS]', {
-        requestId: selectedRequest.id,
-        missingDocs: missing,
-        totalMissing: missing.length
-      });
       return;
     }
 
     setProcessingAction({ id: selectedRequest.id, type: "resubmit" });
 
     try {
-      console.log('[FLOW_PRIVADA][FE][FASE4][CORRECTION][RESUBMIT][API_CALL_START]', {
-        requestId: selectedRequest.id,
-        fromStatus: selectedRequest.status,
-        toStatus: 'pending_contract_client_signature'
-      });
-
       // Use transition API to resubmit
       await transitionPrivatePurchaseState(selectedRequest.id, 'pending_contract_client_signature');
-
-      console.log('[FLOW_PRIVADA][FE][FASE4][CORRECTION][RESUBMIT][API_OK]', {
-        requestId: selectedRequest.id,
-        ok: true,
-        code: 'SUCCESS'
-      });
 
       showToast("Solicitud reenviada a gerencia para revisiÃƒÂ³n", "success");
       fetchPrivatePurchases({
@@ -1008,12 +966,6 @@ const PrivatePurchasesPage = () => {
       const errorCode = error.response?.data?.code;
       if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.DOCS_INCOMPLETE_FOR_GERENCIA) {
         const missingDocs = error.response?.data?.details?.missingDocs || [];
-        console.log('[FLOW_PRIVADA][FE][FASE4][GERENCIA_DOC_GATE_UI][API_BLOCKED]', {
-          requestId: selectedRequest.id,
-          errorCode,
-          missingDocs,
-          totalMissing: missingDocs.length
-        });
         showToast(`Faltan documentos para reenviar: ${missingDocs.join(', ')}`, "error");
       } else {
         showToast("No se pudo reenviar la solicitud", "error");
@@ -1031,41 +983,14 @@ const PrivatePurchasesPage = () => {
       localStorage.setItem(`private_purchase_flow_${request.id}`, flowId);
     }
 
-    // Log FE: Iniciando validaciÃƒÂ³n de docs para gerencia
-    console.log('[FLOW_PRIVADA][FE][FASE4][GERENCIA_DOC_GATE_UI][API_CALL_START]', {
-      requestId: request.id,
-      status: request.status,
-      flowId,
-      role: 'backoffice_comercial',
-      action: PRIVATE_PURCHASE_ACTIONS.SEND_TO_ACP
-    });
-
     setProcessingAction({ id: request.id, type: "forward" });
     try {
-      const response = await forwardPrivatePurchaseToAcp(request.id, {
+      await forwardPrivatePurchaseToAcp(request.id, {
         headers: { "x-flow-id": flowId }
-      });
-      console.log('[FLOW_PRIVADA][FE][ACP_FORWARD][API_RESPONSE]', {
-        requestId: request.id,
-        flowId,
-        response
-      });
-
-      // Log FE: Ãƒâ€°xito en envÃƒÂ­o a ACP
-      console.log('[FLOW_PRIVADA][FE][FASE4][ACP_FORWARD_SUCCESS]', {
-        requestId: request.id,
-        flowId,
-        ok: true,
-        code: 'SUCCESS'
       });
 
       showToast("Solicitud enviada a ACP", "success");
       setPrivatePurchasesData((prev) => {
-        console.log('[FLOW_PRIVADA][FE][ACP_FORWARD][OPTIMISTIC_BEFORE]', {
-          requestId: request.id,
-          flowId,
-          prev
-        });
         if (!prev) return prev;
         const rows = Array.isArray(prev.rows) ? prev.rows : Array.isArray(prev) ? prev : [];
         const updatedRows = rows.map((item) =>
@@ -1074,32 +999,12 @@ const PrivatePurchasesPage = () => {
             : item
         );
         const next = Array.isArray(prev.rows) ? { ...prev, rows: updatedRows } : updatedRows;
-        console.log('[FLOW_PRIVADA][FE][ACP_FORWARD][OPTIMISTIC_AFTER]', {
-          requestId: request.id,
-          flowId,
-          next
-        });
-        const updatedItem = (Array.isArray(next.rows) ? next.rows : next).find(
-          (item) => item.id === request.id
-        );
-        console.log('[FLOW_PRIVADA][FE][ACP_FORWARD][OPTIMISTIC_STATUS]', {
-          requestId: request.id,
-          flowId,
-          status: updatedItem?.status
-        });
         return next;
       });
-      setLastUpdatedRequestId(request.id);
       const nextStatusFilter = statusFilter === "pending_backoffice" ? "all" : statusFilter;
       if (nextStatusFilter !== statusFilter) {
         setStatusFilter(nextStatusFilter);
       }
-      console.log('[FLOW_PRIVADA][FE][ACP_FORWARD][REFRESH]', {
-        requestId: request.id,
-        flowId,
-        statusFilter,
-        nextStatusFilter
-      });
       fetchPrivatePurchases({
         status: nextStatusFilter !== "all" ? nextStatusFilter : undefined,
       });
@@ -1117,26 +1022,11 @@ const PrivatePurchasesPage = () => {
 
       if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.DOCS_INCOMPLETE_FOR_GERENCIA) {
         const missingDocs = error.response?.data?.details?.missingDocs || [];
-
-        // Log FE: Bloqueado por docs incompletos
-        console.log('[FLOW_PRIVADA][FE][FASE4][GERENCIA_DOC_GATE_UI][API_BLOCKED]', {
-          requestId: request.id,
-          errorCode,
-          missingDocs,
-          totalMissing: missingDocs.length
-        });
-
         showToast(
           `No se puede enviar a ACP: ${PRIVATE_PURCHASE_ERROR_MESSAGES[errorCode]} (${missingDocs.length} documentos faltantes)`,
           "error"
         );
       } else if (errorCode === PRIVATE_PURCHASE_ERROR_CODES.DOC_ALREADY_EXISTS) {
-        console.log('[FLOW_PRIVADA][FE][FASE4][IDEMPOTENCY_UI][BLOCKED]', {
-          requestId: request.id,
-          errorCode,
-          existingRef: error.response?.data?.details?.existingRef
-        });
-
         showToast(PRIVATE_PURCHASE_ERROR_MESSAGES[errorCode], "warning");
       } else {
         showToast(errorMessage || "No se pudo enviar a ACP", "error");
@@ -1164,45 +1054,12 @@ const PrivatePurchasesPage = () => {
       return;
     }
 
-    // Log detallado de roles y permisos antes de hacer la llamada
-    console.log('[FLOW_PRIVADA][FE][ACP_AVAILABILITY_EMAIL][ROLE_CHECK]', {
-      requestId,
-      user: {
-        id: user?.id,
-        email: user?.email,
-        rawRoleValue,
-        rolesArray,
-        roleText,
-        normalizedRole,
-        normalizedScope
-      },
-      roleChecks: {
-        isAcpUser,
-        isBackofficeUser,
-        isManagerUser,
-        hasRoleToken_acp_comercial: hasRoleToken("acp_comercial"),
-        hasRoleToken_acp: hasRoleToken("acp"),
-        hasRoleToken_comercial: hasRoleToken("comercial"),
-        hasRoleToken_jefe_comercial: hasRoleToken("jefe_comercial")
-      },
-      requiredRoles: ['acp_comercial', 'jefe_comercial'],
-      endpoint: `/private-purchases/${requestId}/start-availability`
-    });
-
     setAcpEmailModal((prev) => ({ ...prev, loading: true }));
     setProcessingAction({ id: requestId, type: "acp_send_email" });
     try {
-      console.log('[FLOW_PRIVADA][FE][ACP][EMAIL][START]', {
-        requestId,
-        providerEmail: providerEmail.trim(),
-        userHasRequiredRole: isAcpUser || isManagerUser
-      });
       await startPrivatePurchaseAvailability(requestId, {
         provider_email: providerEmail.trim(),
         notes: notes.trim()
-      });
-      console.log('[FLOW_PRIVADA][FE][ACP][EMAIL][SUCCESS]', {
-        requestId
       });
       showToast("Correo de disponibilidad enviado", "success");
       fetchPrivatePurchases({
@@ -1294,20 +1151,11 @@ const PrivatePurchasesPage = () => {
     setAcpResponseModal((prev) => ({ ...prev, loading: true }));
     setProcessingAction({ id: requestId, type: "acp_response" });
     try {
-      console.log('[FLOW_PRIVADA][FE][ACP][RESPONSE][START]', {
-        requestId,
-        itemsCount: items?.length || 0
-      });
-
       // Enviar items individuales al backend
       await savePrivatePurchaseProviderResponse(requestId, {
         outcome: "new", // El backend calcula el outcome basado en items
         items: items || [],
         notes: notes.trim()
-      });
-
-      console.log('[FLOW_PRIVADA][FE][ACP][RESPONSE][SUCCESS]', {
-        requestId
       });
       showToast("Respuesta del proveedor registrada", "success");
       fetchPrivatePurchases({
@@ -1447,7 +1295,6 @@ const PrivatePurchasesPage = () => {
   const handleBackofficeAcceptAvailability = async (requestId) => {
     const request = requestId ? getRequestById(requestId) : selectedRequest;
     if (!request) return;
-    const flowId = getFlowIdForRequest(request.id) || `pp-${Date.now()}-${request.id}`;
 
     setProcessingAction({ id: request.id, type: "availability_accept" });
     try {
@@ -1471,7 +1318,6 @@ const PrivatePurchasesPage = () => {
   const handleBackofficeRejectAvailability = async (requestId) => {
     const request = requestId ? getRequestById(requestId) : selectedRequest;
     if (!request) return;
-    const flowId = getFlowIdForRequest(request.id) || `pp-${Date.now()}-${request.id}`;
 
     const reason = window.prompt("Motivo de rechazo de disponibilidad:", "") || "";
     if (!reason.trim()) {
@@ -1503,27 +1349,27 @@ const PrivatePurchasesPage = () => {
       {processingAction && (
         <ProcessingOverlay
           className="z-[1010]"
-          title={processingAction.title || "Procesando..."}
-          steps={PRIVATE_PURCHASE_PROCESSING_STEPS[processingAction.type] ? [PRIVATE_PURCHASE_PROCESSING_STEPS[processingAction.type]] : []}
-          activeStep={processingAction.type}
+          title={processingTitle || processingAction.title || "Procesando..."}
+          steps={processingStep ? [processingStep] : []}
+          activeStep={processingStep?.id}
         />
       )}
-      <div className="space-y-5 sm:space-y-6 pb-6 px-3 sm:px-0">
-        <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div className="space-y-4 sm:space-y-5 pb-6 px-3 sm:px-0">
+        <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <FiFileText className="text-blue-600" />
+            <h1 className="text-lg sm:text-xl font-semibold text-gray-900 flex items-center gap-2">
+              <FiFileText className="text-slate-600" />
               Compras Privadas
             </h1>
-            <p className="text-xs sm:text-sm text-gray-500 max-w-xl">
-              Gestiona el flujo privado que empieza en comercial y termina en ACP.
+            <p className="text-xs text-gray-500 max-w-xl">
+              Flujo privado desde comercial hasta aprobación operativa.
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:w-auto"
+              className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 sm:w-auto"
             >
               <option value="all">Todos los estados</option>
               {STATUS_DEFINITIONS.map((status) => (
@@ -1560,16 +1406,13 @@ const PrivatePurchasesPage = () => {
           </div>
         </Card>
 
-        {/* SecciÃƒÂ³n de solicitudes con cards modernas */}
         <div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-6">
-            <div className="flex items-start gap-3">
-              <div className="rounded-xl bg-slate-900 p-2.5 text-white shadow-sm">
-                <FiPackage size={20} />
-              </div>
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3">
+            <div className="flex items-start gap-2">
+              <FiPackage className="text-slate-500 mt-0.5" size={16} />
               <div>
-                <h2 className="text-xl font-bold text-slate-900">Solicitudes de compra privada</h2>
-                <p className="text-xs sm:text-sm text-slate-500">Gestiona el flujo completo desde comercial hasta ACP</p>
+                <h2 className="text-base font-semibold text-slate-900">Solicitudes de compra privada</h2>
+                <p className="text-xs text-slate-500">Stream operativo con seguimiento por estado</p>
               </div>
             </div>
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -1578,7 +1421,7 @@ const PrivatePurchasesPage = () => {
                 <input
                   type="text"
                   placeholder="Buscar por cliente o estado..."
-                  className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:w-72"
+                  className="w-full rounded-md border border-slate-200 bg-white pl-9 pr-3 py-2 text-sm text-slate-800 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200 sm:w-72"
                   value={listQuery}
                   onChange={(e) => setListQuery(e.target.value)}
                 />
@@ -1605,8 +1448,9 @@ const PrivatePurchasesPage = () => {
               </p>
             </Card>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {filteredRequests.map((req) => {
+            <div className="mx-auto max-w-7xl">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {filteredRequests.map((req) => {
                 const statusConfig = getPrivatePurchaseStatusConfig(req.status);
                 const clientInfo = getPrivatePurchaseClientInfo(req.client_snapshot);
                 const equipmentInfo = getPrivatePurchaseEquipmentInfo(req);
@@ -1627,6 +1471,37 @@ const PrivatePurchasesPage = () => {
                 const comodatoLink = getDocumentLink(docs, "COMODATO");
                 const reservationSent = Boolean(req.reservation_email_sent_at);
                 const statusOwner = statusOwnerLabels[req.status] || "Equipo interno";
+                const equipmentById = new Map(
+                  (Array.isArray(req.equipment) ? req.equipment : [])
+                    .filter(Boolean)
+                    .map((eq) => [String(eq.id || eq.equipment_id || eq.inventory_id || ""), eq]),
+                );
+
+                const resolveProviderItemName = (item, index) => {
+                  const rawItemId = item?.id ?? item?.equipment_id ?? item?.inventory_id ?? "";
+                  const normalizedId = String(rawItemId || "").trim();
+                  const requestedItem = equipmentById.get(normalizedId) || {};
+
+                  const preferred = [
+                    item?.name,
+                    item?.label,
+                    requestedItem?.name,
+                    requestedItem?.item_name,
+                    requestedItem?.model,
+                    requestedItem?.sku,
+                  ]
+                    .map((value) => String(value || "").trim())
+                    .find((value) => value.length > 0);
+
+                  if (!preferred) return `Equipo ${index + 1}`;
+                  if (normalizedId && preferred === normalizedId) {
+                    const fallback = [requestedItem?.name, requestedItem?.model, requestedItem?.sku]
+                      .map((value) => String(value || "").trim())
+                      .find((value) => value.length > 0 && value !== normalizedId);
+                    return fallback || `Equipo ${index + 1}`;
+                  }
+                  return preferred;
+                };
 
                 const toggleExpanded = (e) => {
                   e.stopPropagation();
@@ -1634,14 +1509,14 @@ const PrivatePurchasesPage = () => {
                 };
 
                 return (
-                  <Card
-                    key={req.id}
-                    className={`relative h-full flex flex-col rounded-none border border-x-0 p-4 shadow-none transition-all duration-300 cursor-pointer sm:rounded-2xl sm:border sm:p-5 sm:shadow-md sm:transform sm:hover:-translate-y-1 ${isSelected
-                      ? 'border-blue-300 bg-blue-50/50 sm:shadow-lg sm:shadow-blue-200/60 sm:ring-2 sm:ring-blue-200'
-                      : `${statusConfig.cardBorder} ${statusConfig.cardBg} sm:shadow-md sm:hover:shadow-lg`
-                      }`}
-                    onClick={() => setSelectedId(req.id)}
-                  >
+                  <div key={req.id}>
+                    <Card
+                      className={`relative flex h-full w-full max-w-sm mx-auto flex-col rounded-lg border p-4 shadow-sm transition-colors cursor-pointer ${isSelected
+                        ? 'border-blue-300 bg-blue-50/40 ring-1 ring-blue-200'
+                        : `${statusConfig.cardBorder} bg-white hover:bg-slate-50/80`
+                        }`}
+                      onClick={() => setSelectedId(req.id)}
+                    >
                     {/* Header compacto */}
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1">
@@ -1660,28 +1535,54 @@ const PrivatePurchasesPage = () => {
                             </span>
                           )}
                         </div>
-                        <h3 className="font-bold text-lg text-gray-900 leading-tight mt-1">{clientInfo.name}</h3>
-                        <p className="text-xs text-gray-500 mt-1">{clientInfo.email}</p>
+                        <h3 className="font-semibold text-base text-slate-900 leading-tight mt-1">{clientInfo.name}</h3>
+                        <p className="text-xs text-slate-500 mt-1">{clientInfo.email}</p>
                       </div>
                     </div>
 
                     {/* Equipo solicitado */}
-                    <div className="mb-3 flex items-center gap-2 text-sm text-gray-700">
-                      <FiPackage className="text-gray-500" size={14} />
+                    <div className="mb-3 flex items-center gap-2 text-sm text-slate-700">
+                      <FiPackage className="text-slate-400" size={14} />
                       <span className="font-medium">{equipmentInfo.summary}</span>
                     </div>
 
                     {/* Metadatos esenciales */}
-                    <div className="grid grid-cols-2 gap-2 text-xs text-gray-600 mb-4">
+                    <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 mb-4">
                       <div className="flex items-center gap-2">
-                        <FiUser className="text-gray-400" size={12} />
+                        <FiUser className="text-slate-400" size={12} />
                         <span className="truncate">{creationInfo.by}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <FiUsers className="text-gray-400" size={12} />
+                        <FiUsers className="text-slate-400" size={12} />
                         <span className="truncate">Responsable: {statusOwner}</span>
                       </div>
                     </div>
+
+                    {req.checklist_state?.action && (
+                      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Checklist automático</p>
+                          <span className="text-[11px] text-slate-500">
+                            {(req.checklist_state.pending || []).length > 0
+                              ? `${(req.checklist_state.pending || []).length} pendiente(s)`
+                              : "Completo"}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs font-medium text-slate-700">
+                          Paso: {formatChecklistActionLabel(req.checklist_state)}
+                        </p>
+                        <div className="mt-2 space-y-1">
+                          {(req.checklist_state.items || []).map((item) => (
+                            <div key={`${req.id}-check-${item.key}`} className="flex items-center gap-2 text-xs">
+                              <input type="checkbox" checked={Boolean(item.checked)} readOnly disabled />
+                              <span className={item.checked ? "text-emerald-700" : "text-slate-700"}>
+                                {item.label}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Boton de expandir/colapsar */}
                     <div className="mt-auto">
@@ -1775,32 +1676,32 @@ const PrivatePurchasesPage = () => {
 
                     {/* Contenido expandido */}
                     {expanded && (
-                      <div className="mt-4 pt-4 border-t border-gray-200 space-y-4">
+                      <div className="mt-4 pt-4 border-t border-slate-200 space-y-3">
                         {/* InformaciÃƒÂ³n detallada del cliente */}
-                        <div className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Cliente</p>
+                        <div className="bg-slate-50 rounded-lg p-3">
+                          <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">Cliente</p>
                           <div className="space-y-1 text-sm">
-                            <p><span className="font-medium">Nombre:</span> {clientInfo.name}</p>
-                            <p><span className="font-medium">Email:</span> {clientInfo.email}</p>
-                            <p><span className="font-medium">ID:</span> {clientInfo.identifier}</p>
+                            <p className="text-slate-700"><span className="font-medium text-slate-900">Nombre:</span> {clientInfo.name}</p>
+                            <p className="text-slate-700"><span className="font-medium text-slate-900">Email:</span> {clientInfo.email}</p>
+                            <p className="text-slate-700"><span className="font-medium text-slate-900">ID:</span> {clientInfo.identifier}</p>
                           </div>
                         </div>
 
                         {/* Equipos */}
                         {equipmentInfo.count > 0 && (
-                          <div className="bg-gray-50 rounded-lg p-3">
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">
+                          <div className="bg-slate-50 rounded-lg p-3">
+                            <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">
                               Equipos ({equipmentInfo.count})
                             </p>
                             <div className="space-y-2">
                               {equipmentInfo.details.slice(0, 3).map((item, idx) => (
                                 <div key={idx} className="flex justify-between items-center text-sm">
-                                  <span className="font-medium text-gray-900">{item.name}</span>
-                                  <span className="text-xs text-gray-500">{item.sku}</span>
+                                  <span className="font-medium text-slate-900">{item.name}</span>
+                                  <span className="text-xs text-slate-500">{item.sku}</span>
                                 </div>
                               ))}
                               {equipmentInfo.details.length > 3 && (
-                                <p className="text-xs text-gray-500 text-center">
+                                <p className="text-xs text-slate-500 text-center">
                                   +{equipmentInfo.details.length - 3} equipos mÃƒÂ¡s
                                 </p>
                               )}
@@ -1810,43 +1711,44 @@ const PrivatePurchasesPage = () => {
 
                         {/* Notas */}
                         {req.notes && (
-                          <div className="bg-gray-50 rounded-lg p-3">
-                            <p className="text-xs uppercase tracking-wide text-gray-500 mb-2">Notas</p>
-                            <p className="text-sm text-gray-700">{req.notes}</p>
+                          <div className="bg-slate-50 rounded-lg p-3">
+                            <p className="text-xs uppercase tracking-wide text-slate-500 mb-2">Notas</p>
+                            <p className="text-sm text-slate-700">{req.notes}</p>
                           </div>
                         )}
 
                         {/* Respuesta detallada del proveedor */}
                         {req.provider_response && (
-                          <div className="bg-blue-50 rounded-lg p-4 border border-blue-100">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
                             <div className="flex items-center justify-between mb-3">
-                              <p className="text-xs font-semibold text-blue-800 uppercase tracking-wide">
+                              <p className="text-xs font-semibold text-slate-700 uppercase tracking-wide">
                                 Respuesta detallada del proveedor
                               </p>
-                              <span className="text-[10px] text-blue-600">
+                              <span className="text-[10px] text-slate-500">
                                 {req.provider_response_at ? formatDateTimeEC(req.provider_response_at, '') : ''}
                               </span>
                             </div>
 
                             <div className="mb-3">
-                              <p className="text-sm font-medium text-blue-900">
+                              <p className="text-sm font-medium text-slate-900">
                                 {req.provider_response.outcome === 'new' ? 'Equipos disponibles para entrega' : 'Equipos no disponibles'}
                               </p>
                               {req.provider_response.notes && (
-                                <p className="text-sm text-blue-700 mt-1">{req.provider_response.notes}</p>
+                                <p className="text-sm text-slate-700 mt-1">{req.provider_response.notes}</p>
                               )}
                             </div>
 
                             {Array.isArray(req.provider_response.items) && req.provider_response.items.length > 0 && (
                               <div className="space-y-3">
-                                <p className="text-[10px] uppercase tracking-wide text-blue-700">Equipos evaluados:</p>
+                                <p className="text-[10px] uppercase tracking-wide text-slate-500">Equipos evaluados:</p>
                                 <div className="space-y-2">
                                   {req.provider_response.items.map((item, idx) => {
-                                    const requestedItem = req.equipment?.find(eq => eq.id === item.id) || {};
+                                    const requestedItem = equipmentById.get(String(item?.id ?? item?.equipment_id ?? item?.inventory_id ?? "")) || {};
                                     const requestedType = item.requested_type || requestedItem.type;
                                     const availableType = item.available_type;
                                     const decision = item.decision;
                                     const hasMismatch = requestedType && availableType && requestedType !== availableType;
+                                    const displayName = resolveProviderItemName(item, idx);
 
                                     const typeBadge = (type, label) => (
                                       <span
@@ -1862,8 +1764,8 @@ const PrivatePurchasesPage = () => {
                                     );
 
                                     return (
-                                      <div key={`${req.id}-${idx}`} className="rounded-lg border border-blue-200 bg-white p-3 shadow-sm">
-                                        <p className="font-medium text-gray-900 text-sm">{item.name || requestedItem.name || 'Equipo'}</p>
+                                      <div key={`${req.id}-${idx}`} className="rounded-md border border-slate-200 bg-white p-2.5">
+                                        <p className="font-medium text-slate-900 text-sm">{displayName}</p>
                                         <div className="flex flex-wrap gap-2 mt-2">
                                           {requestedType && typeBadge(requestedType, "Solicitado")}
                                           {availableType && typeBadge(availableType, "Disponible")}
@@ -1904,9 +1806,9 @@ const PrivatePurchasesPage = () => {
                         )}
 
                         {/* Documentos clave */}
-                        <div className="bg-gray-50 rounded-lg p-3">
+                        <div className="bg-slate-50 rounded-lg p-3">
                           <div className="flex items-center justify-between">
-                            <p className="text-xs uppercase tracking-wide text-gray-500">Documentos clave</p>
+                            <p className="text-xs uppercase tracking-wide text-slate-500">Documentos clave</p>
                             <Button
                               size="xs"
                               variant="ghost"
@@ -1920,9 +1822,9 @@ const PrivatePurchasesPage = () => {
                             </Button>
                           </div>
                           {docsLoading ? (
-                            <p className="text-xs text-gray-500 mt-2">Buscando documentos...</p>
+                            <p className="text-xs text-slate-500 mt-2">Buscando documentos...</p>
                           ) : docs.length === 0 ? (
-                            <p className="text-xs text-gray-500 mt-2">Sin documentos registrados en expediente</p>
+                            <p className="text-xs text-slate-500 mt-2">Sin documentos registrados en expediente</p>
                           ) : (
                             <div className="mt-3 grid gap-2 text-xs">
                               {offerLink && (
@@ -2018,9 +1920,11 @@ const PrivatePurchasesPage = () => {
                         </Button>
                       </div>
                     )}
-                  </Card>
+                    </Card>
+                  </div>
                 );
               })}
+              </div>
             </div>
           )}
         </div>
@@ -2706,6 +2610,37 @@ const PrivatePurchasesPage = () => {
                     </div>
                   );
                 })()
+              )}
+
+              {detailModalRequest.checklist_state?.action && (
+                <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-700 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs uppercase tracking-widest text-slate-500">Checklist automático</p>
+                    <span className="text-[11px] text-slate-500">
+                      {(detailModalRequest.checklist_state.pending || []).length > 0
+                        ? `${(detailModalRequest.checklist_state.pending || []).length} pendiente(s)`
+                        : "Completo"}
+                    </span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Paso: {formatChecklistActionLabel(detailModalRequest.checklist_state)}
+                  </p>
+                  <div className="space-y-1">
+                    {(detailModalRequest.checklist_state.items || []).map((item) => (
+                      <div key={`detail-check-${item.key}`} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={Boolean(item.checked)} readOnly disabled />
+                        <span className={item.checked ? "text-emerald-700" : "text-slate-700"}>
+                          {item.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {(detailModalRequest.checklist_state.pending || []).length > 0 && (
+                    <p className="text-xs text-amber-700">
+                      El checklist se marca automáticamente según los datos y documentos del proceso.
+                    </p>
+                  )}
+                </div>
               )}
 
               <div className="space-y-2 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600">

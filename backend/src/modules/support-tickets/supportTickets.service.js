@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const notificationsService = require("../notifications/notifications.service");
+const notificationManager = require("../notifications/notificationManager");
 
 const TICKET_TYPES = new Set(["fallo", "implementacion", "requerimiento", "problema"]);
 const TICKET_PRIORITIES = new Set(["baja", "media", "alta", "critica"]);
@@ -344,9 +345,22 @@ async function getTIUsers(client) {
 async function notifyUsers({ userIds, title, message, source, priority = 1, meta = {} }) {
   const uniqueIds = Array.from(new Set((userIds || []).filter(Boolean)));
   if (!uniqueIds.length) return;
-  await Promise.all(
-    uniqueIds.map((userId) =>
-      notificationsService.createNotification({
+  await Promise.all(uniqueIds.map(async (userId) => {
+    try {
+      await notificationManager.sendNotification({
+        userId,
+        customTitle: title,
+        customMessage: message,
+        type: "task",
+        source,
+        priority,
+        meta,
+        email: true,
+        chat: false,
+      });
+    } catch (error) {
+      // Fallback conservador: si el manager falla, al menos guardar notificación interna.
+      await notificationsService.createNotification({
         user_id: userId,
         title,
         message,
@@ -354,9 +368,9 @@ async function notifyUsers({ userIds, title, message, source, priority = 1, meta
         source,
         priority,
         meta,
-      })
-    )
-  );
+      });
+    }
+  }));
 }
 
 function buildSla(priority) {

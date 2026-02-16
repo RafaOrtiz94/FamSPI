@@ -5,6 +5,7 @@ import {
     FiCalendar,
     FiCheckCircle,
     FiShield,
+    FiShoppingCart,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -34,7 +35,14 @@ const availabilityColor = (status) => {
     return "bg-red-50 text-red-700 border-red-200";
 };
 
-const TecnicoView = ({ stats, myMaintenances, availability, teamAvailability = [], onAvailabilityChange, onRefresh }) => {
+const TecnicoView = ({
+    stats,
+    myMaintenances,
+    availability,
+    teamAvailability = [],
+    onAvailabilityChange,
+    onRefresh
+}) => {
     const navigate = useNavigate();
 
     const currentStatus = availability?.status || "no_disponible";
@@ -103,6 +111,21 @@ const TecnicoView = ({ stats, myMaintenances, availability, teamAvailability = [
             </Card>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <Card
+                    className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-slate-500"
+                    onClick={() => navigate("/dashboard/purchases/workspace?tab=public")}
+                >
+                    <div className="flex items-center gap-4">
+                        <div className="p-3 bg-slate-100 rounded-full text-slate-700">
+                            <FiShoppingCart size={24} />
+                        </div>
+                        <div>
+                            <h3 className="font-semibold text-gray-900">Inspecciones de Compras</h3>
+                            <p className="text-sm text-gray-500">Coordinar fecha con comercial</p>
+                        </div>
+                    </div>
+                </Card>
+
                 <Card
                     className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-blue-500"
                     onClick={() => navigate("/dashboard/servicio-tecnico/mantenimientos")}

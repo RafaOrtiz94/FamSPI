@@ -9,8 +9,12 @@ export const fetchClients = async (params = {}) => {
   };
 };
 
-export const assignClient = async (clientId, assigneeEmail) => {
-  const { data } = await api.post(`/clients/${clientId}/assign`, { assignee_email: assigneeEmail });
+export const assignClient = async (clientId, payload) => {
+  const body =
+    typeof payload === "string"
+      ? { assignee_email: payload }
+      : { ...(payload || {}) };
+  const { data } = await api.post(`/clients/${clientId}/assign`, body);
   return data.data || data;
 };
 

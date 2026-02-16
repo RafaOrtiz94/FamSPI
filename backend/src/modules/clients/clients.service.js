@@ -3,7 +3,7 @@ const logger = require("../../config/logger");
 const schedulesService = require("../schedules/schedules.service");
 const { uploadBase64File } = require("../../utils/drive");
 
-const MANAGER_ROLES = new Set([
+const FULL_ACCESS_ROLES = new Set([
   "jefe_comercial",
   "acp_comercial",
   "backoffice",
@@ -15,14 +15,43 @@ const MANAGER_ROLES = new Set([
   "ti",
 ]);
 
+const ASSIGNER_ROLES = new Set([
+  "jefe_comercial",
+  "gerencia",
+  "gerente",
+  "admin",
+  "administrador",
+  "ti",
+]);
+
 const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
+const ASSIGNABLE_ADVISOR_ROLES = new Set([
+  "comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]);
+
+const ACTIVE_ASSIGNMENT_CONDITION = `
+  ca.is_active = TRUE
+  AND (ca.starts_at IS NULL OR ca.starts_at <= NOW())
+  AND (ca.ends_at IS NULL OR ca.ends_at >= NOW())
+`;
 
 // Estados válidos para registros de visita.
 // "in_visit" representa una visita en curso que aún no ha sido cerrada.
 const VALID_VISIT_STATUS = new Set(["visited", "pending", "skipped", "in_visit"]);
 
+function hasRole(user, allowedRoles) {
+  return allowedRoles.has(user?.role?.toLowerCase?.() || "");
+}
+
 function isManager(user) {
-  return MANAGER_ROLES.has(user?.role?.toLowerCase?.() || "");
+  return hasRole(user, FULL_ACCESS_ROLES);
+}
+
+function canAssignClients(user) {
+  return hasRole(user, ASSIGNER_ROLES);
 }
 
 function isAdvisor(user) {
@@ -64,9 +93,76 @@ async function ensureTables() {
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
       assigned_to_email TEXT NOT NULL,
       assigned_by_email TEXT,
+      assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+      is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
+      starts_at TIMESTAMPTZ DEFAULT NOW(),
+      ends_at TIMESTAMPTZ,
+      is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      reason TEXT,
       created_at TIMESTAMPTZ DEFAULT NOW(),
-      UNIQUE(client_request_id, assigned_to_email)
+      UNIQUE(client_request_id, assigned_to_email),
+      CONSTRAINT client_assignments_assignment_type_check
+        CHECK (assignment_type IN ('owner', 'manual', 'temporary'))
     );
+  `);
+
+  await db.query(`
+    ALTER TABLE client_assignments
+      ADD COLUMN IF NOT EXISTS assignment_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+      ADD COLUMN IF NOT EXISTS is_temporary BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS starts_at TIMESTAMPTZ DEFAULT NOW(),
+      ADD COLUMN IF NOT EXISTS ends_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE,
+      ADD COLUMN IF NOT EXISTS reason TEXT;
+  `);
+
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'client_assignments_assignment_type_check'
+      ) THEN
+        ALTER TABLE client_assignments
+          ADD CONSTRAINT client_assignments_assignment_type_check
+          CHECK (assignment_type IN ('owner', 'manual', 'temporary'));
+      END IF;
+    END $$;
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_client_assignments_client_active
+      ON client_assignments (client_request_id, is_active, starts_at, ends_at);
+    CREATE INDEX IF NOT EXISTS idx_client_assignments_assigned_email
+      ON client_assignments (assigned_to_email);
+  `);
+
+  await db.query(`
+    INSERT INTO client_assignments (
+      client_request_id,
+      assigned_to_email,
+      assigned_by_email,
+      assignment_type,
+      is_temporary,
+      starts_at,
+      is_active,
+      reason
+    )
+    SELECT
+      cr.id,
+      LOWER(cr.created_by),
+      LOWER(cr.created_by),
+      'owner',
+      FALSE,
+      COALESCE(cr.approved_at, cr.created_at, NOW()),
+      TRUE,
+      'Asignacion automatica por registro del cliente'
+    FROM client_requests cr
+    WHERE cr.status = 'approved'
+      AND cr.created_by IS NOT NULL
+      AND TRIM(cr.created_by) <> ''
+    ON CONFLICT (client_request_id, assigned_to_email) DO NOTHING;
   `);
 
   await db.query(`
@@ -146,8 +242,11 @@ async function ensureClientAccess({ clientId, user }) {
 
   const { rows } = await db.query(
     `SELECT 1 FROM client_requests cr
-     LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id AND ca.assigned_to_email = $2
-     WHERE cr.id = $1 AND (cr.created_by = $2 OR ca.assigned_to_email IS NOT NULL)
+     LEFT JOIN client_assignments ca
+       ON ca.client_request_id = cr.id
+      AND LOWER(ca.assigned_to_email) = LOWER($2)
+      AND ${ACTIVE_ASSIGNMENT_CONDITION}
+     WHERE cr.id = $1 AND (LOWER(COALESCE(cr.created_by, '')) = LOWER($2) OR ca.assigned_to_email IS NOT NULL)
      LIMIT 1`,
     [clientId, user.email],
   );
@@ -165,9 +264,34 @@ async function getClientDetail({ clientId, user }) {
     `
       SELECT
         cr.*,
-        COALESCE(json_agg(DISTINCT ca.assigned_to_email) FILTER (WHERE ca.assigned_to_email IS NOT NULL), '[]') AS asignados
+        COALESCE(
+          json_agg(DISTINCT LOWER(ca.assigned_to_email))
+            FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+          '[]'
+        ) AS asignados,
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object(
+              'assigned_to_email', LOWER(ca.assigned_to_email),
+              'assigned_to_name', COALESCE(au.fullname, au.name, ca.assigned_to_email),
+              'assigned_to_role', au.role,
+              'assignment_type', ca.assignment_type,
+              'is_temporary', ca.is_temporary,
+              'starts_at', ca.starts_at,
+              'ends_at', ca.ends_at,
+              'is_active', ca.is_active,
+              'assigned_by_email', ca.assigned_by_email,
+              'reason', ca.reason
+            )
+          ) FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+          '[]'
+        ) AS assignment_details
       FROM client_requests cr
-      LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id
+      LEFT JOIN client_assignments ca
+        ON ca.client_request_id = cr.id
+       AND ${ACTIVE_ASSIGNMENT_CONDITION}
+      LEFT JOIN users au
+        ON LOWER(au.email) = LOWER(ca.assigned_to_email)
       WHERE cr.id = $1
       GROUP BY cr.id
     `,
@@ -199,9 +323,20 @@ async function getClientDetail({ clientId, user }) {
   }
   if (!Array.isArray(asignados)) asignados = [];
 
+  let assignmentDetails = request.assignment_details;
+  if (typeof assignmentDetails === "string") {
+    try {
+      assignmentDetails = JSON.parse(assignmentDetails);
+    } catch (e) {
+      assignmentDetails = [];
+    }
+  }
+  if (!Array.isArray(assignmentDetails)) assignmentDetails = [];
+
   return {
     ...request,
     asignados,
+    assignment_details: assignmentDetails,
     attachments: isManager(user) ? getClientRequestAttachments(request) : [],
   };
 }
@@ -237,7 +372,7 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
 
   if (!isManager(user)) {
     params.push(user.email, user.email);
-    clauses.push(`(cr.created_by = $${params.length - 1} OR ca.assigned_to_email = $${params.length})`);
+    clauses.push(`(LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1}) OR LOWER(COALESCE(ca.assigned_to_email, '')) = LOWER($${params.length}))`);
   }
 
   if (q) {
@@ -311,7 +446,28 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       cr.shipping_phone,
       cr.shipping_address,
       cr.drive_folder_id,
-      COALESCE(json_agg(DISTINCT ca.assigned_to_email) FILTER (WHERE ca.assigned_to_email IS NOT NULL), '[]') AS asignados,
+      COALESCE(
+        json_agg(DISTINCT LOWER(ca.assigned_to_email))
+          FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+        '[]'
+      ) AS asignados,
+      COALESCE(
+        json_agg(
+          DISTINCT jsonb_build_object(
+            'assigned_to_email', LOWER(ca.assigned_to_email),
+            'assigned_to_name', COALESCE(au.fullname, au.name, ca.assigned_to_email),
+            'assigned_to_role', au.role,
+            'assignment_type', ca.assignment_type,
+            'is_temporary', ca.is_temporary,
+            'starts_at', ca.starts_at,
+            'ends_at', ca.ends_at,
+            'is_active', ca.is_active,
+            'assigned_by_email', ca.assigned_by_email,
+            'reason', ca.reason
+          )
+        ) FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+        '[]'
+      ) AS assignment_details,
       vl.status AS visit_status,
       vl.hora_entrada,
       vl.hora_salida,
@@ -322,7 +478,11 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       vl.observaciones,
       vl.duracion_minutos
     FROM client_requests cr
-    LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id
+    LEFT JOIN client_assignments ca
+      ON ca.client_request_id = cr.id
+     AND ${ACTIVE_ASSIGNMENT_CONDITION}
+    LEFT JOIN users au
+      ON LOWER(au.email) = LOWER(ca.assigned_to_email)
     LEFT JOIN client_visit_logs vl
       ON vl.client_request_id = cr.id AND vl.user_email = $1 AND vl.visit_date = $2
     ${whereClause}
@@ -369,6 +529,17 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     if (!Array.isArray(asignados)) {
       asignados = [];
     }
+    let assignmentDetails = row.assignment_details;
+    if (typeof assignmentDetails === "string") {
+      try {
+        assignmentDetails = JSON.parse(assignmentDetails);
+      } catch (e) {
+        assignmentDetails = [];
+      }
+    }
+    if (!Array.isArray(assignmentDetails)) {
+      assignmentDetails = [];
+    }
     const scheduled_info = includeScheduleInfo
       ? {
         ...(plannedByClient[row.id] || { is_planned: false, schedule_id: approvedSchedule?.id || null }),
@@ -378,6 +549,7 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     return {
       ...row,
       asignados,
+      assignment_details: assignmentDetails,
       visit_status: row.visit_status || "pending",
       scheduled_info,
     };
@@ -539,8 +711,16 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
   };
 }
 
-async function assignClient({ clientId, assigneeEmail, user }) {
-  if (!isManager(user)) {
+async function assignClient({
+  clientId,
+  assigneeEmail,
+  user,
+  temporary = false,
+  startsAt = null,
+  endsAt = null,
+  reason = null,
+}) {
+  if (!canAssignClients(user)) {
     const error = new Error("Solo los jefes pueden asignar clientes");
     error.status = 403;
     throw error;
@@ -555,15 +735,90 @@ async function assignClient({ clientId, assigneeEmail, user }) {
     throw error;
   }
 
+  const { rows: assigneeRows } = await db.query(
+    "SELECT id, email, role, active FROM users WHERE LOWER(email) = $1 LIMIT 1",
+    [normalizedEmail],
+  );
+  const assignee = assigneeRows[0];
+  if (!assignee || assignee.active === false) {
+    const error = new Error("El asesor seleccionado no existe o está inactivo");
+    error.status = 400;
+    throw error;
+  }
+
+  const assigneeRole = (assignee.role || "").toLowerCase();
+  if (!ASSIGNABLE_ADVISOR_ROLES.has(assigneeRole)) {
+    const error = new Error("Solo se pueden asignar clientes a usuarios comerciales");
+    error.status = 400;
+    throw error;
+  }
+
+  const now = new Date();
+  const normalizedStartsAt = startsAt ? new Date(startsAt) : now;
+  const normalizedEndsAt = endsAt ? new Date(endsAt) : null;
+  const isTemporary = Boolean(temporary);
+
+  if (Number.isNaN(normalizedStartsAt.getTime())) {
+    const error = new Error("Fecha de inicio inválida");
+    error.status = 400;
+    throw error;
+  }
+
+  if (isTemporary) {
+    if (!normalizedEndsAt || Number.isNaN(normalizedEndsAt.getTime())) {
+      const error = new Error("La fecha de fin es obligatoria para asignaciones temporales");
+      error.status = 400;
+      throw error;
+    }
+    if (normalizedEndsAt <= normalizedStartsAt) {
+      const error = new Error("La fecha de fin debe ser posterior a la fecha de inicio");
+      error.status = 400;
+      throw error;
+    }
+  }
+
   await db.query(
-    `INSERT INTO client_assignments (client_request_id, assigned_to_email, assigned_by_email)
-     VALUES ($1, $2, $3)
+    `INSERT INTO client_assignments (
+       client_request_id,
+       assigned_to_email,
+       assigned_by_email,
+       assignment_type,
+       is_temporary,
+       starts_at,
+       ends_at,
+       is_active,
+       reason
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, $8)
      ON CONFLICT (client_request_id, assigned_to_email) DO UPDATE
-       SET assigned_by_email = EXCLUDED.assigned_by_email, created_at = NOW()`,
-    [clientId, normalizedEmail, user.email],
+       SET assigned_by_email = EXCLUDED.assigned_by_email,
+           assignment_type = EXCLUDED.assignment_type,
+           is_temporary = EXCLUDED.is_temporary,
+           starts_at = EXCLUDED.starts_at,
+           ends_at = EXCLUDED.ends_at,
+           is_active = EXCLUDED.is_active,
+           reason = EXCLUDED.reason,
+           created_at = NOW()`,
+    [
+      clientId,
+      normalizedEmail,
+      (user.email || "").toLowerCase(),
+      isTemporary ? "temporary" : "manual",
+      isTemporary,
+      normalizedStartsAt.toISOString(),
+      isTemporary ? normalizedEndsAt.toISOString() : null,
+      reason ? String(reason).trim() : null,
+    ],
   );
 
-  return { ok: true, client: clientId, assignee: normalizedEmail };
+  return {
+    ok: true,
+    client: clientId,
+    assignee: normalizedEmail,
+    temporary: isTemporary,
+    starts_at: normalizedStartsAt.toISOString(),
+    ends_at: isTemporary ? normalizedEndsAt.toISOString() : null,
+  };
 }
 
 async function upsertVisitStatus({
@@ -602,8 +857,11 @@ async function upsertVisitStatus({
   if (!isManager(user)) {
     const { rows } = await db.query(
       `SELECT 1 FROM client_requests cr
-       LEFT JOIN client_assignments ca ON ca.client_request_id = cr.id AND ca.assigned_to_email = $2
-       WHERE cr.id = $1 AND (cr.created_by = $2 OR ca.assigned_to_email IS NOT NULL)
+       LEFT JOIN client_assignments ca
+         ON ca.client_request_id = cr.id
+        AND LOWER(ca.assigned_to_email) = LOWER($2)
+        AND ${ACTIVE_ASSIGNMENT_CONDITION}
+       WHERE cr.id = $1 AND (LOWER(COALESCE(cr.created_by, '')) = LOWER($2) OR ca.assigned_to_email IS NOT NULL)
        LIMIT 1`,
       [clientId, user.email],
     );

@@ -1,11 +1,12 @@
-import { getAccessToken } from "../api";
+import { API_BASE_URL, getAccessToken } from "../api";
 
-const BASE_API_URL = (process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1").replace(/\/$/, "");
-const EVENTS_PATH = `${BASE_API_URL}/equipment-purchases/events`;
+const EVENTS_PATH = `${API_BASE_URL}/equipment-purchases/events`;
+const MAX_RETRY_DELAY_MS = 60000;
 
 const subscribers = new Set();
 let eventSource = null;
 let reconnectTimer = null;
+let reconnectAttempts = 0;
 
 const notifySubscribers = (payload) => {
   if (!payload) return;
@@ -20,10 +21,12 @@ const notifySubscribers = (payload) => {
 
 const scheduleReconnect = () => {
   if (reconnectTimer) return;
+  const delay = Math.min(5000 * Math.max(1, reconnectAttempts), MAX_RETRY_DELAY_MS);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    reconnectAttempts += 1;
     startEventStream();
-  }, 5000);
+  }, delay);
 };
 
 const cleanupEventSource = () => {
@@ -36,6 +39,7 @@ const cleanupEventSource = () => {
 const startEventStream = () => {
   if (eventSource) return;
   if (typeof window === "undefined") return;
+  if (!API_BASE_URL) return;
   const token = getAccessToken();
   if (!token) return;
 
@@ -64,6 +68,7 @@ const startEventStream = () => {
   });
 
   eventSource.addEventListener("open", () => {
+    reconnectAttempts = 0;
     console.info("Conexión a stream de compras establecida");
   });
 };

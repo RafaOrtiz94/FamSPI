@@ -97,6 +97,7 @@ class NotificationManager {
     chat = false,
     customTitle,
     customMessage,
+    type,
     priority,
     source,
     meta = {}
@@ -112,7 +113,7 @@ class NotificationManager {
         user_id: userId,
         title: customTitle || this.interpolate(templateData.title, data),
         message: customMessage || this.interpolate(templateData.message, data),
-        type: templateData?.type || 'info',
+        type: type || templateData?.type || 'info',
         source: source || template,
         priority: priority || templateData?.priority || 0,
         meta: { ...meta, template, data, sent_at: new Date().toISOString() }
@@ -155,7 +156,8 @@ class NotificationManager {
         subject,
         html,
         from: process.env.SMTP_FROM,
-        senderName: 'FamSPI Sistema'
+        senderName: 'FamSPI Sistema',
+        source: notification.source,
       });
 
       console.log(`Email enviado a ${userEmail}: ${subject}`);

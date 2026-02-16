@@ -62,10 +62,20 @@ const updateClient = async (req, res) => {
 const assignClient = async (req, res) => {
   try {
     const { id } = req.params;
-    const { assignee_email } = req.body || {};
+    const {
+      assignee_email,
+      temporary,
+      starts_at,
+      ends_at,
+      reason,
+    } = req.body || {};
     const result = await clientsService.assignClient({
       clientId: Number(id),
       assigneeEmail: assignee_email,
+      temporary,
+      startsAt: starts_at,
+      endsAt: ends_at,
+      reason,
       user: req.user,
     });
     return res.json({ ok: true, data: result });

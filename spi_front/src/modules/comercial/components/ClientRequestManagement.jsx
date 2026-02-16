@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
     FiCheckCircle,
     FiXCircle,
@@ -9,8 +9,6 @@ import {
     FiFileText,
     FiUser,
     FiMail,
-    FiPhone,
-    FiMapPin,
     FiAlertCircle,
     FiLink
 } from 'react-icons/fi';
@@ -37,19 +35,7 @@ const ClientRequestManagement = () => {
     const [totalCount, setTotalCount] = useState(0);
     const pageSize = 10;
 
-    useEffect(() => {
-        loadRequests();
-    }, [statusFilter, searchQuery, page]);
-
-    useEffect(() => {
-        const interval = setInterval(() => {
-            loadRequests(true);
-        }, 12000);
-
-        return () => clearInterval(interval);
-    }, [statusFilter, searchQuery, page]);
-
-    const loadRequests = async (silent = false) => {
+    const loadRequests = useCallback(async (silent = false) => {
         try {
             if (!silent) setLoading(true);
             const data = await getClientRequests({
@@ -66,7 +52,19 @@ const ClientRequestManagement = () => {
         } finally {
             if (!silent) setLoading(false);
         }
-    };
+    }, [page, pageSize, searchQuery, statusFilter]);
+
+    useEffect(() => {
+        loadRequests();
+    }, [loadRequests]);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            loadRequests(true);
+        }, 12000);
+
+        return () => clearInterval(interval);
+    }, [loadRequests]);
 
     const handleViewDetails = async (request) => {
         try {

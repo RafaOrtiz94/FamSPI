@@ -2,6 +2,17 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const NotificationManager = require('./notificationManager');
 
+const TI_OFFHOURS_ROLES = [
+  "ti",
+  "jefe_ti",
+  "tecnico",
+  "jefe_tecnico",
+  "servicio_tecnico",
+  "jefe_servicio_tecnico",
+  "admin_ti",
+  "jefe_de_ti",
+];
+
 const mapNotificationRow = (row) => ({
   id: row.id,
   user_id: row.user_id,
@@ -147,10 +158,58 @@ const notifyTIAboutOffHoursLogin = async ({
   try {
     logger.info(`🔐 Notificando a TI sobre login fuera de horario: ${user.email}`, { correlationId });
 
-    // 1. Encontrar usuarios TI (roles 'ti' y 'jefe_ti')
+    const schedule = offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] };
+    const workDaysNames = schedule.workDays.map(d => ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d]).join(', ');
+    const title = '🚨 Login fuera de horario detectado';
+
+    const userMessage = `
+Tu acceso fue detectado fuera de horario.
+Motivo: ${offHoursCheck.reason}
+Horario laboral: ${schedule.start} - ${schedule.end} (${schedule.tz})
+Días hábiles: ${workDaysNames}
+IP: ${ip}
+Ubicación: ${geo?.city || 'Desconocida'}, ${geo?.country || 'Desconocido'}
+Navegador: ${userAgent?.substring(0, 100) || 'Desconocido'}
+Correlation ID: ${correlationId}
+    `.trim();
+
+    // 1) Notificar al usuario que inició sesión fuera de horario (correo)
+    if (user?.id) {
+      try {
+        await NotificationManager.sendNotification({
+          userId: user.id,
+          template: 'custom_html',
+          customTitle: title,
+          customMessage: userMessage,
+          type: 'alert',
+          priority: 2,
+          source: 'security.offhours_login.self',
+          meta: {
+            correlationId,
+            userId: user.id,
+            userEmail: user.email,
+            ip,
+            geo,
+            userAgent,
+            offHoursCheck,
+            timestamp: new Date().toISOString()
+          },
+          email: true,
+          chat: false
+        });
+      } catch (selfNotifyError) {
+        logger.error(`❌ Error notificando al usuario sobre login fuera de horario: ${selfNotifyError.message}`, {
+          correlationId,
+          userId: user.id,
+          userEmail: user.email
+        });
+      }
+    }
+
+    // 2) Encontrar usuarios TI para alerta de seguridad
     const tiUsersQuery = await db.query(
-      `SELECT id, email, fullname FROM users WHERE role IN ('ti', 'jefe_ti') AND role IS NOT NULL`,
-      []
+      `SELECT id, email, fullname FROM users WHERE LOWER(COALESCE(role, '')) = ANY($1)`,
+      [TI_OFFHOURS_ROLES]
     );
 
     if (tiUsersQuery.rows.length === 0) {
@@ -158,11 +217,7 @@ const notifyTIAboutOffHoursLogin = async ({
       return; // No hay usuarios TI, pero no fallamos
     }
 
-    // 2. Construir mensaje de notificación
-    const schedule = offHoursCheck.schedule || { tz: 'America/Guayaquil', start: '07:30', end: '20:00', workDays: [1,2,3,4,5] };
-    const workDaysNames = schedule.workDays.map(d => ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'][d]).join(', ');
-
-    const title = '🚨 Login fuera de horario detectado';
+    // 3. Construir mensaje de notificación para TI
     const message = `
 Usuario: ${user.fullname} (${user.email})
 Motivo: ${offHoursCheck.reason}
@@ -174,9 +229,10 @@ Navegador: ${userAgent?.substring(0, 100) || 'Desconocido'}
 Correlation ID: ${correlationId}
     `.trim();
 
-    // 3. Enviar notificación a cada usuario TI
+    // 4. Enviar notificación a cada usuario TI
     const notificationsSent = [];
-    for (const tiUser of tiUsersQuery.rows) {
+    const tiRecipients = tiUsersQuery.rows.filter((tiUser) => Number(tiUser.id) !== Number(user?.id));
+    for (const tiUser of tiRecipients) {
       try {
         const notification = await NotificationManager.sendNotification({
           userId: tiUser.id,
@@ -224,7 +280,7 @@ Correlation ID: ${correlationId}
     logger.info(`✅ Notificaciones de login fuera de horario completadas`, {
       correlationId,
       tiUsersNotified: notificationsSent.length,
-      totalTIUsers: tiUsersQuery.rows.length
+      totalTIUsers: tiRecipients.length
     });
 
   } catch (error) {

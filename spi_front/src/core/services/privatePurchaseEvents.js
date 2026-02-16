@@ -1,11 +1,12 @@
-import { getAccessToken } from "../api";
+import { API_BASE_URL, getAccessToken } from "../api";
 
-const BASE_API_URL = (process.env.REACT_APP_API_ABSOLUTE_URL || "/api/v1").replace(/\/$/, "");
-const EVENTS_PATH = `${BASE_API_URL}/private-purchases/events`;
+const EVENTS_PATH = `${API_BASE_URL}/private-purchases/events`;
+const MAX_RETRY_DELAY_MS = 60000;
 
 const subscribers = new Set();
 let eventSource = null;
 let reconnectTimer = null;
+let reconnectAttempts = 0;
 
 const notifySubscribers = (payload) => {
   if (!payload) return;
@@ -27,15 +28,18 @@ const cleanupEventSource = () => {
 
 const scheduleReconnect = () => {
   if (reconnectTimer) return;
+  const delay = Math.min(5000 * Math.max(1, reconnectAttempts), MAX_RETRY_DELAY_MS);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
+    reconnectAttempts += 1;
     startEventStream();
-  }, 5000);
+  }, delay);
 };
 
 const startEventStream = () => {
   if (eventSource) return;
   if (typeof window === "undefined") return;
+  if (!API_BASE_URL) return;
   const token = getAccessToken();
   if (!token) return;
 
@@ -61,6 +65,10 @@ const startEventStream = () => {
     console.warn("Evento SSE (private purchases) cerrado, reintentando:", error);
     cleanupEventSource();
     scheduleReconnect();
+  });
+
+  eventSource.addEventListener("open", () => {
+    reconnectAttempts = 0;
   });
 };
 

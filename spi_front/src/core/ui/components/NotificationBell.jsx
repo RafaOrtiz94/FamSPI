@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FiBell, FiCheckCircle, FiAlertTriangle, FiInfo, FiZap, FiX } from "react-icons/fi";
 import { useNotifications } from "../NotificationContext";
@@ -26,8 +26,29 @@ export default function NotificationBell() {
     loading,
   } = useNotifications();
   const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
   const navigate = useNavigate();
   const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    const handleOutsideClick = (event) => {
+      const node = containerRef.current;
+      if (!node) return;
+      if (!node.contains(event.target)) {
+        setOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    document.addEventListener("touchstart", handleOutsideClick);
+
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick);
+      document.removeEventListener("touchstart", handleOutsideClick);
+    };
+  }, [open]);
 
   const recent = useMemo(() => {
     const sorted = [...notifications].sort((a, b) => {
@@ -81,7 +102,7 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className={containerClassName}>
+    <div ref={containerRef} className={containerClassName}>
       <button
         onClick={() => setOpen((v) => !v)}
         className="relative flex h-12 w-12 items-center justify-center rounded-full bg-primary shadow-lg shadow-slate-900/20 transition hover:bg-primary-dark focus-visible:ring-2 focus-visible:ring-accent"

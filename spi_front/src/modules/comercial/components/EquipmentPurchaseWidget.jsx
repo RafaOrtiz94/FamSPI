@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   createEquipmentPurchase,
   getEquipmentPurchaseMeta,
@@ -11,6 +12,8 @@ import {
   uploadSignedProforma,
   submitSignedProformaWithInspection,
   startAvailability,
+  coordinateInspectionDate,
+  getEquipmentPurchaseApiError,
 } from "../../../core/api/equipmentPurchasesApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -20,7 +23,7 @@ import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import StatusBadge from "./StatusBadge";
 import EquipmentSelector from "./EquipmentSelector";
 import RequestActions from "./RequestActions";
-import { subscribeToPurchaseUpdates } from "../../../core/services/purchaseEvents";
+import { usePurchaseSSE } from "../../../core/hooks/usePurchaseSSE";
 import {
   STATUS_CONFIG,
   VALIDATION_MESSAGES,
@@ -45,23 +48,62 @@ import { formatDateTimeEC } from "../../../core/utils/dateUtils";
 import {
   FiPackage,
   FiMail,
-  FiFileText,
-  FiCheckCircle,
-  FiClock,
-  FiAlertCircle,
-  FiDownload,
   FiUser,
   FiSearch,
+  FiChevronDown,
+  FiChevronUp,
+  FiList,
 } from "react-icons/fi";
+
+const CHECKLIST_ACTION_LABELS = {
+  start_availability: "Solicitar disponibilidad al proveedor",
+  save_provider_response: "Registrar respuesta del proveedor",
+  request_or_upload_proforma: "Solicitar o subir proforma",
+  reserve_equipment: "Reservar equipos",
+  submit_signed_with_inspection: "Subir proforma firmada y coordinar inspección",
+  upload_contract: "Subir contrato",
+};
+
+const toChecklistActionLabel = (action) =>
+  CHECKLIST_ACTION_LABELS[action] || action || "Sin paso definido";
+
+const normalizeUserTokens = (user) => {
+  if (!user) return [];
+  const rawRoles = user?.roles ?? user?.role ?? [];
+  const rawScopes = user?.scope ?? [];
+  const roleValues = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+  const scopeValues = Array.isArray(rawScopes) ? rawScopes : [rawScopes];
+  return [...roleValues, ...scopeValues]
+    .flatMap((value) => String(value || "").split(/[,\s]+/))
+    .map((value) => value.trim().toLowerCase())
+    .filter(Boolean);
+};
 
 
 
 const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) => {
+  const navigate = useNavigate();
   const { showToast } = useUI();
   const { user } = useAuth();
-  const role = (user?.role || "").toLowerCase();
-  const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].includes(role);
-  const canAccessAttachments = ["acp_comercial", "gerencia_general"].includes(role);
+  const roleTokens = useMemo(() => normalizeUserTokens(user), [user]);
+  const hasRoleToken = React.useCallback(
+    (token) => roleTokens.some((role) => role === token || role.includes(token)),
+    [roleTokens],
+  );
+  const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].some((roleName) =>
+    hasRoleToken(roleName),
+  );
+  const canAccessAttachments = ["acp_comercial", "gerencia_general"].some((roleName) =>
+    hasRoleToken(roleName),
+  );
+  const canCoordinateInspection = [
+    "comercial",
+    "acp_comercial",
+    "jefe_comercial",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+    "tecnico",
+  ].some((roleName) => hasRoleToken(roleName));
   const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
   const [requests, setRequests] = useState([]);
   const [listQuery, setListQuery] = useState("");
@@ -83,7 +125,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [processingAction, setProcessingAction] = useState(null);
   const [processingStep, setProcessingStep] = useState(null);
   const [expandedRequestId, setExpandedRequestId] = useState(null);
-  const refreshTimerRef = React.useRef(null);
+  const [inspectionCoordDrafts, setInspectionCoordDrafts] = useState({});
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -99,7 +141,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       setRequests(listRes || []);
     } catch (error) {
       console.error(error);
-      showToast("No se pudo cargar las solicitudes de compra", "error");
+      const apiError = getEquipmentPurchaseApiError(error, "No se pudo cargar las solicitudes de compra");
+      showToast(apiError.message, "error");
     } finally {
       setLoading(false);
     }
@@ -109,27 +152,26 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     loadAll();
   }, [loadAll]);
 
-  useEffect(() => {
-    const unsubscribe = subscribeToPurchaseUpdates(({ request }) => {
-      if (!request) return;
-      setRequests((prev) => {
-        const list = Array.isArray(prev) ? [...prev] : [];
-        const idx = list.findIndex((item) => item.id === request.id);
-        if (idx >= 0) {
-          list[idx] = request;
-        } else {
-          list.unshift(request);
-        }
-        return list;
-      });
-      if (refreshTimerRef.current) return;
-      refreshTimerRef.current = setTimeout(() => {
-        refreshTimerRef.current = null;
-        loadAll();
-      }, 800);
+  const handlePurchaseEvent = React.useCallback(({ request }) => {
+    if (!request) return;
+    setRequests((prev) => {
+      const list = Array.isArray(prev) ? [...prev] : [];
+      const idx = list.findIndex((item) => item.id === request.id);
+      if (idx >= 0) {
+        list[idx] = request;
+      } else {
+        list.unshift(request);
+      }
+      return list;
     });
-    return unsubscribe;
+    loadAll();
   }, [loadAll]);
+
+  usePurchaseSSE({
+    type: "public",
+    onEvent: handlePurchaseEvent,
+    debounceMs: 800,
+  });
 
   useEffect(() => {
     setPage(1);
@@ -239,7 +281,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       loadAll();
     } catch (error) {
       console.error(error);
-      showToast("No se pudo crear la solicitud", "error");
+      const apiError = getEquipmentPurchaseApiError(error, "No se pudo crear la solicitud");
+      showToast(apiError.message, "error");
     } finally {
       setCreating(false);
     }
@@ -265,6 +308,14 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     }
   };
 
+  const handleApiError = (error, fallbackMessage) => {
+    const apiError = getEquipmentPurchaseApiError(error, fallbackMessage);
+    showToast(apiError.message, "error");
+    if (["STALE_REQUEST_STATE", "INVALID_TRANSITION", "REQUEST_NOT_FOUND"].includes(apiError.code)) {
+      loadAll();
+    }
+  };
+
   const submitResponse = async () => {
     await runWithOverlay(
       "Enviando respuesta al proveedor",
@@ -285,37 +336,37 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             outcome: normalizedOutcome,
             notes: responseDraft.notes,
             items: responseItems,
+            expected_updated_at: requests.find((row) => row.id === responseDraft.id)?.updated_at,
           });
           showToast("Respuesta registrada", "success");
           setResponseDraft({ open: false, id: null, outcome: "new", notes: "", items: [] });
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("No se pudo guardar la respuesta", "error");
-          throw error;
+          handleApiError(error, "No se pudo guardar la respuesta");
         }
       },
     );
   };
 
-  const handleRequestProforma = async (id) => {
+  const handleRequestProforma = async (request) => {
     await runWithOverlay(
       "Solicitando proforma",
       [{ id: "proforma", label: "Solicitando proforma" }],
       async () => {
         try {
-          await requestProforma(id);
+          await requestProforma(request.id, request.updated_at);
           showToast("Proforma solicitada", "success");
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("No se pudo solicitar la proforma", "error");
+          handleApiError(error, "No se pudo solicitar la proforma");
         }
       },
     );
   };
 
-  const handleUpload = async (id, action, file, extra = {}) => {
+  const handleUpload = async (request, action, file, extra = {}) => {
     if (!file) {
       showToast("Selecciona un archivo", "warning");
       return;
@@ -326,32 +377,31 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       [{ id: action, label: `Subiendo ${label}` }],
       async () => {
         try {
-          if (action === "proforma") await uploadProforma(id, file);
-          if (action === "signed") await uploadSignedProforma(id, { file, ...extra });
-          if (action === "contract") await uploadContract(id, file);
+          if (action === "proforma") await uploadProforma(request.id, file, { expected_updated_at: request.updated_at });
+          if (action === "signed") await uploadSignedProforma(request.id, { file, ...extra, expected_updated_at: request.updated_at });
+          if (action === "contract") await uploadContract(request.id, file, { expected_updated_at: request.updated_at });
           showToast("Archivo cargado", "success");
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("No se pudo cargar el archivo", "error");
-          throw error;
+          handleApiError(error, "No se pudo cargar el archivo");
         }
       },
     );
   };
 
-  const handleReserve = async (id) => {
+  const handleReserve = async (request) => {
     await runWithOverlay(
       "Enviando reserva",
       [{ id: "reserve", label: "Enviando reserva" }],
       async () => {
         try {
-          await reserveEquipment(id);
+          await reserveEquipment(request.id, request.updated_at);
           showToast("Reserva enviada y recordatorio agendado", "success");
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("No se pudo enviar la reserva", "error");
+          handleApiError(error, "No se pudo enviar la reserva");
         }
       },
     );
@@ -372,13 +422,17 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       [{ id: "availability", label: "Enviando correo de disponibilidad" }],
       async () => {
         try {
-          await startAvailability(request.id, { provider_email: providerEmail, notes });
+          await startAvailability(request.id, {
+            provider_email: providerEmail,
+            notes,
+            expected_updated_at: request.updated_at,
+          });
           showToast("Correo de disponibilidad enviado", "success");
           setAvailabilityDrafts((prev) => ({ ...prev, [request.id]: {} }));
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("No se pudo enviar el correo de disponibilidad", "error");
+          handleApiError(error, "No se pudo enviar el correo de disponibilidad");
         }
       },
     );
@@ -401,6 +455,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             inspection_min_date: minDate,
             inspection_max_date: maxDate,
             includes_starter_kit: includesKit,
+            expected_updated_at: requests.find((row) => row.id === requestId)?.updated_at,
           });
 
           showToast("Proforma subida e inspección creada exitosamente", "success");
@@ -408,8 +463,40 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
           loadAll();
         } catch (error) {
           console.error(error);
-          showToast("Error al procesar la solicitud", "error");
-          throw error;
+          handleApiError(error, "Error al procesar la solicitud");
+        }
+      },
+    );
+  };
+
+  const handleCoordinateInspection = async (request) => {
+    if (!request?.id) return;
+    const draft = inspectionCoordDrafts[request.id] || {};
+    const selectedDate = draft.inspection_date || "";
+    if (!selectedDate) {
+      showToast("Selecciona la fecha coordinada de inspección", "warning");
+      return;
+    }
+    if (!request.inspection_min_date || !request.inspection_max_date) {
+      showToast("La solicitud no tiene ventana de inspección definida", "warning");
+      return;
+    }
+
+    await runWithOverlay(
+      "Guardando coordinación de inspección",
+      [{ id: "inspection-coordination", label: "Registrando fecha coordinada" }],
+      async () => {
+        try {
+          await coordinateInspectionDate(request.id, {
+            inspection_date: selectedDate,
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Fecha de inspección coordinada correctamente", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo registrar la coordinación");
         }
       },
     );
@@ -428,15 +515,13 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       <div className="space-y-6">
         {showCreation && (
           <Card className="overflow-hidden border border-slate-200/70 shadow-sm">
-            <div className="flex flex-col gap-3 border-b border-slate-200/60 bg-slate-50/80 p-5">
+            <div className="flex flex-col gap-2 border-b border-slate-200/60 bg-slate-50/70 p-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-start gap-3">
-                  <div className="rounded-xl bg-slate-900 p-2.5 text-white shadow-sm">
-                    <FiPackage size={18} />
-                  </div>
+                <div className="flex items-start gap-2">
+                  <FiPackage className="text-slate-600 mt-0.5" size={16} />
                   <div>
-                    <h2 className="text-lg font-semibold text-slate-900">Nueva solicitud de compra</h2>
-                    <p className="text-sm text-slate-500">Cualquier comercial puede registrar y asignar al ACP Comercial</p>
+                    <h2 className="text-base font-semibold text-slate-900">Nueva solicitud de compra</h2>
+                    <p className="text-xs text-slate-500">Registro y asignación a ACP Comercial</p>
                   </div>
                 </div>
                 <Button onClick={loadAll} variant="ghost" className="px-3">
@@ -445,7 +530,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
               </div>
             </div>
 
-            <div className="space-y-5 p-5">
+            <div className="space-y-4 p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Cliente</label>
@@ -523,15 +608,15 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
         )}
 
         <div>
-          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between mb-4">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between mb-3">
             <div>
-              <div className="flex flex-wrap items-center gap-3">
-                <h2 className="text-xl font-bold text-slate-900">Solicitudes en curso</h2>
-                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-600">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-base font-semibold text-slate-900">Solicitudes</h2>
+                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600">
                   {filteredRequests.length} total
                 </span>
               </div>
-              {loading && <span className="block text-sm text-slate-500 animate-pulse">Actualizando...</span>}
+              {loading && <span className="block text-xs text-slate-500 animate-pulse">Actualizando...</span>}
             </div>
             <div className="flex flex-col items-end gap-2 w-full md:w-auto">
               {compactList && (
@@ -586,7 +671,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {visibleRequests.map((req) => {
                 const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
-                const StatusIcon = statusConfig.icon;
                 const providerResponse = req.provider_response || null;
                 const requestedMap = new Map((req.equipment || []).map((item) => [item.id, item]));
                 const availableItems = Array.isArray(providerResponse?.items)
@@ -633,6 +717,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   })
                   : null;
                 const expanded = expandedRequestId === req.id;
+                const inspectionCoordinationDraft = inspectionCoordDrafts[req.id] || {};
                 const toggleExpanded = () => {
                   setExpandedRequestId((prev) => (prev === req.id ? null : req.id));
                 };
@@ -640,67 +725,135 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                 return (
                   <Card
                     key={req.id}
-                    className={`relative h-full flex flex-col rounded-2xl p-4 md:p-5 border border-slate-200/70 ${statusConfig.cardBg} ${statusConfig.cardBorder} shadow-md ${statusConfig.cardShadow} hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 overflow-hidden`}
+                    className={`h-full flex flex-col rounded-xl p-4 border border-slate-200 bg-white shadow-sm ${statusConfig.cardBorder}`}
                   >
-                    {/* LED de Estado - Esquina Superior Derecha */}
-                    <div className="absolute top-4 right-4 flex items-center gap-2">
-                      <div className="relative">
-                        <div className={`w-4 h-4 rounded-full ${statusConfig.ledColor} ${statusConfig.ledGlow} animate-pulse`}></div>
-                        <div className={`absolute inset-0 w-4 h-4 rounded-full ${statusConfig.ledColor} animate-ping opacity-75`}></div>
-                        <div className={`absolute inset-0.5 w-3 h-3 rounded-full bg-white/30 blur-sm`}></div>
-                      </div>
-                    </div>
-
-                    {/* Header */}
-                    <div className="flex items-start justify-between mb-4 pr-8">
-                      <div className="flex-1">
-                        <h3 className="font-bold text-lg text-gray-900">{req.client_name}</h3>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Creado: {formatDateTimeEC(req.created_at)}
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div className="min-w-0">
+                        <h3 className="font-semibold text-base text-slate-900 truncate">{req.client_name}</h3>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {formatDateTimeEC(req.created_at)}
                         </p>
                       </div>
-                    </div>
-
-                    {/* Badge de Estado */}
-                    <div className="mb-3">
                       <StatusBadge status={req.status} />
                     </div>
 
-                    <div className="mb-3 flex items-center justify-between gap-2 text-sm">
-                      <div className="flex items-center gap-2 text-gray-700">
-                        <FiMail className="text-gray-500" size={14} />
-                        <span className="font-medium">{req.provider_email || "Proveedor pendiente"}</span>
+                    <div className="space-y-2 mb-3">
+                      <div className="flex items-center gap-2 text-sm text-slate-700 min-w-0">
+                        <FiMail className="text-slate-400 shrink-0" size={14} />
+                        <span className="truncate">{req.provider_email || "Proveedor pendiente"}</span>
                       </div>
+                      {(req.assigned_to_name || req.assigned_to_email) && (
+                        <div className="flex items-center gap-2 text-sm text-slate-700 min-w-0">
+                          <FiUser className="text-slate-400 shrink-0" size={14} />
+                          <span className="truncate">{req.assigned_to_name || req.assigned_to_email}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {req.extra?.auto_business_case_id && (
+                      <div className="mb-3">
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/dashboard/business-case/workspace/${req.extra.auto_business_case_id}`)}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100 transition-colors"
+                        >
+                          Ir al BC automático #{String(req.extra.auto_business_case_id).slice(0, 8)}
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="mb-3">
                       <button
                         type="button"
                         onClick={toggleExpanded}
-                        className="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-slate-800"
                       >
-                        {expanded ? "Mostrar menos" : "Mostrar más"}
+                        {expanded ? <FiChevronUp size={14} /> : <FiChevronDown size={14} />}
+                        {expanded ? "Ocultar detalle" : "Ver detalle"}
                       </button>
                     </div>
 
-                    {(req.assigned_to_name || req.assigned_to_email) && (
-                      <div className="mb-3 flex items-center gap-2 text-sm text-gray-700">
-                        <FiUser className="text-gray-500" size={14} />
-                        <span className="font-medium">Asignado a: {req.assigned_to_name || req.assigned_to_email}</span>
+                    {(req.status === "pending_contract" || req.inspection_request_id) && (
+                      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Coordinación de inspección
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Ventana acordada:{" "}
+                          <span className="font-medium">
+                            {req.inspection_min_date || "Sin mínimo"} - {req.inspection_max_date || "Sin máximo"}
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Fecha coordinada:{" "}
+                          <span className="font-semibold">
+                            {req.inspection_scheduled_date || "Pendiente"}
+                          </span>
+                        </p>
+                        {req.inspection_coordinated_by_email && (
+                          <p className="text-[11px] text-slate-500">
+                            Coordinado por {req.inspection_coordinated_by_email}
+                          </p>
+                        )}
+                        {canCoordinateInspection && req.status === "pending_contract" && (
+                          <div className="space-y-2">
+                            <input
+                              type="date"
+                              value={inspectionCoordinationDraft.inspection_date ?? req.inspection_scheduled_date ?? ""}
+                              min={req.inspection_min_date || undefined}
+                              max={req.inspection_max_date || undefined}
+                              onChange={(event) =>
+                                setInspectionCoordDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: {
+                                    ...prev[req.id],
+                                    inspection_date: event.target.value,
+                                  },
+                                }))
+                              }
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                            <textarea
+                              rows={2}
+                              value={inspectionCoordinationDraft.notes ?? req.inspection_coordination_notes ?? ""}
+                              onChange={(event) =>
+                                setInspectionCoordDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: {
+                                    ...prev[req.id],
+                                    notes: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Notas de coordinación (opcional)"
+                              className="w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={() => handleCoordinateInspection(req)}
+                              disabled={!req.inspection_min_date || !req.inspection_max_date}
+                            >
+                              Confirmar fecha coordinada
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {expanded && providerResponse && (
-                      <div className="mb-4 rounded-2xl border border-gray-200 bg-white/70 p-4 space-y-4 shadow-sm">
+                      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
                         <div>
-                          <p className="text-[11px] uppercase tracking-wide text-gray-500">Respuesta del proveedor</p>
-                          <p className="text-sm font-semibold text-gray-900">{providerText}</p>
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Respuesta del proveedor</p>
+                          <p className="text-sm font-semibold text-slate-900">{providerText}</p>
                           {formattedResponseDate && (
-                            <p className="text-[10px] text-gray-500">{formattedResponseDate}</p>
+                            <p className="text-[10px] text-slate-500">{formattedResponseDate}</p>
                           )}
                         </div>
                         {providerResponse.notes && (
-                          <p className="text-sm text-gray-700 whitespace-pre-line">{providerResponse.notes}</p>
+                          <p className="text-sm text-slate-700 whitespace-pre-line">{providerResponse.notes}</p>
                         )}
                         <div className="space-y-3">
-                          <p className="text-[10px] uppercase tracking-wide text-gray-500">{equipmentTitle}</p>
+                          <p className="text-[10px] uppercase tracking-wide text-slate-500">{equipmentTitle}</p>
                           <div className="space-y-2">
                             {equipmentList.map((eq, idx) => {
                               const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
@@ -723,8 +876,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                               );
 
                               return (
-                                <div key={`${req.id}-${idx}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
-                                  <p className="font-medium text-gray-900">{eqName}</p>
+                                <div key={`${req.id}-${idx}`} className="rounded-md border border-slate-200 bg-white p-2.5">
+                                  <p className="font-medium text-slate-900 text-sm">{eqName}</p>
                                   <div className="flex flex-wrap gap-2 mt-2">
                                     {requestedType && typeBadge(requestedType, "Solicitado")}
                                     {availableType && typeBadge(availableType, "Disponible")}
@@ -769,22 +922,23 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       request={req}
                       isManager={isManager}
                       canAccessAttachments={canAccessAttachments}
+                      checklistState={req.checklist_state}
                       availabilityDrafts={availabilityDrafts}
                       inspectionDraft={inspectionDraft}
                       onStartAvailability={handleStartAvailability}
-                      onOpenResponse={openResponse}
-                      onRequestProforma={handleRequestProforma}
-                      onReserve={handleReserve}
-                      onOpenInspection={(request) => setInspectionModal({
-                        open: true,
-                        requestId: request.id,
-                        file: null,
-                        minDate: "",
-                        maxDate: "",
-                        includesKit: false
-                      })}
-                      onUploadProforma={(id, action, file) => handleUpload(id, action, file)}
-                      onUploadContract={(id, action, file) => handleUpload(id, action, file)}
+                    onOpenResponse={openResponse}
+                    onRequestProforma={() => handleRequestProforma(req)}
+                    onReserve={() => handleReserve(req)}
+                    onOpenInspection={(request) => setInspectionModal({
+                      open: true,
+                      requestId: request.id,
+                      file: null,
+                      minDate: "",
+                      maxDate: "",
+                      includesKit: false
+                    })}
+                    onUploadProforma={(_id, action, file) => handleUpload(req, action, file)}
+                    onUploadContract={(_id, action, file) => handleUpload(req, action, file)}
                       onUpdateAvailabilityDraft={(requestId, field, value) => {
                         setAvailabilityDrafts((prev) => ({
                           ...prev,
@@ -792,6 +946,52 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                         }));
                       }}
                     />
+
+                    {req.checklist_state?.action && (
+                      <details className="mt-3 rounded-lg border border-slate-200 bg-white">
+                        <summary className="list-none cursor-pointer select-none px-3 py-2 flex items-center justify-between text-xs font-medium text-slate-700">
+                          <span className="inline-flex items-center gap-1.5">
+                            <FiList size={13} />
+                            Checklist de validación
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            {(req.checklist_state.pending || []).length > 0
+                              ? `${(req.checklist_state.pending || []).length} pendiente(s)`
+                              : "completo"}
+                          </span>
+                        </summary>
+                        <div className="px-3 pb-3 border-t border-slate-100">
+                          <p className="mt-2 text-[11px] uppercase tracking-wide text-slate-500">
+                            Paso: {toChecklistActionLabel(req.checklist_state.action)}
+                          </p>
+                          <div className="mt-2 space-y-1.5">
+                            {(req.checklist_state.items || [])
+                              .filter((item) => (req.checklist_state.requirements || []).includes(item.key))
+                              .map((item) => {
+                                return (
+                                  <div key={`${req.id}-${item.key}`} className="flex items-center gap-2 text-sm">
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(item.checked)}
+                                      disabled
+                                      readOnly
+                                    />
+                                    <span className={item.checked ? "text-emerald-700 font-medium" : "text-slate-700"}>
+                                      {item.label}
+                                    </span>
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">auto</span>
+                                  </div>
+                                );
+                              })}
+                          </div>
+                          {Array.isArray(req.checklist_state.pending) && req.checklist_state.pending.length > 0 && (
+                            <p className="mt-2 text-xs text-amber-700">
+                              El checklist se actualiza automáticamente según el avance del proceso.
+                            </p>
+                          )}
+                        </div>
+                      </details>
+                    )}
                   </Card>
                 );
               })}

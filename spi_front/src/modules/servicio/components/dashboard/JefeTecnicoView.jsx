@@ -4,6 +4,7 @@ import {
     FiUsers,
     FiAlertTriangle,
     FiCheckSquare,
+    FiShoppingCart,
 } from "react-icons/fi";
 import ExecutiveStatCard from "../../../../core/ui/components/ExecutiveStatCard";
 import Card from "../../../../core/ui/components/Card";
@@ -27,7 +28,7 @@ const availabilityLabel = (status) => {
     return "No disponible";
 };
 
-const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], onRefresh }) => {
+const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], onRefresh, onOpenPublicPurchases }) => {
     return (
         <>
             <DashboardHeader
@@ -81,6 +82,24 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
                     to="to-green-500"
                 />
             </div>
+
+            <Card className="p-5 mb-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h3 className="text-base font-semibold text-slate-900">Coordinación de inspecciones (Compras Públicas)</h3>
+                        <p className="text-sm text-slate-600">
+                            Gestiona fechas coordinadas con Comercial directamente desde el Workspace de Compras.
+                        </p>
+                    </div>
+                    <button
+                        onClick={onOpenPublicPurchases}
+                        className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                    >
+                        <FiShoppingCart size={16} />
+                        Ir a Compras Públicas
+                    </button>
+                </div>
+            </Card>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 space-y-6">
