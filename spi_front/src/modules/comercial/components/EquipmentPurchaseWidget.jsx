@@ -144,6 +144,17 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [deliveryDrafts, setDeliveryDrafts] = useState({});
   const [savingProviderContact, setSavingProviderContact] = useState(false);
   const [technicalScheduleDays, setTechnicalScheduleDays] = useState([]);
+  const normalizedFormProviderEmail = useMemo(
+    () => String(form.providerEmail || "").trim().toLowerCase(),
+    [form.providerEmail],
+  );
+  const formProviderAlreadySaved = useMemo(
+    () =>
+      (meta.providerContacts || []).some(
+        (item) => String(item?.email || "").trim().toLowerCase() === normalizedFormProviderEmail,
+      ),
+    [meta.providerContacts, normalizedFormProviderEmail],
+  );
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -767,6 +778,27 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                 </div>
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Proveedor (correo)</label>
+                  {isManager && (meta.providerContacts || []).length > 0 && (
+                    <select
+                      className="w-full mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
+                      value=""
+                      onChange={(e) => {
+                        const selected = e.target.value;
+                        if (!selected) return;
+                        setForm((prev) => ({ ...prev, providerEmail: selected }));
+                        e.target.value = "";
+                      }}
+                    >
+                      <option value="">Selecciona proveedor guardado...</option>
+                      {(meta.providerContacts || []).map((item) => (
+                        <option key={`${item.id || item.email}`} value={item.email}>
+                          {item.display_name
+                            ? `${item.display_name} (${item.email})`
+                            : item.email}
+                        </option>
+                      ))}
+                    </select>
+                  )}
                   <input
                     type="email"
                     className="w-full mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
@@ -775,6 +807,23 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                     placeholder={isManager ? "correo@proveedor.com" : "Solo ACP Comercial"}
                     disabled={!isManager}
                   />
+                  {isManager && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => handleRegisterProviderContact({ email: form.providerEmail })}
+                        disabled={!normalizedFormProviderEmail || formProviderAlreadySaved || savingProviderContact}
+                      >
+                        Guardar proveedor
+                      </Button>
+                      {formProviderAlreadySaved ? (
+                        <span className="text-[11px] text-emerald-700">Proveedor ya guardado</span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500">Se guarda para futuras solicitudes.</span>
+                      )}
+                    </div>
+                  )}
                   {!isManager && (
                     <p className="text-xs text-slate-500 mt-2">El ACP Comercial completara el proveedor y enviara el correo.</p>
                   )}

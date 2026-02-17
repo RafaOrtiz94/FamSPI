@@ -759,6 +759,38 @@ async function ensureTables() {
     );
   `);
   await db.query(
+    `UPDATE equipment_purchase_provider_contacts
+        SET email = lower(trim(email)),
+            updated_at = now()
+      WHERE email IS NOT NULL
+        AND email <> lower(trim(email))`,
+  );
+  await db.query(
+    `DELETE FROM equipment_purchase_provider_contacts a
+      USING equipment_purchase_provider_contacts b
+      WHERE a.id < b.id
+        AND lower(trim(a.email)) = lower(trim(b.email))`,
+  );
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_equipment_purchase_provider_contacts_email_norm
+      ON equipment_purchase_provider_contacts ((lower(trim(email))))`,
+  );
+  await db.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'chk_equipment_purchase_provider_contacts_email_norm'
+      ) THEN
+        ALTER TABLE equipment_purchase_provider_contacts
+          ADD CONSTRAINT chk_equipment_purchase_provider_contacts_email_norm
+          CHECK (email = lower(trim(email)));
+      END IF;
+    END
+    $$;
+  `);
+  await db.query(
     `CREATE INDEX IF NOT EXISTS idx_equipment_purchase_provider_contacts_last_used
       ON equipment_purchase_provider_contacts (last_used_at DESC, updated_at DESC)`,
   );
