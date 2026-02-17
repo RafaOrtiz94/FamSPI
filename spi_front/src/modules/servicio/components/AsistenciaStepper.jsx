@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useForm } from "react-hook-form";
+import { useSearchParams } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload, FiPlus, FiTrash2 } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -29,6 +30,12 @@ const STEPS = [
   },
 ];
 const AsistenciaStepper = () => {
+  const [searchParams] = useSearchParams();
+  const workflowContext = {
+    source_type: searchParams.get("source_type") || undefined,
+    source_id: searchParams.get("source_id") || undefined,
+    request_id: searchParams.get("request_id") || undefined,
+  };
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -170,7 +177,7 @@ const AsistenciaStepper = () => {
         cliente: attendanceData.ORDCliente,
         attendeesCount: attendees.filter(a => a.nombre.trim()).length
       });
-      const result = await generateAttendanceListPDF(attendanceData);
+      const result = await generateAttendanceListPDF(attendanceData, workflowContext);
       console.log("API Response:", result);
       if (result.ok) {
         setPendingResult(result);

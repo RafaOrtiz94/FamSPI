@@ -2,7 +2,7 @@
  * Private Purchase States Constants
  *
  * Canonical states for private purchase workflow based on requirement specification.
- * Supports both "Compra Directa" and "Comodato" flows.
+ * Supports "Venta Directa", "Alquiler" and "Comodato" flows.
  */
 
 const PRIVATE_PURCHASE_STATES = {
@@ -237,6 +237,7 @@ const PRIVATE_PURCHASE_TRANSITIONS = {
 
     [PRIVATE_PURCHASE_STATES.BUSINESS_CASE_REJECTED]: [
         PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS,
+        PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
         PRIVATE_PURCHASE_STATES.REJECTED
     ],
 
@@ -247,6 +248,7 @@ const PRIVATE_PURCHASE_TRANSITIONS = {
 
 const FLOW_TYPES = {
     DIRECT_PURCHASE: 'direct_purchase',
+    RENTAL: 'rental',
     COMODATO: 'comodato'
 };
 

@@ -86,6 +86,7 @@ const DOC_LABELS = {
 const OFFER_KIND_LABELS = {
   venta: "Venta directa",
   alquiler: "Alquiler",
+  prestamo: "Alquiler",
   comodato: "Comodato",
   direct_purchase: "Venta directa",
   rental: "Alquiler",

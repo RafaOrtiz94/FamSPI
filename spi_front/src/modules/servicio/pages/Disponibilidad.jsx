@@ -1,6 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiRefreshCw, FiToggleRight, FiToggleLeft } from "react-icons/fi";
-import { getTeamAvailability, updateAvailabilityStatus } from "../../../core/api/availabilityApi";
+import {
+  getTeamAvailability,
+  updateAvailabilityStatus,
+  getTechnicalActivities,
+  createTechnicalActivity,
+} from "../../../core/api/availabilityApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { useAuth } from "../../../core/auth/AuthContext";
@@ -22,20 +27,38 @@ const statusLabel = (status) => {
 const DisponibilidadTecnicos = () => {
   const { user } = useAuth();
   const [availability, setAvailability] = useState([]);
+  const [activities, setActivities] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [savingActivity, setSavingActivity] = useState(false);
+  const [activityForm, setActivityForm] = useState({
+    activity_date: "",
+    title: "",
+    notes: "",
+  });
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await getTeamAvailability();
-      if (Array.isArray(data?.rows)) return setAvailability(data.rows);
-      if (Array.isArray(data?.result?.rows)) return setAvailability(data.result.rows);
-      if (Array.isArray(data)) return setAvailability(data);
-      setAvailability([]);
+      const today = new Date();
+      const from = today.toISOString().slice(0, 10);
+      const toDate = new Date(today);
+      toDate.setDate(toDate.getDate() + 60);
+      const to = toDate.toISOString().slice(0, 10);
+
+      const [data, activityData] = await Promise.all([
+        getTeamAvailability(),
+        getTechnicalActivities({ from, to }),
+      ]);
+      if (Array.isArray(data?.rows)) setAvailability(data.rows);
+      else if (Array.isArray(data?.result?.rows)) setAvailability(data.result.rows);
+      else if (Array.isArray(data)) setAvailability(data);
+      else setAvailability([]);
+      setActivities(Array.isArray(activityData) ? activityData : []);
     } catch (err) {
       console.warn("No se pudo cargar disponibilidad", err);
       setAvailability([]);
+      setActivities([]);
     } finally {
       setLoading(false);
     }
@@ -69,6 +92,24 @@ const DisponibilidadTecnicos = () => {
       console.warn("No se pudo actualizar tu disponibilidad", err);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCreateActivity = async () => {
+    if (!activityForm.activity_date || !activityForm.title.trim()) return;
+    try {
+      setSavingActivity(true);
+      await createTechnicalActivity({
+        activity_date: activityForm.activity_date,
+        title: activityForm.title.trim(),
+        notes: activityForm.notes.trim(),
+      });
+      setActivityForm({ activity_date: "", title: "", notes: "" });
+      await refresh();
+    } catch (err) {
+      console.warn("No se pudo crear actividad técnica", err);
+    } finally {
+      setSavingActivity(false);
     }
   };
 
@@ -127,6 +168,64 @@ const DisponibilidadTecnicos = () => {
         ) : (
           <p className="text-sm text-gray-500">Sin técnicos registrados.</p>
         )}
+      </Card>
+
+      <Card className="p-5 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900">Cronograma de actividades técnicas</h2>
+          <p className="text-sm text-gray-500">
+            Registra actividades para bloquear fechas en coordinación de inspecciones.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <input
+            type="date"
+            className="border rounded px-3 py-2 text-sm"
+            value={activityForm.activity_date}
+            onChange={(e) => setActivityForm((prev) => ({ ...prev, activity_date: e.target.value }))}
+          />
+          <input
+            type="text"
+            className="border rounded px-3 py-2 text-sm"
+            placeholder="Título de actividad"
+            value={activityForm.title}
+            onChange={(e) => setActivityForm((prev) => ({ ...prev, title: e.target.value }))}
+          />
+          <input
+            type="text"
+            className="border rounded px-3 py-2 text-sm"
+            placeholder="Notas (opcional)"
+            value={activityForm.notes}
+            onChange={(e) => setActivityForm((prev) => ({ ...prev, notes: e.target.value }))}
+          />
+        </div>
+        <div>
+          <Button onClick={handleCreateActivity} disabled={savingActivity || !activityForm.activity_date || !activityForm.title.trim()}>
+            {savingActivity ? "Guardando..." : "Agregar actividad"}
+          </Button>
+        </div>
+
+        <div className="space-y-2">
+          {activities.length ? (
+            activities.map((activity) => (
+              <div
+                key={activity.id}
+                className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm flex flex-col md:flex-row md:items-center md:justify-between gap-1"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">{activity.title}</p>
+                  <p className="text-xs text-gray-500">
+                    {activity.activity_date} · {activity.user_name || "Equipo técnico"}
+                  </p>
+                </div>
+                <p className="text-xs text-gray-600">{activity.notes || "Sin notas"}</p>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm text-gray-500">No hay actividades registradas en los próximos 60 días.</p>
+          )}
+        </div>
       </Card>
     </div>
   );

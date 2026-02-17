@@ -177,6 +177,11 @@ const tiWorkspaceLink = {
 
 const servicioLinks = [
   {
+    name: "Workspace Procedimiento",
+    icon: FiShoppingCart,
+    path: "/dashboard/servicio-tecnico/workspace-procedimiento",
+  },
+  {
     name: "Mantenimientos",
     icon: FiTool,
     path: "/dashboard/servicio-tecnico/mantenimientos",
@@ -211,12 +216,33 @@ const servicioLinks = [
     icon: FiFileText,
     path: "/dashboard/servicio-tecnico/aplicaciones",
   },
+  {
+    name: "Desinfección",
+    icon: FiShield,
+    path: "/dashboard/servicio-tecnico/desinfeccion",
+  },
+  {
+    name: "Asistencia",
+    icon: FiCheckCircle,
+    path: "/dashboard/servicio-tecnico/asistencia",
+  },
+  {
+    name: "Verificación",
+    icon: FiClipboard,
+    path: "/dashboard/servicio-tecnico/verificacion",
+  },
 ];
 
 const deliveryActsLink = {
   name: "Compras privadas",
   icon: FiFileText,
   path: "/dashboard/servicio-tecnico/compras-privadas",
+};
+
+const privateDeliveriesLink = {
+  name: "Entregas privadas",
+  icon: FiTruck,
+  path: "/dashboard/servicio-tecnico/entregas-privadas",
 };
 
 // Sistema de prioridades por rol
@@ -277,25 +303,14 @@ const getPriorityGroups = (scope, role, auditActive) => {
   // ðŸ”§ SERVICIO TÃ‰CNICO - Operaciones tÃ©cnicas
   else if (["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].includes(scope)) {
     groups.critical.push(
-      servicioLinks.find(l => l.name === "Mantenimientos"),
-      servicioLinks.find(l => l.name === "Solicitudes"),
-      servicioLinks.find(l => l.name === "Equipos")
+      servicioLinks.find(l => l.name === "Workspace Procedimiento"),
+      purchasesWorkspaceLink,
     );
     groups.primary.push(
-      servicioLinks.find(l => l.name === "Disponibilidad"),
-      servicioLinks.find(l => l.name === "Aprobaciones")
+      privateDeliveriesLink,
+      deliveryActsLink,
     );
-    const hasTechRole = ["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].some((techRole) =>
-      role.includes(techRole)
-    );
-    if (["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"].includes(scope) || hasTechRole) {
-      groups.primary.push(deliveryActsLink);
-    }
-    groups.secondary.push(
-      servicioLinks.find(l => l.name === "Capacitaciones"),
-      servicioLinks.find(l => l.name === "Aplicaciones"),
-      viaticosLink
-    );
+    groups.secondary.push(viaticosLink);
   }
 
   // TALENTO HUMANO - Gestión de personal
@@ -540,8 +555,5 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
-
-
-
 
 

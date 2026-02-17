@@ -32,6 +32,8 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
   SUBMIT_CONTRACT: '/private-purchases/:id/submit-contract',
   CONTRACT_CLIENT_SIGNED: '/private-purchases/:id/contract/client-signed',
   INSPECTION_REQUEST: '/private-purchases/:id/inspection-request',
+  COORDINATE_INSPECTION_DATE: '/private-purchases/:id/coordinate-inspection-date',
+  REVIEW_INSPECTION_DATE: '/private-purchases/:id/review-inspection-date',
   DELIVERY_GUIDES: '/private-purchases/:id/delivery-guides',
   REQUEST_DELIVERY_DATES: '/private-purchases/:id/request-delivery-dates',
   SUBMIT_DELIVERY_DATES: '/private-purchases/:id/submit-delivery-dates',
@@ -80,6 +82,7 @@ export const PRIVATE_PURCHASE_STATES = {
 
 export const FLOW_TYPES = {
   DIRECT_PURCHASE: 'direct_purchase',
+  RENTAL: 'rental',
   COMODATO: 'comodato'
 };
 
@@ -90,7 +93,7 @@ export const FLOW_TYPES = {
  * @param {Object} data - Datos de la solicitud
  * @param {Object} data.client_data - Datos del cliente
  * @param {Array} data.equipment - Lista de equipos
- * @param {string} data.offer_kind - Tipo de oferta (venta, prestamo, comodato)
+ * @param {string} data.offer_kind - Tipo de oferta (venta, alquiler, comodato)
  * @param {string} data.notes - Notas adicionales
  * @returns {Promise<Object>} Respuesta del servidor
  */
@@ -927,6 +930,52 @@ export const savePrivatePurchaseInspectionRequest = async (id, payload = {}) => 
   }
 };
 
+export const coordinatePrivatePurchaseInspectionDate = async (
+  id,
+  { inspection_date, notes = '' } = {},
+) => {
+  try {
+    const response = await api.patch(
+      PRIVATE_PURCHASE_ENDPOINTS.COORDINATE_INSPECTION_DATE.replace(':id', id),
+      { inspection_date, notes },
+    );
+    if (!response.data?.ok) {
+      throw new Error(response.data?.message || 'Error coordinando inspección');
+    }
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) {
+      error.message = apiMessage;
+    }
+    console.error(`[PrivatePurchasesAPI] Error coordinando inspección ${id}:`, error);
+    throw error;
+  }
+};
+
+export const reviewPrivatePurchaseInspectionDate = async (
+  id,
+  { decision, review_notes = '' } = {},
+) => {
+  try {
+    const response = await api.patch(
+      PRIVATE_PURCHASE_ENDPOINTS.REVIEW_INSPECTION_DATE.replace(':id', id),
+      { decision, review_notes },
+    );
+    if (!response.data?.ok) {
+      throw new Error(response.data?.message || 'Error revisando inspección');
+    }
+    return response.data.data;
+  } catch (error) {
+    const apiMessage = error.response?.data?.error || error.response?.data?.message;
+    if (apiMessage) {
+      error.message = apiMessage;
+    }
+    console.error(`[PrivatePurchasesAPI] Error revisando inspección ${id}:`, error);
+    throw error;
+  }
+};
+
 /**
  * Subir guias de despacho (operaciones)
  * @param {string} id - ID de la solicitud
@@ -1200,6 +1249,8 @@ export default {
   uploadPrivatePurchaseContract,
   uploadPrivatePurchaseClientSignedContract,
   savePrivatePurchaseInspectionRequest,
+  coordinatePrivatePurchaseInspectionDate,
+  reviewPrivatePurchaseInspectionDate,
   uploadPrivatePurchaseDeliveryGuides,
   registerPrivateClient,
   requestClientRegistration,

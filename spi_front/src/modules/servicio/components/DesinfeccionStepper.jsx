@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
+import { useSearchParams } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiDownload, FiUpload } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -58,6 +59,7 @@ const STEPS = [
 ];
 
 const DesinfeccionStepper = () => {
+  const [searchParams] = useSearchParams();
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -83,6 +85,11 @@ const DesinfeccionStepper = () => {
   });
 
   const fileInputRef = useRef(null);
+  const workflowContext = {
+    source_type: searchParams.get("source_type") || undefined,
+    source_id: searchParams.get("source_id") || undefined,
+    request_id: searchParams.get("request_id") || undefined,
+  };
 
   const nextStep = () => {
     if (currentStep < STEPS.length - 1) {
@@ -236,7 +243,7 @@ const DesinfeccionStepper = () => {
         attachmentCount: pdfData.adjunto_evidencia?.length || 0
       });
 
-      const result = await generateDisinfectionPDF(pdfData);
+      const result = await generateDisinfectionPDF(pdfData, workflowContext);
 
       console.log("PDF Generation API Response:", result);
 

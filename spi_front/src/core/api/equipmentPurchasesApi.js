@@ -12,6 +12,12 @@ const EQUIPMENT_PURCHASE_ERROR_MESSAGES = {
   INSPECTION_WINDOW_REQUIRED: "Debes definir la ventana de inspección antes de continuar.",
   INSPECTION_DATE_REQUIRED: "Debes seleccionar una fecha de inspección.",
   INSPECTION_DATE_OUT_OF_WINDOW: "La fecha de inspección debe estar dentro de la ventana permitida.",
+  INSPECTION_REQUEST_REQUIRED: "No existe solicitud de inspección técnica asociada para continuar.",
+  FORBIDDEN_COORDINATION: "Solo el equipo comercial puede coordinar la fecha de inspección.",
+  TECHNICAL_SCHEDULE_FULL: "El cronograma técnico está lleno para esa fecha. Selecciona otro día.",
+  TECHNICAL_SCHEDULE_CONFLICT: "La fecha seleccionada ya tiene actividades técnicas programadas. Elige otra fecha.",
+  DELIVERY_DATES_REQUIRED: "Debes definir fecha de inicio y fin de entrega.",
+  DELIVERY_DATES_INVALID_RANGE: "La fecha de fin debe ser igual o posterior a la de inicio.",
   FORBIDDEN_ROLE_ACTION: "Tu rol no tiene permisos para ejecutar esta acción.",
 };
 
@@ -30,6 +36,21 @@ export const getEquipmentPurchaseApiError = (error, fallback = "No se pudo compl
 export const getEquipmentPurchaseMeta = async () => {
   const { data } = await api.get("/equipment-purchases/meta");
   return data.data || {};
+};
+
+export const listEquipmentProviderContacts = async ({ q = "", limit = 50 } = {}) => {
+  const { data } = await api.get("/equipment-purchases/provider-contacts", {
+    params: { q, limit },
+  });
+  return data.data || [];
+};
+
+export const saveEquipmentProviderContact = async ({ email, display_name } = {}) => {
+  const { data } = await api.post("/equipment-purchases/provider-contacts", {
+    email,
+    display_name,
+  });
+  return data.data;
 };
 
 export const listEquipmentPurchases = async () => {
@@ -114,6 +135,51 @@ export const uploadContract = async (id, file, { expected_updated_at } = {}) => 
   return data.data;
 };
 
+export const requestDeliveryDates = async (id, { notes, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/request-delivery-dates`, {
+    notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const submitDeliveryDates = async (
+  id,
+  { delivery_start_at, delivery_end_at, notes, expected_updated_at },
+) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/submit-delivery-dates`, {
+    delivery_start_at,
+    delivery_end_at,
+    notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const markEquipmentArrived = async (id, { notes, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/mark-equipment-arrived`, {
+    notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const markDispatchReady = async (id, { notes, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/mark-dispatch-ready`, {
+    notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const completeDelivery = async (id, { notes, expected_updated_at } = {}) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/complete-delivery`, {
+    notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
 export const renewReservation = async (id, expected_updated_at) => {
   const { data } = await api.post(`/equipment-purchases/${id}/renew-reservation`, {
     expected_updated_at,
@@ -147,6 +213,19 @@ export const submitSignedProformaWithInspection = async (
   return data.data;
 };
 
+export const requestPublicPurchaseInspection = async (
+  id,
+  { inspection_min_date, inspection_max_date, includes_starter_kit, expected_updated_at },
+) => {
+  const { data } = await api.post(`/equipment-purchases/${id}/request-inspection`, {
+    inspection_min_date,
+    inspection_max_date,
+    includes_starter_kit,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
 export const coordinateInspectionDate = async (id, { inspection_date, notes, expected_updated_at }) => {
   const { data } = await api.patch(`/equipment-purchases/${id}/coordinate-inspection-date`, {
     inspection_date,
@@ -155,7 +234,23 @@ export const coordinateInspectionDate = async (id, { inspection_date, notes, exp
   });
   return data.data;
 };
+
+export const reviewInspectionDate = async (id, { decision, review_notes, expected_updated_at }) => {
+  const { data } = await api.patch(`/equipment-purchases/${id}/review-inspection-date`, {
+    decision,
+    review_notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
 export const getEquipmentPurchaseById = async (id) => {
   const { data } = await api.get(`/equipment-purchases/${id}`);
   return data.data;
+};
+
+export const getPublicPurchaseTechnicalSchedule = async ({ from, to }) => {
+  const { data } = await api.get("/equipment-purchases/technical-schedule", {
+    params: { from, to },
+  });
+  return data.data || { days: [] };
 };

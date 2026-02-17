@@ -79,6 +79,61 @@ export const STATUS_CONFIG = {
         badgeBg: "bg-orange-100",
         badgeText: "text-orange-800"
     },
+    contract_available: {
+        label: "Contrato disponible",
+        iconName: "FiCheckCircle",
+        ledColor: "bg-emerald-500",
+        ledGlow: "shadow-lg shadow-emerald-500/50",
+        cardBg: "bg-gradient-to-br from-white via-emerald-50 to-white",
+        cardBorder: "border-l-4 border-emerald-400",
+        cardShadow: "shadow-emerald-200/60",
+        badgeBg: "bg-emerald-100",
+        badgeText: "text-emerald-800"
+    },
+    delivery_dates_requested: {
+        label: "Pendiente fechas de entrega",
+        iconName: "FiClock",
+        ledColor: "bg-cyan-500",
+        ledGlow: "shadow-lg shadow-cyan-500/50",
+        cardBg: "bg-gradient-to-br from-white via-cyan-50 to-white",
+        cardBorder: "border-l-4 border-cyan-400",
+        cardShadow: "shadow-cyan-200/60",
+        badgeBg: "bg-cyan-100",
+        badgeText: "text-cyan-800"
+    },
+    delivery_dates_submitted: {
+        label: "Fechas de entrega registradas",
+        iconName: "FiCalendar",
+        ledColor: "bg-blue-500",
+        ledGlow: "shadow-lg shadow-blue-500/50",
+        cardBg: "bg-gradient-to-br from-white via-blue-50 to-white",
+        cardBorder: "border-l-4 border-blue-400",
+        cardShadow: "shadow-blue-200/60",
+        badgeBg: "bg-blue-100",
+        badgeText: "text-blue-800"
+    },
+    waiting_dispatch: {
+        label: "Esperando despacho",
+        iconName: "FiPackage",
+        ledColor: "bg-indigo-500",
+        ledGlow: "shadow-lg shadow-indigo-500/50",
+        cardBg: "bg-gradient-to-br from-white via-indigo-50 to-white",
+        cardBorder: "border-l-4 border-indigo-400",
+        cardShadow: "shadow-indigo-200/60",
+        badgeBg: "bg-indigo-100",
+        badgeText: "text-indigo-800"
+    },
+    dispatch_ready: {
+        label: "Despacho listo",
+        iconName: "FiTruck",
+        ledColor: "bg-purple-500",
+        ledGlow: "shadow-lg shadow-purple-500/50",
+        cardBg: "bg-gradient-to-br from-white via-purple-50 to-white",
+        cardBorder: "border-l-4 border-purple-400",
+        cardShadow: "shadow-purple-200/60",
+        badgeBg: "bg-purple-100",
+        badgeText: "text-purple-800"
+    },
     completed: {
         label: "Completado",
         iconName: "FiCheckCircle",
@@ -158,6 +213,11 @@ export const SUCCESS_MESSAGES = {
     reservationSent: "Reserva enviada y recordatorio agendado",
     availabilitySent: "Correo de disponibilidad enviado",
     inspectionCreated: "Proforma subida e inspección creada exitosamente"
+    ,deliveryDatesRequested: "Solicitud de fechas de entrega enviada"
+    ,deliveryDatesSubmitted: "Fechas de entrega registradas"
+    ,equipmentArrived: "Equipo marcado como arribado"
+    ,dispatchReady: "Despacho marcado como listo"
+    ,deliveryCompleted: "Entrega completada"
 };
 
 // Empty state messages

@@ -1,5 +1,6 @@
 import React, { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
+import { useSearchParams } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiDownload, FiUpload } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
@@ -31,6 +32,12 @@ const STEPS = [
 ];
 
 const EntrenamientoStepper = () => {
+  const [searchParams] = useSearchParams();
+  const workflowContext = {
+    source_type: searchParams.get("source_type") || undefined,
+    source_id: searchParams.get("source_id") || undefined,
+    request_id: searchParams.get("request_id") || undefined,
+  };
   const [currentStep, setCurrentStep] = useState(0);
   const [completedSteps, setCompletedSteps] = useState(new Set());
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -154,7 +161,7 @@ const EntrenamientoStepper = () => {
         cliente: pdfData.ORDCliente
       });
 
-      const result = await generateTrainingCoordinationPDF(pdfData);
+      const result = await generateTrainingCoordinationPDF(pdfData, workflowContext);
 
       console.log("API Response:", result);
 

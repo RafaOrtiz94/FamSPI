@@ -465,3 +465,8 @@ export const unlockSection = async (businessCaseId, section) => {
   const { data } = await api.post(`/business-case/${businessCaseId}/sections/${section}/unlock`);
   return data.data || data;
 };
+
+export const submitBusinessCaseFeasibilityDecision = async (businessCaseId, payload) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/feasibility-decision`, payload);
+  return data.data || data;
+};

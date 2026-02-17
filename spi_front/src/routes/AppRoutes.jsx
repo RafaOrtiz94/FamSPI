@@ -70,6 +70,7 @@ const ServicioAplicaciones = lazy(() => import("../modules/servicio/pages/Aplica
 const ServicioDesinfeccion = lazy(() => import("../modules/servicio/pages/Desinfeccion"));
 const ServicioAsistencia = lazy(() => import("../modules/servicio/pages/Asistencia"));
 const ServicioVerificacionEquipos = lazy(() => import("../modules/servicio/pages/VerificacionEquipos"));
+const ServicioTechnicalProcedureWorkspace = lazy(() => import("../modules/servicio/pages/TechnicalProcedureWorkspace"));
 const ServicioPrivatePurchaseDeliveries = lazy(() => import("../modules/servicio/pages/PrivatePurchaseDeliveries"));
 const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/TecnicoPrivatePurchases"));
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
@@ -212,6 +213,11 @@ const AppRoutes = () => {
           <Route path="/dashboard/servicio-tecnico/desinfeccion" element={<ServicioDesinfeccion />} />
           <Route path="/dashboard/servicio-tecnico/asistencia" element={<ServicioAsistencia />} />
           <Route path="/dashboard/servicio-tecnico/verificacion" element={<ServicioVerificacionEquipos />} />
+          <Route
+            element={<ProtectedRoute allowedRoles={["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
+          >
+            <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<ServicioTechnicalProcedureWorkspace />} />
+          </Route>
           <Route
             element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
           >

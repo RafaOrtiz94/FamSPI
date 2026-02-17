@@ -359,10 +359,43 @@ exports.uploadDeliveryGuides = async (req, res, next) => {
  */
 exports.saveInspectionRequest = async (req, res, next) => {
   try {
-    const { request_id, acta_document_id } = req.body || {};
+    const { request_id, acta_document_id, inspection_min_date, inspection_max_date } = req.body || {};
     const result = await service.saveInspectionRequest(
       req.params.id,
-      { requestId: request_id, actaDocumentId: acta_document_id },
+      {
+        requestId: request_id,
+        actaDocumentId: acta_document_id,
+        inspection_min_date,
+        inspection_max_date,
+      },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.coordinateInspectionDate = async (req, res, next) => {
+  try {
+    const { inspection_date, notes } = req.body || {};
+    const result = await service.coordinateInspectionDate(
+      req.params.id,
+      { inspection_date, notes },
+      req.user
+    );
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.reviewInspectionDate = async (req, res, next) => {
+  try {
+    const { decision, review_notes } = req.body || {};
+    const result = await service.reviewInspectionDate(
+      req.params.id,
+      { decision, review_notes },
       req.user
     );
     res.json({ ok: true, data: result });
@@ -816,6 +849,21 @@ exports.getTimeline = async (req, res, next) => {
         actorRole: 'asesor_comercial',
         actorUserId: purchaseData.created_by,
         metadata: { docType: 'INSPECTION_ACT', fileId: purchaseData.inspection_acta_document_id, reason: 'Inspeccion de ambiente solicitada' }
+      });
+    }
+
+    if (purchaseData.inspection_coordinated_at) {
+      businessEvents.push({
+        type: 'INSPECTION_COORDINATED',
+        eventType: 'INSPECTION_COORDINATED',
+        timestamp: purchaseData.inspection_coordinated_at,
+        actorName: purchaseData.inspection_coordinated_by_email || 'Comercial',
+        actorRole: 'coordinacion_inspeccion',
+        actorUserId: purchaseData.inspection_coordinated_by || null,
+        metadata: {
+          inspection_date: purchaseData.inspection_scheduled_date || null,
+          reason: 'Fecha de inspección coordinada',
+        },
       });
     }
 

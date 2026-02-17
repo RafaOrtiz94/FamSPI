@@ -8,11 +8,19 @@ import {
   reserveEquipment,
   saveProviderResponse,
   uploadContract,
+  requestDeliveryDates,
+  submitDeliveryDates,
+  markEquipmentArrived,
+  markDispatchReady,
+  completeDelivery,
   uploadProforma,
   uploadSignedProforma,
-  submitSignedProformaWithInspection,
+  requestPublicPurchaseInspection,
   startAvailability,
   coordinateInspectionDate,
+  reviewInspectionDate,
+  saveEquipmentProviderContact,
+  getPublicPurchaseTechnicalSchedule,
   getEquipmentPurchaseApiError,
 } from "../../../core/api/equipmentPurchasesApi";
 import Card from "../../../core/ui/components/Card";
@@ -60,8 +68,14 @@ const CHECKLIST_ACTION_LABELS = {
   save_provider_response: "Registrar respuesta del proveedor",
   request_or_upload_proforma: "Solicitar o subir proforma",
   reserve_equipment: "Reservar equipos",
-  submit_signed_with_inspection: "Subir proforma firmada y coordinar inspección",
+  submit_signed_with_inspection: "Subir proforma firmada",
+  request_inspection: "Solicitar inspección de ambiente",
   upload_contract: "Subir contrato",
+  request_delivery_dates: "Solicitar fechas de entrega",
+  submit_delivery_dates: "Registrar fechas de entrega",
+  mark_equipment_arrived: "Marcar arribo de equipo",
+  mark_dispatch_ready: "Marcar despacho listo",
+  complete_delivery: "Completar entrega",
 };
 
 const toChecklistActionLabel = (action) =>
@@ -96,15 +110,17 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const canAccessAttachments = ["acp_comercial", "gerencia_general"].some((roleName) =>
     hasRoleToken(roleName),
   );
+  const canUploadSignedProforma = hasRoleToken("acp_comercial");
+  const canRequestInspection = hasRoleToken("acp_comercial");
   const canCoordinateInspection = [
-    "comercial",
-    "acp_comercial",
-    "jefe_comercial",
     "jefe_tecnico",
     "jefe_servicio_tecnico",
-    "tecnico",
   ].some((roleName) => hasRoleToken(roleName));
-  const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [] });
+  const canReviewInspectionCoordination = [
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+  ].some((roleName) => hasRoleToken(roleName));
+  const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [], providerContacts: [] });
   const [requests, setRequests] = useState([]);
   const [listQuery, setListQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -116,7 +132,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [inspectionModal, setInspectionModal] = useState({
     open: false,
     requestId: null,
-    file: null,
     minDate: "",
     maxDate: "",
     includesKit: false
@@ -126,17 +141,21 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [processingStep, setProcessingStep] = useState(null);
   const [expandedRequestId, setExpandedRequestId] = useState(null);
   const [inspectionCoordDrafts, setInspectionCoordDrafts] = useState({});
+  const [deliveryDrafts, setDeliveryDrafts] = useState({});
+  const [savingProviderContact, setSavingProviderContact] = useState(false);
+  const [technicalScheduleDays, setTechnicalScheduleDays] = useState([]);
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
       const [metaRes, listRes] = await Promise.all([
-        showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [] }),
+        showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [], provider_contacts: [] }),
         listEquipmentPurchases(),
       ]);
       setMeta({
         clients: metaRes.clients || [],
         equipment: dedupeEquipmentList(metaRes.equipment || []),
         acpUsers: metaRes.acp_users || [],
+        providerContacts: metaRes.provider_contacts || [],
       });
       setRequests(listRes || []);
     } catch (error) {
@@ -151,6 +170,42 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadTechnicalSchedule = async () => {
+      try {
+        const candidates = (requests || []).filter((req) => req.status === "pending_contract");
+        if (!candidates.length) {
+          if (!cancelled) setTechnicalScheduleDays([]);
+          return;
+        }
+        const from = candidates
+          .map((item) => item.inspection_min_date)
+          .filter(Boolean)
+          .sort()[0] || new Date().toISOString().slice(0, 10);
+        const to = candidates
+          .map((item) => item.inspection_max_date)
+          .filter(Boolean)
+          .sort()
+          .slice(-1)[0] || (() => {
+            const d = new Date();
+            d.setDate(d.getDate() + 60);
+            return d.toISOString().slice(0, 10);
+          })();
+        const calendar = await getPublicPurchaseTechnicalSchedule({ from, to });
+        if (!cancelled) {
+          setTechnicalScheduleDays(Array.isArray(calendar?.days) ? calendar.days : []);
+        }
+      } catch (_error) {
+        if (!cancelled) setTechnicalScheduleDays([]);
+      }
+    };
+    loadTechnicalSchedule();
+    return () => {
+      cancelled = true;
+    };
+  }, [requests]);
 
   const handlePurchaseEvent = React.useCallback(({ request }) => {
     if (!request) return;
@@ -437,29 +492,55 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       },
     );
   };
-  const handleSubmitInspection = async () => {
-    const { requestId, file, minDate, maxDate, includesKit } = inspectionModal;
 
-    if (!file || !minDate || !maxDate) {
-      showToast("Archivo y fechas son obligatorios", "warning");
+  const handleRegisterProviderContact = async ({ email }) => {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      showToast("Debes ingresar un correo de proveedor válido", "warning");
+      return;
+    }
+    setSavingProviderContact(true);
+    try {
+      const saved = await saveEquipmentProviderContact({ email: normalizedEmail });
+      setMeta((prev) => {
+        const previous = Array.isArray(prev.providerContacts) ? prev.providerContacts : [];
+        const deduped = previous.filter(
+          (item) => String(item?.email || "").trim().toLowerCase() !== normalizedEmail,
+        );
+        return {
+          ...prev,
+          providerContacts: [saved, ...deduped],
+        };
+      });
+      showToast("Proveedor guardado para reutilización", "success");
+    } catch (error) {
+      handleApiError(error, "No se pudo guardar el proveedor");
+    } finally {
+      setSavingProviderContact(false);
+    }
+  };
+  const handleSubmitInspection = async () => {
+    const { requestId, minDate, maxDate, includesKit } = inspectionModal;
+
+    if (!minDate || !maxDate) {
+      showToast("Las fechas mínima y máxima son obligatorias", "warning");
       return;
     }
 
     await runWithOverlay(
-      "Subiendo inspección",
+      "Registrando inspección",
       [{ id: "inspection", label: "Enviando inspección" }],
       async () => {
         try {
-          await submitSignedProformaWithInspection(requestId, {
-            file,
+          const expectedUpdatedAt = requests.find((row) => row.id === requestId)?.updated_at;
+          await requestPublicPurchaseInspection(requestId, {
             inspection_min_date: minDate,
             inspection_max_date: maxDate,
             includes_starter_kit: includesKit,
-            expected_updated_at: requests.find((row) => row.id === requestId)?.updated_at,
+            expected_updated_at: expectedUpdatedAt,
           });
-
-          showToast("Proforma subida e inspección creada exitosamente", "success");
-          setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false });
+          showToast("Solicitud de inspección creada con autollenado", "success");
+          setInspectionModal({ open: false, requestId: null, minDate: "", maxDate: "", includesKit: false });
           loadAll();
         } catch (error) {
           console.error(error);
@@ -483,8 +564,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     }
 
     await runWithOverlay(
-      "Guardando coordinación de inspección",
-      [{ id: "inspection-coordination", label: "Registrando fecha coordinada" }],
+      "Enviando propuesta de inspección",
+      [{ id: "inspection-coordination", label: "Registrando propuesta comercial" }],
       async () => {
         try {
           await coordinateInspectionDate(request.id, {
@@ -492,11 +573,150 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             notes: draft.notes || "",
             expected_updated_at: request.updated_at,
           });
-          showToast("Fecha de inspección coordinada correctamente", "success");
+          showToast("Fecha propuesta enviada. Pendiente aprobación de Jefe Técnico", "success");
           loadAll();
         } catch (error) {
           console.error(error);
-          handleApiError(error, "No se pudo registrar la coordinación");
+          handleApiError(error, "No se pudo enviar la propuesta de coordinación");
+        }
+      },
+    );
+  };
+
+  const handleReviewInspection = async (request, decision) => {
+    if (!request?.id) return;
+    const draft = inspectionCoordDrafts[request.id] || {};
+    await runWithOverlay(
+      decision === "accept" ? "Aprobando coordinación" : "Rechazando coordinación",
+      [{ id: "inspection-review", label: decision === "accept" ? "Aprobando fecha propuesta" : "Rechazando fecha propuesta" }],
+      async () => {
+        try {
+          await reviewInspectionDate(request.id, {
+            decision,
+            review_notes: draft.review_notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast(
+            decision === "accept"
+              ? "Fecha de inspección aprobada por Jefe Técnico"
+              : "Fecha propuesta rechazada. Comercial debe proponer otra fecha",
+            "success",
+          );
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo revisar la propuesta");
+        }
+      },
+    );
+  };
+
+  const handleRequestDeliveryDates = async (request) => {
+    await runWithOverlay(
+      "Solicitando fechas de entrega",
+      [{ id: "delivery-dates-request", label: "Solicitando fechas" }],
+      async () => {
+        try {
+          const draft = deliveryDrafts[request.id] || {};
+          await requestDeliveryDates(request.id, {
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Solicitud de fechas de entrega enviada", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo solicitar fechas de entrega");
+        }
+      },
+    );
+  };
+
+  const handleSubmitDeliveryDates = async (request) => {
+    const draft = deliveryDrafts[request.id] || {};
+    if (!draft.delivery_start_at || !draft.delivery_end_at) {
+      showToast("Debes definir fecha de inicio y fin de entrega", "warning");
+      return;
+    }
+    await runWithOverlay(
+      "Registrando fechas de entrega",
+      [{ id: "delivery-dates-submit", label: "Guardando fechas" }],
+      async () => {
+        try {
+          await submitDeliveryDates(request.id, {
+            delivery_start_at: draft.delivery_start_at,
+            delivery_end_at: draft.delivery_end_at,
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Fechas de entrega registradas", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo registrar fechas de entrega");
+        }
+      },
+    );
+  };
+
+  const handleMarkEquipmentArrived = async (request) => {
+    await runWithOverlay(
+      "Marcando arribo de equipo",
+      [{ id: "equipment-arrived", label: "Registrando arribo" }],
+      async () => {
+        try {
+          const draft = deliveryDrafts[request.id] || {};
+          await markEquipmentArrived(request.id, {
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Equipo marcado como arribado", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo marcar arribo");
+        }
+      },
+    );
+  };
+
+  const handleMarkDispatchReady = async (request) => {
+    await runWithOverlay(
+      "Marcando despacho listo",
+      [{ id: "dispatch-ready", label: "Actualizando despacho" }],
+      async () => {
+        try {
+          const draft = deliveryDrafts[request.id] || {};
+          await markDispatchReady(request.id, {
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Despacho marcado como listo", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo marcar despacho listo");
+        }
+      },
+    );
+  };
+
+  const handleCompleteDelivery = async (request) => {
+    await runWithOverlay(
+      "Completando entrega",
+      [{ id: "delivery-complete", label: "Cerrando entrega" }],
+      async () => {
+        try {
+          const draft = deliveryDrafts[request.id] || {};
+          await completeDelivery(request.id, {
+            notes: draft.notes || "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast("Entrega completada", "success");
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo completar entrega");
         }
       },
     );
@@ -718,6 +938,28 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   : null;
                 const expanded = expandedRequestId === req.id;
                 const inspectionCoordinationDraft = inspectionCoordDrafts[req.id] || {};
+                const selectedInspectionDate = inspectionCoordinationDraft.inspection_date ?? req.inspection_proposed_date ?? "";
+                const selectedDateSchedule = technicalScheduleDays.find((item) => item.date === selectedInspectionDate);
+                const selectedDateIsFull = Boolean(
+                  selectedDateSchedule && Array.isArray(selectedDateSchedule.items) && selectedDateSchedule.items.length >= 3,
+                );
+                const blockedDatesInWindow = (technicalScheduleDays || []).filter((item) => {
+                  if (!req.inspection_min_date || !req.inspection_max_date) return false;
+                  return (
+                    item.date >= req.inspection_min_date &&
+                    item.date <= req.inspection_max_date &&
+                    Array.isArray(item.items) &&
+                    item.items.length >= 3
+                  );
+                });
+                const showDeliverySummary = Boolean(
+                  req.delivery_start_at ||
+                  req.delivery_end_at ||
+                  req.equipment_arrived_at ||
+                  req.dispatch_ready_at ||
+                  req.delivered_at ||
+                  ["contract_available", "delivery_dates_requested", "delivery_dates_submitted", "waiting_dispatch", "dispatch_ready", "completed"].includes(req.status),
+                );
                 const toggleExpanded = () => {
                   setExpandedRequestId((prev) => (prev === req.id ? null : req.id));
                 };
@@ -773,7 +1015,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       </button>
                     </div>
 
-                    {(req.status === "pending_contract" || req.inspection_request_id) && (
+                    {(req.status === "waiting_signed_proforma" || req.status === "pending_contract" || req.inspection_request_id) && (
                       <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-2">
                         <p className="text-[11px] uppercase tracking-wide text-slate-500">
                           Coordinación de inspección
@@ -785,11 +1027,104 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                           </span>
                         </p>
                         <p className="text-xs text-slate-700">
-                          Fecha coordinada:{" "}
+                          Fecha propuesta:{" "}
+                          <span className="font-semibold">
+                            {req.inspection_proposed_date || "Pendiente"}
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Fecha coordinada final:{" "}
                           <span className="font-semibold">
                             {req.inspection_scheduled_date || "Pendiente"}
                           </span>
                         </p>
+                        <p className="text-xs text-slate-700">
+                          Estado:{" "}
+                          <span className="font-semibold">
+                            {req.inspection_coordination_status === "accepted"
+                              ? "Aprobada por Jefe Técnico"
+                              : req.inspection_coordination_status === "pending_review"
+                                ? "Pendiente validación de Jefe Técnico"
+                                : req.inspection_coordination_status === "rejected"
+                                  ? "Rechazada por Jefe Técnico"
+                                  : "Pendiente propuesta"}
+                          </span>
+                        </p>
+                        {req.inspection_request_id && (
+                          <p className="text-[11px] text-slate-500">
+                            Solicitud técnica #{req.inspection_request_id}
+                          </p>
+                        )}
+                        {!req.inspection_request_id && req.status === "pending_contract" && canRequestInspection && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() =>
+                              setInspectionModal({
+                                open: true,
+                                requestId: req.id,
+                                minDate: req.inspection_min_date || "",
+                                maxDate: req.inspection_max_date || "",
+                                includesKit: Boolean(req.includes_starter_kit),
+                              })
+                            }
+                          >
+                            Solicitar inspección de ambiente
+                          </Button>
+                        )}
+                        {req.extra?.inspection_acta_link && (
+                          <a
+                            href={req.extra.inspection_acta_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center text-xs font-medium text-blue-700 hover:text-blue-900"
+                          >
+                            Ver acta de inspección
+                          </a>
+                        )}
+                        {req.inspection_request_id && (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                navigate(
+                                  `/dashboard/servicio-tecnico/desinfeccion?source_type=public_purchase&source_id=${encodeURIComponent(
+                                    req.id,
+                                  )}&request_id=${encodeURIComponent(req.inspection_request_id)}`,
+                                )
+                              }
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              F.ST-02 Desinfección
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                navigate(
+                                  `/dashboard/servicio-tecnico/aplicaciones?source_type=public_purchase&source_id=${encodeURIComponent(
+                                    req.id,
+                                  )}&request_id=${encodeURIComponent(req.inspection_request_id)}`,
+                                )
+                              }
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              F.ST-04 Entrenamiento
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                navigate(
+                                  `/dashboard/servicio-tecnico/verificacion?source_type=public_purchase&source_id=${encodeURIComponent(
+                                    req.id,
+                                  )}&request_id=${encodeURIComponent(req.inspection_request_id)}`,
+                                )
+                              }
+                              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-100"
+                            >
+                              F.ST-09 Verificación
+                            </button>
+                          </div>
+                        )}
                         {req.inspection_coordinated_by_email && (
                           <p className="text-[11px] text-slate-500">
                             Coordinado por {req.inspection_coordinated_by_email}
@@ -799,7 +1134,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                           <div className="space-y-2">
                             <input
                               type="date"
-                              value={inspectionCoordinationDraft.inspection_date ?? req.inspection_scheduled_date ?? ""}
+                              value={selectedInspectionDate}
                               min={req.inspection_min_date || undefined}
                               max={req.inspection_max_date || undefined}
                               onChange={(event) =>
@@ -831,12 +1166,91 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             <Button
                               size="sm"
                               onClick={() => handleCoordinateInspection(req)}
-                              disabled={!req.inspection_min_date || !req.inspection_max_date}
+                              disabled={!req.inspection_min_date || !req.inspection_max_date || selectedDateIsFull}
                             >
-                              Confirmar fecha coordinada
+                              Proponer fecha a Jefe Técnico
                             </Button>
+                            {selectedDateIsFull && (
+                              <p className="text-[11px] text-amber-700">
+                                Esa fecha ya tiene el cronograma técnico completo:{" "}
+                                {(selectedDateSchedule?.items || [])
+                                  .map((entry) => entry.summary)
+                                  .filter(Boolean)
+                                  .slice(0, 2)
+                                  .join(" · ")}
+                              </p>
+                            )}
+                            {blockedDatesInWindow.length > 0 && (
+                              <p className="text-[11px] text-slate-600">
+                                Fechas con cronograma completo en la ventana:{" "}
+                                {blockedDatesInWindow
+                                  .slice(0, 4)
+                                  .map((item) => item.date)
+                                  .join(", ")}
+                                {blockedDatesInWindow.length > 4 ? "..." : ""}
+                              </p>
+                            )}
                           </div>
                         )}
+                        {canReviewInspectionCoordination &&
+                          req.status === "pending_contract" &&
+                          req.inspection_coordination_status === "pending_review" && (
+                          <div className="space-y-2 rounded border border-emerald-200 bg-emerald-50 p-2">
+                            <textarea
+                              rows={2}
+                              value={inspectionCoordinationDraft.review_notes ?? ""}
+                              onChange={(event) =>
+                                setInspectionCoordDrafts((prev) => ({
+                                  ...prev,
+                                  [req.id]: {
+                                    ...prev[req.id],
+                                    review_notes: event.target.value,
+                                  },
+                                }))
+                              }
+                              placeholder="Comentario de validación (opcional)"
+                              className="w-full rounded border border-emerald-300 px-2 py-1.5 text-sm"
+                            />
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => handleReviewInspection(req, "accept")}>
+                                Aprobar fecha
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={() => handleReviewInspection(req, "reject")}>
+                                Rechazar fecha
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        {!canCoordinateInspection &&
+                          !canReviewInspectionCoordination &&
+                          req.status === "pending_contract" && (
+                          <p className="text-[11px] text-slate-600">
+                            La fecha exacta de inspección es coordinada por Jefe Técnico.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {showDeliverySummary && (
+                      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3 space-y-1.5">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                          Entrega
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Ventana:{" "}
+                          <span className="font-medium">
+                            {req.delivery_start_at || "Pendiente"} - {req.delivery_end_at || "Pendiente"}
+                          </span>
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Arribo: <span className="font-medium">{req.equipment_arrived_at ? formatDateTimeEC(req.equipment_arrived_at) : "Pendiente"}</span>
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Despacho: <span className="font-medium">{req.dispatch_ready_at ? formatDateTimeEC(req.dispatch_ready_at) : "Pendiente"}</span>
+                        </p>
+                        <p className="text-xs text-slate-700">
+                          Entrega final: <span className="font-medium">{req.delivered_at ? formatDateTimeEC(req.delivered_at) : "Pendiente"}</span>
+                        </p>
                       </div>
                     )}
 
@@ -922,23 +1336,32 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       request={req}
                       isManager={isManager}
                       canAccessAttachments={canAccessAttachments}
+                      canUploadSignedProforma={canUploadSignedProforma}
                       checklistState={req.checklist_state}
+                      providerContacts={meta.providerContacts || []}
+                      onRegisterProviderContact={handleRegisterProviderContact}
+                      savingProviderContact={savingProviderContact}
                       availabilityDrafts={availabilityDrafts}
                       inspectionDraft={inspectionDraft}
                       onStartAvailability={handleStartAvailability}
                     onOpenResponse={openResponse}
                     onRequestProforma={() => handleRequestProforma(req)}
                     onReserve={() => handleReserve(req)}
-                    onOpenInspection={(request) => setInspectionModal({
-                      open: true,
-                      requestId: request.id,
-                      file: null,
-                      minDate: "",
-                      maxDate: "",
-                      includesKit: false
-                    })}
+                    onUploadSignedProforma={(_id, action, file) => handleUpload(req, action, file)}
                     onUploadProforma={(_id, action, file) => handleUpload(req, action, file)}
                     onUploadContract={(_id, action, file) => handleUpload(req, action, file)}
+                      onRequestDeliveryDates={() => handleRequestDeliveryDates(req)}
+                      onSubmitDeliveryDates={() => handleSubmitDeliveryDates(req)}
+                      onMarkEquipmentArrived={() => handleMarkEquipmentArrived(req)}
+                      onMarkDispatchReady={() => handleMarkDispatchReady(req)}
+                      onCompleteDelivery={() => handleCompleteDelivery(req)}
+                      deliveryDraft={deliveryDrafts[req.id] || {}}
+                      onUpdateDeliveryDraft={(requestId, field, value) => {
+                        setDeliveryDrafts((prev) => ({
+                          ...prev,
+                          [requestId]: { ...prev[requestId], [field]: value },
+                        }));
+                      }}
                       onUpdateAvailabilityDraft={(requestId, field, value) => {
                         setAvailabilityDrafts((prev) => ({
                           ...prev,
@@ -1005,18 +1428,9 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Proforma firmada <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="file"
-                    accept=".pdf,.jpg,.jpeg,.png"
-                    onChange={(e) => setInspectionModal(prev => ({ ...prev, file: e.target.files?.[0] || null }))}
-                    className="w-full text-sm border rounded p-2"
-                  />
-                  {inspectionModal.file && (
-                    <p className="text-xs text-green-600 mt-1">✓ {inspectionModal.file.name}</p>
-                  )}
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    SPI autocompleta la solicitud técnica F.ST-20 y genera su PDF con la información de la compra.
+                  </p>
                 </div>
 
                 <div>
@@ -1056,11 +1470,11 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
               <div className="flex justify-end gap-3 mt-6">
                 <Button
                   variant="ghost"
-                  onClick={() => setInspectionModal({ open: false, requestId: null, file: null, minDate: "", maxDate: "", includesKit: false })}
+                  onClick={() => setInspectionModal({ open: false, requestId: null, minDate: "", maxDate: "", includesKit: false })}
                 >
                   Cancelar</Button>
                 <Button onClick={handleSubmitInspection}>
-                  Crear Solicitud
+                  Registrar Inspección
                 </Button>
               </div>
             </div>

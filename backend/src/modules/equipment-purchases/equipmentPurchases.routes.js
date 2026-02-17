@@ -15,8 +15,13 @@ const viewerRoles = Array.from(new Set([
   "tecnico",
   "jefe_operaciones",
 ]));
-const inspectionCoordinationRoles = Array.from(new Set([
-  ...creatorRoles,
+const inspectionRequestRoles = ["acp_comercial"];
+const inspectionCoordinationRoles = ["jefe_tecnico", "jefe_servicio_tecnico"];
+const inspectionReviewRoles = ["jefe_tecnico", "jefe_servicio_tecnico"];
+const deliveryRoles = Array.from(new Set([
+  ...managerRoles,
+  "jefe_operaciones",
+  "jefe_logistica",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
   "tecnico",
@@ -32,11 +37,14 @@ const attachTokenFromQuery = (req, _res, next) => {
 
 router.get("/events", attachTokenFromQuery, verifyToken, requireRole(viewerRoles), streamPurchaseUpdates);
 router.get("/meta", verifyToken, requireRole(creatorRoles), ctrl.getMeta);
+router.get("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.listProviderContacts);
 router.get("/stats", verifyToken, requireRole(managerRoles), ctrl.getStats);
+router.get("/technical-schedule", verifyToken, requireRole(viewerRoles), ctrl.getTechnicalScheduleCalendar);
 router.get("/", verifyToken, requireRole(viewerRoles), ctrl.listMine);
 router.get("/:id", verifyToken, requireRole(viewerRoles), ctrl.getOne);
 
 router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
+router.post("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.saveProviderContact);
 router.post("/:id/start-availability", verifyToken, requireRole(managerRoles), ctrl.startAvailability);
 router.post("/:id/provider-response", verifyToken, requireRole(managerRoles), ctrl.saveProviderResponse);
 router.patch("/:id/checklist", verifyToken, requireRole(creatorRoles), ctrl.updateChecklist);
@@ -57,7 +65,7 @@ router.post(
 router.post(
   "/:id/upload-signed-proforma",
   verifyToken,
-  requireRole(managerRoles),
+  requireRole(["acp_comercial"]),
   ctrl.upload.single("file"),
   ctrl.uploadSignedProforma,
 );
@@ -67,6 +75,36 @@ router.post(
   requireRole(managerRoles),
   ctrl.upload.single("file"),
   ctrl.uploadContract,
+);
+router.post(
+  "/:id/request-delivery-dates",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.requestDeliveryDates,
+);
+router.post(
+  "/:id/submit-delivery-dates",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.submitDeliveryDates,
+);
+router.post(
+  "/:id/mark-equipment-arrived",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.markEquipmentArrived,
+);
+router.post(
+  "/:id/mark-dispatch-ready",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.markDispatchReady,
+);
+router.post(
+  "/:id/complete-delivery",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.completeDelivery,
 );
 
 router.post(
@@ -86,15 +124,27 @@ router.post(
 router.post(
   "/:id/submit-signed-proforma-with-inspection",
   verifyToken,
-  requireRole(managerRoles),
+  requireRole(["acp_comercial"]),
   ctrl.upload.single("file"),
   ctrl.submitSignedProformaWithInspection,
+);
+router.post(
+  "/:id/request-inspection",
+  verifyToken,
+  requireRole(inspectionRequestRoles),
+  ctrl.requestInspectionEnvironment,
 );
 router.patch(
   "/:id/coordinate-inspection-date",
   verifyToken,
   requireRole(inspectionCoordinationRoles),
   ctrl.coordinateInspectionDate,
+);
+router.patch(
+  "/:id/review-inspection-date",
+  verifyToken,
+  requireRole(inspectionReviewRoles),
+  ctrl.reviewInspectionDate,
 );
 
 module.exports = router;

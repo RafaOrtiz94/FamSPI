@@ -113,15 +113,15 @@ const TecnicoView = ({
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 <Card
                     className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-slate-500"
-                    onClick={() => navigate("/dashboard/purchases/workspace?tab=public")}
+                    onClick={() => navigate("/dashboard/servicio-tecnico/workspace-procedimiento?tab=public")}
                 >
                     <div className="flex items-center gap-4">
                         <div className="p-3 bg-slate-100 rounded-full text-slate-700">
                             <FiShoppingCart size={24} />
                         </div>
                         <div>
-                            <h3 className="font-semibold text-gray-900">Inspecciones de Compras</h3>
-                            <p className="text-sm text-gray-500">Coordinar fecha con comercial</p>
+                            <h3 className="font-semibold text-gray-900">Workspace técnico</h3>
+                            <p className="text-sm text-gray-500">Flujo ST-01-01 por proceso</p>
                         </div>
                     </div>
                 </Card>

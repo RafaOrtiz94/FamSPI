@@ -25,17 +25,22 @@ const normalizeRoles = (user) => {
   if (!user) return [];
 
   const rawRoles = user?.roles ?? user?.role ?? user?.user?.roles ?? user?.user?.role ?? [];
+  const rawScopes = user?.scope ?? user?.user?.scope ?? [];
   const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
+  const scopesArray = Array.isArray(rawScopes) ? rawScopes : [rawScopes];
 
-  const normalized = rolesArray.map(role => {
-    if (typeof role === 'object' && role !== null) {
-      const value = role.name || role.role || role.code || role.slug || String(role);
-      return String(value).toLowerCase().trim();
-    }
-    return String(role).toLowerCase().trim();
-  }).filter(Boolean);
+  const normalized = [...rolesArray, ...scopesArray]
+    .flatMap((role) => {
+      if (typeof role === 'object' && role !== null) {
+        const value = role.name || role.role || role.code || role.slug || String(role);
+        return String(value).split(/[,\s]+/);
+      }
+      return String(role || "").split(/[,\s]+/);
+    })
+    .map((token) => String(token || "").toLowerCase().trim())
+    .filter(Boolean);
 
-  return normalized;
+  return Array.from(new Set(normalized));
 };
 
 const PurchasesWorkspace = () => {

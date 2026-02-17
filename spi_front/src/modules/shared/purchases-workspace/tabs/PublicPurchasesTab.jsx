@@ -16,10 +16,13 @@ import { FiList, FiTrendingUp } from 'react-icons/fi';
 
 const normalizeRoles = (user) => {
   if (!user) return [];
-  const rawRoles = user?.roles ?? user?.role ?? user?.user?.roles ?? user?.user?.role ?? user?.scope ?? [];
+  const rawRoles = user?.roles ?? user?.role ?? user?.user?.roles ?? user?.user?.role ?? [];
+  const rawScopes = user?.scope ?? user?.user?.scope ?? [];
   const rolesArray = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
-  return rolesArray
-    .map((role) => String(role || "").toLowerCase().trim())
+  const scopesArray = Array.isArray(rawScopes) ? rawScopes : [rawScopes];
+  return [...rolesArray, ...scopesArray]
+    .flatMap((role) => String(role || "").split(/[,\s]+/))
+    .map((token) => token.toLowerCase().trim())
     .filter(Boolean);
 };
 

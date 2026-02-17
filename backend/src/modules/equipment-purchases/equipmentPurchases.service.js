@@ -22,6 +22,7 @@ const CONTRACT_MAX_DAYS = 110;
 const RESERVATION_REMINDER_OFFSET_DAYS = 55; // Reserva caduca a los 60 días
 const CONTRACT_REMINDER_OFFSET = CONTRACT_MAX_DAYS - 15; // Avisar 15 días antes
 const PROFORMA_REQUEST_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 horas
+const TECHNICAL_DAILY_CAPACITY = Number.parseInt(process.env.TECHNICAL_DAILY_CAPACITY || "3", 10);
 
 let initialized = false;
 
@@ -33,6 +34,11 @@ const STATUS = {
   PROFORMA_RECEIVED: "proforma_received",
   WAITING_SIGNED_PROFORMA: "waiting_signed_proforma",
   PENDING_CONTRACT: "pending_contract",
+  CONTRACT_AVAILABLE: "contract_available",
+  DELIVERY_DATES_REQUESTED: "delivery_dates_requested",
+  DELIVERY_DATES_SUBMITTED: "delivery_dates_submitted",
+  WAITING_DISPATCH: "waiting_dispatch",
+  DISPATCH_READY: "dispatch_ready",
   COMPLETED: "completed",
 };
 
@@ -43,6 +49,11 @@ const STATUS_STATS_ORDER = [
   STATUS.PROFORMA_RECEIVED,
   STATUS.WAITING_SIGNED_PROFORMA,
   STATUS.PENDING_CONTRACT,
+  STATUS.CONTRACT_AVAILABLE,
+  STATUS.DELIVERY_DATES_REQUESTED,
+  STATUS.DELIVERY_DATES_SUBMITTED,
+  STATUS.WAITING_DISPATCH,
+  STATUS.DISPATCH_READY,
   STATUS.COMPLETED,
 ];
 
@@ -54,6 +65,11 @@ const ACTION_BY_STATUS = {
   [STATUS.PROFORMA_RECEIVED]: "reserve_equipment",
   [STATUS.WAITING_SIGNED_PROFORMA]: "submit_signed_with_inspection",
   [STATUS.PENDING_CONTRACT]: "upload_contract",
+  [STATUS.CONTRACT_AVAILABLE]: "request_delivery_dates",
+  [STATUS.DELIVERY_DATES_REQUESTED]: "submit_delivery_dates",
+  [STATUS.DELIVERY_DATES_SUBMITTED]: "mark_equipment_arrived",
+  [STATUS.WAITING_DISPATCH]: "mark_dispatch_ready",
+  [STATUS.DISPATCH_READY]: "complete_delivery",
 };
 const CHECKLIST_ITEMS = {
   client_confirmed: {
@@ -110,10 +126,30 @@ const CHECKLIST_ITEMS = {
       request?.inspection_scheduled_date,
     ),
   },
+  signed_proforma_uploaded: {
+    label: "Proforma firmada subida",
+    auto: true,
+    validator: (request) => Boolean(request?.signed_proforma_file_id),
+  },
   inspection_date_confirmed: {
     label: "Fecha de inspección coordinada",
     auto: true,
     validator: (request) => Boolean(request?.inspection_scheduled_date),
+  },
+  delivery_dates_defined: {
+    label: "Fechas de entrega definidas",
+    auto: true,
+    validator: (request) => Boolean(request?.delivery_start_at && request?.delivery_end_at),
+  },
+  equipment_arrived: {
+    label: "Equipo arribado",
+    auto: true,
+    validator: (request) => Boolean(request?.equipment_arrived_at),
+  },
+  dispatch_ready_confirmed: {
+    label: "Despacho marcado como listo",
+    auto: true,
+    validator: (request) => Boolean(request?.dispatch_ready_at),
   },
 };
 const ACTION_CHECKLIST_REQUIREMENTS = {
@@ -126,8 +162,14 @@ const ACTION_CHECKLIST_REQUIREMENTS = {
   ],
   request_or_upload_proforma: ["accepted_items_validated"],
   reserve_equipment: ["proforma_terms_validated"],
-  submit_signed_with_inspection: ["inspection_date_coordinated", "technical_window_confirmed"],
+  submit_signed_with_inspection: ["proforma_terms_validated"],
+  request_inspection: ["signed_proforma_uploaded"],
   upload_contract: ["inspection_date_confirmed", "contract_ready_for_signature"],
+  request_delivery_dates: ["inspection_date_confirmed"],
+  submit_delivery_dates: [],
+  mark_equipment_arrived: ["delivery_dates_defined"],
+  mark_dispatch_ready: ["delivery_dates_defined", "equipment_arrived"],
+  complete_delivery: ["dispatch_ready_confirmed"],
 };
 const ACTION_ALLOWED_STATUSES = {
   start_availability: [STATUS.PENDING_PROVIDER],
@@ -135,8 +177,14 @@ const ACTION_ALLOWED_STATUSES = {
   request_or_upload_proforma: [STATUS.WAITING_PROFORMA],
   reserve_equipment: [STATUS.PROFORMA_RECEIVED],
   submit_signed_with_inspection: [STATUS.WAITING_SIGNED_PROFORMA],
-  coordinate_inspection_date: [STATUS.PENDING_CONTRACT],
+  request_inspection: [STATUS.WAITING_SIGNED_PROFORMA, STATUS.PENDING_CONTRACT],
+  coordinate_inspection_date: [STATUS.WAITING_SIGNED_PROFORMA, STATUS.PENDING_CONTRACT],
   upload_contract: [STATUS.PENDING_CONTRACT],
+  request_delivery_dates: [STATUS.CONTRACT_AVAILABLE],
+  submit_delivery_dates: [STATUS.DELIVERY_DATES_REQUESTED],
+  mark_equipment_arrived: [STATUS.DELIVERY_DATES_SUBMITTED],
+  mark_dispatch_ready: [STATUS.WAITING_DISPATCH],
+  complete_delivery: [STATUS.DISPATCH_READY],
 };
 const PURCHASE_PROCESS_TEMPLATE_ID =
   process.env.PURCHASE_PROCESS_TEMPLATE_ID || process.env.EQUIPMENT_PURCHASE_PROCESS_TEMPLATE_ID || null;
@@ -169,9 +217,26 @@ function canViewInspectionQueue(user) {
 
 function canCoordinateInspection(user) {
   return [
-    "comercial",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+  ].some((role) => hasRoleToken(user, role));
+}
+
+function canReviewInspectionCoordination(user) {
+  return [
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+  ].some((role) => hasRoleToken(user, role));
+}
+
+function canManageDelivery(user) {
+  return [
     "acp_comercial",
+    "gerencia",
+    "gerencia_general",
     "jefe_comercial",
+    "jefe_operaciones",
+    "jefe_logistica",
     "jefe_tecnico",
     "jefe_servicio_tecnico",
     "tecnico",
@@ -273,6 +338,26 @@ async function notifyUsers({ userIds = [], title, message, type = "info", source
   ));
 }
 
+async function notifyDeliveryStage({ request, title, message, meta = {}, priority = 1 }) {
+  if (!request) return;
+  try {
+    await notifyUsers({
+      userIds: [request.created_by, request.assigned_to],
+      title,
+      message,
+      type: "task",
+      source: "equipment_purchases_delivery",
+      priority,
+      meta: { request_id: request.id, ...meta },
+    });
+  } catch (notifyError) {
+    logger.warn(
+      { notifyError, requestId: request.id },
+      "No se pudieron enviar notificaciones del flujo de entrega",
+    );
+  }
+}
+
 function driveLink(fileId) {
   return fileId ? `https://drive.google.com/file/d/${fileId}/view` : null;
 }
@@ -283,6 +368,12 @@ function safeJsonParse(value, fallback = {}) {
   } catch (error) {
     return fallback;
   }
+}
+
+function mergeExtra(baseExtra, patchExtra = {}) {
+  const base = baseExtra && typeof baseExtra === "object" && !Array.isArray(baseExtra) ? baseExtra : {};
+  const patch = patchExtra && typeof patchExtra === "object" && !Array.isArray(patchExtra) ? patchExtra : {};
+  return { ...base, ...patch };
 }
 
 function mapRequestRow(row = {}) {
@@ -460,6 +551,7 @@ async function buildReport({ subject, html, request, actionLabel, user }) {
 
 async function ensureTables() {
   if (initialized) return;
+  await db.query(`CREATE SCHEMA IF NOT EXISTS servicio`);
   await db.query(`
     CREATE TABLE IF NOT EXISTS equipment_purchase_requests (
       id UUID PRIMARY KEY,
@@ -497,6 +589,16 @@ async function ensureTables() {
       inspection_recorded_at TIMESTAMPTZ,
       inspection_request_id INTEGER,
       inspection_scheduled_date DATE,
+      inspection_proposed_date DATE,
+      inspection_proposed_notes TEXT,
+      inspection_proposed_at TIMESTAMPTZ,
+      inspection_proposed_by INTEGER,
+      inspection_proposed_by_email TEXT,
+      inspection_coordination_status TEXT DEFAULT 'pending_proposal',
+      inspection_review_notes TEXT,
+      inspection_reviewed_at TIMESTAMPTZ,
+      inspection_reviewed_by INTEGER,
+      inspection_reviewed_by_email TEXT,
       inspection_coordination_notes TEXT,
       inspection_coordinated_at TIMESTAMPTZ,
       inspection_coordinated_by INTEGER,
@@ -541,6 +643,46 @@ async function ensureTables() {
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_scheduled_date DATE`,
   );
   await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_proposed_date DATE`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_proposed_notes TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_proposed_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_proposed_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_proposed_by_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_coordination_status TEXT DEFAULT 'pending_proposal'`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_review_notes TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_reviewed_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_reviewed_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_reviewed_by_email TEXT`,
+  );
+  await db.query(
+    `UPDATE equipment_purchase_requests
+        SET inspection_coordination_status = CASE
+          WHEN inspection_scheduled_date IS NOT NULL THEN 'accepted'
+          WHEN inspection_proposed_date IS NOT NULL THEN 'pending_review'
+          WHEN inspection_request_id IS NOT NULL THEN 'pending_proposal'
+          ELSE COALESCE(inspection_coordination_status, 'pending_proposal')
+        END
+      WHERE inspection_coordination_status IS NULL`,
+  );
+  await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS inspection_coordination_notes TEXT`,
   );
   await db.query(
@@ -555,7 +697,142 @@ async function ensureTables() {
   await db.query(
     `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS checklist JSONB DEFAULT '{}'::jsonb`,
   );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_dates_requested_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_dates_requested_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_dates_requested_by_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_start_at DATE`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_end_at DATE`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_notes TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS equipment_arrived_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS equipment_arrived_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS equipment_arrived_by_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS dispatch_ready_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS dispatch_ready_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS dispatch_ready_by_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivered_by INTEGER`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivered_by_email TEXT`,
+  );
+  await db.query(
+    `ALTER TABLE equipment_purchase_requests ADD COLUMN IF NOT EXISTS delivery_confirmed_notes TEXT`,
+  );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS equipment_purchase_provider_contacts (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      display_name TEXT,
+      created_by INTEGER,
+      created_by_email TEXT,
+      last_used_at TIMESTAMPTZ,
+      use_count INTEGER NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_equipment_purchase_provider_contacts_last_used
+      ON equipment_purchase_provider_contacts (last_used_at DESC, updated_at DESC)`,
+  );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS servicio.cronograma_actividades_tecnicas (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      activity_date DATE NOT NULL,
+      title TEXT NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'programado',
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT,
+      created_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      created_by_email TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_cronograma_actividades_tecnicas_activity_date
+      ON servicio.cronograma_actividades_tecnicas (activity_date, status)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_cronograma_actividades_tecnicas_user_date
+      ON servicio.cronograma_actividades_tecnicas (user_id, activity_date)`,
+  );
   initialized = true;
+}
+
+function normalizeProviderEmail(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+async function upsertProviderContact({
+  email,
+  displayName = null,
+  user = null,
+  markUsed = false,
+}) {
+  await ensureTables();
+  const normalizedEmail = normalizeProviderEmail(email);
+  if (!normalizedEmail) {
+    throw createAppError("El correo del proveedor es obligatorio", {
+      code: "PROVIDER_EMAIL_REQUIRED",
+    });
+  }
+  const safeDisplayName = String(displayName || "").trim() || null;
+  const createdBy = Number.isFinite(Number(user?.id)) ? Number(user.id) : null;
+  const createdByEmail = user?.email ? String(user.email).trim().toLowerCase() : null;
+  const touchUsedSql = markUsed
+    ? `last_used_at = now(), use_count = equipment_purchase_provider_contacts.use_count + 1,`
+    : "";
+
+  const { rows } = await db.query(
+    `INSERT INTO equipment_purchase_provider_contacts (
+        email,
+        display_name,
+        created_by,
+        created_by_email,
+        last_used_at,
+        use_count,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, ${markUsed ? "now()" : "NULL"}, ${markUsed ? "1" : "0"}, now())
+      ON CONFLICT (email) DO UPDATE
+      SET
+        display_name = COALESCE(EXCLUDED.display_name, equipment_purchase_provider_contacts.display_name),
+        ${touchUsedSql}
+        updated_at = now()
+      RETURNING id, email, display_name, created_by, created_by_email, last_used_at, use_count, created_at, updated_at`,
+    [normalizedEmail, safeDisplayName, createdBy, createdByEmail],
+  );
+
+  return rows[0] || null;
 }
 
 async function getRootFolder() {
@@ -804,6 +1081,66 @@ async function getAcpCommercialUsers() {
   }));
 }
 
+async function listProviderContacts({ user, query = "", limit = 50 }) {
+  await ensureTables();
+  if (!canManageAll(user)) {
+    return [];
+  }
+
+  const normalizedQuery = String(query || "").trim().toLowerCase();
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 100);
+  const params = [];
+  let whereSql = "";
+
+  if (normalizedQuery) {
+    params.push(`%${normalizedQuery}%`);
+    whereSql = `
+      WHERE lower(email) LIKE $1
+         OR lower(COALESCE(display_name, '')) LIKE $1
+    `;
+  }
+  params.push(safeLimit);
+  const limitParam = params.length;
+
+  const { rows } = await db.query(
+    `SELECT
+        id,
+        email,
+        display_name,
+        created_by,
+        created_by_email,
+        last_used_at,
+        use_count,
+        created_at,
+        updated_at
+      FROM equipment_purchase_provider_contacts
+      ${whereSql}
+      ORDER BY
+        last_used_at DESC NULLS LAST,
+        use_count DESC,
+        updated_at DESC
+      LIMIT $${limitParam}`,
+    params,
+  );
+
+  return rows;
+}
+
+async function saveProviderContact({ user, email, display_name }) {
+  if (!canManageAll(user)) {
+    throw createAppError("Solo ACP Comercial puede registrar proveedores", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  return upsertProviderContact({
+    email,
+    displayName: display_name,
+    user,
+    markUsed: false,
+  });
+}
+
 async function getEquipmentCatalog() {
   try {
     const modelos = await inventarioService.listModelos();
@@ -862,8 +1199,23 @@ async function listByUser(user) {
   const params = [];
   let query = `SELECT * FROM equipment_purchase_requests`;
   if (!canManageAll(user) && canViewInspectionQueue(user)) {
-    query += ` WHERE inspection_request_id IS NOT NULL AND status = $1`;
-    params.push(STATUS.PENDING_CONTRACT);
+    query += ` WHERE status = ANY($1::text[])
+      AND (
+        status = $2
+        OR
+        inspection_request_id IS NOT NULL
+        OR (inspection_min_date IS NOT NULL AND inspection_max_date IS NOT NULL)
+      )`;
+    params.push([
+      STATUS.WAITING_SIGNED_PROFORMA,
+      STATUS.PENDING_CONTRACT,
+      STATUS.CONTRACT_AVAILABLE,
+      STATUS.DELIVERY_DATES_REQUESTED,
+      STATUS.DELIVERY_DATES_SUBMITTED,
+      STATUS.WAITING_DISPATCH,
+      STATUS.DISPATCH_READY,
+    ]);
+    params.push(STATUS.WAITING_SIGNED_PROFORMA);
   } else if (!canManageAll(user)) {
     query += ` WHERE created_by = $1 OR assigned_to = $1`;
     params.push(user.id);
@@ -875,13 +1227,130 @@ async function listByUser(user) {
   return rows.map(mapRequestRow);
 }
 
+async function listTechnicalSchedule({ from, to, excludePublicRequestId = null, excludeInspectionRequestId = null }) {
+  await ensureTables();
+  const fromDate = String(from || "").slice(0, 10);
+  const toDate = String(to || "").slice(0, 10);
+  if (!fromDate || !toDate) return [];
+
+  const { rows } = await db.query(
+    `
+      SELECT activity_date, source_type, summary
+      FROM (
+        SELECT
+          a.activity_date::date AS activity_date,
+          'actividad_tecnica'::text AS source_type,
+          COALESCE(a.title, 'Actividad técnica') AS summary
+        FROM servicio.cronograma_actividades_tecnicas a
+        WHERE a.activity_date BETWEEN $1::date AND $2::date
+          AND COALESCE(lower(a.status), 'programado') IN ('programado', 'confirmado', 'en_proceso')
+
+        UNION ALL
+
+        SELECT
+          m.fecha_programada::date AS activity_date,
+          'mantenimiento'::text AS source_type,
+          COALESCE(m.descripcion, 'Mantenimiento programado') AS summary
+        FROM servicio.cronograma_mantenimientos m
+        WHERE m.fecha_programada BETWEEN $1::date AND $2::date
+          AND COALESCE(lower(m.estado), 'pendiente') IN ('pendiente', 'en proceso')
+
+        UNION ALL
+
+        SELECT
+          c.fecha::date AS activity_date,
+          'capacitacion'::text AS source_type,
+          COALESCE(c.titulo, 'Capacitación técnica') AS summary
+        FROM servicio.cronograma_capacitacion c
+        WHERE c.fecha BETWEEN $1::date AND $2::date
+          AND COALESCE(lower(c.estado), 'programado') NOT IN ('cancelada', 'cancelado')
+
+        UNION ALL
+
+        SELECT
+          epr.inspection_scheduled_date::date AS activity_date,
+          'inspeccion_compra_publica'::text AS source_type,
+          COALESCE(epr.client_name, 'Inspección compra pública') AS summary
+        FROM equipment_purchase_requests epr
+        WHERE epr.inspection_scheduled_date BETWEEN $1::date AND $2::date
+          AND ($3::uuid IS NULL OR epr.id <> $3::uuid)
+          AND COALESCE(epr.status, '') NOT IN ('completed')
+
+        UNION ALL
+
+        SELECT
+          ppr.inspection_scheduled_date::date AS activity_date,
+          'inspeccion_compra_privada'::text AS source_type,
+          COALESCE(ppr.client_name, 'Inspección compra privada') AS summary
+        FROM private_purchase_requests ppr
+        WHERE ppr.inspection_scheduled_date BETWEEN $1::date AND $2::date
+          AND COALESCE(ppr.status, '') NOT IN ('completed', 'cancelled')
+
+        UNION ALL
+
+        SELECT
+          (r.payload->>'fecha_instalacion')::date AS activity_date,
+          'solicitud_inspeccion'::text AS source_type,
+          COALESCE(r.payload->>'nombre_cliente', 'Solicitud de inspección') AS summary
+        FROM requests r
+        JOIN request_types rt ON rt.id = r.request_type_id
+        WHERE rt.code = 'F.ST-20'
+          AND (r.payload->>'fecha_instalacion') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND (r.payload->>'fecha_instalacion')::date BETWEEN $1::date AND $2::date
+          AND ($4::int IS NULL OR r.id <> $4::int)
+          AND COALESCE(r.status, '') NOT IN ('rechazado', 'cancelado')
+      ) AS timeline
+      ORDER BY activity_date ASC, source_type ASC
+    `,
+    [fromDate, toDate, excludePublicRequestId, excludeInspectionRequestId],
+  );
+
+  return rows;
+}
+
+function groupTechnicalScheduleByDate(rows = []) {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const dateKey = String(row.activity_date || "").slice(0, 10);
+    if (!dateKey) return;
+    if (!grouped.has(dateKey)) grouped.set(dateKey, []);
+    grouped.get(dateKey).push({
+      source_type: row.source_type,
+      summary: row.summary,
+    });
+  });
+  return Array.from(grouped.entries())
+    .map(([date, items]) => ({ date, items }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+async function getTechnicalScheduleCalendar({ user, from, to }) {
+  if (!canViewInspectionQueue(user) && !canCoordinateInspection(user) && !canManageAll(user)) {
+    throw createAppError("No autorizado para consultar cronograma técnico", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const rows = await listTechnicalSchedule({ from, to });
+  return {
+    from: String(from || "").slice(0, 10),
+    to: String(to || "").slice(0, 10),
+    days: groupTechnicalScheduleByDate(rows),
+  };
+}
+
 async function getById(id, user) {
   await ensureTables();
   const { rows } = await db.query(`SELECT * FROM equipment_purchase_requests WHERE id = $1 LIMIT 1`, [id]);
   const row = rows[0];
   const isCreator = row?.created_by === user?.id;
   const isAssignee = row?.assigned_to === user?.id;
-  const isInspectionViewer = canViewInspectionQueue(user) && Boolean(row?.inspection_request_id);
+  const isInspectionViewer =
+    canViewInspectionQueue(user) &&
+    Boolean(
+      row?.inspection_request_id ||
+      (row?.inspection_min_date && row?.inspection_max_date),
+    );
   if (!row || (!isCreator && !isAssignee && !canManageAll(user) && !isInspectionViewer)) return null;
   let mapped = mapRequestRow(row);
 
@@ -1080,7 +1549,13 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
   if (!equipment.length) throw createAppError("No hay equipos registrados para solicitar disponibilidad", {
     code: "EMPTY_EQUIPMENT_LIST",
   });
-  assertChecklistReady(request, "start_availability");
+  // Permite validar checklist con el correo/notas que ACP está ingresando en esta misma acción.
+  const requestForChecklist = {
+    ...request,
+    provider_email: providerEmail || request.provider_email,
+    notes: notes || request.notes,
+  };
+  assertChecklistReady(requestForChecklist, "start_availability");
 
   const equipmentList = equipment
     .map((item) => {
@@ -1129,6 +1604,11 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
       RETURNING *`,
     [providerEmail, notes || request.notes || null, STATUS.WAITING_PROVIDER, emailFileId, id],
   );
+  await upsertProviderContact({
+    email: providerEmail,
+    user,
+    markUsed: true,
+  });
 
   return mapRequestRow(rows[0]);
 }
@@ -1531,11 +2011,47 @@ async function submitSignedProformaWithInspection({
   });
 
   const inspectionId = inspectionWithActa?.request?.id || inspectionRequest?.request?.id;
+  const inspectionActaFileId =
+    inspectionWithActa?.document?.pdfId ||
+    inspectionWithActa?.document?.id ||
+    inspectionRequest?.document?.pdfId ||
+    inspectionRequest?.document?.id ||
+    null;
+  const inspectionActaLink =
+    inspectionWithActa?.document?.pdfLink ||
+    inspectionWithActa?.document?.link ||
+    inspectionRequest?.document?.pdfLink ||
+    inspectionRequest?.document?.link ||
+    null;
 
   if (inspectionId) {
+    const mergedExtra = mergeExtra(request?.extra, {
+      inspection_request_id: inspectionId,
+      inspection_acta_file_id: inspectionActaFileId,
+      inspection_acta_link: inspectionActaLink,
+      inspection_acta_generated_at: new Date().toISOString(),
+    });
     await db.query(
-      `UPDATE equipment_purchase_requests SET inspection_request_id = $1, updated_at = now() WHERE id = $2`,
-      [inspectionId, id],
+      `UPDATE equipment_purchase_requests
+          SET inspection_request_id = $1,
+              inspection_proposed_date = NULL,
+              inspection_proposed_notes = NULL,
+              inspection_proposed_at = NULL,
+              inspection_proposed_by = NULL,
+              inspection_proposed_by_email = NULL,
+              inspection_coordination_status = 'pending_proposal',
+              inspection_review_notes = NULL,
+              inspection_reviewed_at = NULL,
+              inspection_reviewed_by = NULL,
+              inspection_reviewed_by_email = NULL,
+              inspection_scheduled_date = NULL,
+              inspection_coordinated_at = NULL,
+              inspection_coordinated_by = NULL,
+              inspection_coordinated_by_email = NULL,
+              extra = $2::jsonb,
+              updated_at = now()
+        WHERE id = $3`,
+      [inspectionId, JSON.stringify(mergedExtra), id],
     );
 
     if (signedResult?.signed_proforma_file_id) {
@@ -1550,15 +2066,15 @@ async function submitSignedProformaWithInspection({
   try {
     await notifyUsers({
       userIds: [signedResult?.created_by, signedResult?.assigned_to],
-      title: "Inspecci?n creada",
-      message: `Se gener? la inspecci?n para ${signedResult?.client_name || "cliente"}.`,
+      title: "Inspeccion creada",
+      message: `Se genero la inspeccion para ${signedResult?.client_name || "cliente"}.`,
       type: "info",
       source: "equipment_purchases",
       priority: 1,
       meta: { request_id: signedResult?.id, inspection_id: inspectionId || null },
     });
   } catch (notifyError) {
-    logger.warn({ notifyError, requestId: signedResult?.id }, "No se pudieron enviar notificaciones de inspecci?n");
+    logger.warn({ notifyError, requestId: signedResult?.id }, "No se pudieron enviar notificaciones de inspeccion");
   }
 
   try {
@@ -1587,6 +2103,185 @@ async function submitSignedProformaWithInspection({
   }
 
   return { purchase_request: signedResult, inspection_request: inspectionWithActa };
+}
+
+async function requestInspectionEnvironment({
+  id,
+  user,
+  inspection_min_date,
+  inspection_max_date,
+  includes_starter_kit,
+  expected_updated_at,
+}) {
+  await ensureTables();
+  if (!inspection_min_date || !inspection_max_date) {
+    throw createAppError("Las fechas de inspección mínima y máxima son obligatorias", {
+      code: "INSPECTION_WINDOW_REQUIRED",
+    });
+  }
+
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "request_inspection");
+  assertChecklistReady(request, "request_inspection");
+
+  let inspectionId = request.inspection_request_id || null;
+  let inspectionActaFileId = request.extra?.inspection_acta_file_id || null;
+  let inspectionActaLink = request.extra?.inspection_acta_link || null;
+  let inspectionWithActa = null;
+
+  if (!inspectionId) {
+    const clientInfo = await getClientDetails(request.client_id);
+    const payload = buildInspectionPayload({
+      request,
+      clientInfo,
+      inspection_min_date,
+      inspection_max_date,
+      includes_starter_kit,
+    });
+
+    const inspectionRequest = await createServiceRequest({
+      requester_id: user.id,
+      requester_email: user.email,
+      requester_name: user.fullname || user.name || null,
+      request_type_id: "F.ST-20",
+      payload,
+    });
+
+    inspectionWithActa = await ensureActaForInspection({
+      inspectionRequest,
+      user,
+    });
+
+    inspectionId = inspectionWithActa?.request?.id || inspectionRequest?.request?.id || null;
+    inspectionActaFileId =
+      inspectionWithActa?.document?.pdfId ||
+      inspectionWithActa?.document?.id ||
+      inspectionRequest?.document?.pdfId ||
+      inspectionRequest?.document?.id ||
+      null;
+    inspectionActaLink =
+      inspectionWithActa?.document?.pdfLink ||
+      inspectionWithActa?.document?.link ||
+      inspectionRequest?.document?.pdfLink ||
+      inspectionRequest?.document?.link ||
+      null;
+
+    if (request?.signed_proforma_file_id && inspectionId) {
+      await addDriveAttachment({
+        request_id: inspectionId,
+        drive_file_id: request.signed_proforma_file_id,
+        title: "Proforma firmada",
+      });
+    }
+  } else if (!inspectionActaFileId || !inspectionActaLink) {
+    try {
+      const regeneratedActa = await generateActa(inspectionId, user.id, "inspection");
+      await updateRequestStatus(inspectionId, "acta_generada");
+      inspectionActaFileId =
+        regeneratedActa?.pdfId ||
+        regeneratedActa?.id ||
+        inspectionActaFileId ||
+        null;
+      inspectionActaLink =
+        regeneratedActa?.pdfLink ||
+        regeneratedActa?.link ||
+        inspectionActaLink ||
+        null;
+    } catch (actaError) {
+      logger.error(
+        { actaError, purchaseRequestId: id, inspectionRequestId: inspectionId },
+        "No se pudo regenerar F.ST-20 para solicitud de inspeccion existente",
+      );
+    }
+  }
+
+  const mergedExtra = mergeExtra(request?.extra, {
+    inspection_acta_file_id: inspectionActaFileId,
+    inspection_acta_link: inspectionActaLink,
+    inspection_acta_generated_at: new Date().toISOString(),
+  });
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET inspection_request_id = COALESCE($1, inspection_request_id),
+            inspection_min_date = $2,
+            inspection_max_date = $3,
+            includes_starter_kit = $4,
+            inspection_recorded_at = now(),
+            inspection_proposed_date = NULL,
+            inspection_proposed_notes = NULL,
+            inspection_proposed_at = NULL,
+            inspection_proposed_by = NULL,
+            inspection_proposed_by_email = NULL,
+            inspection_coordination_status = 'pending_proposal',
+            inspection_review_notes = NULL,
+            inspection_reviewed_at = NULL,
+            inspection_reviewed_by = NULL,
+            inspection_reviewed_by_email = NULL,
+            inspection_scheduled_date = NULL,
+            inspection_coordinated_at = NULL,
+            inspection_coordinated_by = NULL,
+            inspection_coordinated_by_email = NULL,
+            extra = $5::jsonb,
+            updated_at = now()
+      WHERE id = $6
+      RETURNING *`,
+    [
+      inspectionId,
+      inspection_min_date,
+      inspection_max_date,
+      includes_starter_kit === true,
+      JSON.stringify(mergedExtra),
+      id,
+    ],
+  );
+
+  const updated = rows[0];
+  try {
+    await notifyUsers({
+      userIds: [updated?.created_by, updated?.assigned_to],
+      title: "Inspección de ambiente solicitada",
+      message: `Se registró solicitud de inspección para ${updated?.client_name || "cliente"}.`,
+      type: "info",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated?.id, inspection_id: inspectionId || null },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated?.id }, "No se pudieron enviar notificaciones de solicitud de inspección");
+  }
+
+  try {
+    const autoBusinessCaseId = await ensureAutoBusinessCaseForPurchase({
+      purchaseRequest: updated,
+      user,
+      inspectionId,
+    });
+    if (autoBusinessCaseId) {
+      await notifyUsers({
+        userIds: [updated?.created_by, updated?.assigned_to],
+        title: "Business Case creado automáticamente",
+        message: `Se creó el BC ${autoBusinessCaseId} para ${updated?.client_name || "cliente"}.`,
+        type: "task",
+        source: "equipment_purchases",
+        priority: 1,
+        meta: {
+          request_id: updated?.id,
+          business_case_id: autoBusinessCaseId,
+          auto_created: true,
+        },
+      });
+    }
+  } catch (bcError) {
+    logger.error({ bcError, requestId: updated?.id }, "No se pudo crear BC automático al solicitar inspección");
+  }
+
+  return {
+    purchase_request: mapRequestRow(updated),
+    inspection_request: inspectionWithActa,
+  };
 }
 
 async function coordinateInspectionDate({ id, user, inspection_date, notes, expected_updated_at }) {
@@ -1641,25 +2336,130 @@ async function coordinateInspectionDate({ id, user, inspection_date, notes, expe
     });
   }
 
+  const conflictRows = await listTechnicalSchedule({
+    from: inspection_date,
+    to: inspection_date,
+    excludePublicRequestId: id,
+    excludeInspectionRequestId: request.inspection_request_id || null,
+  });
+  if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
+    throw createAppError(
+      "El cronograma técnico está lleno para esa fecha. Selecciona otro día.",
+      {
+        status: 409,
+        code: "TECHNICAL_SCHEDULE_FULL",
+        details: {
+          date: inspection_date,
+          capacity: TECHNICAL_DAILY_CAPACITY,
+          conflicts_count: conflictRows.length,
+          conflicts: conflictRows.map((item) => ({
+            source_type: item.source_type,
+            summary: item.summary,
+          })),
+        },
+      },
+    );
+  }
+
+  if (!request.inspection_request_id) {
+    throw createAppError("No existe solicitud de inspección asociada para coordinar la fecha", {
+      status: 409,
+      code: "INSPECTION_REQUEST_REQUIRED",
+    });
+  }
+
+  const extraBase = request?.extra || {};
+  const mergedExtra = mergeExtra(extraBase, {
+    inspection_request_id: request.inspection_request_id,
+    inspection_coordination_confirmed_at: new Date().toISOString(),
+  });
+
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
-        SET inspection_scheduled_date = $1,
-            inspection_coordination_notes = $2,
+        SET inspection_proposed_date = $1,
+            inspection_proposed_notes = $2,
+            inspection_proposed_at = now(),
+            inspection_proposed_by = $3,
+            inspection_proposed_by_email = $4,
+            inspection_coordination_status = 'accepted',
+            inspection_scheduled_date = $1,
             inspection_coordinated_at = now(),
             inspection_coordinated_by = $3,
             inspection_coordinated_by_email = $4,
+            inspection_review_notes = NULL,
+            inspection_reviewed_at = now(),
+            inspection_reviewed_by = $3,
+            inspection_reviewed_by_email = $4,
+            inspection_coordination_notes = $2,
+            extra = $5::jsonb,
             updated_at = now()
-      WHERE id = $5
+      WHERE id = $6
       RETURNING *`,
-    [inspection_date, notes || null, user?.id || null, user?.email || null, id],
+    [
+      inspection_date,
+      notes || null,
+      user?.id || null,
+      user?.email || null,
+      JSON.stringify(mergedExtra),
+      id,
+    ],
   );
   const updated = mapRequestRow(rows[0]);
+
+  try {
+    await db.query(
+      `UPDATE requests
+          SET payload = jsonb_set(
+            COALESCE(payload, '{}'::jsonb),
+            '{fecha_instalacion}',
+            to_jsonb($1::text),
+            true
+          ),
+          updated_at = now()
+        WHERE id = $2`,
+      [inspection_date, request.inspection_request_id],
+    );
+    const regeneratedActa = await generateActa(request.inspection_request_id, user.id, "inspection");
+    await updateRequestStatus(request.inspection_request_id, "acta_generada");
+
+    if (regeneratedActa) {
+      const mergedAfterActa = mergeExtra(updated?.extra, {
+        inspection_acta_file_id:
+          regeneratedActa?.pdfId ||
+          regeneratedActa?.id ||
+          updated?.extra?.inspection_acta_file_id ||
+          null,
+        inspection_acta_link:
+          regeneratedActa?.pdfLink ||
+          regeneratedActa?.link ||
+          updated?.extra?.inspection_acta_link ||
+          null,
+        inspection_acta_generated_at: new Date().toISOString(),
+      });
+      const actaUpdateRes = await db.query(
+        `UPDATE equipment_purchase_requests
+            SET extra = $1::jsonb,
+                updated_at = now()
+          WHERE id = $2
+          RETURNING *`,
+        [JSON.stringify(mergedAfterActa), id],
+      );
+      if (actaUpdateRes.rows?.[0]) {
+        Object.assign(updated, mapRequestRow(actaUpdateRes.rows[0]));
+      }
+    }
+  } catch (actaError) {
+    logger.error(
+      { actaError, purchaseRequestId: id, inspectionRequestId: request.inspection_request_id },
+      "No se pudo regenerar/actualizar el acta al coordinar inspeccion",
+    );
+  }
 
   try {
     await notifyUsers({
       userIds: [updated.created_by, updated.assigned_to],
       title: "Fecha de inspección coordinada",
-      message: `Se coordinó inspección para ${updated.client_name || "cliente"} el ${inspection_date}.`,
+      message: `Jefe Técnico coordinó inspección para ${updated.client_name || "cliente"} el ${inspection_date}.`,
       type: "task",
       source: "equipment_purchases",
       priority: 1,
@@ -1667,6 +2467,168 @@ async function coordinateInspectionDate({ id, user, inspection_date, notes, expe
     });
   } catch (notifyError) {
     logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de coordinación");
+  }
+
+  return updated;
+}
+
+async function reviewInspectionDateProposal({ id, user, decision, review_notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canReviewInspectionCoordination(user)) {
+    throw createAppError("No autorizado para revisar la coordinación de inspección", {
+      status: 403,
+      code: "FORBIDDEN_COORDINATION_REVIEW",
+    });
+  }
+
+  const normalizedDecision = String(decision || "").toLowerCase();
+  if (!["accept", "reject"].includes(normalizedDecision)) {
+    throw createAppError("Decisión inválida. Usa 'accept' o 'reject'.", {
+      status: 400,
+      code: "INVALID_REVIEW_DECISION",
+    });
+  }
+
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "coordinate_inspection_date");
+  if (!request.inspection_request_id) {
+    throw createAppError("No existe solicitud de inspección asociada", {
+      status: 409,
+      code: "INSPECTION_REQUEST_REQUIRED",
+    });
+  }
+  if (!request.inspection_proposed_date) {
+    throw createAppError("No hay una fecha propuesta para revisar", {
+      status: 409,
+      code: "INSPECTION_PROPOSAL_REQUIRED",
+    });
+  }
+
+  const proposalDate = String(request.inspection_proposed_date).slice(0, 10);
+
+  if (normalizedDecision === "reject") {
+    const { rows } = await db.query(
+      `UPDATE equipment_purchase_requests
+          SET inspection_coordination_status = 'rejected',
+              inspection_review_notes = $1,
+              inspection_reviewed_at = now(),
+              inspection_reviewed_by = $2,
+              inspection_reviewed_by_email = $3,
+              inspection_scheduled_date = NULL,
+              inspection_coordinated_at = NULL,
+              inspection_coordinated_by = NULL,
+              inspection_coordinated_by_email = NULL,
+              updated_at = now()
+        WHERE id = $4
+        RETURNING *`,
+      [review_notes || null, user.id || null, user.email || null, id],
+    );
+    return mapRequestRow(rows[0]);
+  }
+
+  const conflictRows = await listTechnicalSchedule({
+    from: proposalDate,
+    to: proposalDate,
+    excludePublicRequestId: id,
+    excludeInspectionRequestId: request.inspection_request_id || null,
+  });
+  if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
+    throw createAppError("El cronograma técnico está lleno para esa fecha.", {
+      status: 409,
+      code: "TECHNICAL_SCHEDULE_FULL",
+      details: {
+        date: proposalDate,
+        capacity: TECHNICAL_DAILY_CAPACITY,
+        conflicts_count: conflictRows.length,
+        conflicts: conflictRows.map((item) => ({
+          source_type: item.source_type,
+          summary: item.summary,
+        })),
+      },
+    });
+  }
+
+  let regeneratedActa = null;
+  try {
+    await db.query(
+      `UPDATE requests
+          SET payload = jsonb_set(
+            COALESCE(payload, '{}'::jsonb),
+            '{fecha_instalacion}',
+            to_jsonb($1::text),
+            true
+          ),
+          updated_at = now()
+        WHERE id = $2`,
+      [proposalDate, request.inspection_request_id],
+    );
+    regeneratedActa = await generateActa(request.inspection_request_id, user.id, "inspection");
+    await updateRequestStatus(request.inspection_request_id, "acta_generada");
+  } catch (actaError) {
+    logger.error(
+      { actaError, purchaseRequestId: id, inspectionRequestId: request.inspection_request_id },
+      "No se pudo regenerar/actualizar el acta al aprobar inspección",
+    );
+  }
+
+  const extraBase = request?.extra || {};
+  const mergedExtra = mergeExtra(extraBase, {
+    inspection_request_id: request.inspection_request_id,
+    inspection_acta_file_id:
+      regeneratedActa?.pdfId ||
+      regeneratedActa?.id ||
+      extraBase?.inspection_acta_file_id ||
+      null,
+    inspection_acta_link:
+      regeneratedActa?.pdfLink ||
+      regeneratedActa?.link ||
+      extraBase?.inspection_acta_link ||
+      null,
+    inspection_acta_generated_at: new Date().toISOString(),
+  });
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET inspection_scheduled_date = $1,
+            inspection_coordination_notes = COALESCE($2, inspection_coordination_notes),
+            inspection_coordination_status = 'accepted',
+            inspection_review_notes = $3,
+            inspection_reviewed_at = now(),
+            inspection_reviewed_by = $4,
+            inspection_reviewed_by_email = $5,
+            inspection_coordinated_at = now(),
+            inspection_coordinated_by = $4,
+            inspection_coordinated_by_email = $5,
+            extra = $6::jsonb,
+            updated_at = now()
+      WHERE id = $7
+      RETURNING *`,
+    [
+      proposalDate,
+      request.inspection_proposed_notes || null,
+      review_notes || null,
+      user.id || null,
+      user.email || null,
+      JSON.stringify(mergedExtra),
+      id,
+    ],
+  );
+  const updated = mapRequestRow(rows[0]);
+
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: "Fecha de inspección aprobada",
+      message: `Jefe Técnico confirmó inspección para ${updated.client_name || "cliente"} el ${proposalDate}.`,
+      type: "task",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id, inspection_date: proposalDate },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de aprobación");
   }
 
   return updated;
@@ -1680,6 +2642,43 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   assertActionStatus(request, "upload_contract");
   assertChecklistReady(request, "upload_contract");
 
+  const autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  if (!autoBusinessCaseId) {
+    throw createAppError("No se encontró el Business Case automático asociado", {
+      status: 409,
+      code: "BUSINESS_CASE_REQUIRED",
+    });
+  }
+
+  const bcRes = await db.query(
+    `SELECT id, bc_stage
+       FROM equipment_purchase_requests
+      WHERE id = $1
+        AND COALESCE(request_type, 'purchase') = 'business_case'
+      LIMIT 1`,
+    [autoBusinessCaseId],
+  );
+  const bc = bcRes.rows[0] || null;
+  if (!bc) {
+    throw createAppError("El Business Case asociado no existe o no es válido", {
+      status: 409,
+      code: "BUSINESS_CASE_INVALID",
+    });
+  }
+  if (String(bc.bc_stage || "").toLowerCase() !== "factible") {
+    throw createAppError(
+      "No puedes subir contrato: el Business Case aún no está resuelto como factible",
+      {
+        status: 409,
+        code: "BUSINESS_CASE_NOT_READY",
+        details: {
+          business_case_id: autoBusinessCaseId,
+          bc_stage: bc.bc_stage || null,
+        },
+      },
+    );
+  }
+
   const fileId = await uploadDocument(file, request.drive_folder_id, "contrato");
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
@@ -1689,7 +2688,7 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
             updated_at = now()
       WHERE id = $3
       RETURNING *`,
-    [fileId, STATUS.COMPLETED, id],
+    [fileId, STATUS.CONTRACT_AVAILABLE, id],
   );
 
   const completed = rows[0];
@@ -1699,7 +2698,7 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
     await notifyUsers({
       userIds: [completed.created_by, completed.assigned_to, gerencia?.id],
       title: "Contrato subido",
-      message: `Contrato subido para ${completed.client_name || "cliente"}.`,
+      message: `Contrato subido para ${completed.client_name || "cliente"}. Solicita fechas de entrega para continuar.`,
       type: "info",
       source: "equipment_purchases",
       priority: 2,
@@ -1709,7 +2708,7 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
     logger.warn({ notifyError, requestId: completed.id }, "No se pudieron enviar notificaciones de contrato");
   }
 
-  // Enviar notificación automática de equipo disponible
+  // Enviar notificación automática de contrato disponible para entrega
   setImmediate(async () => {
     try {
       const acceptedItems = getAcceptedItems(completed);
@@ -1753,6 +2752,217 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   });
 
   return completed;
+}
+
+async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede solicitar fechas de entrega", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "request_delivery_dates");
+  assertChecklistReady(request, "request_delivery_dates");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            delivery_dates_requested_at = now(),
+            delivery_dates_requested_by = $2,
+            delivery_dates_requested_by_email = $3,
+            delivery_notes = COALESCE($4, delivery_notes),
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.DELIVERY_DATES_REQUESTED, user?.id || null, user?.email || null, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Fechas de entrega solicitadas",
+    message: `Se solicitó registrar fechas de entrega para ${updated.client_name || "el cliente"}.`,
+    meta: { status: updated.status },
+  });
+  return updated;
+}
+
+async function submitDeliveryDates({
+  id,
+  user,
+  delivery_start_at,
+  delivery_end_at,
+  notes,
+  expected_updated_at,
+}) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede registrar fechas de entrega", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  if (!delivery_start_at || !delivery_end_at) {
+    throw createAppError("Debes definir fecha inicio y fin de entrega", {
+      status: 400,
+      code: "DELIVERY_DATES_REQUIRED",
+    });
+  }
+  const start = new Date(`${delivery_start_at}T00:00:00`);
+  const end = new Date(`${delivery_end_at}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw createAppError("Formato de fecha inválido para entrega", {
+      status: 400,
+      code: "INVALID_DATE_FORMAT",
+    });
+  }
+  if (end.getTime() < start.getTime()) {
+    throw createAppError("La fecha fin no puede ser menor que la fecha inicio", {
+      status: 409,
+      code: "DELIVERY_DATES_INVALID_RANGE",
+    });
+  }
+
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "submit_delivery_dates");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            delivery_start_at = $2,
+            delivery_end_at = $3,
+            delivery_notes = COALESCE($4, delivery_notes),
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.DELIVERY_DATES_SUBMITTED, delivery_start_at, delivery_end_at, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Fechas de entrega registradas",
+    message: `Entrega planificada del ${updated.delivery_start_at || "-"} al ${updated.delivery_end_at || "-"}.`,
+    meta: {
+      status: updated.status,
+      delivery_start_at: updated.delivery_start_at || null,
+      delivery_end_at: updated.delivery_end_at || null,
+    },
+  });
+  return updated;
+}
+
+async function markEquipmentArrived({ id, user, notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede marcar arribo de equipo", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "mark_equipment_arrived");
+  assertChecklistReady(request, "mark_equipment_arrived");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            equipment_arrived_at = now(),
+            equipment_arrived_by = $2,
+            equipment_arrived_by_email = $3,
+            delivery_notes = COALESCE($4, delivery_notes),
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.WAITING_DISPATCH, user?.id || null, user?.email || null, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Equipo arribado",
+    message: `Se confirmó arribo de equipo para ${updated.client_name || "el cliente"}.`,
+    meta: { status: updated.status, equipment_arrived_at: updated.equipment_arrived_at || null },
+  });
+  return updated;
+}
+
+async function markDispatchReady({ id, user, notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede marcar despacho listo", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "mark_dispatch_ready");
+  assertChecklistReady(request, "mark_dispatch_ready");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            dispatch_ready_at = now(),
+            dispatch_ready_by = $2,
+            dispatch_ready_by_email = $3,
+            delivery_notes = COALESCE($4, delivery_notes),
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.DISPATCH_READY, user?.id || null, user?.email || null, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Despacho listo",
+    message: `El despacho está listo para ${updated.client_name || "el cliente"}.`,
+    meta: { status: updated.status, dispatch_ready_at: updated.dispatch_ready_at || null },
+  });
+  return updated;
+}
+
+async function completeDelivery({ id, user, notes, expected_updated_at }) {
+  await ensureTables();
+  if (!canManageDelivery(user)) {
+    throw createAppError("Tu rol no puede completar la entrega", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "complete_delivery");
+  assertChecklistReady(request, "complete_delivery");
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            delivered_at = now(),
+            delivered_by = $2,
+            delivered_by_email = $3,
+            delivery_confirmed_notes = COALESCE($4, delivery_confirmed_notes),
+            updated_at = now()
+      WHERE id = $5
+      RETURNING *`,
+    [STATUS.COMPLETED, user?.id || null, user?.email || null, notes || null, id],
+  );
+  const updated = mapRequestRow(rows[0]);
+  await notifyDeliveryStage({
+    request: updated,
+    title: "Entrega completada",
+    message: `Se completó la entrega para ${updated.client_name || "el cliente"}.`,
+    meta: { status: updated.status, delivered_at: updated.delivered_at || null },
+    priority: 2,
+  });
+  return updated;
 }
 
 async function renewReservation({ id, user, expected_updated_at }) {
@@ -1917,6 +3127,8 @@ module.exports = {
   getApprovedClients,
   getAcpCommercialUsers,
   getEquipmentCatalog,
+  listProviderContacts,
+  saveProviderContact,
   listByUser,
   getById,
   createPurchaseRequest,
@@ -1927,11 +3139,19 @@ module.exports = {
   reserveEquipment,
   uploadSignedProforma,
   submitSignedProformaWithInspection,
+  requestInspectionEnvironment,
   coordinateInspectionDate,
+  reviewInspectionDateProposal,
   uploadContract,
+  requestDeliveryDates,
+  submitDeliveryDates,
+  markEquipmentArrived,
+  markDispatchReady,
+  completeDelivery,
   renewReservation,
   cancelOrder,
   updateChecklistItem,
   getStats,
+  getTechnicalScheduleCalendar,
   STATUS,
 };

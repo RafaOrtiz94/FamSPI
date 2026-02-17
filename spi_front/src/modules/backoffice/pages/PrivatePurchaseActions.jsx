@@ -188,6 +188,7 @@ const BackofficeActions = ({
                     <Button
                         size="sm"
                         variant="warning"
+                        disabled={!request.inspection_scheduled_date}
                         onClick={() => onResubmitToGerencia(request.id)}
                     >
                         Enviar a gerencia
@@ -195,13 +196,21 @@ const BackofficeActions = ({
                 );
             }
             return (
-                <Button
-                    size="sm"
-                    variant="success"
-                    onClick={() => onUploadContract(request.id)}
-                >
-                    Subir contrato
-                </Button>
+                <div className="space-y-1">
+                    <Button
+                        size="sm"
+                        variant="success"
+                        disabled={!request.inspection_scheduled_date}
+                        onClick={() => onUploadContract(request.id)}
+                    >
+                        Subir contrato
+                    </Button>
+                    {!request.inspection_scheduled_date && (
+                        <span className="text-[11px] text-amber-600">
+                            Coordina la fecha de inspección antes de contrato.
+                        </span>
+                    )}
+                </div>
             );
         case "client_registration_requested":
             return null;
@@ -344,7 +353,7 @@ const CommercialActions = ({
         case "client_registered":
             return (
                 <Button size="sm" variant="primary" onClick={() => onOpenInspectionModal(request.id)}>
-                    Solicitar inspeccion de ambiente
+                    Generar inspeccion automatica
                 </Button>
             );
         case "client_registration_requested":

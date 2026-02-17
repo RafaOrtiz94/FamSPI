@@ -4,7 +4,7 @@
  * Domain-driven state management for private purchase workflow.
  * Enforces canonical state transitions and maintains audit trail.
  *
- * Supports both "Compra Directa" and "Comodato" flows.
+ * Supports "Venta Directa", "Alquiler" and "Comodato" flows.
  */
 
 const db = require("../../config/db");
@@ -377,8 +377,6 @@ class PrivatePurchaseStateMachine {
         if (!rows.length) return recipients;
 
         const purchase = rows[0];
-        const clientData = purchase.client_snapshot || {};
-        const isComodato = purchase.offer_kind === 'prestamo';
         let assignedTechnicianId = purchase.delivery_act_assigned_to_user_id || null;
         if (!assignedTechnicianId && purchase.delivery_act_assigned_to_email) {
             try {

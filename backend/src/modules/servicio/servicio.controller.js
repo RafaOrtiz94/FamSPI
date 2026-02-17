@@ -15,6 +15,131 @@ const auth = new google.auth.GoogleAuth({
 });
 const drive = google.drive({ version: "v3", auth });
 const docs = google.docs({ version: "v1", auth });
+const WORKFLOW_SOURCE_TYPES = new Set(["public_purchase", "private_purchase"]);
+
+const normalizeWorkflowSourceType = (value) => String(value || "").trim().toLowerCase();
+const normalizeWorkflowSourceId = (value) => String(value || "").trim();
+const isValidWorkflowSourceType = (value) => WORKFLOW_SOURCE_TYPES.has(normalizeWorkflowSourceType(value));
+const clampLimit = (value, { min = 1, max = 200, fallback = 50 } = {}) => {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+};
+
+const ensureWorkflowDocumentsTable = async () => {
+  await db.query(`CREATE SCHEMA IF NOT EXISTS servicio`);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS servicio.workflow_documents (
+      id BIGSERIAL PRIMARY KEY,
+      source_type TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      document_code TEXT NOT NULL,
+      stage_key TEXT,
+      drive_file_id TEXT,
+      drive_folder_id TEXT,
+      request_id INTEGER,
+      created_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      created_by_email TEXT,
+      metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_workflow_documents_source
+      ON servicio.workflow_documents (source_type, source_id, created_at DESC)`,
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_workflow_documents_document_code
+      ON servicio.workflow_documents (document_code, created_at DESC)`,
+  );
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_workflow_documents_file
+      ON servicio.workflow_documents (source_type, source_id, document_code, COALESCE(drive_file_id, ''))`,
+  );
+};
+
+const trackWorkflowDocument = async (req, body, defaults = {}) => {
+  try {
+    const ok = Boolean(body?.ok);
+    const driveFileId = body?.pdfId || body?.fileId || null;
+    const driveFolderId = body?.driveFolderId || body?.folderId || null;
+    if (!ok || !driveFileId) return;
+
+    const sourceTypeRaw = req.body?.source_type || req.body?.sourceType || defaults.source_type || null;
+    const sourceIdRaw = req.body?.source_id || req.body?.sourceId || defaults.source_id || null;
+    const sourceType = sourceTypeRaw ? normalizeWorkflowSourceType(sourceTypeRaw) : null;
+    const sourceId = sourceIdRaw ? normalizeWorkflowSourceId(sourceIdRaw) : null;
+    if (!sourceType || !sourceId || !isValidWorkflowSourceType(sourceType)) return;
+
+    await ensureWorkflowDocumentsTable();
+    const metadata = JSON.stringify({
+      message: body?.message || null,
+      payload_summary: {
+        orden: req.body?.ORDNumero || req.body?.Num_Orden || null,
+        cliente: req.body?.ORDCliente || req.body?.Cliente || req.body?.cliente || null,
+        equipo: req.body?.ORDEquipo || req.body?.Equipo || req.body?.equipo || null,
+      },
+      tracked_at: new Date().toISOString(),
+    });
+    const requestId = Number.isFinite(Number(req.body?.request_id)) ? Number(req.body?.request_id) : null;
+
+    const { rows: existing } = await db.query(
+      `SELECT id
+         FROM servicio.workflow_documents
+        WHERE source_type = $1
+          AND source_id = $2
+          AND document_code = $3
+          AND COALESCE(drive_file_id, '') = COALESCE($4, '')
+        LIMIT 1`,
+      [sourceType, sourceId, defaults.document_code || "DOC", driveFileId],
+    );
+
+    if (existing.length > 0) {
+      await db.query(
+        `UPDATE servicio.workflow_documents
+            SET stage_key = $1,
+                drive_folder_id = $2,
+                request_id = COALESCE($3, request_id),
+                metadata = $4::jsonb,
+                updated_at = now()
+          WHERE id = $5`,
+        [defaults.stage_key || null, driveFolderId, requestId, metadata, existing[0].id],
+      );
+    } else {
+      await db.query(
+        `INSERT INTO servicio.workflow_documents (
+            source_type, source_id, document_code, stage_key, drive_file_id, drive_folder_id,
+            request_id, created_by, created_by_email, metadata, created_at, updated_at
+          )
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,now(),now())`,
+        [
+          sourceType,
+          sourceId,
+          defaults.document_code || "DOC",
+          defaults.stage_key || null,
+          driveFileId,
+          driveFolderId,
+          requestId,
+          req.user?.id || null,
+          req.user?.email || null,
+          metadata,
+        ],
+      );
+    }
+  } catch (error) {
+    console.warn("⚠️ No se pudo registrar documento de workflow ST-01-01:", error?.message || error);
+  }
+};
+
+const withWorkflowTracking = (handler, defaults = {}) => async (req, res) => {
+  const originalJson = res.json.bind(res);
+  res.json = (body) => {
+    trackWorkflowDocument(req, body, defaults);
+    return originalJson(body);
+  };
+  return handler(req, res);
+};
 
 // ===============================================================
 // 🧠 CAPACITACIONES
@@ -190,6 +315,99 @@ const updateDisponibilidadTecnico = async (req, res) => {
 };
 
 // ===============================================================
+// 📆 CRONOGRAMA DE ACTIVIDADES TÉCNICAS
+// ===============================================================
+const ensureTechnicalActivitiesTable = async () => {
+  await db.query(`CREATE SCHEMA IF NOT EXISTS servicio`);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS servicio.cronograma_actividades_tecnicas (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      activity_date DATE NOT NULL,
+      title TEXT NOT NULL,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'programado',
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT,
+      created_by INTEGER REFERENCES public.users(id) ON DELETE SET NULL,
+      created_by_email TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_cronograma_actividades_tecnicas_activity_date
+      ON servicio.cronograma_actividades_tecnicas (activity_date, status)`,
+  );
+};
+
+const listActividadesTecnicas = async (req, res) => {
+  try {
+    await ensureTechnicalActivitiesTable();
+    const from = String(req.query?.from || "").slice(0, 10);
+    const to = String(req.query?.to || "").slice(0, 10);
+    if (!from || !to) {
+      return res.status(400).json({ ok: false, error: "Parámetros from y to son obligatorios (YYYY-MM-DD)" });
+    }
+
+    const { rows } = await db.query(
+      `SELECT
+          a.id,
+          a.user_id,
+          COALESCE(u.fullname, u.name, u.email) AS user_name,
+          a.activity_date,
+          a.title,
+          a.notes,
+          a.status,
+          a.source_type,
+          a.source_id,
+          a.created_by,
+          a.created_by_email,
+          a.created_at,
+          a.updated_at
+       FROM servicio.cronograma_actividades_tecnicas a
+       LEFT JOIN public.users u ON u.id = a.user_id
+       WHERE a.activity_date BETWEEN $1::date AND $2::date
+       ORDER BY a.activity_date ASC, a.created_at ASC`,
+      [from, to],
+    );
+    res.json({ ok: true, rows });
+  } catch (err) {
+    console.error("❌ Error listando actividades técnicas:", err);
+    res.status(500).json({ ok: false, error: "Error al listar actividades técnicas" });
+  }
+};
+
+const createActividadTecnica = async (req, res) => {
+  try {
+    await ensureTechnicalActivitiesTable();
+    const activityDate = String(req.body?.activity_date || "").slice(0, 10);
+    const title = String(req.body?.title || "").trim();
+    const notes = String(req.body?.notes || "").trim() || null;
+    const status = String(req.body?.status || "programado").toLowerCase();
+    const userIdRaw = req.body?.user_id;
+    const userId = Number.isFinite(Number(userIdRaw)) ? Number(userIdRaw) : req.user?.id || null;
+
+    if (!activityDate || !title) {
+      return res.status(400).json({ ok: false, error: "activity_date y title son obligatorios" });
+    }
+
+    const { rows } = await db.query(
+      `INSERT INTO servicio.cronograma_actividades_tecnicas (
+          user_id, activity_date, title, notes, status, source_type, created_by, created_by_email
+        )
+        VALUES ($1, $2::date, $3, $4, $5, 'manual', $6, $7)
+        RETURNING *`,
+      [userId, activityDate, title, notes, status, req.user?.id || null, req.user?.email || null],
+    );
+    res.status(201).json({ ok: true, row: rows[0] });
+  } catch (err) {
+    console.error("❌ Error creando actividad técnica:", err);
+    res.status(500).json({ ok: false, error: "Error al crear actividad técnica" });
+  }
+};
+
+// ===============================================================
 // ⚙️ EQUIPOS
 // ===============================================================
 const mapEquipmentRow = (row) => ({
@@ -342,7 +560,7 @@ const createMantenimientoAnual = async (req, res) => {
 // ===============================================================
 // 🧴 DESINFECCIÓN DE INSTRUMENTOS
 // ===============================================================
-const generateDisinfectionPDF = async (req, res) => {
+const generateDisinfectionPDF = withWorkflowTracking(async (req, res) => {
   try {
     console.log("🎯 Controller: Received disinfection PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
@@ -362,12 +580,12 @@ const generateDisinfectionPDF = async (req, res) => {
     console.error("❌ Error generando PDF de desinfección:", err);
     res.status(500).json({ error: "Error generando PDF de desinfección" });
   }
-};
+}, { document_code: "F.ST-02", stage_key: "desinfeccion" });
 
 // ===============================================================
 // 🏫 COORDINACIÓN DE ENTRENAMIENTO
 // ===============================================================
-const generateTrainingCoordinationPDF = async (req, res) => {
+const generateTrainingCoordinationPDF = withWorkflowTracking(async (req, res) => {
   try {
     console.log("🎯 Controller: Received training coordination PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
@@ -391,12 +609,12 @@ const generateTrainingCoordinationPDF = async (req, res) => {
     console.error("❌ Error generando PDF de coordinación de entrenamiento:", err);
     res.status(500).json({ error: "Error generando PDF de coordinación de entrenamiento" });
   }
-};
+}, { document_code: "F.ST-04", stage_key: "entrenamiento_coordinacion" });
 
 // ===============================================================
 // 📝 LISTA DE ASISTENCIA DE ENTRENAMIENTO
 // ===============================================================
-const generateAttendanceListPDF = async (req, res) => {
+const generateAttendanceListPDF = withWorkflowTracking(async (req, res) => {
   try {
     console.log("📝 Controller: Received training attendance list PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
@@ -420,12 +638,12 @@ const generateAttendanceListPDF = async (req, res) => {
     console.error("❌ Error generando PDF de lista de asistencia:", err);
     res.status(500).json({ error: "Error generando PDF de lista de asistencia" });
   }
-};
+}, { document_code: "F.ST-05", stage_key: "entrenamiento_asistencia" });
 
 // ===============================================================
 // 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
 // ===============================================================
-const generateEquipmentVerificationPDF = async (req, res) => {
+const generateEquipmentVerificationPDF = withWorkflowTracking(async (req, res) => {
   try {
     console.log("🔧 Controller: Received equipment verification PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
@@ -451,6 +669,88 @@ const generateEquipmentVerificationPDF = async (req, res) => {
     console.error("❌ Error generando PDF de verificación de equipos:", err);
     res.status(500).json({ error: "Error generando PDF de verificación de equipos" });
   }
+}, { document_code: "F.ST-09", stage_key: "verificacion_equipo_nuevo" });
+
+const listWorkflowDocuments = async (req, res) => {
+  try {
+    await ensureWorkflowDocumentsTable();
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type);
+    const sourceId = normalizeWorkflowSourceId(req.query?.source_id);
+    const limit = clampLimit(req.query?.limit, { fallback: 50, max: 200 });
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!isValidWorkflowSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type inválido" });
+    }
+    const { rows } = await db.query(
+      `SELECT id, source_type, source_id, document_code, stage_key, drive_file_id, drive_folder_id,
+              request_id, created_by, created_by_email, metadata, created_at, updated_at
+         FROM servicio.workflow_documents
+        WHERE source_type = $1
+          AND source_id = $2
+        ORDER BY created_at DESC
+        LIMIT $3`,
+      [sourceType, sourceId, limit],
+    );
+    res.json({ ok: true, source_type: sourceType, source_id: sourceId, limit, rows });
+  } catch (err) {
+    console.error("❌ Error listando documentos de workflow ST-01-01:", err);
+    res.status(500).json({ ok: false, error: "Error al listar documentos de workflow" });
+  }
+};
+
+const listWorkflowDocumentsSummary = async (req, res) => {
+  try {
+    await ensureWorkflowDocumentsTable();
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type);
+    const sourceIdsRaw = String(req.query?.source_ids || "");
+    if (!sourceType || !sourceIdsRaw.trim()) {
+      return res.status(400).json({ ok: false, error: "source_type y source_ids son obligatorios" });
+    }
+    if (!isValidWorkflowSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type inválido" });
+    }
+
+    const sourceIds = Array.from(
+      new Set(
+        sourceIdsRaw
+          .split(",")
+          .map((value) => normalizeWorkflowSourceId(value))
+          .filter(Boolean),
+      ),
+    ).slice(0, 200);
+    if (!sourceIds.length) {
+      return res.status(400).json({ ok: false, error: "source_ids inválido" });
+    }
+
+    const { rows } = await db.query(
+      `
+        SELECT
+          source_id,
+          COUNT(*)::int AS total_documents,
+          MAX(created_at) AS last_document_at,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT document_code), NULL) AS document_codes,
+          ARRAY_REMOVE(ARRAY_AGG(DISTINCT stage_key), NULL) AS stage_keys
+        FROM servicio.workflow_documents
+        WHERE source_type = $1
+          AND source_id = ANY($2::text[])
+        GROUP BY source_id
+        ORDER BY source_id ASC
+      `,
+      [sourceType, sourceIds],
+    );
+
+    res.json({
+      ok: true,
+      source_type: sourceType,
+      count: rows.length,
+      rows,
+    });
+  } catch (err) {
+    console.error("❌ Error listando resumen de documentos workflow ST-01-01:", err);
+    res.status(500).json({ ok: false, error: "Error al listar resumen de workflow" });
+  }
 };
 
 // ===============================================================
@@ -463,6 +763,8 @@ module.exports = {
   deleteCapacitacion,
   getDisponibilidadTecnicos,
   updateDisponibilidadTecnico,
+  listActividadesTecnicas,
+  createActividadTecnica,
   getEquipos,
   createEquipo,
   getMantenimientos,
@@ -472,4 +774,6 @@ module.exports = {
   generateTrainingCoordinationPDF,
   generateAttendanceListPDF,
   generateEquipmentVerificationPDF,
+  listWorkflowDocuments,
+  listWorkflowDocumentsSummary,
 };

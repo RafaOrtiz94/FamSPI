@@ -2,6 +2,8 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { ensureFolder } = require("../../utils/drive");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
+const PrivatePurchaseStateMachine = require("../private-purchases/privatePurchaseStateMachine");
+const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -82,6 +84,243 @@ function mapBusinessCase(row) {
     updated_at: toIso(row.updated_at),
     bc_created_at: toIso(row.bc_created_at),
   };
+}
+
+function toObject(value) {
+  if (!value) return {};
+  if (typeof value === "object") return value;
+  try {
+    return JSON.parse(value);
+  } catch (_error) {
+    return {};
+  }
+}
+
+function normalizeFallbackOfferKind(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "venta") return "venta";
+  if (normalized === "alquiler") return "alquiler";
+  if (normalized === "prestamo") return "alquiler";
+  return null;
+}
+
+async function recordExcelExportAndMarkWaitingCalculations(businessCaseId, user = {}) {
+  await assertModernBusinessCase(businessCaseId);
+  const { rows } = await db.query(
+    `SELECT modern_bc_metadata
+       FROM equipment_purchase_requests
+      WHERE id = $1`,
+    [businessCaseId],
+  );
+  if (!rows.length) {
+    const error = new Error("Business Case no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const metadata = toObject(rows[0].modern_bc_metadata);
+  const feasibility = toObject(metadata.feasibility);
+  const nowIso = new Date().toISOString();
+
+  feasibility.status = "esperando_calculos";
+  feasibility.export_excel = {
+    at: nowIso,
+    by_email: user?.email || null,
+    by_id: user?.id || null,
+  };
+  feasibility.requires_change_approval = true;
+
+  metadata.feasibility = feasibility;
+
+  await db.query(
+    `UPDATE equipment_purchase_requests
+        SET bc_stage = 'esperando_calculos',
+            modern_bc_metadata = $1::jsonb,
+            updated_at = NOW()
+      WHERE id = $2`,
+    [JSON.stringify(metadata), businessCaseId],
+  );
+
+  return getBusinessCaseById(businessCaseId);
+}
+
+async function saveFeasibilityDecision(
+  businessCaseId,
+  {
+    is_feasible,
+    notes = "",
+    fallback_offer_kind = null,
+    quantities = null,
+    prices = null,
+    calculations = null,
+  } = {},
+  user = {},
+) {
+  await assertModernBusinessCase(businessCaseId);
+  const { rows } = await db.query(
+    `SELECT id, canonical_state, modern_bc_metadata
+       FROM equipment_purchase_requests
+      WHERE id = $1`,
+    [businessCaseId],
+  );
+  if (!rows.length) {
+    const error = new Error("Business Case no encontrado");
+    error.status = 404;
+    throw error;
+  }
+
+  const row = rows[0];
+  const metadata = toObject(row.modern_bc_metadata);
+  const feasibility = toObject(metadata.feasibility);
+  const exportInfo = toObject(feasibility.export_excel);
+
+  if (!exportInfo.at) {
+    const error = new Error("Primero debe exportar los reactivos para iniciar calculos");
+    error.status = 409;
+    error.code = "EXPORT_REQUIRED";
+    throw error;
+  }
+
+  const nowIso = new Date().toISOString();
+  const normalizedFallback = normalizeFallbackOfferKind(fallback_offer_kind);
+  if (is_feasible === false && !normalizedFallback) {
+    const error = new Error("Debe seleccionar venta directa o alquiler cuando no es factible");
+    error.status = 400;
+    error.code = "FALLBACK_OFFER_KIND_REQUIRED";
+    throw error;
+  }
+
+  feasibility.status = is_feasible ? "factible" : "no_factible";
+  feasibility.decision = {
+    is_feasible: Boolean(is_feasible),
+    notes: notes || "",
+    decided_at: nowIso,
+    decided_by_email: user?.email || null,
+    decided_by_id: user?.id || null,
+    fallback_offer_kind: is_feasible ? null : normalizedFallback,
+    quantities: quantities || null,
+    prices: prices || null,
+    calculations: calculations || null,
+  };
+  feasibility.requires_change_approval = false;
+  feasibility.closed = !is_feasible;
+
+  metadata.feasibility = feasibility;
+  await db.query(
+    `UPDATE equipment_purchase_requests
+        SET bc_stage = $2,
+            modern_bc_metadata = $1::jsonb,
+            updated_at = NOW()
+      WHERE id = $3`,
+    [JSON.stringify(metadata), is_feasible ? "factible" : "cerrado_no_factible", businessCaseId],
+  );
+
+  const privatePurchaseId = metadata?.private_purchase_id || null;
+  if (privatePurchaseId) {
+    const { rows: privateRows } = await db.query(
+      `SELECT id, status, offer_kind, extra
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [privatePurchaseId],
+    );
+
+    if (privateRows.length) {
+      const purchase = privateRows[0];
+      const actorId = user?.id || -1;
+      const actorReason = `Decision de factibilidad BC ${businessCaseId}`;
+
+      if (is_feasible) {
+        if (purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS) {
+          await PrivatePurchaseStateMachine.transition(
+            privatePurchaseId,
+            PRIVATE_PURCHASE_STATES.BUSINESS_CASE_UNDER_REVIEW,
+            actorId,
+            actorReason,
+            { source: "business_case", businessCaseId, decision: "under_review" },
+          );
+        }
+        if (
+          purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_UNDER_REVIEW ||
+          purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS
+        ) {
+          await PrivatePurchaseStateMachine.transition(
+            privatePurchaseId,
+            PRIVATE_PURCHASE_STATES.BUSINESS_CASE_FEASIBILITY_APPROVED,
+            actorId,
+            actorReason,
+            { source: "business_case", businessCaseId, decision: "approved" },
+          );
+        }
+      } else {
+        if (purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS) {
+          await PrivatePurchaseStateMachine.transition(
+            privatePurchaseId,
+            PRIVATE_PURCHASE_STATES.BUSINESS_CASE_UNDER_REVIEW,
+            actorId,
+            actorReason,
+            { source: "business_case", businessCaseId, decision: "under_review" },
+          );
+        }
+        if (
+          purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_UNDER_REVIEW ||
+          purchase.status === PRIVATE_PURCHASE_STATES.BUSINESS_CASE_IN_PROGRESS
+        ) {
+          await PrivatePurchaseStateMachine.transition(
+            privatePurchaseId,
+            PRIVATE_PURCHASE_STATES.BUSINESS_CASE_REJECTED,
+            actorId,
+            actorReason,
+            { source: "business_case", businessCaseId, decision: "rejected" },
+          );
+        }
+
+        const privateExtra = toObject(purchase.extra);
+        privateExtra.business_case_decision = {
+          business_case_id: businessCaseId,
+          outcome: "no_factible",
+          fallback_offer_kind: normalizedFallback,
+          decided_at: nowIso,
+          decided_by_email: user?.email || null,
+          notes: notes || "",
+        };
+
+        await db.query(
+          `UPDATE private_purchase_requests
+              SET offer_kind = $2,
+                  extra = $3::jsonb,
+                  updated_at = NOW()
+            WHERE id = $1`,
+          [privatePurchaseId, normalizedFallback, JSON.stringify(privateExtra)],
+        );
+
+        const { rows: refreshedRows } = await db.query(
+          `SELECT status FROM private_purchase_requests WHERE id = $1`,
+          [privatePurchaseId],
+        );
+        const currentPrivateStatus = refreshedRows[0]?.status || purchase.status;
+        if (
+          PrivatePurchaseStateMachine.canTransition(
+            currentPrivateStatus,
+            PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
+          )
+        ) {
+          await PrivatePurchaseStateMachine.transition(
+            privatePurchaseId,
+            PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
+            actorId,
+            "BC no factible, continuar flujo alterno",
+            {
+              source: "business_case",
+              businessCaseId,
+              fallback_offer_kind: normalizedFallback,
+            },
+          );
+        }
+      }
+    }
+  }
+
+  return getBusinessCaseById(businessCaseId);
 }
 
 async function assertModernBusinessCase(id) {
@@ -771,4 +1010,6 @@ module.exports = {
   isPublicComodato,
   isPrivateComodato,
   isComodato,
+  recordExcelExportAndMarkWaitingCalculations,
+  saveFeasibilityDecision,
 };

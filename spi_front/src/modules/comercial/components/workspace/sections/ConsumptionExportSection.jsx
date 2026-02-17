@@ -3,6 +3,8 @@ import { useParams } from "react-router-dom";
 import { FiDownload, FiCopy } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
+import { useAuth } from "../../../../../core/auth/AuthContext";
+import { submitBusinessCaseFeasibilityDecision } from "../../../../../core/api/businessCaseApi";
 
 const TYPE_MAP = {
   reactivo: "reactivo",
@@ -212,14 +214,30 @@ const toTsv = (rows) => {
 const ConsumptionExportSection = ({ businessCase }) => {
   const { id: bcId } = useParams();
   const { showToast } = useUI();
+  const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [investments, setInvestments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [decisionLoading, setDecisionLoading] = useState(false);
+  const [decisionForm, setDecisionForm] = useState({
+    notes: "",
+    fallback_offer_kind: "venta",
+  });
+  const [hasExportForCalculations, setHasExportForCalculations] = useState(false);
 
   const clientName = businessCase?.client_name || businessCase?.clientName || "Cliente";
   const bcType = getPurchaseTypeLabel(
     businessCase?.bc_purchase_type || businessCase?.bcPurchaseType,
+  );
+  const feasibilityMetadata = businessCase?.modern_bc_metadata?.feasibility || {};
+  const feasibilityStatus = feasibilityMetadata?.status || "sin_definir";
+  const userRoles = Array.isArray(user?.roles)
+    ? user.roles
+    : [user?.role, user?.scope].filter(Boolean);
+  const normalizedRoles = userRoles.map((role) => String(role || "").toLowerCase());
+  const canDecideFeasibility = normalizedRoles.some((role) =>
+    ["jefe_comercial", "gerencia", "gerencia_general"].includes(role),
   );
 
   useEffect(() => {
@@ -240,6 +258,10 @@ const ConsumptionExportSection = ({ businessCase }) => {
         const invRes = await api.get(`/business-case/${bcId}/investments/catalog`);
         const invData = invRes?.data?.data || [];
         setInvestments(Array.isArray(invData) ? invData : []);
+        const exportAt =
+          businessCase?.modern_bc_metadata?.feasibility?.export_excel?.at ||
+          businessCase?.modern_bc_metadata?.feasibility?.decision?.decided_at;
+        setHasExportForCalculations(Boolean(exportAt));
         return;
       } catch (err) {
         const fallback = businessCase?.modern_bc_metadata?.consumption_items || [];
@@ -260,20 +282,42 @@ const ConsumptionExportSection = ({ businessCase }) => {
   );
 
   const handleDownload = () => {
-    if (!rows.length) {
-      showToast("No hay datos para exportar", "warning");
-      return;
-    }
-    const csv = toCsv(rows);
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", `bc_${bcId}_reactivos.csv`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    showToast("Archivo CSV generado", "success");
+    const downloadBackendExcel = async () => {
+      const res = await api.get(`/business-case/${bcId}/export/excel`, { responseType: "blob" });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `business-case-${bcId}.xlsx`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+
+    const downloadCsvFallback = () => {
+      if (!rows.length) {
+        showToast("No hay datos para exportar", "warning");
+        return;
+      }
+      const csv = toCsv(rows);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `bc_${bcId}_reactivos.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+
+    downloadBackendExcel()
+      .then(() => {
+        setHasExportForCalculations(true);
+        showToast("Excel exportado. Estado actualizado a esperando calculos", "success");
+      })
+      .catch(() => {
+        downloadCsvFallback();
+        showToast("Exportacion local generada. Verifique integracion de Excel backend", "warning");
+      });
   };
 
   const handleCopy = async () => {
@@ -287,6 +331,36 @@ const ConsumptionExportSection = ({ businessCase }) => {
       showToast("Datos copiados para Sheets", "success");
     } catch (err) {
       showToast("No se pudo copiar al portapapeles", "error");
+    }
+  };
+
+  const handleSubmitDecision = async (isFeasible) => {
+    if (!bcId) return;
+    if (!hasExportForCalculations && !feasibilityMetadata?.export_excel?.at) {
+      showToast("Primero exporte el Excel para habilitar la decision de factibilidad", "warning");
+      return;
+    }
+
+    try {
+      setDecisionLoading(true);
+      const payload = {
+        is_feasible: Boolean(isFeasible),
+        notes: decisionForm.notes || "",
+      };
+      if (!isFeasible) {
+        payload.fallback_offer_kind = decisionForm.fallback_offer_kind;
+      }
+      await submitBusinessCaseFeasibilityDecision(bcId, payload);
+      showToast(
+        isFeasible
+          ? "Factibilidad aprobada y flujo actualizado"
+          : "Business Case cerrado como no factible y flujo alterno activado",
+        "success",
+      );
+    } catch (err) {
+      showToast(err?.response?.data?.message || "No se pudo guardar la decision de factibilidad", "error");
+    } finally {
+      setDecisionLoading(false);
     }
   };
 
@@ -330,6 +404,69 @@ const ConsumptionExportSection = ({ businessCase }) => {
       {error && (
         <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-amber-800 text-sm">
           {error}
+        </div>
+      )}
+
+      {canDecideFeasibility && (
+        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-semibold text-gray-900">Decision de factibilidad (Jefe Comercial)</h3>
+            <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">
+              Estado actual: {String(feasibilityStatus).replace(/_/g, " ")}
+            </span>
+          </div>
+
+          <div className="text-xs text-gray-600">
+            {hasExportForCalculations || feasibilityMetadata?.export_excel?.at
+              ? "Exportacion registrada. Puede decidir factibilidad."
+              : "Debe exportar Excel primero para pasar a esperando calculos."}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Notas de evaluación</label>
+            <textarea
+              rows={3}
+              value={decisionForm.notes}
+              onChange={(e) => setDecisionForm((prev) => ({ ...prev, notes: e.target.value }))}
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              placeholder="Resumen de cálculos, cantidades y precios evaluados"
+              disabled={decisionLoading}
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="text-sm text-gray-700">Si no es factible, continuar como:</label>
+            <select
+              value={decisionForm.fallback_offer_kind}
+              onChange={(e) =>
+                setDecisionForm((prev) => ({ ...prev, fallback_offer_kind: e.target.value }))
+              }
+              className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
+              disabled={decisionLoading}
+            >
+              <option value="venta">Venta directa</option>
+              <option value="alquiler">Alquiler</option>
+            </select>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => handleSubmitDecision(true)}
+              disabled={decisionLoading}
+              className="px-4 py-2 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
+            >
+              Marcar Factible
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSubmitDecision(false)}
+              disabled={decisionLoading}
+              className="px-4 py-2 rounded-full bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-60"
+            >
+              Marcar No Factible
+            </button>
+          </div>
         </div>
       )}
 

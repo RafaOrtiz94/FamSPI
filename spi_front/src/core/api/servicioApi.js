@@ -4,21 +4,34 @@ import api from "./index";
  * API calls for Servicio Técnico module
  */
 
+const withWorkflowContext = (payload = {}, workflowContext = null) => {
+  if (!workflowContext || typeof workflowContext !== "object") return payload;
+  const nextPayload = { ...payload };
+  const sourceType = workflowContext.source_type || workflowContext.sourceType || null;
+  const sourceId = workflowContext.source_id || workflowContext.sourceId || null;
+  const requestId = workflowContext.request_id || workflowContext.requestId || null;
+  if (sourceType && !nextPayload.source_type) nextPayload.source_type = sourceType;
+  if (sourceId && !nextPayload.source_id) nextPayload.source_id = String(sourceId);
+  if (requestId && !nextPayload.request_id) nextPayload.request_id = requestId;
+  return nextPayload;
+};
+
 // ======================================================
 // 🧴 DESINFECCIÓN DE INSTRUMENTOS
 // ======================================================
-export const generateDisinfectionPDF = async (disinfectionData) => {
+export const generateDisinfectionPDF = async (disinfectionData, workflowContext = null) => {
+  const payload = withWorkflowContext(disinfectionData, workflowContext);
   console.log("🌐 API: Sending disinfection PDF request", {
     endpoint: "/servicio/desinfeccion/pdf",
-    hasData: !!disinfectionData,
-    dataKeys: Object.keys(disinfectionData || {}),
-    signaturePresent: !!disinfectionData?.firma_ing_SC,
-    signatureLength: disinfectionData?.firma_ing_SC?.length,
-    attachmentsPresent: !!disinfectionData?.adjunto_evidencia,
-    attachmentCount: disinfectionData?.adjunto_evidencia?.length || 0
+    hasData: !!payload,
+    dataKeys: Object.keys(payload || {}),
+    signaturePresent: !!payload?.firma_ing_SC,
+    signatureLength: payload?.firma_ing_SC?.length,
+    attachmentsPresent: !!payload?.adjunto_evidencia,
+    attachmentCount: payload?.adjunto_evidencia?.length || 0
   });
 
-  const response = await api.post("/servicio/desinfeccion/pdf", disinfectionData);
+  const response = await api.post("/servicio/desinfeccion/pdf", payload);
 
   console.log("🌐 API: Received disinfection PDF response", {
     status: response.status,
@@ -48,18 +61,19 @@ export const getEquiposServicio = async () => {
 // ======================================================
 // 🏫 COORDINACIÓN DE ENTRENAMIENTO
 // ======================================================
-export const generateTrainingCoordinationPDF = async (trainingData) => {
+export const generateTrainingCoordinationPDF = async (trainingData, workflowContext = null) => {
+  const payload = withWorkflowContext(trainingData, workflowContext);
   console.log("🎓 API: Sending training coordination PDF request", {
     endpoint: "/servicio/entrenamiento/pdf",
-    hasData: !!trainingData,
-    dataKeys: Object.keys(trainingData || {}),
-    signaturePresent: !!trainingData?.Firma_af_image,
-    signatureLength: trainingData?.Firma_af_image?.length,
-    ordenNumero: trainingData?.ORDNumero,
-    cliente: trainingData?.ORDCliente
+    hasData: !!payload,
+    dataKeys: Object.keys(payload || {}),
+    signaturePresent: !!payload?.Firma_af_image,
+    signatureLength: payload?.Firma_af_image?.length,
+    ordenNumero: payload?.ORDNumero,
+    cliente: payload?.ORDCliente
   });
 
-  const response = await api.post("/servicio/entrenamiento/pdf", trainingData);
+  const response = await api.post("/servicio/entrenamiento/pdf", payload);
 
   console.log("🎓 API: Received training coordination PDF response", {
     status: response.status,
@@ -78,18 +92,19 @@ export const generateTrainingCoordinationPDF = async (trainingData) => {
 // ======================================================
 // 📝 LISTA DE ASISTENCIA DE ENTRENAMIENTO
 // ======================================================
-export const generateAttendanceListPDF = async (attendanceData) => {
+export const generateAttendanceListPDF = async (attendanceData, workflowContext = null) => {
+  const payload = withWorkflowContext(attendanceData, workflowContext);
   console.log("📋 API: Sending training attendance list PDF request", {
     endpoint: "/servicio/entrenamiento/asistencia/pdf",
-    hasData: !!attendanceData,
-    dataKeys: Object.keys(attendanceData || {}),
-    signaturePresent: !!attendanceData?.Firma_Especialista,
-    signatureLength: attendanceData?.Firma_Especialista?.length,
-    ordenNumero: attendanceData?.Num_Orden,
-    cliente: attendanceData?.ORDCliente
+    hasData: !!payload,
+    dataKeys: Object.keys(payload || {}),
+    signaturePresent: !!payload?.Firma_Especialista,
+    signatureLength: payload?.Firma_Especialista?.length,
+    ordenNumero: payload?.Num_Orden,
+    cliente: payload?.ORDCliente
   });
 
-  const response = await api.post("/servicio/entrenamiento/asistencia/pdf", attendanceData);
+  const response = await api.post("/servicio/entrenamiento/asistencia/pdf", payload);
 
   console.log("📋 API: Received training attendance list PDF response", {
     status: response.status,
@@ -108,20 +123,21 @@ export const generateAttendanceListPDF = async (attendanceData) => {
 // ======================================================
 // 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
 // ======================================================
-export const generateEquipmentVerificationPDF = async (verificationData) => {
+export const generateEquipmentVerificationPDF = async (verificationData, workflowContext = null) => {
+  const payload = withWorkflowContext(verificationData, workflowContext);
   console.log("🔧 API: Sending equipment verification PDF request", {
     endpoint: "/servicio/entrenamiento/verificacion/pdf",
-    hasData: !!verificationData,
-    dataKeys: Object.keys(verificationData || {}),
-    signaturePresent: !!verificationData?.firma_af_image,
-    signatureLength: verificationData?.firma_af_image?.length,
-    fecha: verificationData?.Fecha,
-    cliente: verificationData?.Cliente,
-    equipo: verificationData?.Equipo,
-    serie: verificationData?.Serie
+    hasData: !!payload,
+    dataKeys: Object.keys(payload || {}),
+    signaturePresent: !!payload?.firma_af_image,
+    signatureLength: payload?.firma_af_image?.length,
+    fecha: payload?.Fecha,
+    cliente: payload?.Cliente,
+    equipo: payload?.Equipo,
+    serie: payload?.Serie
   });
 
-  const response = await api.post("/servicio/entrenamiento/verificacion/pdf", verificationData);
+  const response = await api.post("/servicio/entrenamiento/verificacion/pdf", payload);
 
   console.log("🔧 API: Received equipment verification PDF response", {
     status: response.status,
@@ -137,4 +153,25 @@ export const generateEquipmentVerificationPDF = async (verificationData) => {
   });
 
   return response.data;
+};
+
+export const listWorkflowDocuments = async ({ source_type, source_id } = {}) => {
+  const { data } = await api.get("/servicio/workflow-documents", {
+    params: { source_type, source_id },
+  });
+  return data?.rows || [];
+};
+
+export const listWorkflowDocumentsSummary = async ({ source_type, source_ids = [] } = {}) => {
+  const normalizedIds = Array.from(
+    new Set((Array.isArray(source_ids) ? source_ids : []).map((value) => String(value || "").trim()).filter(Boolean)),
+  );
+  if (!source_type || normalizedIds.length === 0) return [];
+  const { data } = await api.get("/servicio/workflow-documents/summary", {
+    params: {
+      source_type,
+      source_ids: normalizedIds.join(","),
+    },
+  });
+  return data?.rows || [];
 };

@@ -47,6 +47,18 @@ const formatDateTimeMaybe = (value, fallback, label) => {
   return String(value);
 };
 
+const OFFER_KIND_LABELS = {
+  venta: "Venta directa",
+  alquiler: "Alquiler",
+  prestamo: "Alquiler",
+  comodato: "Comodato",
+};
+
+const resolveOfferKindLabel = (value) => {
+  const key = String(value || "").trim().toLowerCase();
+  return OFFER_KIND_LABELS[key] || "Venta directa";
+};
+
 const PrivatePurchaseApprovalsWidget = () => {
   const { showToast } = useUI();
   const [purchases, setPurchases] = useState([]);
@@ -252,7 +264,7 @@ const PrivatePurchaseApprovalsWidget = () => {
                       {purchase.client_snapshot?.commercial_name || 'Cliente sin nombre'}
                     </h4>
                     <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                      {purchase.offer_kind === 'comodato' ? 'Comodato' : 'Compra'}
+                      {resolveOfferKindLabel(purchase.offer_kind)}
                     </span>
                   </div>
 
@@ -473,7 +485,7 @@ const PurchaseApprovalModal = ({ purchase, timelineData, onApprove, onReject, lo
             <span className="font-medium">Solicitado por:</span> {timelineData?.requested_by_name || 'No disponible'}
           </div>
           <div>
-            <span className="font-medium">Tipo:</span> {purchase.offer_kind === 'comodato' ? 'Comodato' : 'Compra directa'}
+            <span className="font-medium">Tipo:</span> {resolveOfferKindLabel(purchase.offer_kind)}
           </div>
           <div>
             <span className="font-medium">Fecha:</span> {formatDateMaybe(

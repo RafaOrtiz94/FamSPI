@@ -49,6 +49,18 @@ router.post(
   requireRole(["servicio_tecnico", "tecnico", "jefe_servicio_tecnico", "gerencia"]),
   controller.updateDisponibilidadTecnico
 );
+router.get(
+  "/actividades",
+  verifyToken,
+  requireRole(["servicio_tecnico", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia", "comercial", "acp_comercial", "jefe_comercial"]),
+  controller.listActividadesTecnicas
+);
+router.post(
+  "/actividades",
+  verifyToken,
+  requireRole(["servicio_tecnico", "tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
+  controller.createActividadTecnica
+);
 
 // ======================================================
 // ⚙️ EQUIPOS
@@ -130,6 +142,45 @@ router.post(
   verifyToken,
   requireRole(["tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "gerencia"]),
   controller.generateEquipmentVerificationPDF
+);
+
+router.get(
+  "/workflow-documents",
+  verifyToken,
+  requireRole([
+    "tecnico",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+    "servicio_tecnico",
+    "comercial",
+    "acp_comercial",
+    "jefe_comercial",
+    "gerencia",
+    "gerencia_general",
+    "operaciones",
+    "jefe_operaciones",
+    "jefe_logistica",
+  ]),
+  controller.listWorkflowDocuments
+);
+router.get(
+  "/workflow-documents/summary",
+  verifyToken,
+  requireRole([
+    "tecnico",
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+    "servicio_tecnico",
+    "comercial",
+    "acp_comercial",
+    "jefe_comercial",
+    "gerencia",
+    "gerencia_general",
+    "operaciones",
+    "jefe_operaciones",
+    "jefe_logistica",
+  ]),
+  controller.listWorkflowDocumentsSummary
 );
 
 module.exports = router;

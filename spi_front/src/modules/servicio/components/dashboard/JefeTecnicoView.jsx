@@ -86,9 +86,9 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
             <Card className="p-5 mb-6">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h3 className="text-base font-semibold text-slate-900">Coordinación de inspecciones (Compras Públicas)</h3>
+                        <h3 className="text-base font-semibold text-slate-900">Workspace técnico unificado</h3>
                         <p className="text-sm text-slate-600">
-                            Gestiona fechas coordinadas con Comercial directamente desde el Workspace de Compras.
+                            Ejecuta el procedimiento ST-01-01 por proceso (público y privado) en una sola vista.
                         </p>
                     </div>
                     <button
@@ -96,7 +96,7 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
                         className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                     >
                         <FiShoppingCart size={16} />
-                        Ir a Compras Públicas
+                        Abrir workspace técnico
                     </button>
                 </div>
             </Card>

@@ -613,7 +613,7 @@ const ComercialSolicitudesView = () => {
                                     onChange={(e) => setOfferKind(e.target.value)}
                                 >
                                     <option value="venta">Venta</option>
-                                    <option value="prestamo">Préstamo</option>
+                                    <option value="alquiler">Alquiler</option>
                                     <option value="comodato">Comodato</option>
                                 </select>
                             </label>

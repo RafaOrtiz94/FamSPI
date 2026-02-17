@@ -207,7 +207,7 @@ const ServicioDashboard = () => {
           approvals={safeApprovals}
           availability={safeAvailability}
           onRefresh={refreshSnapshots}
-          onOpenPublicPurchases={() => navigate("/dashboard/purchases/workspace?tab=public")}
+          onOpenPublicPurchases={() => navigate("/dashboard/servicio-tecnico/workspace-procedimiento?tab=public")}
         />
       );
     }

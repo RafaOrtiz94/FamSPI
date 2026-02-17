@@ -44,14 +44,17 @@ export const PRIVATE_PURCHASE_ERROR_CODES = {
   DOCS_INCOMPLETE_FOR_GERENCIA: 'DOCS_INCOMPLETE_FOR_GERENCIA',
   DOC_ALREADY_EXISTS: 'DOC_ALREADY_EXISTS',
   GERENCIA_REJECTION_REASON_REQUIRED: 'GERENCIA_REJECTION_REASON_REQUIRED',
-  INSPECTION_REQUIRED: 'INSPECTION_REQUIRED'
+  INSPECTION_REQUIRED: 'INSPECTION_REQUIRED',
+  INSPECTION_COORDINATION_REQUIRED: 'INSPECTION_COORDINATION_REQUIRED',
 };
 
 // Mensajes de error para UI
 export const PRIVATE_PURCHASE_ERROR_MESSAGES = {
   [PRIVATE_PURCHASE_ERROR_CODES.DOCS_INCOMPLETE_FOR_GERENCIA]: 'Faltan documentos requeridos para enviar a gerencia',
   [PRIVATE_PURCHASE_ERROR_CODES.DOC_ALREADY_EXISTS]: 'Ya existe un documento de este tipo',
-  [PRIVATE_PURCHASE_ERROR_CODES.INSPECTION_REQUIRED]: 'Debe solicitar inspeccion de ambiente antes de subir el contrato'
+  [PRIVATE_PURCHASE_ERROR_CODES.INSPECTION_REQUIRED]: 'Debe solicitar inspeccion de ambiente antes de subir el contrato',
+  [PRIVATE_PURCHASE_ERROR_CODES.INSPECTION_COORDINATION_REQUIRED]:
+    'Debes coordinar la fecha de inspección antes de subir el contrato',
 };
 
 // Estados que requieren validación de documentos para gerencia

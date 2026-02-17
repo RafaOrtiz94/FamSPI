@@ -1,17 +1,8 @@
 import React from 'react';
-
-import PrivatePurchaseDeliveries from './PrivatePurchaseDeliveries';
+import { Navigate } from "react-router-dom";
 
 const TecnicoPrivatePurchases = () => (
-  <div className="space-y-4">
-    <div className="px-1">
-      <h1 className="text-2xl font-semibold text-gray-900">Compras privadas</h1>
-      <p className="text-sm text-gray-500">
-        Gestion de actas y entregas asignadas para servicio tecnico.
-      </p>
-    </div>
-    <PrivatePurchaseDeliveries />
-  </div>
+  <Navigate to="/dashboard/servicio-tecnico/workspace-procedimiento?tab=private" replace />
 );
 
 export default TecnicoPrivatePurchases;

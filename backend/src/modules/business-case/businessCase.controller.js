@@ -71,6 +71,15 @@ const determinationSchema = Joi.object({
   annualQuantity: Joi.number().integer().positive(),
 }).or("monthlyQty", "annualQty", "monthlyQuantity", "annualQuantity");
 
+const feasibilityDecisionSchema = Joi.object({
+  is_feasible: Joi.boolean().required(),
+  notes: Joi.string().allow("").max(2000).optional(),
+  fallback_offer_kind: Joi.string().valid("venta", "alquiler", "prestamo").optional(),
+  quantities: Joi.object().optional(),
+  prices: Joi.object().optional(),
+  calculations: Joi.object().optional(),
+});
+
 const SECTION_ALIASES = {
   general: "general",
   lab: "lab",
@@ -357,6 +366,7 @@ async function exportPdf(req, res) {
 async function exportExcel(req, res) {
   try {
     const buffer = await excelExporter.generateBusinessCaseExcel(req.params.id);
+    await businessCaseService.recordExcelExportAndMarkWaitingCalculations(req.params.id, req.user);
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -368,6 +378,24 @@ async function exportExcel(req, res) {
     res
       .status(err.status || 500)
       .json({ ok: false, message: err.message || "No se pudo generar el Excel del Business Case" });
+  }
+}
+
+async function submitFeasibilityDecision(req, res) {
+  try {
+    const { error, value } = feasibilityDecisionSchema.validate(req.body || {}, { abortEarly: false });
+    if (error) {
+      return res.status(400).json({ ok: false, message: error.details.map((d) => d.message).join(", ") });
+    }
+
+    const updated = await businessCaseService.saveFeasibilityDecision(req.params.id, value, req.user);
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    logger.error(err);
+    res.status(err.status || 500).json({
+      ok: false,
+      message: err.message || "No se pudo registrar la decision de factibilidad",
+    });
   }
 }
 
@@ -1507,6 +1535,7 @@ module.exports = {
   recalculate,
   exportPdf,
   exportExcel,
+  submitFeasibilityDecision,
   updateEconomicData,
   addInvestment,
   getInvestments,

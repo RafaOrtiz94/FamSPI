@@ -58,6 +58,12 @@ router.get("/:id/calculations", verifyToken, requireRole(businessCaseRoles), ctr
 router.post("/:id/recalculate", verifyToken, requireRole(businessCaseRoles), ctrl.recalculate);
 router.get("/:id/export/pdf", verifyToken, requireRole(businessCaseRoles), ctrl.exportPdf);
 router.get("/:id/export/excel", verifyToken, requireRole(businessCaseRoles), ctrl.exportExcel);
+router.post(
+  "/:id/feasibility-decision",
+  verifyToken,
+  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  ctrl.submitFeasibilityDecision,
+);
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
 
 // UI Guidance routes (Workspace)

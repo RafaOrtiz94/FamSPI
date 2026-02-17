@@ -53,6 +53,12 @@ router.post('/:id/provider-response', controller.saveProviderResponse);
 router.post('/:id/submit-contract', controller.uploadContract);
 router.post('/:id/contract/client-signed', controller.uploadClientSignedContract);
 router.post('/:id/inspection-request', controller.saveInspectionRequest);
+router.patch('/:id/coordinate-inspection-date', controller.coordinateInspectionDate);
+router.patch(
+  '/:id/review-inspection-date',
+  requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']),
+  controller.reviewInspectionDate
+);
 router.post('/:id/delivery-guides', controller.uploadDeliveryGuides);
 router.post('/:id/request-delivery-dates', controller.requestDeliveryDates);
 router.post('/:id/submit-delivery-dates', controller.submitDeliveryDates);

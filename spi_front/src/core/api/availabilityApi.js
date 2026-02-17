@@ -19,3 +19,20 @@ export const updateAvailabilityStatus = async (status, note = "") => {
   return data?.result || data;
 };
 
+export const getTechnicalActivities = async ({ from, to }) => {
+  const { data } = await api.get("/servicio/actividades", {
+    params: { from, to },
+  });
+  return unwrapRows(data);
+};
+
+export const createTechnicalActivity = async ({ activity_date, title, notes = "", status = "programado", user_id } = {}) => {
+  const { data } = await api.post("/servicio/actividades", {
+    activity_date,
+    title,
+    notes,
+    status,
+    user_id,
+  });
+  return data?.row || data;
+};

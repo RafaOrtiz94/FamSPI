@@ -15,9 +15,20 @@ const { uploadBase64File, ensureFolder } = require("../../utils/drive");
 const { sendAndArchive } = require("../../utils/emailArchive");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
+const {
+  createRequest: createServiceRequest,
+  addDriveAttachment,
+} = require("../requests/requests.service");
 
 const driveLink = (fileId) => (fileId ? `https://drive.google.com/file/d/${fileId}/view` : null);
 const RESERVATION_REMINDER_OFFSET_DAYS = 55;
+const PRIVATE_OFFER_KIND_CANONICAL_MAP = Object.freeze({
+  venta: "venta",
+  comodato: "comodato",
+  alquiler: "alquiler",
+  prestamo: "alquiler"
+});
+const PRIVATE_OFFER_KIND_ALLOWED = Object.freeze(["venta", "comodato", "alquiler"]);
 const PRIVATE_CHECKLIST_ITEM_LABELS = {
   client_data_complete: "Datos del cliente completos",
   equipment_defined: "Equipos definidos",
@@ -29,6 +40,8 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
   client_registered: "Cliente registrado",
   inspection_requested: "Inspección de ambiente solicitada",
   inspection_act_uploaded: "Acta de inspección cargada",
+  inspection_window_defined: "Ventana de inspección definida",
+  inspection_date_coordinated: "Fecha de inspección coordinada",
   lopdp_approved: "Aprobación LOPDP confirmada",
   client_id_uploaded: "Documento de identificación del cliente cargado",
   operating_permit_if_required: "Permiso de funcionamiento cargado (si aplica)",
@@ -48,7 +61,39 @@ const formatEquipmentList = (equipment = []) => {
     .join("<br>");
 };
 
+const toIsoDate = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+};
+
+const addDaysIso = (days = 0) => {
+  const date = new Date();
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() + Number(days || 0));
+  return toIsoDate(date);
+};
+const TECHNICAL_DAILY_CAPACITY = Number.parseInt(process.env.TECHNICAL_DAILY_CAPACITY || "3", 10);
+
 class PrivatePurchasesService {
+  _normalizeOfferKind(rawOfferKind, { allowLegacyAlias = true } = {}) {
+    const normalized = String(rawOfferKind || "").trim().toLowerCase();
+    if (!normalized) return "venta";
+    if (allowLegacyAlias && PRIVATE_OFFER_KIND_CANONICAL_MAP[normalized]) {
+      return PRIVATE_OFFER_KIND_CANONICAL_MAP[normalized];
+    }
+    return PRIVATE_OFFER_KIND_ALLOWED.includes(normalized) ? normalized : null;
+  }
+
+  _normalizeOfferKindsInRows(rows = []) {
+    const list = Array.isArray(rows) ? rows : [rows];
+    list.forEach((row) => {
+      if (!row || typeof row !== "object") return;
+      row.offer_kind = this._normalizeOfferKind(row.offer_kind, { allowLegacyAlias: true }) || row.offer_kind;
+    });
+  }
+
   _getUserRoles(user) {
     const candidates = [];
     if (Array.isArray(user?.role)) {
@@ -80,6 +125,82 @@ class PrivatePurchasesService {
 
   _hasAnyRoleToken(user, tokens = []) {
     return tokens.some((token) => this._hasRoleToken(user, token));
+  }
+
+  async _listTechnicalScheduleByDate({ date, excludePrivatePurchaseId = null, excludeInspectionRequestId = null }) {
+    const dateKey = String(date || "").slice(0, 10);
+    if (!dateKey) return [];
+    const { rows } = await db.query(
+      `
+        SELECT activity_date, source_type, summary
+        FROM (
+          SELECT
+            a.activity_date::date AS activity_date,
+            'actividad_tecnica'::text AS source_type,
+            COALESCE(a.title, 'Actividad técnica') AS summary
+          FROM servicio.cronograma_actividades_tecnicas a
+          WHERE a.activity_date = $1::date
+            AND COALESCE(lower(a.status), 'programado') IN ('programado', 'confirmado', 'en_proceso')
+
+          UNION ALL
+
+          SELECT
+            m.fecha_programada::date AS activity_date,
+            'mantenimiento'::text AS source_type,
+            COALESCE(m.descripcion, 'Mantenimiento programado') AS summary
+          FROM servicio.cronograma_mantenimientos m
+          WHERE m.fecha_programada = $1::date
+            AND COALESCE(lower(m.estado), 'pendiente') IN ('pendiente', 'en proceso')
+
+          UNION ALL
+
+          SELECT
+            c.fecha::date AS activity_date,
+            'capacitacion'::text AS source_type,
+            COALESCE(c.titulo, 'Capacitación técnica') AS summary
+          FROM servicio.cronograma_capacitacion c
+          WHERE c.fecha = $1::date
+            AND COALESCE(lower(c.estado), 'programado') NOT IN ('cancelada', 'cancelado')
+
+          UNION ALL
+
+          SELECT
+            epr.inspection_scheduled_date::date AS activity_date,
+            'inspeccion_compra_publica'::text AS source_type,
+            COALESCE(epr.client_name, 'Inspección compra pública') AS summary
+          FROM equipment_purchase_requests epr
+          WHERE epr.inspection_scheduled_date = $1::date
+            AND COALESCE(epr.status, '') NOT IN ('completed')
+
+          UNION ALL
+
+          SELECT
+            ppr.inspection_scheduled_date::date AS activity_date,
+            'inspeccion_compra_privada'::text AS source_type,
+            COALESCE(ppr.client_name, 'Inspección compra privada') AS summary
+          FROM private_purchase_requests ppr
+          WHERE ppr.inspection_scheduled_date = $1::date
+            AND ($2::uuid IS NULL OR ppr.id <> $2::uuid)
+            AND COALESCE(ppr.status, '') NOT IN ('completed', 'cancelled')
+
+          UNION ALL
+
+          SELECT
+            (r.payload->>'fecha_instalacion')::date AS activity_date,
+            'solicitud_inspeccion'::text AS source_type,
+            COALESCE(r.payload->>'nombre_cliente', 'Solicitud de inspección') AS summary
+          FROM requests r
+          JOIN request_types rt ON rt.id = r.request_type_id
+          WHERE rt.code = 'F.ST-20'
+            AND (r.payload->>'fecha_instalacion') ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+            AND (r.payload->>'fecha_instalacion')::date = $1::date
+            AND ($3::int IS NULL OR r.id <> $3::int)
+            AND COALESCE(r.status, '') NOT IN ('rechazado', 'cancelado')
+        ) timeline
+      `,
+      [dateKey, excludePrivatePurchaseId, excludeInspectionRequestId],
+    );
+    return rows;
   }
 
   _isRoleAllowedForList(user, requestedRole) {
@@ -235,10 +356,9 @@ class PrivatePurchasesService {
       throw new Error('Todos los equipos deben tener un ID vรกlido');
     }
 
-    // Validar tipo de oferta
-    const validOfferKinds = ['venta', 'prestamo', 'comodato'];
-    if (!validOfferKinds.includes(offerKind)) {
-      throw new Error(`Tipo de oferta invรกlido. Valores permitidos: ${validOfferKinds.join(', ')}`);
+    const normalizedOfferKind = this._normalizeOfferKind(offerKind, { allowLegacyAlias: true });
+    if (!normalizedOfferKind) {
+      throw new Error(`Tipo de oferta invรกlido. Valores permitidos: ${PRIVATE_OFFER_KIND_ALLOWED.join(', ')}`);
     }
 
     const client = await db.getClient();
@@ -290,7 +410,7 @@ class PrivatePurchasesService {
         JSON.stringify(clientData),
         JSON.stringify(equipment),
         PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
-        offerKind,
+          normalizedOfferKind,
         notes
       ];
 
@@ -330,7 +450,7 @@ class PrivatePurchasesService {
         const payload = {
           purchase_id: purchaseId,
           client_name: clientData.name || clientData.commercial_name || 'Cliente sin nombre',
-          offer_kind: offerKind
+          offer_kind: normalizedOfferKind
         };
         await Promise.all(recipients.map((recipient) => notificationManager.sendNotification({
           userId: recipient.id,
@@ -344,10 +464,10 @@ class PrivatePurchasesService {
         logger.warn({ error, purchaseId }, 'No se pudo notificar a backoffice de nueva solicitud');
       }
 
-      if (offerKind === 'comodato') {
+      if (normalizedOfferKind === 'comodato') {
         await this.ensureBusinessCaseForComodato(purchaseId, user, {
           business_case_id: null,
-          offer_kind: offerKind,
+          offer_kind: normalizedOfferKind,
           client_snapshot: clientData,
           drive_folder_id: null,
           status: PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE
@@ -442,6 +562,7 @@ class PrivatePurchasesService {
     }
 
     const purchase = rows[0];
+    this._normalizeOfferKindsInRows([purchase]);
     await this._attachClientRequestSnapshot(purchase);
     await this._ensureArrivalStates([purchase], user);
     await this._attachChecklistState([purchase]);
@@ -597,12 +718,13 @@ class PrivatePurchasesService {
         provider_response_at,\n        reservation_email_sent_at,\n        reservation_email_file_id,\n        reservation_calendar_event_id,\n        reservation_calendar_event_link,\n        includes_starter_kit,\n        operations_notes,\n        estimated_arrival_at,\n        estimated_arrival_updated_at,\n        equipment_arrived_at,\n        equipment_arrived_by,
         dispatch_items_json,
         dispatch_notes,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email\n      FROM private_purchase_requests
       WHERE created_by = $1
       ORDER BY created_at DESC
     `;
 
     const { rows } = await db.query(query, [user.id]);
+    this._normalizeOfferKindsInRows(rows);
     await this._autoResolveClientRegistration(rows, user);
     await this._attachClientRequestSnapshot(rows);
     await this._ensureArrivalStates(rows, user);
@@ -736,6 +858,7 @@ class PrivatePurchasesService {
       case 'jefe_servicio_tecnico':
         whereClause = 'status = ANY($1)';
         params = [[
+          PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
           PRIVATE_PURCHASE_STATES.WAITING_DISPATCH,
           PRIVATE_PURCHASE_STATES.DISPATCH_READY,
           PRIVATE_PURCHASE_STATES.DELIVERY_ACT_GENERATED,
@@ -809,7 +932,7 @@ class PrivatePurchasesService {
         dispatch_items_json,
         dispatch_notes,
         delivery_act_observations_json,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email\n      FROM private_purchase_requests
       WHERE ${whereClause}
       ORDER BY
         CASE
@@ -835,6 +958,7 @@ class PrivatePurchasesService {
       params
     });
     const { rows } = await db.query(query, params);
+    this._normalizeOfferKindsInRows(rows);
     logger.debug('[FLOW_PRIVADA][BE][LIST_BY_ROLE][RESULT]', {
       role,
       count: rows.length
@@ -1091,7 +1215,7 @@ class PrivatePurchasesService {
     logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado contract para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
-      'SELECT contract_document_id, contract_client_signed_document_id, contract_signed_document_id, inspection_request_id, inspection_acta_document_id, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
+      'SELECT contract_document_id, contract_client_signed_document_id, contract_signed_document_id, inspection_request_id, inspection_acta_document_id, inspection_scheduled_date, client_snapshot, drive_folder_id FROM private_purchase_requests WHERE id = $1',
       [purchaseId]
     );
 
@@ -1113,6 +1237,13 @@ class PrivatePurchasesService {
       const error = new Error('Debe solicitar inspeccion de ambiente antes de subir el contrato');
       error.status = 409;
       error.code = 'INSPECTION_REQUIRED';
+      throw error;
+    }
+
+    if (!isManagerRole && !existingRows[0].inspection_scheduled_date) {
+      const error = new Error('Debe coordinar la fecha de inspección antes de subir el contrato');
+      error.status = 409;
+      error.code = 'INSPECTION_COORDINATION_REQUIRED';
       throw error;
     }
 
@@ -1802,7 +1933,7 @@ class PrivatePurchasesService {
       `Cliente aprobado registrado: ${approvedClient.commercial_name}`
     );
 
-    // Notificar a backoffice que puede subir el contrato (síncrono para Cloud Run)
+    // Notificar a backoffice que puede continuar flujo documental
     try {
       const backofficeUsers = await this._getUsersByRole('backoffice_comercial');
 
@@ -1822,8 +1953,26 @@ class PrivatePurchasesService {
     } catch (error) {
       logger.warn('Error enviando notificacion de cliente aprobado:', error);
     }
+    let result = rows[0];
+    try {
+      // Producción madura: generar inspección automáticamente al aprobar registro del cliente.
+      result = await this.saveInspectionRequest(
+        purchaseId,
+        {
+          inspection_min_date: addDaysIso(1),
+          inspection_max_date: addDaysIso(7),
+        },
+        user
+      );
+    } catch (inspectionError) {
+      logger.error(
+        { inspectionError, purchaseId },
+        'No se pudo generar automáticamente la inspección de ambiente',
+      );
+      throw inspectionError;
+    }
 
-    return rows[0];
+    return result;
   }
 
   /**
@@ -2584,15 +2733,78 @@ class PrivatePurchasesService {
     return rows[0];
   }
 
-  async saveInspectionRequest(purchaseId, { requestId, actaDocumentId } = {}, user) {
-    if (!requestId) {
-      const error = new Error('Solicitud de inspeccion requerida');
-      error.status = 400;
-      throw error;
-    }
+  _buildPrivateInspectionPayload(purchase = {}, inspectionWindow = {}) {
+    const snapshot = purchase?.client_snapshot || {};
+    const equipment = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
+    const equipos = equipment.map((item) => ({
+      nombre_equipo: item?.name || item?.label || item?.sku || item?.id || "Equipo",
+      estado: item?.type || item?.estado || "nuevo",
+      unidad_id: item?.unidad_id || item?.id || "",
+      serial: item?.serial || "",
+    }));
 
+    return {
+      nombre_cliente: snapshot?.commercial_name || snapshot?.name || snapshot?.client_name || "",
+      direccion_cliente: snapshot?.shipping_address || snapshot?.address || "",
+      persona_contacto: snapshot?.shipping_contact_name || snapshot?.contact_name || snapshot?.legal_rep_name || "",
+      celular_contacto: snapshot?.shipping_phone || snapshot?.shipping_cellphone || snapshot?.phone || "",
+      email_cliente: snapshot?.client_email || snapshot?.email || "",
+      fecha_instalacion: inspectionWindow?.inspection_min_date || addDaysIso(1),
+      fecha_tope_instalacion: inspectionWindow?.inspection_max_date || addDaysIso(7),
+      requiere_lis: Boolean(purchase?.includes_starter_kit),
+      equipos,
+      anotaciones: "Inspección de ambiente generada automáticamente desde compra privada",
+      accesorios: "",
+      observaciones: purchase?.notes || "",
+    };
+  }
+
+  async _notifyInspectionStakeholders(purchaseId, purchaseRow, user, message) {
+    try {
+      const creatorId = purchaseRow?.created_by || null;
+      const technicalRoles = ["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"];
+      const technicalUsers = await Promise.all(technicalRoles.map((role) => this._getUsersByRole(role)));
+      const recipients = new Map();
+
+      if (creatorId) recipients.set(String(creatorId), creatorId);
+      technicalUsers.flat().forEach((u) => {
+        if (u?.id) recipients.set(String(u.id), u.id);
+      });
+
+      const title = "Inspección de ambiente - Compra privada";
+      const notificationPayload = {
+        client_name:
+          purchaseRow?.client_snapshot?.commercial_name ||
+          purchaseRow?.client_snapshot?.name ||
+          "Cliente",
+        purchase_id: purchaseId,
+      };
+
+      for (const userId of recipients.values()) {
+        await notificationManager.sendNotification({
+          userId,
+          customTitle: title,
+          customMessage: message,
+          type: "task",
+          source: "private_purchase.inspection",
+          priority: 2,
+          email: true,
+          chat: true,
+          meta: notificationPayload,
+        });
+      }
+    } catch (error) {
+      logger.warn({ error, purchaseId }, "No se pudo notificar coordinación de inspección privada");
+    }
+  }
+
+  async saveInspectionRequest(purchaseId, { requestId, actaDocumentId, inspection_min_date, inspection_max_date } = {}, user) {
     const { rows } = await db.query(
-      'SELECT inspection_request_id, status FROM private_purchase_requests WHERE id = $1',
+      `SELECT id, status, inspection_request_id, inspection_scheduled_date, inspection_min_date, inspection_max_date,
+              created_by, created_by_email, client_snapshot, equipment, includes_starter_kit, notes, offer_kind,
+              offer_signed_document_id
+         FROM private_purchase_requests
+        WHERE id = $1`,
       [purchaseId]
     );
 
@@ -2600,49 +2812,349 @@ class PrivatePurchasesService {
       throw new Error('Solicitud no encontrada');
     }
 
-    if (rows[0].inspection_request_id) {
-      if (rows[0].status !== PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED) {
-        await this.transitionState(
-          purchaseId,
-          PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
-          user,
-          'Inspeccion de ambiente ya registrada, avanzando estado'
-        );
-      }
-
-      const { rows: existingRows } = await db.query(
-        `SELECT *
-           FROM private_purchase_requests
-          WHERE id = $1`,
-        [purchaseId]
-      );
-
-      return existingRows[0] || rows[0];
-    }
-
-    if (rows[0].status !== PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED) {
+    const purchase = rows[0];
+    const allowedStates = new Set([
+      PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED,
+      PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
+    ]);
+    if (!allowedStates.has(purchase.status)) {
       const error = new Error('Estado invalido para solicitar inspeccion');
       error.status = 409;
       error.code = 'INVALID_TRANSITION';
       throw error;
     }
 
+    if (purchase.inspection_request_id) {
+      if (purchase.status !== PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED) {
+        await this.transitionState(
+          purchaseId,
+          PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
+          user,
+          'Inspeccion de ambiente ya registrada'
+        );
+      }
+
+      const { rows: existingRows } = await db.query('SELECT * FROM private_purchase_requests WHERE id = $1', [purchaseId]);
+      return existingRows[0] || purchase;
+    }
+
+    const minDate = inspection_min_date || purchase.inspection_min_date || addDaysIso(1);
+    const maxDate = inspection_max_date || purchase.inspection_max_date || addDaysIso(7);
+    const payload = this._buildPrivateInspectionPayload(purchase, {
+      inspection_min_date: minDate,
+      inspection_max_date: maxDate,
+    });
+
+    let resolvedRequestId = requestId;
+    if (!resolvedRequestId) {
+      const inspectionRequest = await createServiceRequest({
+        requester_id: user?.id,
+        requester_email: user?.email || purchase.created_by_email || null,
+        requester_name: user?.fullname || user?.name || null,
+        request_type_id: "F.ST-20",
+        payload,
+      });
+      resolvedRequestId = inspectionRequest?.request?.id || inspectionRequest?.request_id || inspectionRequest?.id || null;
+      const autoActaId =
+        inspectionRequest?.document?.id ||
+        inspectionRequest?.document?.pdfId ||
+        inspectionRequest?.document?.docId ||
+        null;
+      if (!actaDocumentId && autoActaId) actaDocumentId = autoActaId;
+    }
+
+    if (!resolvedRequestId) {
+      const error = new Error("No se pudo generar la solicitud de inspección");
+      error.status = 500;
+      error.code = "INSPECTION_REQUEST_CREATE_FAILED";
+      throw error;
+    }
+
     const { rows: updatedRows } = await db.query(
       `UPDATE private_purchase_requests
          SET inspection_request_id = $1,
-             inspection_acta_document_id = $2,
+             inspection_acta_document_id = COALESCE($2, inspection_acta_document_id),
+             inspection_min_date = COALESCE($3, inspection_min_date),
+             inspection_max_date = COALESCE($4, inspection_max_date),
+             inspection_proposed_date = NULL,
+             inspection_proposed_notes = NULL,
+             inspection_proposed_at = NULL,
+             inspection_proposed_by = NULL,
+             inspection_proposed_by_email = NULL,
+             inspection_coordination_status = 'pending_proposal',
+             inspection_review_notes = NULL,
+             inspection_reviewed_at = NULL,
+             inspection_reviewed_by = NULL,
+             inspection_reviewed_by_email = NULL,
+             inspection_scheduled_date = NULL,
+             inspection_coordinated_at = NULL,
+             inspection_coordinated_by = NULL,
+             inspection_coordinated_by_email = NULL,
              inspection_requested_at = NOW(),
              updated_at = NOW()
-       WHERE id = $3
+       WHERE id = $5
        RETURNING *`,
-      [requestId, actaDocumentId || null, purchaseId]
+      [resolvedRequestId, actaDocumentId || null, minDate, maxDate, purchaseId]
     );
 
-    await this.transitionState(
+    if (purchase.offer_signed_document_id) {
+      try {
+        await addDriveAttachment({
+          request_id: resolvedRequestId,
+          drive_file_id: purchase.offer_signed_document_id,
+          title: "Oferta firmada del cliente",
+        });
+      } catch (attachmentError) {
+        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar oferta firmada a inspección privada");
+      }
+    }
+
+    if (purchase.status !== PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED) {
+      await this.transitionState(
+        purchaseId,
+        PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
+        user,
+        'Inspeccion de ambiente solicitada'
+      );
+    }
+
+    await this._notifyInspectionStakeholders(
       purchaseId,
-      PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
+      updatedRows[0],
       user,
-      'Inspeccion de ambiente solicitada'
+      "Se creó la inspección de ambiente. Comercial debe coordinar fecha con Jefe Técnico/Técnico.",
+    );
+
+    return updatedRows[0];
+  }
+
+  async coordinateInspectionDate(purchaseId, { inspection_date, notes = '' } = {}, user) {
+    const canCoordinate = this._hasAnyRoleToken(user, [
+      'comercial',
+      'acp_comercial',
+      'jefe_comercial',
+    ]);
+    if (!canCoordinate) {
+      const error = new Error('No autorizado para coordinar inspección');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, status, inspection_request_id, inspection_min_date, inspection_max_date, client_snapshot, created_by
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      throw new Error('Solicitud no encontrada');
+    }
+    const purchase = rows[0];
+
+    if (!purchase.inspection_request_id) {
+      const error = new Error('La inspección de ambiente aún no fue generada');
+      error.status = 409;
+      error.code = 'INSPECTION_REQUIRED';
+      throw error;
+    }
+
+    if (!inspection_date) {
+      const error = new Error('Debe seleccionar fecha coordinada de inspección');
+      error.status = 400;
+      error.code = 'INSPECTION_DATE_REQUIRED';
+      throw error;
+    }
+
+    const selected = new Date(`${inspection_date}T00:00:00`);
+    const min = purchase.inspection_min_date ? new Date(`${purchase.inspection_min_date}T00:00:00`) : null;
+    const max = purchase.inspection_max_date ? new Date(`${purchase.inspection_max_date}T00:00:00`) : null;
+    if (Number.isNaN(selected.getTime())) {
+      const error = new Error('Formato de fecha inválido');
+      error.status = 400;
+      error.code = 'INVALID_DATE_FORMAT';
+      throw error;
+    }
+    if ((min && selected < min) || (max && selected > max)) {
+      const error = new Error('La fecha coordinada debe estar dentro de la ventana de inspección');
+      error.status = 409;
+      error.code = 'INSPECTION_DATE_OUT_OF_WINDOW';
+      throw error;
+    }
+
+    const conflictRows = await this._listTechnicalScheduleByDate({
+      date: inspection_date,
+      excludePrivatePurchaseId: purchaseId,
+      excludeInspectionRequestId: purchase.inspection_request_id || null,
+    });
+    if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
+      const error = new Error('El cronograma técnico está lleno para esa fecha. Selecciona otro día.');
+      error.status = 409;
+      error.code = 'TECHNICAL_SCHEDULE_FULL';
+      error.details = {
+        date: String(inspection_date || '').slice(0, 10),
+        capacity: TECHNICAL_DAILY_CAPACITY,
+        conflicts_count: conflictRows.length,
+        conflicts: conflictRows.map((item) => ({
+          source_type: item.source_type,
+          summary: item.summary,
+        })),
+      };
+      throw error;
+    }
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE private_purchase_requests
+         SET inspection_proposed_date = $2,
+             inspection_proposed_notes = $3,
+             inspection_proposed_at = NOW(),
+             inspection_proposed_by = $4,
+             inspection_proposed_by_email = $5,
+             inspection_coordination_status = 'pending_review',
+             inspection_scheduled_date = NULL,
+             inspection_coordinated_at = NULL,
+             inspection_coordinated_by = NULL,
+             inspection_coordinated_by_email = NULL,
+             inspection_reviewed_at = NULL,
+             inspection_reviewed_by = NULL,
+             inspection_reviewed_by_email = NULL,
+             inspection_review_notes = NULL,
+             inspection_coordination_notes = $3,
+             updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [purchaseId, inspection_date, notes || null, user?.id || null, user?.email || null]
+    );
+
+    await this._notifyInspectionStakeholders(
+      purchaseId,
+      updatedRows[0],
+      user,
+      `Comercial propuso fecha de inspección para ${inspection_date}. Pendiente validación de Jefe Técnico.`,
+    );
+
+    return updatedRows[0];
+  }
+
+  async reviewInspectionDate(purchaseId, { decision, review_notes = '' } = {}, user) {
+    const canReview = this._hasAnyRoleToken(user, ['jefe_tecnico', 'jefe_servicio_tecnico']);
+    if (!canReview) {
+      const error = new Error('No autorizado para revisar coordinación de inspección');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    const normalizedDecision = String(decision || '').toLowerCase();
+    if (!['accept', 'reject'].includes(normalizedDecision)) {
+      const error = new Error("Decisión inválida. Usa 'accept' o 'reject'");
+      error.status = 400;
+      error.code = 'INVALID_REVIEW_DECISION';
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id, status, inspection_request_id, inspection_proposed_date, inspection_proposed_notes
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId]
+    );
+    if (!rows.length) {
+      throw new Error('Solicitud no encontrada');
+    }
+    const purchase = rows[0];
+
+    if (!purchase.inspection_request_id) {
+      const error = new Error('La inspección de ambiente aún no fue generada');
+      error.status = 409;
+      error.code = 'INSPECTION_REQUIRED';
+      throw error;
+    }
+    if (!purchase.inspection_proposed_date) {
+      const error = new Error('No existe fecha propuesta pendiente de revisión');
+      error.status = 409;
+      error.code = 'INSPECTION_PROPOSAL_REQUIRED';
+      throw error;
+    }
+
+    const proposalDate = String(purchase.inspection_proposed_date).slice(0, 10);
+
+    if (normalizedDecision === 'reject') {
+      const { rows: updatedRows } = await db.query(
+        `UPDATE private_purchase_requests
+           SET inspection_coordination_status = 'rejected',
+               inspection_review_notes = $2,
+               inspection_reviewed_at = NOW(),
+               inspection_reviewed_by = $3,
+               inspection_reviewed_by_email = $4,
+               inspection_scheduled_date = NULL,
+               inspection_coordinated_at = NULL,
+               inspection_coordinated_by = NULL,
+               inspection_coordinated_by_email = NULL,
+               updated_at = NOW()
+         WHERE id = $1
+         RETURNING *`,
+        [purchaseId, review_notes || null, user?.id || null, user?.email || null],
+      );
+      await this._notifyInspectionStakeholders(
+        purchaseId,
+        updatedRows[0],
+        user,
+        `Jefe Técnico rechazó la fecha propuesta. ${review_notes || 'Comercial debe proponer otra fecha.'}`,
+      );
+      return updatedRows[0];
+    }
+
+    const conflictRows = await this._listTechnicalScheduleByDate({
+      date: proposalDate,
+      excludePrivatePurchaseId: purchaseId,
+      excludeInspectionRequestId: purchase.inspection_request_id || null,
+    });
+    if (conflictRows.length >= TECHNICAL_DAILY_CAPACITY) {
+      const error = new Error('El cronograma técnico está lleno para esa fecha.');
+      error.status = 409;
+      error.code = 'TECHNICAL_SCHEDULE_FULL';
+      error.details = {
+        date: proposalDate,
+        capacity: TECHNICAL_DAILY_CAPACITY,
+        conflicts_count: conflictRows.length,
+        conflicts: conflictRows.map((item) => ({
+          source_type: item.source_type,
+          summary: item.summary,
+        })),
+      };
+      throw error;
+    }
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE private_purchase_requests
+         SET inspection_scheduled_date = $2,
+             inspection_coordination_notes = COALESCE($3, inspection_coordination_notes),
+             inspection_coordination_status = 'accepted',
+             inspection_review_notes = $3,
+             inspection_reviewed_at = NOW(),
+             inspection_reviewed_by = $4,
+             inspection_reviewed_by_email = $5,
+             inspection_coordinated_at = NOW(),
+             inspection_coordinated_by = $4,
+             inspection_coordinated_by_email = $5,
+             updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [
+        purchaseId,
+        proposalDate,
+        review_notes || purchase.inspection_proposed_notes || null,
+        user?.id || null,
+        user?.email || null,
+      ],
+    );
+
+    await this._notifyInspectionStakeholders(
+      purchaseId,
+      updatedRows[0],
+      user,
+      `Jefe Técnico aprobó la fecha de inspección para ${proposalDate}.`,
     );
 
     return updatedRows[0];
@@ -2724,8 +3236,12 @@ class PrivatePurchasesService {
     }
 
     if (filters.offer_kind) {
+      const normalizedFilterOfferKind = this._normalizeOfferKind(filters.offer_kind, { allowLegacyAlias: true });
+      if (!normalizedFilterOfferKind) {
+        return [];
+      }
       whereClause += ` AND offer_kind = $${paramIndex}`;
-      params.push(filters.offer_kind);
+      params.push(normalizedFilterOfferKind);
       paramIndex++;
     }
 
@@ -2813,6 +3329,23 @@ class PrivatePurchasesService {
         p.inspection_request_id,
         p.inspection_acta_document_id,
         p.inspection_requested_at,
+        p.inspection_min_date,
+        p.inspection_max_date,
+        p.inspection_proposed_date,
+        p.inspection_proposed_notes,
+        p.inspection_proposed_at,
+        p.inspection_proposed_by,
+        p.inspection_proposed_by_email,
+        p.inspection_coordination_status,
+        p.inspection_review_notes,
+        p.inspection_reviewed_at,
+        p.inspection_reviewed_by,
+        p.inspection_reviewed_by_email,
+        p.inspection_scheduled_date,
+        p.inspection_coordination_notes,
+        p.inspection_coordinated_at,
+        p.inspection_coordinated_by,
+        p.inspection_coordinated_by_email,
         COALESCE(u_creator.fullname, u_creator.name) AS created_by_name,
         COALESCE(u_manager.fullname, u_manager.name) AS manager_contract_decision_by_name
       FROM private_purchase_requests p
@@ -2823,6 +3356,7 @@ class PrivatePurchasesService {
     `;
 
     const { rows } = await db.query(query, params);
+    this._normalizeOfferKindsInRows(rows);
     await this._attachClientRequestSnapshot(rows);
     await this._attachChecklistState(rows);
     return rows;
@@ -3227,15 +3761,20 @@ class PrivatePurchasesService {
         };
       case PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED:
         return {
-          action: "request_inspection",
-          action_label: "Solicitar inspección de ambiente",
-          requirements: ["client_registered", "inspection_requested"],
+          action: "auto_inspection_creation",
+          action_label: "Generación automática de inspección",
+          requirements: ["client_registered", "inspection_requested", "inspection_window_defined"],
         };
       case PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED:
         return {
-          action: "upload_contract_draft",
-          action_label: "Subir contrato borrador",
-          requirements: ["inspection_requested", "contract_draft_uploaded"],
+          action: "coordinate_inspection_then_upload_contract",
+          action_label: "Coordinar inspección y subir contrato borrador",
+          requirements: [
+            "inspection_requested",
+            "inspection_window_defined",
+            "inspection_date_coordinated",
+            "contract_draft_uploaded",
+          ],
         };
       case PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE:
         return {
@@ -3328,6 +3867,10 @@ class PrivatePurchasesService {
         return Boolean(row?.inspection_request_id || row?.inspection_requested_at);
       case "inspection_act_uploaded":
         return Boolean(row?.inspection_acta_document_id);
+      case "inspection_window_defined":
+        return Boolean(row?.inspection_min_date && row?.inspection_max_date);
+      case "inspection_date_coordinated":
+        return Boolean(row?.inspection_scheduled_date);
       case "lopdp_approved": {
         const lopdpStatus = String(clientRequest?.lopdp_consent_status || "").toLowerCase();
         return Boolean(

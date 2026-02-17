@@ -379,6 +379,33 @@ const OperacionesPrivatePurchases = () => {
     const guideDocuments = filterDocumentsByType(selectedPurchase?.documents, ['DELIVERY_GUIDE']);
     const coreDocuments = filterDocumentsByType(selectedPurchase?.documents, ['SIGNED_OFFER', 'CONTRACT_SIGNED']);
     const hasGuides = guideDocuments.length > 0;
+    const negotiatedItems = Array.isArray(selectedPurchase?.equipment) ? selectedPurchase.equipment : [];
+    const dispatchItems = Array.isArray(selectedPurchase?.dispatch_items_json)
+      ? selectedPurchase.dispatch_items_json
+      : [];
+
+    const normalizeItemKey = (item) => String(item?.id || item?.equipment_id || item?.name || "").toLowerCase().trim();
+    const dispatchIndex = dispatchItems.reduce((acc, item) => {
+      const key = normalizeItemKey(item);
+      if (!key) return acc;
+      const qty = Number(item?.quantity || item?.qty || item?.amount || 0) || 0;
+      acc[key] = (acc[key] || 0) + qty;
+      return acc;
+    }, {});
+
+    const deliveryControlRows = negotiatedItems.map((item, index) => {
+      const key = normalizeItemKey(item) || `row-${index}`;
+      const requested = Number(item?.quantity || item?.qty || 1) || 1;
+      const dispatched = dispatchIndex[key] || 0;
+      return {
+        key,
+        name: item?.name || item?.label || `Equipo ${index + 1}`,
+        requested,
+        dispatched,
+        pending: Math.max(requested - dispatched, 0),
+        completed: dispatched >= requested && requested > 0,
+      };
+    });
 
     return (
       <div className="space-y-6">
@@ -549,6 +576,54 @@ const OperacionesPrivatePurchases = () => {
                     {selectedPurchase.equipment_arrived_at ? 'Equipo recibido' : 'Marcar equipo recibido'}
                   </Button>
                 </div>
+              </div>
+            </details>
+
+            <details id="delivery-control-section" className="group rounded-xl border border-gray-200 bg-white p-4" open>
+              <summary className="cursor-pointer list-none text-sm font-semibold text-slate-900">
+                Control de elementos de la negociación
+              </summary>
+              <div className="mt-3 space-y-3">
+                {!deliveryControlRows.length ? (
+                  <p className="text-sm text-gray-500">No hay equipos negociados registrados para esta compra.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100 text-left text-xs uppercase tracking-wide text-gray-500">
+                          <th className="px-2 py-2">Elemento</th>
+                          <th className="px-2 py-2">Negociado</th>
+                          <th className="px-2 py-2">Despachado</th>
+                          <th className="px-2 py-2">Pendiente</th>
+                          <th className="px-2 py-2">Estado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {deliveryControlRows.map((row) => (
+                          <tr key={row.key} className="border-b border-gray-50">
+                            <td className="px-2 py-2 text-gray-800">{row.name}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.requested}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.dispatched}</td>
+                            <td className="px-2 py-2 text-gray-700">{row.pending}</td>
+                            <td className="px-2 py-2">
+                              <span
+                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                  row.completed
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : row.dispatched > 0
+                                    ? "bg-amber-100 text-amber-700"
+                                    : "bg-slate-100 text-slate-700"
+                                }`}
+                              >
+                                {row.completed ? "Completo" : row.dispatched > 0 ? "Parcial" : "Pendiente"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </details>
           </div>
@@ -729,7 +804,6 @@ const OperacionesPrivatePurchases = () => {
 };
 
 export default OperacionesPrivatePurchases;
-
 
 
 

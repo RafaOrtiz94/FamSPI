@@ -40,10 +40,11 @@ exports.upload = upload;
 
 exports.getMeta = async (req, res, next) => {
   try {
-    const [clients, equipment, acpUsers] = await Promise.all([
+    const [clients, equipment, acpUsers, providerContacts] = await Promise.all([
       service.getApprovedClients(),
       service.getEquipmentCatalog(),
       service.getAcpCommercialUsers(),
+      service.listProviderContacts({ user: req.user, limit: 50 }),
     ]);
 
     await logAction({
@@ -54,7 +55,41 @@ exports.getMeta = async (req, res, next) => {
       details: { clients: clients.length, equipment: equipment.length },
     });
 
-    res.json({ ok: true, data: { clients, equipment, acp_users: acpUsers } });
+    res.json({
+      ok: true,
+      data: {
+        clients,
+        equipment,
+        acp_users: acpUsers,
+        provider_contacts: providerContacts,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.listProviderContacts = async (req, res, next) => {
+  try {
+    const contacts = await service.listProviderContacts({
+      user: req.user,
+      query: req.query?.q || "",
+      limit: req.query?.limit,
+    });
+    res.json({ ok: true, data: contacts });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.saveProviderContact = async (req, res, next) => {
+  try {
+    const contact = await service.saveProviderContact({
+      user: req.user,
+      email: req.body?.email,
+      display_name: req.body?.display_name,
+    });
+    res.status(201).json({ ok: true, data: contact });
   } catch (error) {
     next(error);
   }
@@ -64,6 +99,21 @@ exports.getStats = async (req, res, next) => {
   try {
     const stats = await service.getStats({ requestType: req.query.request_type || "purchase" });
     res.json({ ok: true, data: stats });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.getTechnicalScheduleCalendar = async (req, res, next) => {
+  try {
+    const from = req.query?.from;
+    const to = req.query?.to;
+    const data = await service.getTechnicalScheduleCalendar({
+      user: req.user,
+      from,
+      to,
+    });
+    res.json({ ok: true, data });
   } catch (error) {
     next(error);
   }
@@ -339,6 +389,128 @@ exports.uploadContract = async (req, res, next) => {
   }
 };
 
+exports.requestDeliveryDates = async (req, res, next) => {
+  try {
+    const { notes, expected_updated_at } = req.body || {};
+    const updated = await service.requestDeliveryDates({
+      id: req.params.id,
+      user: req.user,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "delivery_dates_requested",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.submitDeliveryDates = async (req, res, next) => {
+  try {
+    const { delivery_start_at, delivery_end_at, notes, expected_updated_at } = req.body || {};
+    const updated = await service.submitDeliveryDates({
+      id: req.params.id,
+      user: req.user,
+      delivery_start_at,
+      delivery_end_at,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "delivery_dates_submitted",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.markEquipmentArrived = async (req, res, next) => {
+  try {
+    const { notes, expected_updated_at } = req.body || {};
+    const updated = await service.markEquipmentArrived({
+      id: req.params.id,
+      user: req.user,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "equipment_arrived",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.markDispatchReady = async (req, res, next) => {
+  try {
+    const { notes, expected_updated_at } = req.body || {};
+    const updated = await service.markDispatchReady({
+      id: req.params.id,
+      user: req.user,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "dispatch_ready",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.completeDelivery = async (req, res, next) => {
+  try {
+    const { notes, expected_updated_at } = req.body || {};
+    const updated = await service.completeDelivery({
+      id: req.params.id,
+      user: req.user,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "delivery_completed",
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.renewReservation = async (req, res, next) => {
   try {
     const updated = await service.renewReservation({
@@ -417,6 +589,37 @@ exports.submitSignedProformaWithInspection = async (req, res, next) => {
   }
 };
 
+exports.requestInspectionEnvironment = async (req, res, next) => {
+  try {
+    const { inspection_min_date, inspection_max_date, includes_starter_kit, expected_updated_at } = req.body || {};
+
+    const result = await service.requestInspectionEnvironment({
+      id: req.params.id,
+      user: req.user,
+      inspection_min_date,
+      inspection_max_date,
+      includes_starter_kit: includes_starter_kit === "true" || includes_starter_kit === true,
+      expected_updated_at,
+    });
+
+    const normalizedResult = normalizeDatesDeep(result, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedResult,
+      action: "inspection_requested",
+      extra: { message: "Solicitud de inspección de ambiente registrada" },
+      selector: (data) => data?.purchase_request,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.coordinateInspectionDate = async (req, res, next) => {
   try {
     const { inspection_date, notes, expected_updated_at } = req.body || {};
@@ -437,6 +640,32 @@ exports.coordinateInspectionDate = async (req, res, next) => {
       payload: normalizedUpdated,
       action: "inspection_coordinated",
       meta: { inspection_date: inspection_date || null },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.reviewInspectionDate = async (req, res, next) => {
+  try {
+    const { decision, review_notes, expected_updated_at } = req.body || {};
+    const updated = await service.reviewInspectionDateProposal({
+      id: req.params.id,
+      user: req.user,
+      decision,
+      review_notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: decision === "accept" ? "inspection_coordination_approved" : "inspection_coordination_rejected",
+      meta: { decision: String(decision || "").toLowerCase() },
     });
   } catch (error) {
     next(error);

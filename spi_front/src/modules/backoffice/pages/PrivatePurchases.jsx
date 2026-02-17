@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   FiChevronDown,
   FiClock,
@@ -25,13 +25,14 @@ import { useApi } from "../../../core/hooks/useApi";
 import { useUI } from "../../../core/ui/useUI";
 import { formatDateTimeEC } from "../../../core/utils/dateUtils";
 import NewClientRequestForm from "../../comercial/components/NewClientRequestForm";
-import CreateRequestModal from "../../comercial/components/CreateRequestModal";
 import {
   forwardPrivatePurchaseToAcp,
   getPrivatePurchaseDocuments,
   listPrivatePurchases,
   getMyPrivatePurchases,
   checkClientApproval,
+  coordinatePrivatePurchaseInspectionDate,
+  reviewPrivatePurchaseInspectionDate,
   requestDeliveryDates,
   requestClientRegistration,
   savePrivatePurchaseInspectionRequest,
@@ -45,7 +46,6 @@ import {
   uploadPrivatePurchaseClientSignedContract,
   uploadPrivateSignedOffer,
 } from "../../../core/api/privatePurchasesApi";
-import { createRequest } from "../../../core/api/requestsApi";
 import {
   PRIVATE_PURCHASE_STATUS_DEFINITIONS,
   PRIVATE_PURCHASE_ERROR_CODES,
@@ -86,6 +86,16 @@ const statusLookup = STATUS_DEFINITIONS.reduce((acc, def) => {
 }, {});
 
 const formatDate = (value) => formatDateTimeEC(value, "Sin fecha");
+const OFFER_KIND_LABELS = {
+  venta: "Venta directa",
+  alquiler: "Alquiler",
+  prestamo: "Alquiler",
+  comodato: "Comodato",
+};
+const resolveOfferKindLabel = (value) => {
+  const key = String(value || "").trim().toLowerCase();
+  return OFFER_KIND_LABELS[key] || "Venta directa";
+};
 const formatChecklistActionLabel = (checklistState = {}) => {
   if (checklistState?.action_label) return checklistState.action_label;
   const raw = String(checklistState?.action || "")
@@ -97,6 +107,7 @@ const formatChecklistActionLabel = (checklistState = {}) => {
 
 const PrivatePurchasesPage = () => {
   const location = useLocation();
+  const navigate = useNavigate();
   const { showToast } = useUI();
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedId, setSelectedId] = useState(null);
@@ -126,10 +137,10 @@ const PrivatePurchasesPage = () => {
     end: "",
     notes: ""
   });
-  const [inspectionModal, setInspectionModal] = useState({
-    open: false,
-    requestId: null,
-    initialData: null
+  const [inspectionCoordinationDraft, setInspectionCoordinationDraft] = useState({
+    inspection_date: "",
+    notes: "",
+    loading: false,
   });
   const [processingAction, setProcessingAction] = useState(null);
   const [documentLinks, setDocumentLinks] = useState([]);
@@ -179,12 +190,20 @@ const PrivatePurchasesPage = () => {
     normalizedRole.includes("gerencia") ||
     normalizedRole.includes("jefe_comercial");
   const isGerenciaGeneral = hasRoleToken("gerencia_general");
+  const isTechnicalCoordinator =
+    hasRoleToken("jefe_tecnico") ||
+    hasRoleToken("jefe_servicio_tecnico") ||
+    hasRoleToken("tecnico");
   const isPureCommercial =
     !isBackofficeUser &&
     !isManagerUser &&
     !isAcpUser &&
     (normalizedRole.startsWith("comercial") || normalizedScope.startsWith("comercial"));
-  const canManageRequests = isBackofficeUser || isManagerUser || isAcpUser;
+  const canCoordinatePrivateInspection =
+    isPureCommercial || hasRoleToken("jefe_comercial") || hasRoleToken("acp_comercial");
+  const canReviewPrivateInspectionCoordination =
+    hasRoleToken("jefe_tecnico") || hasRoleToken("jefe_servicio_tecnico");
+  const canManageRequests = isBackofficeUser || isManagerUser || isAcpUser || isTechnicalCoordinator;
   const canViewRequests = canManageRequests || isPureCommercial;
   const statusOwnerLabels = {
     pending_backoffice: "Backoffice Comercial",
@@ -426,28 +445,6 @@ const PrivatePurchasesPage = () => {
     return localStorage.getItem(`private_purchase_flow_${requestId}`);
   };
 
-  const buildInspectionInitialData = (request) => {
-    const snapshot = request?.client_snapshot || {};
-    const equipment = Array.isArray(request?.equipment)
-      ? request.equipment.map((item) => ({
-        equipo_id: item.id || item.equipo_id || item.unidad_id || "",
-        unidad_id: item.unidad_id || item.id || "",
-        estado: item.type === "cu" ? "cu" : "nuevo",
-        serial: item.serial || "",
-        nombre_equipo: item.name || item.label || item.sku || "Equipo",
-      }))
-      : [];
-    return {
-      cliente_id: snapshot.registered_client_id || snapshot.client_id || "",
-      client_id: snapshot.registered_client_id || snapshot.client_id || "",
-      nombre_cliente: snapshot.commercial_name || snapshot.name || snapshot.client_name || "",
-      direccion_cliente: snapshot.shipping_address || snapshot.address || "",
-      persona_contacto: snapshot.shipping_contact_name || snapshot.contact_name || snapshot.legal_rep_name || "",
-      celular_contacto: snapshot.shipping_phone || snapshot.shipping_cellphone || snapshot.phone || "",
-      email_cliente: snapshot.client_email || snapshot.email || "",
-      equipos: equipment,
-    };
-  };
 
   useEffect(() => {
     if (!canViewRequests) return;
@@ -533,6 +530,22 @@ const PrivatePurchasesPage = () => {
     if (!updated) return;
     setDetailModalRequest(updated);
   }, [detailModalRequest?.id, requests]);
+
+  useEffect(() => {
+    if (!detailModalRequest?.id) return;
+    setInspectionCoordinationDraft((prev) => ({
+      ...prev,
+      inspection_date: detailModalRequest.inspection_proposed_date || "",
+      notes: detailModalRequest.inspection_proposed_notes || detailModalRequest.inspection_coordination_notes || "",
+      review_notes: detailModalRequest.inspection_review_notes || "",
+    }));
+  }, [
+    detailModalRequest?.id,
+    detailModalRequest?.inspection_proposed_date,
+    detailModalRequest?.inspection_proposed_notes,
+    detailModalRequest?.inspection_coordination_notes,
+    detailModalRequest?.inspection_review_notes,
+  ]);
 
   // Calculate missing documents for resubmit gating
   useEffect(() => {
@@ -1209,58 +1222,71 @@ const PrivatePurchasesPage = () => {
     });
   };
 
-  const handleOpenInspectionModal = (requestId) => {
-    const request = getRequestById(requestId);
-    if (!request) return;
 
-    setInspectionModal({
-      open: true,
-      requestId,
-      initialData: buildInspectionInitialData(request)
-    });
-  };
-
-  const handleSubmitInspectionRequest = async (data) => {
-    if (!inspectionModal.requestId) return;
+  const handleAutoInspectionRequest = async (requestId) => {
+    if (!requestId) return;
     try {
-      showToast("Enviando solicitud de inspeccion...", "info");
-
-      const { files = [], ...payload } = data || {};
-      const payloadToSend = {
-        ...payload,
-        observaciones: payload?.observacion
-      };
-      delete payloadToSend.observacion;
-
-      const result = await createRequest({
-        request_type_id: "F.ST-20",
-        ...payloadToSend,
-        files
-      });
-
-      const requestId =
-        result?.request?.id ||
-        result?.request_id ||
-        result?.id;
-      const actaId =
-        result?.document?.id ||
-        result?.document?.pdfId ||
-        result?.document?.docId ||
-        null;
-
-      await savePrivatePurchaseInspectionRequest(inspectionModal.requestId, {
-        request_id: requestId,
-        acta_document_id: actaId
-      });
-
-      showToast("Solicitud de inspeccion enviada correctamente", "success");
-      setInspectionModal({ open: false, requestId: null, initialData: null });
+      setProcessingAction({ id: requestId, type: "inspection_auto" });
+      showToast("Generando inspección de ambiente...", "info");
+      await savePrivatePurchaseInspectionRequest(requestId, {});
+      showToast("Inspección de ambiente creada automáticamente", "success");
       fetchPrivatePurchases({
         status: statusFilter !== "all" ? statusFilter : undefined,
       });
     } catch (error) {
-      console.error("[FLOW_PRIVADA][FE][INSPECCION][ERROR]", error);
-      showToast("Error al enviar la solicitud de inspeccion", "error");
+      console.error("[FLOW_PRIVADA][FE][INSPECCION_AUTO][ERROR]", error);
+      showToast(error?.message || "No se pudo generar la inspección automática", "error");
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleCoordinateInspectionDate = async () => {
+    if (!detailModalRequest?.id) return;
+    if (!inspectionCoordinationDraft.inspection_date) {
+      showToast("Selecciona la fecha coordinada de inspección", "warning");
+      return;
+    }
+    try {
+      setInspectionCoordinationDraft((prev) => ({ ...prev, loading: true }));
+      await coordinatePrivatePurchaseInspectionDate(detailModalRequest.id, {
+        inspection_date: inspectionCoordinationDraft.inspection_date,
+        notes: inspectionCoordinationDraft.notes || "",
+      });
+      showToast("Fecha propuesta enviada. Pendiente validación de Jefe Técnico", "success");
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error("[FLOW_PRIVADA][FE][COORD_INSPECCION][ERROR]", error);
+      showToast(error?.message || "No se pudo coordinar la inspección", "error");
+    } finally {
+      setInspectionCoordinationDraft((prev) => ({ ...prev, loading: false }));
+    }
+  };
+
+  const handleReviewInspectionDate = async (decision) => {
+    if (!detailModalRequest?.id) return;
+    try {
+      setInspectionCoordinationDraft((prev) => ({ ...prev, loading: true }));
+      await reviewPrivatePurchaseInspectionDate(detailModalRequest.id, {
+        decision,
+        review_notes: inspectionCoordinationDraft.review_notes || "",
+      });
+      showToast(
+        decision === "accept"
+          ? "Fecha de inspección aprobada por Jefe Técnico"
+          : "Fecha propuesta rechazada. Comercial debe proponer otra fecha",
+        "success",
+      );
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error("[FLOW_PRIVADA][FE][REVIEW_INSPECCION][ERROR]", error);
+      showToast(error?.message || "No se pudo revisar la propuesta de inspección", "error");
+    } finally {
+      setInspectionCoordinationDraft((prev) => ({ ...prev, loading: false }));
     }
   };
 
@@ -1558,6 +1584,30 @@ const PrivatePurchasesPage = () => {
                       </div>
                     </div>
 
+                    {(req.inspection_request_id || req.inspection_scheduled_date || req.inspection_proposed_date) && (
+                      <div className="mb-3 rounded-lg border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs text-cyan-800">
+                        <p className="font-semibold">Inspección de ambiente</p>
+                        <p>
+                          Ventana: {req.inspection_min_date || "Pendiente"} - {req.inspection_max_date || "Pendiente"}
+                        </p>
+                        <p>
+                          Propuesta: {req.inspection_proposed_date || "Pendiente"}
+                        </p>
+                        <p>
+                          Coordinación final: {req.inspection_scheduled_date || "Pendiente"}
+                        </p>
+                        <p>
+                          Estado: {req.inspection_coordination_status === "accepted"
+                            ? "Aprobada"
+                            : req.inspection_coordination_status === "pending_review"
+                              ? "Pendiente validación jefe técnico"
+                              : req.inspection_coordination_status === "rejected"
+                                ? "Rechazada"
+                                : "Pendiente propuesta"}
+                        </p>
+                      </div>
+                    )}
+
                     {req.checklist_state?.action && (
                       <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
@@ -1667,7 +1717,7 @@ const PrivatePurchasesPage = () => {
                       }}
                       onOpenInspectionModal={(id) => {
                         setSelectedId(id);
-                        handleOpenInspectionModal(id);
+                        handleAutoInspectionRequest(id);
                       }}
                     />
 
@@ -2384,15 +2434,6 @@ const PrivatePurchasesPage = () => {
           />
         </Modal>
 
-        <CreateRequestModal
-          open={inspectionModal.open}
-          onClose={() => setInspectionModal({ open: false, requestId: null, initialData: null })}
-          onSubmit={handleSubmitInspectionRequest}
-          presetType="inspection"
-          initialData={inspectionModal.initialData}
-          isEditing={true}
-        />
-
         <Modal
           open={Boolean(detailModalRequest)}
           onClose={handleDetailClose}
@@ -2436,7 +2477,7 @@ const PrivatePurchasesPage = () => {
                 </div>
                 <div>
                   <p className="text-xs uppercase tracking-widest text-gray-500">Tipo de oferta</p>
-                  <p className="text-sm font-semibold text-gray-900 capitalize">{detailModalRequest.offer_kind || "venta"}</p>
+                  <p className="text-sm font-semibold text-gray-900">{resolveOfferKindLabel(detailModalRequest.offer_kind)}</p>
                   <p className="text-xs text-gray-500">
                     Vigente hasta {formatDate(detailModalRequest.offer_valid_until)}
                   </p>
@@ -2643,6 +2684,160 @@ const PrivatePurchasesPage = () => {
                 </div>
               )}
 
+              {(detailModalRequest.inspection_request_id || detailModalRequest.status === "inspection_requested") && (
+                <div className="space-y-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-900">
+                  <p className="text-xs uppercase tracking-widest text-cyan-700">Inspección de ambiente</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <p>
+                      <span className="font-medium">Ventana:</span>{" "}
+                      {detailModalRequest.inspection_min_date || "Pendiente"} - {detailModalRequest.inspection_max_date || "Pendiente"}
+                    </p>
+                    <p>
+                      <span className="font-medium">Fecha propuesta:</span>{" "}
+                      {detailModalRequest.inspection_proposed_date || "Pendiente"}
+                    </p>
+                    <p>
+                      <span className="font-medium">Fecha coordinada final:</span>{" "}
+                      {detailModalRequest.inspection_scheduled_date || "Pendiente"}
+                    </p>
+                    <p>
+                      <span className="font-medium">Estado:</span>{" "}
+                      {detailModalRequest.inspection_coordination_status === "accepted"
+                        ? "Aprobada por jefe técnico"
+                        : detailModalRequest.inspection_coordination_status === "pending_review"
+                          ? "Pendiente validación jefe técnico"
+                          : detailModalRequest.inspection_coordination_status === "rejected"
+                            ? "Rechazada por jefe técnico"
+                            : "Pendiente propuesta"}
+                    </p>
+                  </div>
+                  {detailModalRequest.inspection_coordinated_by_email && (
+                    <p className="text-xs text-cyan-700">
+                      Coordinado por {detailModalRequest.inspection_coordinated_by_email}
+                    </p>
+                  )}
+                  {detailModalRequest.inspection_request_id && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(
+                            `/dashboard/servicio-tecnico/desinfeccion?source_type=private_purchase&source_id=${encodeURIComponent(
+                              detailModalRequest.id,
+                            )}&request_id=${encodeURIComponent(detailModalRequest.inspection_request_id)}`,
+                          )
+                        }
+                        className="rounded-md border border-cyan-200 bg-white px-2 py-1 text-[11px] font-medium text-cyan-900 hover:bg-cyan-100"
+                      >
+                        F.ST-02 Desinfección
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(
+                            `/dashboard/servicio-tecnico/aplicaciones?source_type=private_purchase&source_id=${encodeURIComponent(
+                              detailModalRequest.id,
+                            )}&request_id=${encodeURIComponent(detailModalRequest.inspection_request_id)}`,
+                          )
+                        }
+                        className="rounded-md border border-cyan-200 bg-white px-2 py-1 text-[11px] font-medium text-cyan-900 hover:bg-cyan-100"
+                      >
+                        F.ST-04 Entrenamiento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          navigate(
+                            `/dashboard/servicio-tecnico/verificacion?source_type=private_purchase&source_id=${encodeURIComponent(
+                              detailModalRequest.id,
+                            )}&request_id=${encodeURIComponent(detailModalRequest.inspection_request_id)}`,
+                          )
+                        }
+                        className="rounded-md border border-cyan-200 bg-white px-2 py-1 text-[11px] font-medium text-cyan-900 hover:bg-cyan-100"
+                      >
+                        F.ST-09 Verificación
+                      </button>
+                    </div>
+                  )}
+                  {canCoordinatePrivateInspection && detailModalRequest.status === "inspection_requested" && (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                        <input
+                          type="date"
+                          className="w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-700"
+                          min={detailModalRequest.inspection_min_date || undefined}
+                          max={detailModalRequest.inspection_max_date || undefined}
+                          value={inspectionCoordinationDraft.inspection_date}
+                          onChange={(event) =>
+                            setInspectionCoordinationDraft((prev) => ({
+                              ...prev,
+                              inspection_date: event.target.value,
+                            }))
+                          }
+                        />
+                        <textarea
+                          rows={2}
+                          className="w-full rounded-lg border border-cyan-200 bg-white px-3 py-2 text-sm text-slate-700"
+                          value={inspectionCoordinationDraft.notes}
+                          onChange={(event) =>
+                            setInspectionCoordinationDraft((prev) => ({
+                              ...prev,
+                              notes: event.target.value,
+                            }))
+                          }
+                          placeholder="Notas de coordinación (opcional)"
+                        />
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={handleCoordinateInspectionDate}
+                        loading={inspectionCoordinationDraft.loading}
+                        disabled={!detailModalRequest.inspection_request_id}
+                      >
+                        Proponer fecha a Jefe Técnico
+                      </Button>
+                    </div>
+                  )}
+                  {canReviewPrivateInspectionCoordination &&
+                    detailModalRequest.status === "inspection_requested" &&
+                    detailModalRequest.inspection_coordination_status === "pending_review" && (
+                    <div className="space-y-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+                      <textarea
+                        rows={2}
+                        className="w-full rounded-lg border border-emerald-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        value={inspectionCoordinationDraft.review_notes || ""}
+                        onChange={(event) =>
+                          setInspectionCoordinationDraft((prev) => ({
+                            ...prev,
+                            review_notes: event.target.value,
+                          }))
+                        }
+                        placeholder="Comentario de validación (opcional)"
+                      />
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => handleReviewInspectionDate("accept")}
+                          loading={inspectionCoordinationDraft.loading}
+                        >
+                          Aprobar fecha
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          onClick={() => handleReviewInspectionDate("reject")}
+                          loading={inspectionCoordinationDraft.loading}
+                        >
+                          Rechazar fecha
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2 rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-600">
                 <p className="text-xs uppercase tracking-widest text-gray-500">Expediente</p>
                 {!isGerenciaGeneral && documentLinks.length > visibleDocumentLinks.length && (
@@ -2779,20 +2974,28 @@ const PrivatePurchasesPage = () => {
                   )}
                 {isBackofficeUser &&
                   detailModalRequest.status === "inspection_requested" && (
-                    <Button
-                      variant={detailModalRequest.contract_document_id ? "warning" : "success"}
-                      size="sm"
-                      onClick={() => {
-                        if (detailModalRequest.contract_document_id) {
-                          setSelectedId(detailModalRequest.id);
-                          handleResubmitToGerencia();
-                          return;
-                        }
-                        openContractModal("draft");
-                      }}
-                    >
-                      <FiUpload /> {detailModalRequest.contract_document_id ? "Enviar a gerencia" : "Subir contrato"}
-                    </Button>
+                    <div className="space-y-1">
+                      <Button
+                        variant={detailModalRequest.contract_document_id ? "warning" : "success"}
+                        size="sm"
+                        disabled={!detailModalRequest.inspection_scheduled_date}
+                        onClick={() => {
+                          if (detailModalRequest.contract_document_id) {
+                            setSelectedId(detailModalRequest.id);
+                            handleResubmitToGerencia();
+                            return;
+                          }
+                          openContractModal("draft");
+                        }}
+                      >
+                        <FiUpload /> {detailModalRequest.contract_document_id ? "Enviar a gerencia" : "Subir contrato"}
+                      </Button>
+                      {!detailModalRequest.inspection_scheduled_date && (
+                        <p className="text-xs text-amber-700">
+                          Debes coordinar la fecha de inspección antes de continuar con contrato.
+                        </p>
+                      )}
+                    </div>
                   )}
                 {isPureCommercial && detailModalRequest.status === "pending_contract_client_signature" && (
                   <Button
@@ -2807,9 +3010,10 @@ const PrivatePurchasesPage = () => {
                   <Button
                     variant="primary"
                     size="sm"
-                    onClick={() => handleOpenInspectionModal(detailModalRequest.id)}
+                    onClick={() => handleAutoInspectionRequest(detailModalRequest.id)}
+                    loading={processingAction?.type === "inspection_auto" && processingAction?.id === detailModalRequest.id}
                   >
-                    <FiSearch /> Solicitar inspeccion
+                    <FiSearch /> Generar inspección automática
                   </Button>
                 )}
                 {isPureCommercial && detailModalRequest.status === "delivery_dates_requested" && (
