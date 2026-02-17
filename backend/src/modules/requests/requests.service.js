@@ -11,7 +11,10 @@ const { v4: uuidv4 } = require("uuid");
 const { drive, docs } = require("../../config/google");
 const QRCode = require("qrcode");
 const { Readable } = require("stream");
-const PDFDocument = require("pdfkit");
+const PDFKitDocument = require("pdfkit");
+const { PDFDocument: PdfLibDocument, StandardFonts } = require("pdf-lib");
+const path = require("path");
+const fs = require("fs");
 const {
   copyTemplate,
   replaceTags,
@@ -525,6 +528,11 @@ const FORM_VARIANT_META = {
     label: "Ficha de Cliente",
   },
 };
+
+const INSPECTION_FORM_PDF_PATH = path.resolve(
+  __dirname,
+  "../../data/plantillas/F.ST-20_V01_SOLICITUD DE INSPECCION DE AMBIENTE.pdf",
+);
 
 function buildHttpError(message, status = 400) {
   const error = new Error(message);
@@ -1236,6 +1244,103 @@ async function resolveEquipmentDisplayData(equipos = []) {
   });
 }
 
+function buildInspectionExtrasText(payload = {}) {
+  const extras = [payload.accesorios, payload.anotaciones]
+    .map((item) => asText(item).trim())
+    .filter(Boolean);
+  return extras.join(" | ");
+}
+
+async function generateInspectionFormPdf({
+  request_id,
+  uploaded_by,
+  folderId,
+  payload,
+  req,
+  equipos,
+  docLabel,
+  normalizedCode,
+  paddedId,
+  variantKey,
+}) {
+  if (!fs.existsSync(INSPECTION_FORM_PDF_PATH)) {
+    throw new Error(`Plantilla de inspeccion no encontrada: ${INSPECTION_FORM_PDF_PATH}`);
+  }
+
+  const sourcePdfBytes = fs.readFileSync(INSPECTION_FORM_PDF_PATH);
+  const pdfDoc = await PdfLibDocument.load(sourcePdfBytes);
+  const form = pdfDoc.getForm();
+  const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+  const setTextField = (fieldName, value) => {
+    const textField = form.getTextField(fieldName);
+    textField.setText(asText(value));
+    textField.updateAppearances(baseFont);
+  };
+
+  const firstFourEquipments = Array.isArray(equipos) ? equipos.slice(0, 4) : [];
+  const reqLisValue =
+    typeof payload?.requiere_lis === "boolean"
+      ? (payload.requiere_lis ? "Si" : "No")
+      : asText(payload?.requiere_lis);
+
+  setTextField("asesor", req?.requester_name || "");
+  setTextField("fecha", formatDate(req?.created_at));
+  setTextField("correo", req?.requester_email || "");
+  setTextField("cliente", payload?.nombre_cliente || "");
+  setTextField("dir_cliente", payload?.direccion_cliente || "");
+  setTextField("pc_cliente", payload?.persona_contacto || "");
+  setTextField("cp_cliente", payload?.celular_contacto || "");
+  setTextField("fecha_ins", payload?.fecha_instalacion ? formatDate(payload.fecha_instalacion) : "");
+  setTextField("req_lis", reqLisValue);
+  setTextField("Acc_extras", buildInspectionExtrasText(payload));
+  setTextField("obs", payload?.observaciones || "");
+
+  for (let i = 0; i < 4; i += 1) {
+    const equipment = firstFourEquipments[i];
+    const name = equipment?.displayName || equipment?.nombre_equipo || "";
+    const state = equipment?.displayState || equipment?.estado || "";
+    setTextField(`equipo_${i + 1}`, name);
+    setTextField(`e_equipo_${i + 1}`, state);
+  }
+
+  form.flatten();
+  const pdfBytes = await pdfDoc.save();
+  const pdfName = `${docLabel} - ${normalizedCode}-${paddedId}.pdf`;
+  const stored = await uploadBase64File(
+    pdfName,
+    Buffer.from(pdfBytes).toString("base64"),
+    "application/pdf",
+    folderId,
+  );
+  const pdfLink = stored?.webViewLink || (stored?.id ? buildDriveLink(stored.id) : null);
+
+  await db.query(
+    `INSERT INTO request_attachments (request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)
+     VALUES ($1,$2,$3,$4,$5,$6)`,
+    [request_id, stored.id, pdfLink, "application/pdf", uploaded_by, pdfName],
+  );
+
+  await logAction({
+    user_id: uploaded_by,
+    module: "requests",
+    action: "generate_acta_pdf_template",
+    entity: "requests",
+    entity_id: request_id,
+    details: { template_file: path.basename(INSPECTION_FORM_PDF_PATH), variant: variantKey || "inspection" },
+  });
+
+  return {
+    id: stored.id,
+    link: pdfLink,
+    pdfId: stored.id,
+    pdfLink,
+    name: pdfName,
+    variant: variantKey,
+    source: "local_pdf_template",
+  };
+}
+
 async function generateActa(request_id, uploaded_by, options = {}) {
   let formVariant = null;
   if (typeof options === "string") formVariant = options;
@@ -1271,7 +1376,7 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   const buildFallbackPdf = async () => {
     const fallbackName = `${docLabel} - ${pdfBaseName}.pdf`;
     const buffer = await new Promise((resolve, reject) => {
-      const pdfDoc = new PDFDocument({ margin: 50 });
+      const pdfDoc = new PDFKitDocument({ margin: 50 });
       const chunks = [];
       pdfDoc.on("data", (chunk) => chunks.push(chunk));
       pdfDoc.on("end", () => resolve(Buffer.concat(chunks)));
@@ -1341,6 +1446,28 @@ async function generateActa(request_id, uploaded_by, options = {}) {
       fallback: true,
     };
   };
+
+  if (typeCode === "F.ST-20") {
+    try {
+      return await generateInspectionFormPdf({
+        request_id,
+        uploaded_by,
+        folderId,
+        payload,
+        req,
+        equipos,
+        docLabel,
+        normalizedCode,
+        paddedId,
+        variantKey,
+      });
+    } catch (error) {
+      logger.error(
+        { err: error, request_id, templatePath: INSPECTION_FORM_PDF_PATH },
+        "Error generando F.ST-20 desde plantilla PDF local, usando flujo de respaldo",
+      );
+    }
+  }
 
   const templateId = getSolicitudTemplateId(typeCode);
   if (!templateId) {
