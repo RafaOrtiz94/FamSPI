@@ -36,6 +36,9 @@ export const normalizeUIGuidanceResponse = (response) => {
         canBlockSections: data.permissions?.canBlockSections ?? false,
         canUnblockSections: data.permissions?.canUnblockSections ?? false
       },
+      featureFlags: {
+        autosave: data.featureFlags?.autosave || {},
+      },
       observationData: data.observationData || null,
       workflowState: {
         currentStage: data.workflowState?.currentStage || 'draft',
@@ -49,6 +52,7 @@ export const normalizeUIGuidanceResponse = (response) => {
       businessCase: null,
       sectionOwnership: { rules: {} },
       permissions: { canEdit: true, canCompleteSections: true, canPromoteStage: true, canAddObservations: true },
+      featureFlags: { autosave: {} },
       observationData: null,
       workflowState: { currentStage: 'draft', availableTransitions: [] }
     };
@@ -279,8 +283,6 @@ class SectionAutosaveManager {
   async _performSectionSave(sectionKey, data) {
     // This would call the appropriate backend endpoint based on section
     // For now, we'll simulate the API calls
-    console.log(`Autosaving section ${sectionKey}:`, data);
-
     // Simulate API delay
     await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -468,5 +470,40 @@ export const unlockSection = async (businessCaseId, section) => {
 
 export const submitBusinessCaseFeasibilityDecision = async (businessCaseId, payload) => {
   const { data } = await api.post(`/business-case/${businessCaseId}/feasibility-decision`, payload);
+  return data.data || data;
+};
+
+export const getBusinessCaseDispatchWorkspace = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/dispatch-workspace`);
+  return data.data || data;
+};
+
+export const saveBusinessCaseCommercialDispatchPlan = async (businessCaseId, items = []) => {
+  const { data } = await api.put(`/business-case/${businessCaseId}/dispatch-workspace/commercial-plan`, {
+    items,
+  });
+  return data.data || data;
+};
+
+export const saveBusinessCaseOperationsDispatchControl = async (businessCaseId, items = []) => {
+  const { data } = await api.put(`/business-case/${businessCaseId}/dispatch-workspace/operations-control`, {
+    items,
+  });
+  return data.data || data;
+};
+
+export const getBusinessCaseObservabilityDashboard = async () => {
+  const { data } = await api.get("/business-case/observability/dashboard");
+  return data.data || data;
+};
+
+export const getAutosaveFeatureFlags = async (role = null) => {
+  const config = role ? { params: { role } } : undefined;
+  const { data } = await api.get("/business-case/feature-flags/autosave", config);
+  return data.data || data;
+};
+
+export const updateAutosaveFeatureFlags = async (payload) => {
+  const { data } = await api.put("/business-case/feature-flags/autosave", payload);
   return data.data || data;
 };

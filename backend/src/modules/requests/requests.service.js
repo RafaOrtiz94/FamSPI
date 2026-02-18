@@ -1272,8 +1272,9 @@ async function generateInspectionFormPdf({
   const form = pdfDoc.getForm();
   const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
 
-  const setTextField = (fieldName, value) => {
+  const setTextField = (fieldName, value, { fontSize = 8 } = {}) => {
     const textField = form.getTextField(fieldName);
+    textField.setFontSize(fontSize);
     textField.setText(asText(value));
     textField.updateAppearances(baseFont);
   };
@@ -1284,24 +1285,24 @@ async function generateInspectionFormPdf({
       ? (payload.requiere_lis ? "Si" : "No")
       : asText(payload?.requiere_lis);
 
-  setTextField("asesor", req?.requester_name || "");
-  setTextField("fecha", formatDate(req?.created_at));
-  setTextField("correo", req?.requester_email || "");
-  setTextField("cliente", payload?.nombre_cliente || "");
-  setTextField("dir_cliente", payload?.direccion_cliente || "");
-  setTextField("pc_cliente", payload?.persona_contacto || "");
-  setTextField("cp_cliente", payload?.celular_contacto || "");
-  setTextField("fecha_ins", payload?.fecha_instalacion ? formatDate(payload.fecha_instalacion) : "");
-  setTextField("req_lis", reqLisValue);
-  setTextField("Acc_extras", buildInspectionExtrasText(payload));
-  setTextField("obs", payload?.observaciones || "");
+  setTextField("asesor", req?.requester_name || "", { fontSize: 8 });
+  setTextField("fecha", formatDate(req?.created_at), { fontSize: 8 });
+  setTextField("correo", req?.requester_email || "", { fontSize: 8 });
+  setTextField("cliente", payload?.nombre_cliente || "", { fontSize: 8 });
+  setTextField("dir_cliente", payload?.direccion_cliente || "", { fontSize: 8 });
+  setTextField("pc_cliente", payload?.persona_contacto || "", { fontSize: 8 });
+  setTextField("cp_cliente", payload?.celular_contacto || "", { fontSize: 8 });
+  setTextField("fecha_ins", payload?.fecha_instalacion ? formatDate(payload.fecha_instalacion) : "", { fontSize: 8 });
+  setTextField("req_lis", reqLisValue, { fontSize: 8 });
+  setTextField("Acc_extras", buildInspectionExtrasText(payload), { fontSize: 8 });
+  setTextField("obs", payload?.observaciones || "", { fontSize: 8 });
 
   for (let i = 0; i < 4; i += 1) {
     const equipment = firstFourEquipments[i];
     const name = equipment?.displayName || equipment?.nombre_equipo || "";
     const state = equipment?.displayState || equipment?.estado || "";
-    setTextField(`equipo_${i + 1}`, name);
-    setTextField(`e_equipo_${i + 1}`, state);
+    setTextField(`equipo_${i + 1}`, name, { fontSize: 8 });
+    setTextField(`e_equipo_${i + 1}`, state, { fontSize: 8 });
   }
 
   form.flatten();
@@ -1448,25 +1449,18 @@ async function generateActa(request_id, uploaded_by, options = {}) {
   };
 
   if (typeCode === "F.ST-20") {
-    try {
-      return await generateInspectionFormPdf({
-        request_id,
-        uploaded_by,
-        folderId,
-        payload,
-        req,
-        equipos,
-        docLabel,
-        normalizedCode,
-        paddedId,
-        variantKey,
-      });
-    } catch (error) {
-      logger.error(
-        { err: error, request_id, templatePath: INSPECTION_FORM_PDF_PATH },
-        "Error generando F.ST-20 desde plantilla PDF local, usando flujo de respaldo",
-      );
-    }
+    return await generateInspectionFormPdf({
+      request_id,
+      uploaded_by,
+      folderId,
+      payload,
+      req,
+      equipos,
+      docLabel,
+      normalizedCode,
+      paddedId,
+      variantKey,
+    });
   }
 
   const templateId = getSolicitudTemplateId(typeCode);

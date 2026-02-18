@@ -175,7 +175,8 @@ export const privatePurchasesApi = {
   // List private purchases (existing)
   listPrivatePurchases: async (filters = {}) => {
     const queryParams = new URLSearchParams();
-    if (filters.status) queryParams.append('status', filters.status);
+    const normalizedStatus = typeof filters.status === 'string' ? filters.status.trim() : filters.status;
+    if (normalizedStatus) queryParams.append('status', normalizedStatus);
 
     const result = await apiCall(`/private-purchases?${queryParams}`);
     return result;

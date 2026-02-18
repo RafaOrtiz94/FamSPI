@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useCallback, useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   getBusinessCase,
@@ -7,6 +7,7 @@ import {
   createAutosaveManager
 } from "../../../core/api/businessCaseApi";
 import { useUI } from "../../../core/ui/UIContext";
+import { recordBusinessCaseTelemetry } from "../../../core/utils/businessCaseTelemetry";
 import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
@@ -29,67 +30,88 @@ const BusinessCaseWorkspace = () => {
     setSelectedSection(sectionId);
   };
 
-  const handleSectionSave = async () => {
+  const handleSectionSave = useCallback(async (options = {}) => {
     if (!uiGuidance) return;
+    if (options?.refresh === false) return;
 
-    console.log("DEBUG: handleSectionSave called");
-
+    const startedAt = Date.now();
     try {
       // Refresh UI guidance and business case to rehydrate saved fields
       const [data, businessCaseData] = await Promise.all([
         getUIGuidance(bcId),
         getBusinessCase(bcId)
       ]);
-      console.log("DEBUG: New UI guidance data", data);
       setUiGuidance(normalizeUIGuidanceResponse(data));
       setBusinessCase(businessCaseData);
-      console.log("DEBUG: uiGuidance state updated");
       showToast("Sección guardada y datos actualizados", "success");
+      recordBusinessCaseTelemetry({
+        section: "workspace",
+        type: "refresh_after_save_success",
+        durationMs: Date.now() - startedAt,
+        success: true,
+      });
     } catch (err) {
       console.error("Failed to refresh UI guidance after save:", err);
       showToast("Error actualizando datos después del guardado", "error");
+      recordBusinessCaseTelemetry({
+        section: "workspace",
+        type: "refresh_after_save_error",
+        durationMs: Date.now() - startedAt,
+        success: false,
+      });
     }
-  };
+  }, [bcId, showToast, uiGuidance]);
 
 
   // Initialize autosave manager and fetch data on mount and when bcId changes
+  const fetchWorkspaceData = useCallback(async () => {
+    if (!bcId) {
+      // No bcId provided - show picker instead of workspace
+      setLoading(false);
+      return;
+    }
+
+    const startedAt = Date.now();
+    try {
+      setLoading(true);
+      setError(null);
+
+      // Create autosave manager
+      autosaveManagerRef.current = createAutosaveManager(bcId);
+
+      // Load complete business case and UI guidance in parallel
+      const [businessCaseData, uiGuidanceData] = await Promise.all([
+        getBusinessCase(bcId),
+        getUIGuidance(bcId)
+      ]);
+
+      // Normalize UI guidance response
+      const normalizedUIGuidance = normalizeUIGuidanceResponse(uiGuidanceData);
+
+      setBusinessCase(businessCaseData);
+      setUiGuidance(normalizedUIGuidance);
+      recordBusinessCaseTelemetry({
+        section: "workspace",
+        type: "initial_load_success",
+        durationMs: Date.now() - startedAt,
+        success: true,
+      });
+    } catch (err) {
+      console.error("Failed to fetch workspace data:", err);
+      setError(err.message || "Failed to load workspace data");
+      showToast("Error cargando datos del workspace", "error");
+      recordBusinessCaseTelemetry({
+        section: "workspace",
+        type: "initial_load_error",
+        durationMs: Date.now() - startedAt,
+        success: false,
+      });
+    } finally {
+      setLoading(false);
+    }
+  }, [bcId, showToast]);
+
   useEffect(() => {
-    const fetchWorkspaceData = async () => {
-      if (!bcId) {
-        // No bcId provided - show picker instead of workspace
-        setLoading(false);
-        return;
-      }
-
-      try {
-        setLoading(true);
-        setError(null);
-
-        // Create autosave manager
-        autosaveManagerRef.current = createAutosaveManager(bcId);
-
-        // Load complete business case and UI guidance in parallel
-        const [businessCaseData, uiGuidanceData] = await Promise.all([
-          getBusinessCase(bcId),
-          getUIGuidance(bcId)
-        ]);
-
-        console.log('[WORKSPACE_DEBUG] getUIGuidance response shape', { hasUIGuidance: !!uiGuidanceData, keys: Object.keys(uiGuidanceData||{}) });
-
-        // Normalize UI guidance response
-        const normalizedUIGuidance = normalizeUIGuidanceResponse(uiGuidanceData);
-
-        setBusinessCase(businessCaseData);
-        setUiGuidance(normalizedUIGuidance);
-      } catch (err) {
-        console.error("Failed to fetch workspace data:", err);
-        setError(err.message || "Failed to load workspace data");
-        showToast("Error cargando datos del workspace", "error");
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchWorkspaceData();
 
     // Cleanup function
@@ -99,7 +121,7 @@ const BusinessCaseWorkspace = () => {
         autosaveManagerRef.current = null;
       }
     };
-  }, [bcId]); // Removed showToast from dependencies to prevent infinite re-renders
+  }, [fetchWorkspaceData]);
 
   const handleRefresh = async () => {
     if (!bcId) return;
@@ -112,10 +134,6 @@ const BusinessCaseWorkspace = () => {
       console.error("Failed to refresh UI guidance:", err);
       showToast("Error actualizando datos", "error");
     }
-  };
-
-  const handleStateTransition = () => {
-    console.log("State transition clicked");
   };
 
   // Show picker when no bcId is provided

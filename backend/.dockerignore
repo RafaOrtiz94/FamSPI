@@ -18,6 +18,8 @@ docs
 *.md
 *.pdf
 *.docx
+!src/data/plantillas/*.pdf
+!src/data/plantillas/*.docx
 
 # frontend si existe
 ../spi_front

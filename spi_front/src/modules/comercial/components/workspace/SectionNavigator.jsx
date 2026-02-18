@@ -18,7 +18,7 @@ const ROLE_SECTION_CONFIG = {
     canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
   },
   acp_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
     canEdit: ["general", "lab", "equipment", "lis", "requirement", "investments", "consumption_export"],
   },
   backoffice_comercial: {
@@ -27,25 +27,25 @@ const ROLE_SECTION_CONFIG = {
   },
   // Manager roles - full access
   jefe_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
   },
   gerencia: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
     canEdit: [],
   },
   gerencia_general: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "dispatch_workspace"],
     canEdit: [],
   },
   // Technical roles - equipment/determinations focus
   operaciones: {
-    visible: ["equipment", "determinations"],
-    canEdit: ["equipment", "determinations"],
+    visible: ["equipment", "determinations", "dispatch_workspace"],
+    canEdit: ["equipment", "determinations", "dispatch_workspace"],
   },
   jefe_operaciones: {
-    visible: ["equipment", "determinations", "requirement", "investments"],
-    canEdit: ["equipment", "determinations", "requirement", "investments"],
+    visible: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace"],
+    canEdit: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace"],
   },
   servicio_tecnico: {
     visible: ["equipment", "determinations"],
@@ -57,8 +57,8 @@ const ROLE_SECTION_CONFIG = {
   },
   // Admin - full access
   admin: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
   },
 };
 
@@ -147,6 +147,12 @@ const SectionNavigator = ({
       title: "Exportacion Reactivos",
       description: "Salida ordenada para Excel/Sheets",
       icon: "EXP"
+    },
+    {
+      id: "dispatch_workspace",
+      title: "Despacho Operativo",
+      description: "Cantidades comerciales y control de despacho",
+      icon: "OPS"
     }
   ];
 
@@ -306,5 +312,3 @@ const SectionNavigator = ({
 };
 
 export default SectionNavigator;
-
-

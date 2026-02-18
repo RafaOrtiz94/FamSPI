@@ -5,6 +5,7 @@ const businessCaseService = require("./businessCase.service");
 const equipmentSelectionService = require("./equipmentSelection.service");
 const determinationsService = require("./determinations.service");
 const investmentsService = require("./investments.service");
+const dispatchWorkspaceService = require("./bcDispatchWorkspace.service");
 const bcLabEnvironmentService = require("./bcLabEnvironment.service");
 const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
 const bcLisIntegrationService = require("./bcLisIntegration.service");
@@ -14,6 +15,9 @@ const orchestrator = require("./BusinessCaseOrchestrator.service");
 const pdfGenerator = require("./pdfGenerator.service");
 const excelExporter = require("./excelExporter.service");
 const equipmentCompatibilityService = require("./equipmentCompatibility.service");
+const observabilityService = require("./businessCaseObservability.service");
+const featureFlagsService = require("./businessCaseFeatureFlags.service");
+const idempotencyService = require("./businessCaseIdempotency.service");
 const { BusinessCaseDataOwnership } = require("./businessCaseDataOwnership");
 const notificationManager = require("../notifications/notificationManager");
 const BusinessCaseStateMachine = require("./businessCaseStateMachine");
@@ -89,11 +93,91 @@ const SECTION_ALIASES = {
   requirement: "requirement",
   investments: "investments",
   prices: "prices",
+  dispatch_workspace: "dispatch_workspace",
 };
 
 const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
 const LOCK_ROLES = ["acp_comercial", "backoffice_comercial"];
 const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
+const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
+  "admin",
+  "administrador",
+  "gerencia",
+  "gerencia_general",
+  "jefe_comercial",
+  "jefe_tecnico",
+  "jefe_operaciones",
+]);
+
+function isTruthyFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on";
+}
+
+function getExpectedVersion(req) {
+  const rawHeader = req.headers["if-match"];
+  if (rawHeader) return rawHeader;
+  const rawBody = req.body?.version;
+  if (rawBody) return rawBody;
+  return null;
+}
+
+function getIdempotencyKey(req) {
+  const headerKey = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
+  if (headerKey) return String(headerKey).trim();
+  const bodyKey = req.body?.idempotency_key || req.body?.idempotencyKey;
+  if (bodyKey) return String(bodyKey).trim();
+  return null;
+}
+
+async function startIdempotentWrite({
+  req,
+  operationScope,
+  businessCaseId = null,
+  payload = {},
+}) {
+  const providedKey = getIdempotencyKey(req);
+  const bucket = Math.floor(Date.now() / 30000);
+  const autoKeyHash = idempotencyService.hashPayload(payload).slice(0, 24);
+  const key =
+    providedKey ||
+    `auto:${operationScope}:${req.user?.id || "anon"}:${bucket}:${autoKeyHash}`;
+
+  return idempotencyService.start({
+    operationScope,
+    idempotencyKey: key,
+    businessCaseId,
+    payload,
+    userId: req.user?.id || null,
+  });
+}
+
+function applyResponseHeadersFromBody(res, responseBody = {}) {
+  const version = responseBody?.data?.version;
+  if (version) {
+    res.set("ETag", `"${version}"`);
+  }
+}
+
+async function completeIdempotentWrite(session, responseBody, httpStatus = 200) {
+  if (!session?.enabled || !session?.recordId) return;
+  await idempotencyService.complete(session.recordId, {
+    httpStatus,
+    responsePayload: responseBody,
+  });
+}
+
+async function failIdempotentWrite(session, error) {
+  if (!session?.enabled || !session?.recordId) return;
+  await idempotencyService.fail(session.recordId, error);
+}
+
+function resolveRequestRole(req) {
+  return String(req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+}
 
 async function getUsersByRoles(roles = []) {
   if (!roles.length) return [];
@@ -484,16 +568,32 @@ async function deleteInvestment(req, res) {
 
 // Lab Environment
 async function saveLabEnvironment(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     await assertSectionEditable(id, "lab", req.user);
-    const result = await bcLabEnvironmentService.createLabEnvironment(id, req.body);
+    const payload = req.body || {};
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.lab.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const result = await bcLabEnvironmentService.createLabEnvironment(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "lab", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: result });
+    const responseBody = { success: true, data: result };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving lab environment');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -512,16 +612,32 @@ async function getLabEnvironment(req, res) {
 
 // Equipment Details
 async function saveEquipmentDetails(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     await assertSectionEditable(id, "equipment", req.user);
-    const result = await bcEquipmentDetailsService.createEquipmentDetails(id, req.body);
+    const payload = req.body || {};
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.equipment.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const result = await bcEquipmentDetailsService.createEquipmentDetails(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: result });
+    const responseBody = { success: true, data: result };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving equipment details');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -551,18 +667,34 @@ async function getInvestmentCatalog(req, res) {
 }
 
 async function saveInvestmentSelection(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
-    const role = (req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+    const role = resolveRequestRole(req);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
     const payload = { ...req.body };
     if (!canEditPrice) {
       delete payload.unit_price;
     }
+
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.investment.selection.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
     const selection = await investmentsService.upsertInvestmentSelection(id, payload, req.user);
-    res.json({ ok: true, data: selection });
+    const responseBody = { ok: true, data: selection };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving investment selection');
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
@@ -613,6 +745,26 @@ async function getConsumptionItems(req, res) {
   try {
     const { id } = req.params;
     const data = await businessCaseService.getConsumptionItems(id);
+    const debugItem = (data?.items || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
+    logger.info(
+      {
+        businessCaseId: id,
+        itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
+        excludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        debugItem: debugItem
+          ? {
+            key: debugItem.key,
+            itemId: debugItem.itemId,
+            annualQty: debugItem.annualQty,
+            source: debugItem.source,
+          }
+          : null,
+      },
+      "[BC_CONSUMPTION][GET]",
+    );
+    if (data?.version) {
+      res.set("ETag", `"${data.version}"`);
+    }
     res.json({ ok: true, data });
   } catch (error) {
     logger.error({ error: error.message }, 'Error getting consumption items');
@@ -621,24 +773,306 @@ async function getConsumptionItems(req, res) {
 }
 
 async function saveConsumptionItems(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await assertSectionEditable(id, "determinations", req.user);
+    const silent = isTruthyFlag(req.query?.silent) || isTruthyFlag(req.body?.silent);
+    const expectedVersion = getExpectedVersion(req);
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const excluded = Array.isArray(req.body?.excluded) ? req.body.excluded : [];
-    const data = await businessCaseService.saveConsumptionItems(id, items, excluded);
-    if ((req.user?.role || "").toLowerCase() === "comercial") {
+    const requestDebugItem = items.find((item) => String(item?.itemId || "").trim() === "3321193001");
+    logger.info(
+      {
+        businessCaseId: id,
+        itemsCount: items.length,
+        excludedCount: excluded.length,
+        requestDebugItem: requestDebugItem
+          ? {
+            key: requestDebugItem.key,
+            itemId: requestDebugItem.itemId,
+            annualQty: requestDebugItem.annualQty,
+            source: requestDebugItem.source,
+          }
+          : null,
+      },
+      "[BC_CONSUMPTION][SAVE][REQUEST]",
+    );
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.consumption.save",
+      businessCaseId: id,
+      payload: {
+        items,
+        excluded,
+        version: expectedVersion || null,
+        silent: Boolean(silent),
+      },
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const data = await businessCaseService.saveConsumptionItems(id, items, excluded, { expectedVersion });
+    const responseDebugItem = (data?.items || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
+    logger.info(
+      {
+        businessCaseId: id,
+        itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
+        excludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        responseDebugItem: responseDebugItem
+          ? {
+            key: responseDebugItem.key,
+            itemId: responseDebugItem.itemId,
+            annualQty: responseDebugItem.annualQty,
+            source: responseDebugItem.source,
+          }
+          : null,
+      },
+      "[BC_CONSUMPTION][SAVE][RESPONSE]",
+    );
+    try {
+      await dispatchWorkspaceService.syncDispatchWorkspaceFromConsumption(id);
+    } catch (syncError) {
+      logger.warn({ error: syncError.message, businessCaseId: id }, "No se pudo sincronizar workspace de despacho");
+    }
+    const responseBody = { ok: true, data };
+    if (data?.version) {
+      res.set("ETag", `"${data.version}"`);
+    }
+    if (!silent && (req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "determinations", actor: req.user?.email || "system" });
     }
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
+  } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
+    logger.error({ error: error.message }, 'Error saving consumption items');
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message,
+      code: error.code || null,
+      details: error.details || null,
+    });
+  }
+}
+
+async function patchConsumptionItem(req, res) {
+  let idempotencySession = null;
+  try {
+    const { id, itemKey } = req.params;
+    await assertSectionEditable(id, "determinations", req.user);
+    const silent = isTruthyFlag(req.query?.silent) || isTruthyFlag(req.body?.silent);
+    const expectedVersion = getExpectedVersion(req);
+    const annualQty = req.body?.annualQty;
+    const row = req.body?.row && typeof req.body.row === "object" ? req.body.row : {};
+    const exclude = isTruthyFlag(req.body?.exclude);
+    const normalizedItemKey = decodeURIComponent(itemKey);
+
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.consumption.patch",
+      businessCaseId: id,
+      payload: {
+        itemKey: normalizedItemKey,
+        annualQty,
+        row,
+        exclude,
+        version: expectedVersion || null,
+        silent: Boolean(silent),
+      },
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const data = await businessCaseService.patchConsumptionItem(
+      id,
+      normalizedItemKey,
+      { annualQty, row, exclude },
+      { expectedVersion },
+    );
+    try {
+      await dispatchWorkspaceService.syncDispatchWorkspaceFromConsumption(id);
+    } catch (syncError) {
+      logger.warn({ error: syncError.message, businessCaseId: id }, "No se pudo sincronizar workspace de despacho");
+    }
+    const responseBody = { ok: true, data };
+    if (data?.version) {
+      res.set("ETag", `"${data.version}"`);
+    }
+
+    if (!silent && (req.user?.role || "").toLowerCase() === "comercial") {
+      await notifySectionReview({ businessCaseId: id, section: "determinations", actor: req.user?.email || "system" });
+    }
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
+  } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
+    logger.error({ error: error.message }, "Error patching consumption item");
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message,
+      code: error.code || null,
+      details: error.details || null,
+    });
+  }
+}
+
+async function getDispatchWorkspace(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const data = await dispatchWorkspaceService.getDispatchWorkspace(id);
     res.json({ ok: true, data });
   } catch (error) {
-    logger.error({ error: error.message }, 'Error saving consumption items');
+    logger.error({ error: error.message }, "Error getting dispatch workspace");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function saveCommercialDispatchPlan(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const payloadItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const data = await dispatchWorkspaceService.saveCommercialPlan(id, payloadItems, req.user);
+    await notifySectionReview({
+      businessCaseId: id,
+      section: "calculations",
+      actor: req.user?.email || "system",
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error saving commercial dispatch plan");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function saveOperationsDispatchControl(req, res) {
+  try {
+    const { id } = req.params;
+    await businessCaseService.assertModernBusinessCase(id);
+    const payloadItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const data = await dispatchWorkspaceService.saveOperationsControl(id, payloadItems, req.user);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error saving operations dispatch control");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function ingestFrontendObservabilityEvents(req, res) {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    const accepted = observabilityService.registerFrontendEvents(events, {
+      role: req.user?.role || null,
+      user: req.user?.email || null,
+    });
+    res.json({ ok: true, data: { accepted } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error ingesting frontend observability events");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getObservabilityMetrics(req, res) {
+  try {
+    const snapshot = observabilityService.getSnapshot();
+    res.json({ ok: true, data: snapshot });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting observability metrics");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getObservabilityDashboard(req, res) {
+  try {
+    const dashboard = observabilityService.getOperationalDashboard();
+    res.json({ ok: true, data: dashboard });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting observability dashboard");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getAutosaveFeatureFlags(req, res) {
+  try {
+    const requesterRole = resolveRequestRole(req);
+    const requestedRole = String(req.query?.role || requesterRole).trim().toLowerCase();
+
+    if (requestedRole !== requesterRole && !AUTOSAVE_FLAG_ADMIN_ROLES.has(requesterRole)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para consultar feature flags de otro rol",
+      });
+    }
+
+    const data = await featureFlagsService.getAutosaveFlagsForRole(requestedRole);
+    res.json({ ok: true, data });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting autosave feature flags");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function upsertAutosaveFeatureFlags(req, res) {
+  try {
+    const schema = Joi.object({
+      section: Joi.string().trim().required(),
+      role: Joi.string().trim().required(),
+      enabled: Joi.boolean().required(),
+      metadata: Joi.object().optional(),
+    });
+    const bulkSchema = Joi.object({
+      flags: Joi.array().items(schema).min(1).required(),
+    });
+
+    let flags = [];
+    if (Array.isArray(req.body?.flags)) {
+      const { error, value } = bulkSchema.validate(req.body, { abortEarly: false });
+      if (error) {
+        return res.status(400).json({
+          ok: false,
+          message: error.details.map((item) => item.message).join(", "),
+        });
+      }
+      flags = value.flags;
+    } else {
+      const { error, value } = schema.validate(req.body, { abortEarly: false });
+      if (error) {
+        return res.status(400).json({
+          ok: false,
+          message: error.details.map((item) => item.message).join(", "),
+        });
+      }
+      flags = [value];
+    }
+
+    const results = [];
+    for (const flag of flags) {
+      const saved = await featureFlagsService.upsertAutosaveFlag({
+        section: flag.section,
+        role: flag.role,
+        enabled: flag.enabled,
+        metadata: flag.metadata || {},
+        userId: req.user?.id || null,
+      });
+      results.push(saved);
+    }
+
+    res.json({ ok: true, data: { updated: results } });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error updating autosave feature flags");
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
 
 // Equipment Details V2 (pairs + backup optional)
 async function saveEquipmentDetailsV2(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
@@ -646,6 +1080,17 @@ async function saveEquipmentDetailsV2(req, res) {
 
     const { error, value } = equipmentDetailsV2Schema.validate(req.body);
     if (error) return res.status(400).json({ success: false, message: error.message });
+
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.equipment.save_v2",
+      businessCaseId: id,
+      payload: value,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
 
     // Persist in extra.equipment_details to allow UI rehydration
     const payload = {
@@ -691,8 +1136,11 @@ async function saveEquipmentDetailsV2(req, res) {
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "equipment", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: payload });
+    const responseBody = { success: true, data: payload };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving equipment details v2');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -700,16 +1148,32 @@ async function saveEquipmentDetailsV2(req, res) {
 
 // LIS Integration
 async function saveLisIntegration(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     await assertSectionEditable(id, "lis", req.user);
-    const result = await bcLisIntegrationService.createLisIntegration(id, req.body);
+    const payload = req.body || {};
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.lis.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const result = await bcLisIntegrationService.createLisIntegration(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "lis", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: result });
+    const responseBody = { success: true, data: result };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving LIS integration');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -758,16 +1222,32 @@ async function getLisEquipmentInterfaces(req, res) {
 
 // Requirements
 async function saveRequirements(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     await assertSectionEditable(id, "requirement", req.user);
-    const result = await bcRequirementsService.createRequirements(id, req.body);
+    const payload = req.body || {};
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.requirements.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const result = await bcRequirementsService.createRequirements(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "requirement", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: result });
+    const responseBody = { success: true, data: result };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving requirements');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -786,16 +1266,32 @@ async function getRequirements(req, res) {
 
 // Deliveries
 async function saveDeliveries(req, res) {
+  let idempotencySession = null;
   try {
     const { id } = req.params;
     await businessCaseService.assertModernBusinessCase(id);
     await assertSectionEditable(id, "requirement", req.user);
-    const result = await bcDeliveriesService.createDeliveries(id, req.body);
+    const payload = req.body || {};
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.deliveries.save",
+      businessCaseId: id,
+      payload,
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const result = await bcDeliveriesService.createDeliveries(id, payload);
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({ businessCaseId: id, section: "requirement", actor: req.user?.email || "system" });
     }
-    res.json({ success: true, data: result });
+    const responseBody = { success: true, data: result };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
   } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
     logger.error({ error: error.message }, 'Error saving deliveries');
     res.status(error.status || 500).json({ success: false, message: error.message });
   }
@@ -1141,6 +1637,19 @@ async function getUIGuidance(req, res) {
       : [];
     const hasDeterminationsData = consumptionItems.length > 0;
     const determinationsComplete = consumptionItems.some((item) => Number(item?.annualQty) > 0);
+    let dispatchWorkspaceData = { items: [] };
+    try {
+      dispatchWorkspaceData = await dispatchWorkspaceService.getDispatchWorkspace(id);
+    } catch (dispatchError) {
+      logger.warn(
+        { error: dispatchError.message, businessCaseId: id },
+        "No se pudo cargar workspace de despacho en ui-guidance. Continuando con fallback.",
+      );
+    }
+    const dispatchItems = Array.isArray(dispatchWorkspaceData?.items) ? dispatchWorkspaceData.items : [];
+    const hasDispatchWorkspaceData = dispatchItems.length > 0;
+    const calculationsComplete = dispatchItems.some((item) => Number(item?.plannedQty) > 0);
+    const dispatchWorkspaceComplete = dispatchItems.some((item) => Number(item?.opsDispatchQty) > 0);
 
     const hasGeneralData = hasAny(bc, [
       "client_name",
@@ -1172,7 +1681,12 @@ async function getUIGuidance(req, res) {
       requirement: completionRule(requirementComplete, hasRequirementData || hasDeliveryData, "requirement"),
       investments: completionRule(hasInvestmentsData, hasInvestmentsData, "investments"),
       prices: completionRule(false, false, "prices"),
-      calculations: completionRule(false, false, "calculations"),
+      calculations: completionRule(calculationsComplete, hasDispatchWorkspaceData, "calculations"),
+      dispatch_workspace: completionRule(
+        dispatchWorkspaceComplete,
+        hasDispatchWorkspaceData,
+        "dispatch_workspace",
+      ),
       rentability: completionRule(false, false, "rentability"),
     };
 
@@ -1214,12 +1728,16 @@ async function getUIGuidance(req, res) {
       canBlockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole),
       canUnblockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole)
     };
+    const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
 
     // Build UI guidance response
     const uiGuidance = {
       businessCase: bc,
       sectionOwnership,
       permissions,
+      featureFlags: {
+        autosave: autosaveFlags.sections,
+      },
       workspaceData: {
         lab_environment: labEnvironment,
         requirements: requirementData,
@@ -1297,6 +1815,7 @@ async function getDataOwnership(req, res) {
         investments: { owner: req.user?.email || 'system', lastModified: toIso(now) },
         prices: { owner: req.user?.email || 'system', lastModified: toIso(now) },
         calculations: { owner: req.user?.email || 'system', lastModified: toIso(now) },
+        dispatch_workspace: { owner: req.user?.email || 'system', lastModified: toIso(now) },
         rentability: { owner: req.user?.email || 'system', lastModified: toIso(now) }
       }
     };
@@ -1379,7 +1898,7 @@ async function recordSectionCompletion(req, res) {
     const user = req.user;
 
     // Validate section exists
-    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'investments', 'prices', 'calculations', 'rentability'];
+    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'investments', 'prices', 'calculations', 'dispatch_workspace', 'rentability'];
     if (!validSections.includes(section)) {
       return res.status(400).json({ ok: false, message: "Invalid section name" });
     }
@@ -1546,6 +2065,15 @@ module.exports = {
   saveInvestmentSelection,
   getConsumptionItems,
   saveConsumptionItems,
+  patchConsumptionItem,
+  getDispatchWorkspace,
+  saveCommercialDispatchPlan,
+  saveOperationsDispatchControl,
+  ingestFrontendObservabilityEvents,
+  getObservabilityMetrics,
+  getObservabilityDashboard,
+  getAutosaveFeatureFlags,
+  upsertAutosaveFeatureFlags,
   // UI Guidance endpoints (Workspace)
   getUIGuidance,
   getDataOwnership,

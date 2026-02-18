@@ -18,6 +18,7 @@ const viewerRoles = Array.from(new Set([
 const inspectionRequestRoles = ["acp_comercial"];
 const inspectionCoordinationRoles = ["jefe_tecnico", "jefe_servicio_tecnico"];
 const inspectionReviewRoles = ["jefe_tecnico", "jefe_servicio_tecnico"];
+const technicalInspectionExecutionRoles = ["tecnico", "jefe_tecnico", "jefe_servicio_tecnico"];
 const deliveryRoles = Array.from(new Set([
   ...managerRoles,
   "jefe_operaciones",
@@ -145,6 +146,12 @@ router.patch(
   verifyToken,
   requireRole(inspectionReviewRoles),
   ctrl.reviewInspectionDate,
+);
+router.patch(
+  "/:id/site-inspection",
+  verifyToken,
+  requireRole(technicalInspectionExecutionRoles),
+  ctrl.registerSiteInspection,
 );
 
 module.exports = router;

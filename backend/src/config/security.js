@@ -55,6 +55,11 @@ const corsConfig = {
     "X-Requested-With",
     "Accept",
     "x-flow-id",
+    "Idempotency-Key",
+    "idempotency-key",
+    "x-idempotency-key",
+    "If-Match",
+    "if-match",
   ],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
 };

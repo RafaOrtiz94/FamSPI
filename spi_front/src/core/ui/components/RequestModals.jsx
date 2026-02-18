@@ -646,8 +646,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         },
         equipment: formData.equipment,
         offer_kind: formData.offer_kind,
-        notes: formData.notes,
-        status: 'pending_commercial'
+        notes: formData.notes
       };
 
       console.log('[FLOW_COMERCIAL][FE][SUBMIT] Payload enviado:', JSON.stringify(payload, null, 2));
@@ -1443,7 +1442,6 @@ export const PublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     try {
       const payload = {
         ...formData,
-        status: 'pending_commercial',
         request_type_id: 'compra_publica'
       };
 

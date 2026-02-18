@@ -672,6 +672,50 @@ exports.reviewInspectionDate = async (req, res, next) => {
   }
 };
 
+exports.registerSiteInspection = async (req, res, next) => {
+  try {
+    const {
+      result,
+      checklist,
+      observations,
+      recommendations,
+      follow_up_date,
+      is_reinspection,
+      expected_updated_at,
+    } = req.body || {};
+
+    const updated = await service.registerSiteInspection({
+      id: req.params.id,
+      user: req.user,
+      result,
+      checklist,
+      observations,
+      recommendations,
+      follow_up_date,
+      is_reinspection,
+      expected_updated_at,
+    });
+
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action:
+        String(result || "").toLowerCase() === "compliant"
+          ? "site_inspection_completed"
+          : "site_inspection_requires_reinspection",
+      meta: { result: String(result || "").toLowerCase() || null },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 exports.startAvailability = async (req, res, next) => {
   try {
     const { provider_email, notes, expected_updated_at } = req.body;

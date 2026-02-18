@@ -57,6 +57,7 @@ const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClient
 const EquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/EquipmentPurchases"));
 const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
+const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
 const PlanificacionMensual = lazy(() => import("../modules/comercial/pages/PlanificacionMensual"));
 const AprobacionCronogramas = lazy(() => import("../modules/comercial/pages/AprobacionCronogramas"));
 const DashboardServicio = lazy(() => import("../modules/servicio/pages/Dashboard"));
@@ -200,6 +201,26 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/business-case" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace" element={<BusinessCaseWorkspace />} />
             <Route path="/dashboard/business-case/workspace/:id" element={<BusinessCaseWorkspace />} />
+          </Route>
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "jefe_comercial",
+                  "jefe_tecnico",
+                  "jefe_operaciones",
+                  "gerencia",
+                  "gerencia_general",
+                  "admin",
+                  "administrador",
+                ]}
+              />
+            }
+          >
+            <Route
+              path="/dashboard/business-case/observabilidad"
+              element={<BusinessCaseObservabilityDashboard />}
+            />
           </Route>
 
           <Route path="/dashboard/servicio-tecnico" element={<DashboardServicio />} />

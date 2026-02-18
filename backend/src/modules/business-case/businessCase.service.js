@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const crypto = require("crypto");
 const { ensureFolder } = require("../../utils/drive");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
 const PrivatePurchaseStateMachine = require("../private-purchases/privatePurchaseStateMachine");
@@ -733,19 +734,24 @@ async function loadConsumptionData(businessCaseId) {
       [businessCaseId],
     );
 
+    const mappedItems = items.map((row) => ({
+      key: row.item_key,
+      itemId: row.item_id,
+      name: row.name,
+      type: row.item_type,
+      source: row.source,
+      catalogId: row.catalog_id,
+      annualQty: row.annual_qty,
+      equipmentId: row.equipment_id,
+      equipmentName: row.equipment_name,
+    }));
+    const mappedExcluded = excluded.map((row) => row.item_key);
+    const version = buildConsumptionVersion(mappedItems, mappedExcluded);
+
     return {
-      items: items.map((row) => ({
-        key: row.item_key,
-        itemId: row.item_id,
-        name: row.name,
-        type: row.item_type,
-        source: row.source,
-        catalogId: row.catalog_id,
-        annualQty: row.annual_qty,
-        equipmentId: row.equipment_id,
-        equipmentName: row.equipment_name,
-      })),
-      excluded: excluded.map((row) => row.item_key),
+      items: mappedItems,
+      excluded: mappedExcluded,
+      version,
     };
   } catch (error) {
     logger.warn({ error: error.message, businessCaseId }, "No se pudo cargar consumos de BC");
@@ -753,48 +759,220 @@ async function loadConsumptionData(businessCaseId) {
   }
 }
 
+function normalizeExpectedVersion(value) {
+  if (!value) return null;
+  const raw = String(value).trim();
+  if (!raw) return null;
+  return raw.replace(/^W\/"/, "").replace(/^"/, "").replace(/"$/, "");
+}
+
+function buildConsumptionVersion(items = [], excluded = []) {
+  const normalizedItems = normalizeConsumptionItemsForComparison(items);
+  const normalizedExcluded = normalizeExcludedKeysForComparison(excluded);
+  return crypto
+    .createHash("sha1")
+    .update(JSON.stringify({ items: normalizedItems, excluded: normalizedExcluded }))
+    .digest("hex");
+}
+
+function normalizeConsumptionItemsForComparison(items = []) {
+  const byKey = new Map();
+  const safeItems = Array.isArray(items) ? items : [];
+
+  for (const item of safeItems) {
+    if (!item) continue;
+    const key = String(item.key || "").trim();
+    if (!key) continue;
+
+    const annualQtyRaw = item.annualQty ?? item.annual_qty ?? 0;
+    const annualQty = Number(annualQtyRaw);
+
+    byKey.set(key, {
+      key,
+      itemId: item.itemId ?? item.item_id ?? null,
+      name: String(item.name || "").trim(),
+      type: String(item.type || item.item_type || "consumible").trim().toLowerCase(),
+      source: String(item.source || "catalog").trim().toLowerCase(),
+      catalogId: item.catalogId ?? item.catalog_id ?? null,
+      annualQty: Number.isFinite(annualQty) ? annualQty : 0,
+      equipmentId: item.equipmentId ?? item.equipment_id ?? null,
+      equipmentName: item.equipmentName ?? item.equipment_name ?? null,
+    });
+  }
+
+  return Array.from(byKey.values()).sort((a, b) => a.key.localeCompare(b.key));
+}
+
+function normalizeExcludedKeysForComparison(excluded = []) {
+  const safeExcluded = Array.isArray(excluded) ? excluded : [];
+  return Array.from(
+    new Set(
+      safeExcluded
+        .map((key) => String(key || "").trim())
+        .filter(Boolean),
+    ),
+  ).sort();
+}
+
+function isSameConsumptionPayload(current = {}, nextItems = [], nextExcluded = []) {
+  const currentItems = normalizeConsumptionItemsForComparison(current.items || []);
+  const currentExcluded = normalizeExcludedKeysForComparison(current.excluded || []);
+  const incomingItems = normalizeConsumptionItemsForComparison(nextItems);
+  const incomingExcluded = normalizeExcludedKeysForComparison(nextExcluded);
+
+  return (
+    JSON.stringify(currentItems) === JSON.stringify(incomingItems)
+    && JSON.stringify(currentExcluded) === JSON.stringify(incomingExcluded)
+  );
+}
+
+function assertConsumptionVersion(expectedVersion, currentVersion) {
+  const normalizedExpected = normalizeExpectedVersion(expectedVersion);
+  if (!normalizedExpected) return;
+  if (normalizedExpected === currentVersion) return;
+
+  const error = new Error("Los consumos fueron actualizados por otro usuario. Refresca antes de guardar.");
+  error.status = 409;
+  error.code = "CONSUMPTION_VERSION_CONFLICT";
+  error.details = { expectedVersion: normalizedExpected, currentVersion };
+  throw error;
+}
+
 async function syncConsumptionData(businessCaseId, metadata = {}) {
-  const items = Array.isArray(metadata.consumption_items) ? metadata.consumption_items : [];
-  const excluded = Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [];
+  const items = normalizeConsumptionItemsForComparison(
+    Array.isArray(metadata.consumption_items) ? metadata.consumption_items : [],
+  ).map((item) => ({
+    item_key: item.key,
+    item_id: item.itemId || null,
+    name: item.name || item.key,
+    item_type: item.type || "consumible",
+    source: item.source || "catalog",
+    catalog_id: Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null,
+    annual_qty: Math.max(0, Number(item.annualQty || 0)),
+    equipment_id: Number.isFinite(Number(item.equipmentId)) ? Number(item.equipmentId) : null,
+    equipment_name: item.equipmentName || null,
+  }));
+  const excluded = normalizeExcludedKeysForComparison(
+    Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [],
+  );
+  const client = await db.getClient();
 
-  await db.query("BEGIN");
+  await client.query("BEGIN");
   try {
-    await db.query(`DELETE FROM bc_consumption_items WHERE business_case_id = $1`, [businessCaseId]);
-    await db.query(`DELETE FROM bc_consumption_excluded WHERE business_case_id = $1`, [businessCaseId]);
-
-    for (const item of items) {
-      await db.query(
-        `INSERT INTO bc_consumption_items
-          (business_case_id, item_key, item_id, name, item_type, source, catalog_id, annual_qty, equipment_id, equipment_name)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-        [
-          businessCaseId,
-          item.key,
-          item.itemId || null,
-          item.name,
-          item.type || "consumible",
-          item.source || "catalog",
-          item.catalogId || null,
-          Number(item.annualQty || 0),
-          item.equipmentId || item.equipment_id || null,
-          item.equipmentName || item.equipment_name || null,
-        ],
+    if (items.length) {
+      const itemsPayload = JSON.stringify(items);
+      await client.query(
+        `
+        WITH payload AS (
+          SELECT *
+          FROM jsonb_to_recordset($2::jsonb) AS p(
+            item_key text,
+            item_id text,
+            name text,
+            item_type text,
+            source text,
+            catalog_id integer,
+            annual_qty integer,
+            equipment_id integer,
+            equipment_name text
+          )
+        )
+        INSERT INTO bc_consumption_items (
+          business_case_id,
+          item_key,
+          item_id,
+          name,
+          item_type,
+          source,
+          catalog_id,
+          annual_qty,
+          equipment_id,
+          equipment_name,
+          created_at,
+          updated_at
+        )
+        SELECT
+          $1,
+          p.item_key,
+          p.item_id,
+          p.name,
+          p.item_type,
+          p.source,
+          p.catalog_id,
+          p.annual_qty,
+          p.equipment_id,
+          p.equipment_name,
+          NOW(),
+          NOW()
+        FROM payload p
+        ON CONFLICT (business_case_id, item_key)
+        DO UPDATE SET
+          item_id = EXCLUDED.item_id,
+          name = EXCLUDED.name,
+          item_type = EXCLUDED.item_type,
+          source = EXCLUDED.source,
+          catalog_id = EXCLUDED.catalog_id,
+          annual_qty = EXCLUDED.annual_qty,
+          equipment_id = EXCLUDED.equipment_id,
+          equipment_name = EXCLUDED.equipment_name,
+          updated_at = NOW()
+        `,
+        [businessCaseId, itemsPayload],
       );
+
+      await client.query(
+        `
+        DELETE FROM bc_consumption_items b
+        WHERE b.business_case_id = $1
+          AND b.item_key NOT IN (
+            SELECT p.item_key
+            FROM jsonb_to_recordset($2::jsonb) AS p(item_key text)
+          )
+        `,
+        [businessCaseId, itemsPayload],
+      );
+    } else {
+      await client.query(`DELETE FROM bc_consumption_items WHERE business_case_id = $1`, [businessCaseId]);
     }
 
-    for (const key of excluded) {
-      await db.query(
-        `INSERT INTO bc_consumption_excluded (business_case_id, item_key)
-         VALUES ($1, $2)`,
-        [businessCaseId, key],
+    if (excluded.length) {
+      const excludedPayload = JSON.stringify(excluded.map((item_key) => ({ item_key })));
+      await client.query(
+        `
+        WITH payload AS (
+          SELECT p.item_key
+          FROM jsonb_to_recordset($2::jsonb) AS p(item_key text)
+        )
+        INSERT INTO bc_consumption_excluded (business_case_id, item_key, created_at)
+        SELECT $1, p.item_key, NOW()
+        FROM payload p
+        ON CONFLICT (business_case_id, item_key) DO NOTHING
+        `,
+        [businessCaseId, excludedPayload],
       );
+
+      await client.query(
+        `
+        DELETE FROM bc_consumption_excluded b
+        WHERE b.business_case_id = $1
+          AND b.item_key NOT IN (
+            SELECT p.item_key
+            FROM jsonb_to_recordset($2::jsonb) AS p(item_key text)
+          )
+        `,
+        [businessCaseId, excludedPayload],
+      );
+    } else {
+      await client.query(`DELETE FROM bc_consumption_excluded WHERE business_case_id = $1`, [businessCaseId]);
     }
 
-    await db.query("COMMIT");
+    await client.query("COMMIT");
   } catch (error) {
-    await db.query("ROLLBACK");
+    await client.query("ROLLBACK");
     logger.error({ error: error.message, businessCaseId }, "Error sincronizando consumos de BC");
     throw error;
+  } finally {
+    client.release();
   }
 }
 
@@ -803,12 +981,85 @@ async function getConsumptionItems(businessCaseId) {
   return loadConsumptionData(businessCaseId);
 }
 
-async function saveConsumptionItems(businessCaseId, items = [], excluded = []) {
+async function saveConsumptionItems(businessCaseId, items = [], excluded = [], options = {}) {
   await assertModernBusinessCase(businessCaseId);
+  const expectedVersion = options?.expectedVersion || null;
+  const nextItems = Array.isArray(items) ? items : [];
+  const nextExcluded = Array.isArray(excluded) ? excluded : [];
+  const current = await loadConsumptionData(businessCaseId);
+  assertConsumptionVersion(expectedVersion, current?.version || null);
+
+  if (current && isSameConsumptionPayload(current, nextItems, nextExcluded)) {
+    return current;
+  }
+
   await syncConsumptionData(businessCaseId, {
-    consumption_items: Array.isArray(items) ? items : [],
-    consumption_excluded: Array.isArray(excluded) ? excluded : []
+    consumption_items: nextItems,
+    consumption_excluded: nextExcluded
   });
+  return loadConsumptionData(businessCaseId);
+}
+
+async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options = {}) {
+  await assertModernBusinessCase(businessCaseId);
+  const normalizedKey = String(itemKey || "").trim();
+  if (!normalizedKey) {
+    const error = new Error("itemKey requerido para actualizar consumo");
+    error.status = 400;
+    throw error;
+  }
+
+  const expectedVersion = options?.expectedVersion || null;
+  const current = await loadConsumptionData(businessCaseId);
+  assertConsumptionVersion(expectedVersion, current?.version || null);
+
+  const existingItem = (current?.items || []).find((item) => item.key === normalizedKey) || null;
+  const row = patch?.row && typeof patch.row === "object" ? patch.row : {};
+  const annualQtyRaw = patch?.annualQty;
+  const annualQtyNumber = Number(annualQtyRaw);
+  const annualQty = Number.isFinite(annualQtyNumber) ? Math.max(0, annualQtyNumber) : 0;
+
+  let nextItems = (current?.items || []).filter((item) => item.key !== normalizedKey);
+  let nextExcluded = (current?.excluded || []).filter((key) => key !== normalizedKey);
+
+  if (annualQty > 0) {
+    const name = String(row.name || existingItem?.name || "").trim();
+    if (!name) {
+      const error = new Error("Nombre del item requerido para guardar consumo");
+      error.status = 400;
+      throw error;
+    }
+
+    nextItems = [
+      ...nextItems,
+      {
+        key: normalizedKey,
+        itemId: row.itemId ?? existingItem?.itemId ?? null,
+        name,
+        type: String(row.type || existingItem?.type || "consumible").trim().toLowerCase(),
+        source: String(row.source || existingItem?.source || "custom").trim().toLowerCase(),
+        catalogId: row.catalogId ?? existingItem?.catalogId ?? null,
+        annualQty,
+        equipmentId: row.equipmentId ?? existingItem?.equipmentId ?? null,
+        equipmentName: row.equipmentName ?? existingItem?.equipmentName ?? null,
+      },
+    ];
+  } else {
+    const source = String(row.source || existingItem?.source || "").trim().toLowerCase();
+    if (source === "catalog" || patch?.exclude === true) {
+      nextExcluded = Array.from(new Set([...nextExcluded, normalizedKey]));
+    }
+  }
+
+  if (isSameConsumptionPayload(current, nextItems, nextExcluded)) {
+    return current;
+  }
+
+  await syncConsumptionData(businessCaseId, {
+    consumption_items: nextItems,
+    consumption_excluded: nextExcluded,
+  });
+
   return loadConsumptionData(businessCaseId);
 }
 
@@ -1006,6 +1257,7 @@ module.exports = {
   assertModernBusinessCase,
   getConsumptionItems,
   saveConsumptionItems,
+  patchConsumptionItem,
   getBusinessCaseType,
   isPublicComodato,
   isPrivateComodato,

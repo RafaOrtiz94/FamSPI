@@ -19,6 +19,11 @@ const EQUIPMENT_PURCHASE_ERROR_MESSAGES = {
   DELIVERY_DATES_REQUIRED: "Debes definir fecha de inicio y fin de entrega.",
   DELIVERY_DATES_INVALID_RANGE: "La fecha de fin debe ser igual o posterior a la de inicio.",
   FORBIDDEN_ROLE_ACTION: "Tu rol no tiene permisos para ejecutar esta acción.",
+  SITE_INSPECTION_RESULT_REQUIRED: "Debes indicar si el área cumple o no cumple.",
+  SITE_INSPECTION_CHECKLIST_INVALID: "Debes completar correctamente el checklist de inspección F.ST-07.",
+  SITE_INSPECTION_FOLLOW_UP_REQUIRED: "Si el área no cumple debes registrar una fecha de reinspección.",
+  SITE_INSPECTION_NOT_COORDINATED: "Primero se debe coordinar la fecha exacta de inspección (F.ST-20).",
+  SITE_INSPECTION_REPORT_FAILED: "No se pudo generar el documento F.ST-07.",
 };
 
 export const getEquipmentPurchaseApiError = (error, fallback = "No se pudo completar la operación") => {
@@ -239,6 +244,30 @@ export const reviewInspectionDate = async (id, { decision, review_notes, expecte
   const { data } = await api.patch(`/equipment-purchases/${id}/review-inspection-date`, {
     decision,
     review_notes,
+    expected_updated_at,
+  });
+  return data.data;
+};
+
+export const registerPublicPurchaseSiteInspection = async (
+  id,
+  {
+    result,
+    checklist,
+    observations,
+    recommendations,
+    follow_up_date,
+    is_reinspection,
+    expected_updated_at,
+  } = {},
+) => {
+  const { data } = await api.patch(`/equipment-purchases/${id}/site-inspection`, {
+    result,
+    checklist,
+    observations,
+    recommendations,
+    follow_up_date,
+    is_reinspection,
     expected_updated_at,
   });
   return data.data;

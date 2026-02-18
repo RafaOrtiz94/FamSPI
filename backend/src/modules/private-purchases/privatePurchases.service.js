@@ -77,6 +77,18 @@ const addDaysIso = (days = 0) => {
 const TECHNICAL_DAILY_CAPACITY = Number.parseInt(process.env.TECHNICAL_DAILY_CAPACITY || "3", 10);
 
 class PrivatePurchasesService {
+  _normalizeStatusFilter(rawStatus) {
+    const normalized = String(rawStatus || "").trim().toLowerCase();
+    if (!normalized) return null;
+    if (!Object.values(PRIVATE_PURCHASE_STATES).includes(normalized)) {
+      const error = new Error(`Estado inválido para filtro: ${rawStatus}`);
+      error.status = 400;
+      error.code = 'INVALID_STATUS_FILTER';
+      throw error;
+    }
+    return normalized;
+  }
+
   _normalizeOfferKind(rawOfferKind, { allowLegacyAlias = true } = {}) {
     const normalized = String(rawOfferKind || "").trim().toLowerCase();
     if (!normalized) return "venta";
@@ -170,7 +182,7 @@ class PrivatePurchasesService {
             COALESCE(epr.client_name, 'Inspección compra pública') AS summary
           FROM equipment_purchase_requests epr
           WHERE epr.inspection_scheduled_date = $1::date
-            AND COALESCE(epr.status, '') NOT IN ('completed')
+            AND (epr.status IS NULL OR epr.status::text NOT IN ('completed'))
 
           UNION ALL
 
@@ -181,7 +193,7 @@ class PrivatePurchasesService {
           FROM private_purchase_requests ppr
           WHERE ppr.inspection_scheduled_date = $1::date
             AND ($2::uuid IS NULL OR ppr.id <> $2::uuid)
-            AND COALESCE(ppr.status, '') NOT IN ('completed', 'cancelled')
+            AND (ppr.status IS NULL OR ppr.status::text NOT IN ('completed', 'cancelled'))
 
           UNION ALL
 
@@ -3229,9 +3241,10 @@ class PrivatePurchasesService {
     let paramIndex = 1;
 
     // Aplicar filtros básicos
-    if (filters.status) {
+    const normalizedStatusFilter = this._normalizeStatusFilter(filters.status);
+    if (normalizedStatusFilter) {
       whereClause += ` AND status = $${paramIndex}`;
-      params.push(filters.status);
+      params.push(normalizedStatusFilter);
       paramIndex++;
     }
 

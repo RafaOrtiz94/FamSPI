@@ -10,6 +10,8 @@
  */
 
 const { sendMail } = require('../../utils/mailer');
+const db = require('../../config/db');
+const logger = require('../../config/logger');
 const loadNotificationService = () => require('./notifications.service');
 
 class NotificationManager {
@@ -30,7 +32,7 @@ class NotificationManager {
       },
       maintenance_due: {
         title: 'Mantenimiento Programado',
-        message: 'Equipo {equipment_name} requiere mantenimiento preventivo',
+        message: 'Equipo #{equipment_name} requiere mantenimiento preventivo',
         type: 'alert',
         priority: 1
       },
@@ -41,9 +43,9 @@ class NotificationManager {
       priority: 0
     }
     ,
-      private_purchase_request_submitted: {
+    private_purchase_request_submitted: {
       title: 'Nueva solicitud privada',
-      message: 'Solicitada para #{client_name} ({offer_kind}) · revisa y responde cuanto antes',
+      message: 'Solicitada para #{client_name} (#{offer_kind}) · revisa y responde cuanto antes',
       type: 'alert',
       priority: 2
     },
@@ -84,6 +86,10 @@ class NotificationManager {
       priority: 1
     }
   };
+    this.asyncDispatchEnabled =
+      String(process.env.NOTIFICATION_ASYNC_DISPATCH_ENABLED ?? "true").trim().toLowerCase() !== "false";
+    this.defaultMaxAttempts = Number(process.env.NOTIFICATION_DISPATCH_MAX_ATTEMPTS || 5);
+    this.defaultBatchLimit = Number(process.env.NOTIFICATION_DISPATCH_BATCH_LIMIT || 50);
   }
 
   /**
@@ -122,31 +128,221 @@ class NotificationManager {
       // 2. Crear notificación en BD
       const notification = await loadNotificationService().createNotification(notificationData);
 
-      // 3. Enviar email si está habilitado
-      if (email) {
-        await this.sendEmailNotification(notification, data);
-      }
-
-      // 4. Enviar a Google Chat si está habilitado
-      if (chat) {
-        await this.sendChatNotification(notification, data);
+      // 3. Despachar por canales (asincrónico en producción por defecto)
+      if (this.asyncDispatchEnabled) {
+        try {
+          const queueOps = [];
+          if (email) {
+            queueOps.push(this.enqueueDispatch(notification.id, "email", { data }));
+          }
+          if (chat) {
+            queueOps.push(this.enqueueDispatch(notification.id, "chat", { data }));
+          }
+          await Promise.all(queueOps);
+        } catch (queueError) {
+          logger.error(
+            { error: queueError.message, notificationId: notification.id },
+            "[NOTIFICATIONS] Fallo en cola asincrona, aplicando fallback sincrono",
+          );
+          if (email) {
+            await this.sendEmailNotification(notification, data);
+          }
+          if (chat) {
+            await this.sendChatNotification(notification, data);
+          }
+        }
+      } else {
+        if (email) {
+          await this.sendEmailNotification(notification, data);
+        }
+        if (chat) {
+          await this.sendChatNotification(notification, data);
+        }
       }
 
       return notification;
     } catch (error) {
-      console.error('Error enviando notificación:', error);
+      logger.error({ error: error.message }, 'Error enviando notificación');
       throw error;
     }
+  }
+
+  async enqueueDispatch(notificationId, channel, payload = {}) {
+    if (!notificationId || !channel) return null;
+    const maxAttempts = Number.isFinite(this.defaultMaxAttempts) ? this.defaultMaxAttempts : 5;
+    const { rows } = await db.query(
+      `
+      INSERT INTO notification_dispatch_queue (
+        notification_id,
+        channel,
+        payload,
+        status,
+        attempts,
+        max_attempts,
+        next_retry_at,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3::jsonb, 'pending', 0, $4, NOW(), NOW(), NOW())
+      ON CONFLICT (notification_id, channel)
+      DO UPDATE SET
+        payload = EXCLUDED.payload,
+        status = 'pending',
+        next_retry_at = NOW(),
+        updated_at = NOW()
+      RETURNING id
+      `,
+      [notificationId, channel, JSON.stringify(payload || {}), maxAttempts],
+    );
+    return rows[0] || null;
+  }
+
+  async processDispatchQueueBatch({ limit } = {}) {
+    const batchLimit = Number.isFinite(Number(limit)) ? Number(limit) : this.defaultBatchLimit;
+    const client = await db.getClient();
+    let jobs = [];
+    try {
+      await client.query("BEGIN");
+      const { rows } = await client.query(
+        `
+        SELECT
+          q.id,
+          q.notification_id,
+          q.channel,
+          q.payload,
+          q.attempts,
+          q.max_attempts,
+          n.user_id,
+          n.title,
+          n.message,
+          n.type,
+          n.source,
+          n.created_at
+        FROM notification_dispatch_queue q
+        JOIN notifications n ON n.id = q.notification_id
+        WHERE q.status IN ('pending', 'failed')
+          AND q.next_retry_at <= NOW()
+          AND q.attempts < q.max_attempts
+        ORDER BY q.created_at ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+        `,
+        [batchLimit],
+      );
+      jobs = rows;
+
+      if (jobs.length) {
+        const ids = jobs.map((item) => Number(item.id));
+        await client.query(
+          `
+          UPDATE notification_dispatch_queue
+          SET status = 'processing',
+              attempts = attempts + 1,
+              locked_at = NOW(),
+              updated_at = NOW()
+          WHERE id = ANY($1::bigint[])
+          `,
+          [ids],
+        );
+      }
+
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+
+    const summary = {
+      total: jobs.length,
+      sent: 0,
+      failed: 0,
+      retriable: 0,
+    };
+
+    for (const job of jobs) {
+      const notification = {
+        id: job.notification_id,
+        user_id: job.user_id,
+        title: job.title,
+        message: job.message,
+        type: job.type,
+        source: job.source,
+        created_at: job.created_at,
+      };
+      const payload = job.payload || {};
+
+      try {
+        if (job.channel === "email") {
+          await this.sendEmailNotification(notification, payload.data || {}, { strict: true });
+        } else if (job.channel === "chat") {
+          await this.sendChatNotification(notification, payload.data || {}, { strict: true });
+        } else {
+          throw new Error(`Canal de despacho no soportado: ${job.channel}`);
+        }
+
+        await db.query(
+          `
+          UPDATE notification_dispatch_queue
+          SET status = 'sent',
+              locked_at = NULL,
+              last_error = NULL,
+              updated_at = NOW()
+          WHERE id = $1
+          `,
+          [job.id],
+        );
+        summary.sent += 1;
+      } catch (error) {
+        const attemptsAfterIncrement = Number(job.attempts) + 1;
+        const hasRetry = attemptsAfterIncrement < Number(job.max_attempts);
+        const retryMinutes = Math.min(60, Math.max(1, 2 ** Math.min(attemptsAfterIncrement, 6)));
+
+        await db.query(
+          `
+          UPDATE notification_dispatch_queue
+          SET status = 'failed',
+              locked_at = NULL,
+              last_error = $2,
+              next_retry_at = CASE
+                WHEN attempts < max_attempts THEN NOW() + make_interval(mins => $3)
+                ELSE NOW()
+              END,
+              updated_at = NOW()
+          WHERE id = $1
+          `,
+          [job.id, String(error.message || "dispatch_error"), retryMinutes],
+        );
+
+        summary.failed += 1;
+        if (hasRetry) summary.retriable += 1;
+        logger.error(
+          {
+            queueId: job.id,
+            notificationId: job.notification_id,
+            channel: job.channel,
+            error: error.message,
+          },
+          "[NOTIFICATIONS] Error despachando cola",
+        );
+      }
+    }
+
+    return summary;
   }
 
   /**
    * Envía notificación solo por email (reutiliza sendMail existente)
    */
-  async sendEmailNotification(notification, data = {}) {
+  async sendEmailNotification(notification, data = {}, options = {}) {
+    const strict = options?.strict === true;
     try {
-      // Buscar email del usuario (necesitarás implementar esta función)
       const userEmail = await this.getUserEmail(notification.user_id);
-      if (!userEmail) return;
+      if (!userEmail) {
+        if (strict) throw new Error("No se pudo determinar email del usuario para notificación");
+        return;
+      }
 
       const subject = notification.title;
       const html = this.generateEmailHTML(notification, data);
@@ -160,17 +356,18 @@ class NotificationManager {
         source: notification.source,
       });
 
-      console.log(`Email enviado a ${userEmail}: ${subject}`);
+      logger.info({ userEmail, subject, notificationId: notification.id }, "[NOTIFICATIONS] Email enviado");
     } catch (error) {
-      console.error('Error enviando email:', error);
-      // No lanzamos error para no detener el flujo
+      logger.error({ error: error.message, notificationId: notification?.id }, "Error enviando email");
+      if (strict) throw error;
     }
   }
 
   /**
    * Envía notificación a Google Chat (reutiliza sendChatMessage)
    */
-  async sendChatNotification(notification, data = {}) {
+  async sendChatNotification(notification, data = {}, options = {}) {
+    const strict = options?.strict === true;
     try {
       const { sendChatMessage } = require('../../utils/googleChat');
 
@@ -181,10 +378,10 @@ class NotificationManager {
         threadKey: `notification-${notification.id}`
       });
 
-      console.log('Mensaje enviado a Google Chat');
+      logger.info({ notificationId: notification.id }, "[NOTIFICATIONS] Mensaje enviado a Google Chat");
     } catch (error) {
-      console.error('Error enviando mensaje a Chat:', error);
-      // No lanzamos error para no detener el flujo
+      logger.error({ error: error.message, notificationId: notification?.id }, "Error enviando mensaje a Chat");
+      if (strict) throw error;
     }
   }
 
@@ -192,7 +389,8 @@ class NotificationManager {
    * Interpola placeholders en templates
    */
   interpolate(template, data) {
-    return template.replace(/#\{(\w+)\}/g, (match, key) => {
+    return String(template || "").replace(/#\{(\w+)\}|\{(\w+)\}/g, (match, keyHash, keyCurly) => {
+      const key = keyHash || keyCurly;
       return data[key] !== undefined ? data[key] : match;
     });
   }
@@ -231,14 +429,13 @@ class NotificationManager {
    */
   async getUserEmail(userId) {
     try {
-      const db = require('../../config/db');
       const { rows } = await db.query(
         'SELECT email FROM users WHERE id = $1',
         [userId]
       );
       return rows[0]?.email || null;
     } catch (error) {
-      console.error('Error obteniendo email del usuario:', error);
+      logger.error({ error: error.message, userId }, 'Error obteniendo email del usuario');
       return null;
     }
   }

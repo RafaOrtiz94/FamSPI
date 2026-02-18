@@ -17,6 +17,7 @@ import {
   FiShield,
   FiTruck,
   FiLifeBuoy,
+  FiActivity,
 } from "react-icons/fi";
 import clsx from "clsx";
 
@@ -102,6 +103,12 @@ const businessCaseLink = {
   name: "Business Case",
   icon: FiFileText,
   path: "/dashboard/business-case",
+};
+
+const businessCaseObservabilityLink = {
+  name: "Obs. BC",
+  icon: FiActivity,
+  path: "/dashboard/business-case/observabilidad",
 };
 
 const linksInteresLink = {
@@ -348,6 +355,18 @@ const getPriorityGroups = (scope, role, auditActive) => {
     groups.secondary.push(...comercialLinks);
   }
 
+  if ([
+    "jefe_comercial",
+    "jefe_tecnico",
+    "jefe_operaciones",
+    "gerencia",
+    "gerencia_general",
+    "admin",
+    "administrador",
+  ].includes(scope)) {
+    groups.secondary.push(businessCaseObservabilityLink);
+  }
+
   groups.secondary.push(linksInteresLink);
 
   // Filtrar elementos vacÃ­os y aplanar arrays
@@ -555,5 +574,4 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
-
 

@@ -1068,7 +1068,14 @@ export const checkClientApproval = async (purchaseId) => {
  */
 export const listPrivatePurchases = async (filters = {}) => {
   try {
-    const response = await api.get(PRIVATE_PURCHASE_ENDPOINTS.BASE, { params: filters });
+    const sanitizedFilters = Object.fromEntries(
+      Object.entries(filters || {}).filter(([, value]) => {
+        if (value === undefined || value === null) return false;
+        if (typeof value === "string" && value.trim() === "") return false;
+        return true;
+      }),
+    );
+    const response = await api.get(PRIVATE_PURCHASE_ENDPOINTS.BASE, { params: sanitizedFilters });
 
     if (!response.data?.ok) {
       throw new Error(response.data?.message || 'Error obteniendo solicitudes');

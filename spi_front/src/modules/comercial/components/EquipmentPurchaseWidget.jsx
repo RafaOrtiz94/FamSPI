@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   createEquipmentPurchase,
   getEquipmentPurchaseMeta,
+  listEquipmentProviderContacts,
   listEquipmentPurchases,
   requestProforma,
   reserveEquipment,
@@ -58,6 +59,7 @@ import {
   FiMail,
   FiUser,
   FiSearch,
+  FiFileText,
   FiChevronDown,
   FiChevronUp,
   FiList,
@@ -93,10 +95,66 @@ const normalizeUserTokens = (user) => {
     .filter(Boolean);
 };
 
+const toIsoDate = (dateObj) => {
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, "0");
+  const day = String(dateObj.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const normalizeDateOnly = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const isoDateMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (isoDateMatch) return isoDateMatch[1];
+  const esDateMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (esDateMatch) {
+    const [, dd, mm, yyyy] = esDateMatch;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) return toIsoDate(parsed);
+  return "";
+};
+
+const formatDateToEsLabel = (value) => {
+  const normalized = normalizeDateOnly(value);
+  if (!normalized) return "Pendiente";
+  const [yyyy, mm, dd] = normalized.split("-");
+  return `${dd}/${mm}/${yyyy}`;
+};
+
+const startOfMonth = (value) => {
+  if (!value) return null;
+  const date = new Date(`${String(value).slice(0, 10)}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+};
+
+const buildMonthGrid = (baseDate) => {
+  const year = baseDate.getFullYear();
+  const month = baseDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const start = new Date(firstDay);
+  start.setDate(firstDay.getDate() - firstDay.getDay());
+  const days = [];
+  for (let i = 0; i < 42; i += 1) {
+    const date = new Date(start);
+    date.setDate(start.getDate() + i);
+    days.push({
+      date,
+      iso: toIsoDate(date),
+      inMonth: date.getMonth() === month,
+    });
+  }
+  return days;
+};
+
 
 
 const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { showToast } = useUI();
   const { user } = useAuth();
   const roleTokens = useMemo(() => normalizeUserTokens(user), [user]);
@@ -120,6 +178,13 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     "jefe_tecnico",
     "jefe_servicio_tecnico",
   ].some((roleName) => hasRoleToken(roleName));
+  const canAccessTechnicalProcedureForms = [
+    "jefe_tecnico",
+    "jefe_servicio_tecnico",
+    "tecnico",
+  ].some((roleName) => hasRoleToken(roleName));
+  const isWorkspaceRoute = String(location?.pathname || "").includes("/dashboard/purchases/workspace");
+  const allowProcessModals = !isWorkspaceRoute;
   const [meta, setMeta] = useState({ clients: [], equipment: [], acpUsers: [], providerContacts: [] });
   const [requests, setRequests] = useState([]);
   const [listQuery, setListQuery] = useState("");
@@ -144,6 +209,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [deliveryDrafts, setDeliveryDrafts] = useState({});
   const [savingProviderContact, setSavingProviderContact] = useState(false);
   const [technicalScheduleDays, setTechnicalScheduleDays] = useState([]);
+  const [calendarMonthByRequest, setCalendarMonthByRequest] = useState({});
   const normalizedFormProviderEmail = useMemo(
     () => String(form.providerEmail || "").trim().toLowerCase(),
     [form.providerEmail],
@@ -158,15 +224,18 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
-      const [metaRes, listRes] = await Promise.all([
+      const [metaRes, listRes, providerContactsRes] = await Promise.all([
         showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [], provider_contacts: [] }),
         listEquipmentPurchases(),
+        isManager ? listEquipmentProviderContacts({ limit: 200 }) : Promise.resolve([]),
       ]);
       setMeta({
         clients: metaRes.clients || [],
         equipment: dedupeEquipmentList(metaRes.equipment || []),
         acpUsers: metaRes.acp_users || [],
-        providerContacts: metaRes.provider_contacts || [],
+        providerContacts: showCreation
+          ? (metaRes.provider_contacts || providerContactsRes || [])
+          : (providerContactsRes || []),
       });
       setRequests(listRes || []);
     } catch (error) {
@@ -564,7 +633,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const handleCoordinateInspection = async (request) => {
     if (!request?.id) return;
     const draft = inspectionCoordDrafts[request.id] || {};
-    const selectedDate = draft.inspection_date || "";
+    const selectedDate = normalizeDateOnly(draft.inspection_date || "");
     if (!selectedDate) {
       showToast("Selecciona la fecha coordinada de inspección", "warning");
       return;
@@ -987,16 +1056,31 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   : null;
                 const expanded = expandedRequestId === req.id;
                 const inspectionCoordinationDraft = inspectionCoordDrafts[req.id] || {};
-                const selectedInspectionDate = inspectionCoordinationDraft.inspection_date ?? req.inspection_proposed_date ?? "";
+                const inspectionMinDate = normalizeDateOnly(req.inspection_min_date);
+                const inspectionMaxDate = normalizeDateOnly(req.inspection_max_date);
+                const selectedInspectionDate = normalizeDateOnly(
+                  inspectionCoordinationDraft.inspection_date ?? req.inspection_proposed_date ?? "",
+                );
                 const selectedDateSchedule = technicalScheduleDays.find((item) => item.date === selectedInspectionDate);
                 const selectedDateIsFull = Boolean(
                   selectedDateSchedule && Array.isArray(selectedDateSchedule.items) && selectedDateSchedule.items.length >= 3,
                 );
+                const monthStartCandidate =
+                  calendarMonthByRequest[req.id] ||
+                  startOfMonth(selectedInspectionDate) ||
+                  startOfMonth(inspectionMinDate) ||
+                  new Date();
+                const calendarMonthStart = new Date(
+                  monthStartCandidate.getFullYear(),
+                  monthStartCandidate.getMonth(),
+                  1,
+                );
+                const calendarDays = buildMonthGrid(calendarMonthStart);
                 const blockedDatesInWindow = (technicalScheduleDays || []).filter((item) => {
-                  if (!req.inspection_min_date || !req.inspection_max_date) return false;
+                  if (!inspectionMinDate || !inspectionMaxDate) return false;
                   return (
-                    item.date >= req.inspection_min_date &&
-                    item.date <= req.inspection_max_date &&
+                    item.date >= inspectionMinDate &&
+                    item.date <= inspectionMaxDate &&
                     Array.isArray(item.items) &&
                     item.items.length >= 3
                   );
@@ -1009,6 +1093,25 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   req.delivered_at ||
                   ["contract_available", "delivery_dates_requested", "delivery_dates_submitted", "waiting_dispatch", "dispatch_ready", "completed"].includes(req.status),
                 );
+                const generatedDocuments = [
+                  req.process_doc_link
+                    ? { key: "process_doc", label: "Documento base del proceso", link: req.process_doc_link }
+                    : null,
+                  req.proforma_file_link
+                    ? { key: "proforma", label: "Proforma", link: req.proforma_file_link }
+                    : null,
+                  req.signed_proforma_file_link
+                    ? { key: "signed_proforma", label: "Proforma firmada", link: req.signed_proforma_file_link }
+                    : null,
+                  req.contract_file_link
+                    ? { key: "contract", label: "Contrato", link: req.contract_file_link }
+                    : null,
+                  req.extra?.inspection_acta_link
+                    ? { key: "inspection_acta", label: "Acta de inspección F.ST-20", link: req.extra.inspection_acta_link }
+                    : null,
+                ].filter(Boolean);
+                const clientDocuments = Array.isArray(req.client_documents) ? req.client_documents : [];
+                const hasDocumentsSection = canAccessAttachments && (generatedDocuments.length > 0 || clientDocuments.length > 0);
                 const toggleExpanded = () => {
                   setExpandedRequestId((prev) => (prev === req.id ? null : req.id));
                 };
@@ -1072,19 +1175,19 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                         <p className="text-xs text-slate-700">
                           Ventana acordada:{" "}
                           <span className="font-medium">
-                            {req.inspection_min_date || "Sin mínimo"} - {req.inspection_max_date || "Sin máximo"}
+                            {inspectionMinDate ? formatDateToEsLabel(inspectionMinDate) : "Sin mínimo"} - {inspectionMaxDate ? formatDateToEsLabel(inspectionMaxDate) : "Sin máximo"}
                           </span>
                         </p>
                         <p className="text-xs text-slate-700">
                           Fecha propuesta:{" "}
                           <span className="font-semibold">
-                            {req.inspection_proposed_date || "Pendiente"}
+                            {formatDateToEsLabel(req.inspection_proposed_date)}
                           </span>
                         </p>
                         <p className="text-xs text-slate-700">
-                          Fecha coordinada final:{" "}
+                          Fecha exacta coordinada:{" "}
                           <span className="font-semibold">
-                            {req.inspection_scheduled_date || "Pendiente"}
+                            {formatDateToEsLabel(req.inspection_scheduled_date)}
                           </span>
                         </p>
                         <p className="text-xs text-slate-700">
@@ -1099,7 +1202,33 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                                   : "Pendiente propuesta"}
                           </span>
                         </p>
-                        {req.inspection_request_id && (
+                        {req.contract_deadline_date && (
+                          <p className="text-xs text-slate-700">
+                            Fecha límite contrato (110 días):{" "}
+                            <span className="font-semibold">
+                              {formatDateToEsLabel(req.contract_deadline_date)}
+                            </span>
+                            {Number.isFinite(Number(req.contract_deadline_days_remaining)) && (
+                              <span
+                                className={`ml-1 ${
+                                  Number(req.contract_deadline_days_remaining) < 0
+                                    ? "text-rose-700"
+                                    : "text-slate-600"
+                                }`}
+                              >
+                                ({Number(req.contract_deadline_days_remaining) < 0
+                                  ? `${Math.abs(Number(req.contract_deadline_days_remaining))} día(s) vencido`
+                                  : `${Number(req.contract_deadline_days_remaining)} día(s) restantes`})
+                              </span>
+                            )}
+                          </p>
+                        )}
+                        {req.contract_reminder_date && (
+                          <p className="text-[11px] text-slate-500">
+                            Recordatorio ACP (15 días antes): {formatDateToEsLabel(req.contract_reminder_date)}
+                          </p>
+                        )}
+                        {req.inspection_request_id && canAccessTechnicalProcedureForms && (
                           <p className="text-[11px] text-slate-500">
                             Solicitud técnica #{req.inspection_request_id}
                           </p>
@@ -1112,8 +1241,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                               setInspectionModal({
                                 open: true,
                                 requestId: req.id,
-                                minDate: req.inspection_min_date || "",
-                                maxDate: req.inspection_max_date || "",
+                                minDate: inspectionMinDate || "",
+                                maxDate: inspectionMaxDate || "",
                                 includesKit: Boolean(req.includes_starter_kit),
                               })
                             }
@@ -1131,7 +1260,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             Ver acta de inspección
                           </a>
                         )}
-                        {req.inspection_request_id && (
+                        {req.inspection_request_id && canAccessTechnicalProcedureForms && (
                           <div className="flex flex-wrap gap-2 pt-1">
                             <button
                               type="button"
@@ -1184,8 +1313,8 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             <input
                               type="date"
                               value={selectedInspectionDate}
-                              min={req.inspection_min_date || undefined}
-                              max={req.inspection_max_date || undefined}
+                              min={inspectionMinDate || undefined}
+                              max={inspectionMaxDate || undefined}
                               onChange={(event) =>
                                 setInspectionCoordDrafts((prev) => ({
                                   ...prev,
@@ -1215,10 +1344,103 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             <Button
                               size="sm"
                               onClick={() => handleCoordinateInspection(req)}
-                              disabled={!req.inspection_min_date || !req.inspection_max_date || selectedDateIsFull}
+                              disabled={!inspectionMinDate || !inspectionMaxDate || selectedDateIsFull}
                             >
                               Proponer fecha a Jefe Técnico
                             </Button>
+                            {inspectionMinDate && inspectionMaxDate && (
+                              <div className="rounded-lg border border-slate-200 bg-white p-2">
+                                <div className="mb-2 flex items-center justify-between">
+                                  <button
+                                    type="button"
+                                    className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                                    onClick={() =>
+                                      setCalendarMonthByRequest((prev) => ({
+                                        ...prev,
+                                        [req.id]: new Date(
+                                          calendarMonthStart.getFullYear(),
+                                          calendarMonthStart.getMonth() - 1,
+                                          1,
+                                        ),
+                                      }))
+                                    }
+                                  >
+                                    ←
+                                  </button>
+                                  <p className="text-xs font-semibold text-slate-700">
+                                    {calendarMonthStart.toLocaleString("es-ES", { month: "long", year: "numeric" })}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    className="rounded px-2 py-1 text-xs text-slate-600 hover:bg-slate-100"
+                                    onClick={() =>
+                                      setCalendarMonthByRequest((prev) => ({
+                                        ...prev,
+                                        [req.id]: new Date(
+                                          calendarMonthStart.getFullYear(),
+                                          calendarMonthStart.getMonth() + 1,
+                                          1,
+                                        ),
+                                      }))
+                                    }
+                                  >
+                                    →
+                                  </button>
+                                </div>
+                                <div className="mb-1 grid grid-cols-7 gap-1 text-center text-[10px] font-semibold text-slate-500">
+                                  {["D", "L", "M", "X", "J", "V", "S"].map((name) => (
+                                    <span key={`${req.id}-weekday-${name}`}>{name}</span>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-7 gap-1">
+                                  {calendarDays.map((day) => {
+                                    const isInWindow =
+                                      day.iso >= inspectionMinDate &&
+                                      day.iso <= inspectionMaxDate;
+                                    const schedule = technicalScheduleDays.find((item) => item.date === day.iso);
+                                    const isFull =
+                                      Boolean(schedule && Array.isArray(schedule.items) && schedule.items.length >= 3);
+                                    const isSelected = day.iso === selectedInspectionDate;
+                                    const disabledDay = !day.inMonth || !isInWindow || isFull;
+                                    return (
+                                      <button
+                                        key={`${req.id}-${day.iso}`}
+                                        type="button"
+                                        disabled={disabledDay}
+                                        onClick={() =>
+                                          setInspectionCoordDrafts((prev) => ({
+                                            ...prev,
+                                            [req.id]: {
+                                              ...prev[req.id],
+                                              inspection_date: day.iso,
+                                            },
+                                          }))
+                                        }
+                                        className={`h-8 rounded text-[11px] transition-colors ${
+                                          isSelected
+                                            ? "bg-blue-600 text-white"
+                                            : disabledDay
+                                              ? "bg-slate-100 text-slate-300 cursor-not-allowed"
+                                              : "bg-slate-50 text-slate-700 hover:bg-blue-50"
+                                        }`}
+                                        title={
+                                          isFull
+                                            ? "Cronograma técnico lleno"
+                                            : isInWindow
+                                              ? `Seleccionar ${day.iso}`
+                                              : "Fuera de ventana"
+                                        }
+                                      >
+                                        {day.date.getDate()}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                                <p className="mt-2 text-[10px] text-slate-500">
+                                  Gris: fuera de ventana. Bloqueado: cronograma lleno. Azul: fecha seleccionada.
+                                </p>
+                              </div>
+                            )}
                             {selectedDateIsFull && (
                               <p className="text-[11px] text-amber-700">
                                 Esa fecha ya tiene el cronograma técnico completo:{" "}
@@ -1303,6 +1525,58 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       </div>
                     )}
 
+                    {hasDocumentsSection && (
+                      <details className="mb-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                        <summary className="list-none cursor-pointer text-xs font-semibold uppercase tracking-wide text-slate-600 flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1.5">
+                            <FiFileText size={13} />
+                            Documentos
+                          </span>
+                          <span className="text-[10px] text-slate-500">
+                            {generatedDocuments.length + clientDocuments.length}
+                          </span>
+                        </summary>
+                        <div className="mt-3 space-y-3">
+                          {generatedDocuments.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-semibold text-slate-700 mb-1">Generados por el proceso</p>
+                              <div className="flex flex-wrap gap-2">
+                                {generatedDocuments.map((doc) => (
+                                  <a
+                                    key={`${req.id}-${doc.key}`}
+                                    href={doc.link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                                  >
+                                    {doc.label}
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {clientDocuments.length > 0 && (
+                            <div>
+                              <p className="text-[11px] font-semibold text-slate-700 mb-1">Documentos del cliente</p>
+                              <div className="flex flex-wrap gap-2">
+                                {clientDocuments.map((doc, idx) => (
+                                  <a
+                                    key={`${req.id}-client-doc-${doc.key || idx}`}
+                                    href={doc.link}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-100"
+                                  >
+                                    {doc.label}
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </details>
+                    )}
+
                     {expanded && providerResponse && (
                       <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50/60 p-3 space-y-3">
                         <div>
@@ -1381,43 +1655,45 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       </div>
                     )}
 
-                    <RequestActions
-                      request={req}
-                      isManager={isManager}
-                      canAccessAttachments={canAccessAttachments}
-                      canUploadSignedProforma={canUploadSignedProforma}
-                      checklistState={req.checklist_state}
-                      providerContacts={meta.providerContacts || []}
-                      onRegisterProviderContact={handleRegisterProviderContact}
-                      savingProviderContact={savingProviderContact}
-                      availabilityDrafts={availabilityDrafts}
-                      inspectionDraft={inspectionDraft}
-                      onStartAvailability={handleStartAvailability}
-                    onOpenResponse={openResponse}
-                    onRequestProforma={() => handleRequestProforma(req)}
-                    onReserve={() => handleReserve(req)}
-                    onUploadSignedProforma={(_id, action, file) => handleUpload(req, action, file)}
-                    onUploadProforma={(_id, action, file) => handleUpload(req, action, file)}
-                    onUploadContract={(_id, action, file) => handleUpload(req, action, file)}
-                      onRequestDeliveryDates={() => handleRequestDeliveryDates(req)}
-                      onSubmitDeliveryDates={() => handleSubmitDeliveryDates(req)}
-                      onMarkEquipmentArrived={() => handleMarkEquipmentArrived(req)}
-                      onMarkDispatchReady={() => handleMarkDispatchReady(req)}
-                      onCompleteDelivery={() => handleCompleteDelivery(req)}
-                      deliveryDraft={deliveryDrafts[req.id] || {}}
-                      onUpdateDeliveryDraft={(requestId, field, value) => {
-                        setDeliveryDrafts((prev) => ({
-                          ...prev,
-                          [requestId]: { ...prev[requestId], [field]: value },
-                        }));
-                      }}
-                      onUpdateAvailabilityDraft={(requestId, field, value) => {
-                        setAvailabilityDrafts((prev) => ({
-                          ...prev,
-                          [requestId]: { ...prev[requestId], [field]: value },
-                        }));
-                      }}
-                    />
+                    {allowProcessModals && (
+                      <RequestActions
+                        request={req}
+                        isManager={isManager}
+                        canAccessAttachments={canAccessAttachments}
+                        canUploadSignedProforma={canUploadSignedProforma}
+                        checklistState={req.checklist_state}
+                        providerContacts={meta.providerContacts || []}
+                        onRegisterProviderContact={handleRegisterProviderContact}
+                        savingProviderContact={savingProviderContact}
+                        availabilityDrafts={availabilityDrafts}
+                        inspectionDraft={inspectionDraft}
+                        onStartAvailability={handleStartAvailability}
+                        onOpenResponse={openResponse}
+                        onRequestProforma={() => handleRequestProforma(req)}
+                        onReserve={() => handleReserve(req)}
+                        onUploadSignedProforma={(_id, action, file) => handleUpload(req, action, file)}
+                        onUploadProforma={(_id, action, file) => handleUpload(req, action, file)}
+                        onUploadContract={(_id, action, file) => handleUpload(req, action, file)}
+                        onRequestDeliveryDates={() => handleRequestDeliveryDates(req)}
+                        onSubmitDeliveryDates={() => handleSubmitDeliveryDates(req)}
+                        onMarkEquipmentArrived={() => handleMarkEquipmentArrived(req)}
+                        onMarkDispatchReady={() => handleMarkDispatchReady(req)}
+                        onCompleteDelivery={() => handleCompleteDelivery(req)}
+                        deliveryDraft={deliveryDrafts[req.id] || {}}
+                        onUpdateDeliveryDraft={(requestId, field, value) => {
+                          setDeliveryDrafts((prev) => ({
+                            ...prev,
+                            [requestId]: { ...prev[requestId], [field]: value },
+                          }));
+                        }}
+                        onUpdateAvailabilityDraft={(requestId, field, value) => {
+                          setAvailabilityDrafts((prev) => ({
+                            ...prev,
+                            [requestId]: { ...prev[requestId], [field]: value },
+                          }));
+                        }}
+                      />
+                    )}
 
                     {req.checklist_state?.action && (
                       <details className="mt-3 rounded-lg border border-slate-200 bg-white">
@@ -1470,7 +1746,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             </div>
           )}
         </div>
-        {inspectionModal.open && (
+        {allowProcessModals && inspectionModal.open && (
           <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 backdrop-blur-sm">
             <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
               <h3 className="text-lg font-semibold mb-4">Solicitud de Inspección de Ambiente</h3>

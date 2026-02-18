@@ -9,6 +9,7 @@ const ctrl = require("./businessCase.controller");
 const equipmentCatalogCtrl = require("./equipmentCatalog.controller");
 const determinationsCatalogCtrl = require("./determinationsCatalog.controller");
 const calculationTemplatesCtrl = require("./calculationTemplates.controller");
+const observabilityService = require("./businessCaseObservability.service");
 
 const businessCaseRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
 const investmentRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
@@ -22,6 +23,51 @@ const determinationsCatalogWriteRoles = [
 ];
 
 const router = express.Router();
+
+router.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on("finish", () => {
+    observabilityService.recordApiCall({
+      method: req.method,
+      path: req.originalUrl || req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+  next();
+});
+
+router.post(
+  "/observability/frontend-events",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.ingestFrontendObservabilityEvents,
+);
+router.get(
+  "/observability/metrics",
+  verifyToken,
+  requireRole(["admin", "administrador", "gerencia", "jefe_comercial", "jefe_tecnico", "gerencia_general"]),
+  ctrl.getObservabilityMetrics,
+);
+router.get(
+  "/observability/dashboard",
+  verifyToken,
+  requireRole(["admin", "administrador", "gerencia", "gerencia_general", "jefe_comercial", "jefe_tecnico", "jefe_operaciones"]),
+  ctrl.getObservabilityDashboard,
+);
+
+router.get(
+  "/feature-flags/autosave",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  ctrl.getAutosaveFeatureFlags,
+);
+router.put(
+  "/feature-flags/autosave",
+  verifyToken,
+  requireRole(["admin", "administrador", "gerencia", "gerencia_general", "jefe_comercial", "jefe_tecnico", "jefe_operaciones"]),
+  ctrl.upsertAutosaveFeatureFlags,
+);
 
 router.get("/", verifyToken, requireRole(businessCaseRoles), ctrl.list);
 router.post("/", verifyToken, requireRole(["comercial"]), ctrl.create);
@@ -83,6 +129,20 @@ router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles
 router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
 router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
 router.put("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.saveConsumptionItems);
+router.patch("/:id/consumption-items/:itemKey", verifyToken, requireRole(businessCaseRoles), ctrl.patchConsumptionItem);
+router.get("/:id/dispatch-workspace", verifyToken, requireRole(businessCaseRoles), ctrl.getDispatchWorkspace);
+router.put(
+  "/:id/dispatch-workspace/commercial-plan",
+  verifyToken,
+  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  ctrl.saveCommercialDispatchPlan,
+);
+router.put(
+  "/:id/dispatch-workspace/operations-control",
+  verifyToken,
+  requireRole(["jefe_operaciones", "gerencia", "gerencia_general"]),
+  ctrl.saveOperationsDispatchControl,
+);
 
 // Manual BC Form routes
 router.get("/:id/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getComplete);

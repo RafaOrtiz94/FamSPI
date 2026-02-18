@@ -3,12 +3,6 @@ import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTri
 import Card from "../../../../core/ui/components/Card";
 
 const CaseHeader = ({ uiGuidance, onRefresh }) => {
-  console.log('[WORKSPACE_DEBUG] CaseHeader ownership snapshot', {
-    hasOwnership: !!uiGuidance?.sectionOwnership,
-    sectionOwnershipKeys: Object.keys(uiGuidance?.sectionOwnership || {}),
-    completionSummary: uiGuidance?.sectionOwnership?.completionSummary
-  });
-
   const { businessCaseId, clientName, workflowState, sectionOwnership } = uiGuidance || {};
   const { currentState, availableTransitions } = workflowState || {};
   const { completionSummary } = sectionOwnership || {};

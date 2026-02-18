@@ -131,6 +131,16 @@ export const WORKSPACE_TEXTS = {
         'Revise que los equipos y cantidades anuales esten completos'
       ],
       warnings: ['Solo disponible para Jefe Comercial y ACP Comercial']
+    },
+    dispatch_workspace: {
+      title: 'Workspace de Despacho',
+      description: 'Plan comercial de cantidades y control operativo de elementos a despachar',
+      tips: [
+        'Jefe Comercial define cantidad objetivo y precio por elemento',
+        'Jefe Operaciones registra cantidades a despachar y avance despachado',
+        'Use observaciones para trazabilidad de cambios en cada item'
+      ],
+      warnings: ['Debe existir consumo anual para que los elementos aparezcan en este workspace']
     }
   },
 

@@ -6,12 +6,12 @@ import EquipmentSection from "./EquipmentSection";
 import DeterminationsSection from "./DeterminationsSection";
 import InvestmentsSection from "./InvestmentsSection";
 import ClientDataSection from "./ClientDataSection";
-import SectionObservationAlert from "./SectionObservationAlert";
 import RequirementsSection from "./sections/RequirementsSection";
 // New sections - Phase 1 UX Improvements
 import LabSection from "./sections/LabSection";
 import LISSection from "./sections/LISSection";
 import ConsumptionExportSection from "./sections/ConsumptionExportSection";
+import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
 
 const SectionContent = ({
   selectedSection,
@@ -112,6 +112,11 @@ const SectionContent = ({
       title: "Exportacion Reactivos",
       description: "Salida ordenada para Excel/Sheets",
       icon: "EXP"
+    },
+    dispatch_workspace: {
+      title: "Workspace de Despacho",
+      description: "Plan comercial y control operativo por elemento",
+      icon: "OPS"
     }
   };
 
@@ -180,6 +185,7 @@ const SectionContent = ({
         <DeterminationsSection
           businessCase={businessCase}
           permissions={permissions}
+          featureFlags={uiGuidance?.featureFlags || {}}
           ownership={uiGuidance?.sectionOwnership?.rules?.determinations || {}}
           onSave={onSectionSave}
         />
@@ -237,6 +243,14 @@ const SectionContent = ({
       return (
         <ConsumptionExportSection
           businessCase={businessCase}
+        />
+      );
+    }
+
+    if (selectedSection === "dispatch_workspace") {
+      return (
+        <DispatchWorkspaceSection
+          onSave={onSectionSave}
         />
       );
     }
@@ -299,4 +313,3 @@ const SectionContent = ({
 };
 
 export default SectionContent;
-

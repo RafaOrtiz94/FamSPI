@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FiActivity, FiAlertTriangle, FiCheck, FiEdit2, FiTrash2, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../../core/auth/AuthContext";
+import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCaseTelemetry";
 
 const ITEM_TYPES = [
   { value: "reactivo", label: "Reactivo" },
@@ -19,10 +20,13 @@ const TECNICO_TYPES = new Set(["control", "calibrador", "consumible", "material"
 const REACTIVO_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
 const TECNICO_ROLES = new Set(["jefe_tecnico", "tecnico"]);
 const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
+const ROW_WINDOW_STEP = 24;
+const IDEMPOTENCY_TTL_MS = 60 * 1000;
 
 const DeterminationsSection = ({
   businessCase,
   permissions = {},
+  featureFlags = {},
   ownership = {},
   onSave = () => {}
 }) => {
@@ -35,7 +39,17 @@ const DeterminationsSection = ({
   const [excludedKeys, setExcludedKeys] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const debounceRefs = useRef({});
+  const autosaveTimeoutRef = useRef(null);
+  const pendingQtyChangesRef = useRef({});
+  const editedRowsRef = useRef({});
+  const [pendingChangesCount, setPendingChangesCount] = useState(0);
+  const [hasStructureChanges, setHasStructureChanges] = useState(false);
+  const [quantityDrafts, setQuantityDrafts] = useState({});
+  const quantityDraftsRef = useRef({});
+  const [rowWindowByGroup, setRowWindowByGroup] = useState({});
+  const savedItemsRef = useRef([]);
+  const excludedKeysRef = useRef([]);
+  const consumptionVersionRef = useRef(null);
   const [equipmentIds, setEquipmentIds] = useState([]);
   const [equipmentMeta, setEquipmentMeta] = useState({});
 
@@ -47,9 +61,11 @@ const DeterminationsSection = ({
     name: "",
     type: "reactivo",
   });
+  const idempotencyCacheRef = useRef(new Map());
 
   const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
   const currentRole = user?.role;
+  const autosaveEnabled = false;
 
   const canEditType = (type) => {
     if (!canEditBase) return false;
@@ -59,7 +75,55 @@ const DeterminationsSection = ({
     return false;
   };
 
-  const loadEquipmentData = async () => {
+  const getStableJson = useCallback((value) => {
+    if (Array.isArray(value)) {
+      return `[${value.map((entry) => getStableJson(entry)).join(",")}]`;
+    }
+    if (!value || typeof value !== "object") {
+      return JSON.stringify(value);
+    }
+    const keys = Object.keys(value).sort();
+    const body = keys.map((key) => `${JSON.stringify(key)}:${getStableJson(value[key])}`).join(",");
+    return `{${body}}`;
+  }, []);
+
+  const buildFastHash = useCallback((input) => {
+    const str = String(input || "");
+    let hash = 0;
+    for (let index = 0; index < str.length; index += 1) {
+      hash = (hash * 31 + str.charCodeAt(index)) >>> 0;
+    }
+    return hash.toString(16);
+  }, []);
+
+  const getIdempotencyKey = useCallback(
+    (scope, payload) => {
+      const now = Date.now();
+      const fingerprint = `${scope}:${buildFastHash(getStableJson(payload))}`;
+      const existing = idempotencyCacheRef.current.get(fingerprint);
+      if (existing && existing.expiresAt > now) {
+        return existing.key;
+      }
+
+      const randomKey =
+        (typeof window !== "undefined" && window.crypto?.randomUUID?.()) ||
+        `${now}-${Math.random().toString(16).slice(2)}`;
+      const key = `${scope}:${bcId}:${randomKey}`;
+      idempotencyCacheRef.current.set(fingerprint, { key, expiresAt: now + IDEMPOTENCY_TTL_MS });
+
+      if (idempotencyCacheRef.current.size > 100) {
+        const entries = Array.from(idempotencyCacheRef.current.entries());
+        entries
+          .filter(([, value]) => value.expiresAt <= now)
+          .forEach(([fingerprintKey]) => idempotencyCacheRef.current.delete(fingerprintKey));
+      }
+
+      return key;
+    },
+    [bcId, buildFastHash, getStableJson],
+  );
+
+  const loadEquipmentData = useCallback(async () => {
     if (!bcId) return;
     const detailsFromExtra = businessCase?.extra?.equipment_details;
     if (Array.isArray(detailsFromExtra) && detailsFromExtra.length > 0) {
@@ -81,12 +145,13 @@ const DeterminationsSection = ({
     } catch (err) {
       console.warn("No se pudieron cargar datos de equipo", err.message);
     }
-  };
+  }, [bcId, businessCase?.extra?.equipment_details]);
 
-  const loadCatalog = async () => {
+  const loadCatalog = useCallback(async () => {
     if (!equipmentIds.length) return;
     setLoading(true);
     try {
+      const start = Date.now();
       const determinationsList = [];
       const consumablesList = [];
       const nextEquipmentMeta = {};
@@ -135,45 +200,120 @@ const DeterminationsSection = ({
       setCatalogDeterminations(Array.from(uniqueDeterminaciones.values()));
       setCatalogConsumables(Array.from(uniqueConsumables.values()));
       setEquipmentMeta((prev) => ({ ...prev, ...nextEquipmentMeta }));
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "load_catalog_success",
+        durationMs: Date.now() - start,
+        success: true,
+      });
     } catch (err) {
       showToast("No se pudieron cargar items del catalogo", "error");
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "load_catalog_error",
+        success: false,
+      });
     } finally {
       setLoading(false);
     }
-  };
+  }, [equipmentIds, showToast]);
 
-  const loadExisting = async () => {
+  const loadExisting = useCallback(async () => {
     if (!bcId) return;
+    const start = Date.now();
     try {
       const res = await api.get(`/business-case/${bcId}/consumption-items`);
       const data = res?.data?.data || {};
       const items = Array.isArray(data?.items) ? data.items : [];
       const excluded = Array.isArray(data?.excluded) ? data.excluded : [];
+      const version = data?.version || null;
+      pendingQtyChangesRef.current = {};
+      editedRowsRef.current = {};
+      setPendingChangesCount(0);
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+        autosaveTimeoutRef.current = null;
+      }
+      consumptionVersionRef.current = version;
       setSavedItems(items);
       setExcludedKeys(excluded);
+      setQuantityDrafts(() => {
+        const next = {};
+        items.forEach((item) => {
+          if (!item?.key) return;
+          next[item.key] = String(item.annualQty ?? 0);
+        });
+        quantityDraftsRef.current = next;
+        return next;
+      });
+      setHasStructureChanges(false);
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "load_existing_success",
+        durationMs: Date.now() - start,
+        success: true,
+      });
       return;
     } catch (err) {
       // Fallback to businessCase metadata if API fails
       const stored = businessCase?.modern_bc_metadata?.consumption_items;
       const excluded = businessCase?.modern_bc_metadata?.consumption_excluded;
-      setSavedItems(Array.isArray(stored) ? stored : []);
+      const safeStored = Array.isArray(stored) ? stored : [];
+      pendingQtyChangesRef.current = {};
+      editedRowsRef.current = {};
+      setPendingChangesCount(0);
+      consumptionVersionRef.current = null;
+      setSavedItems(safeStored);
       setExcludedKeys(Array.isArray(excluded) ? excluded : []);
+      setQuantityDrafts(() => {
+        const next = {};
+        safeStored.forEach((item) => {
+          if (!item?.key) return;
+          next[item.key] = String(item.annualQty ?? 0);
+        });
+        quantityDraftsRef.current = next;
+        return next;
+      });
+      setHasStructureChanges(false);
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "load_existing_fallback",
+        success: false,
+      });
     }
-  };
+  }, [bcId, businessCase?.modern_bc_metadata?.consumption_excluded, businessCase?.modern_bc_metadata?.consumption_items]);
 
   useEffect(() => {
     loadEquipmentData();
-  }, [bcId]);
+  }, [loadEquipmentData]);
 
   useEffect(() => {
     if (equipmentIds.length) {
       loadCatalog();
     }
-  }, [equipmentIds]);
+  }, [equipmentIds, loadCatalog]);
 
   useEffect(() => {
     loadExisting();
-  }, [bcId]);
+  }, [loadExisting]);
+
+  useEffect(() => {
+    savedItemsRef.current = savedItems;
+  }, [savedItems]);
+
+  useEffect(() => {
+    excludedKeysRef.current = excludedKeys;
+  }, [excludedKeys]);
+
+  useEffect(() => {
+    return () => {
+      if (autosaveTimeoutRef.current) {
+        clearTimeout(autosaveTimeoutRef.current);
+        autosaveTimeoutRef.current = null;
+      }
+      pendingQtyChangesRef.current = {};
+    };
+  }, []);
 
   const catalogItems = useMemo(() => {
     const determinations = (catalogDeterminations || []).map((det) => ({
@@ -181,6 +321,8 @@ const DeterminationsSection = ({
       legacyKey: `det:${det.id}`,
       type: "determinacion",
       name: det.name,
+      itemId: det.roche_code || null,
+      manufacturerId: det.roche_code || null,
       source: "catalog",
       catalogId: det.id,
       equipmentId: det.equipment_id,
@@ -191,6 +333,8 @@ const DeterminationsSection = ({
       legacyKey: `cons:${item.id}`,
       type: item.type || "consumible",
       name: item.name,
+      itemId: item.supplier_code || null,
+      manufacturerId: item.supplier_code || null,
       source: "catalog",
       catalogId: item.id,
       equipmentId: item.equipment_id,
@@ -221,20 +365,12 @@ const DeterminationsSection = ({
     });
     const enrichedCustom = customItems.map((item) => ({
       ...item,
+      manufacturerId: item.manufacturerId || item.itemId || null,
       equipmentName: item.equipmentName || "Manual",
       equipmentId: item.equipmentId || null,
     }));
     return [...catalogVisible, ...enrichedCustom];
   }, [catalogItems, savedItems, excludedKeys]);
-
-  const reactivoRows = useMemo(
-    () => mergedRows.filter((row) => REACTIVO_TYPES.has(row.type)),
-    [mergedRows]
-  );
-  const tecnicoRows = useMemo(
-    () => mergedRows.filter((row) => TECNICO_TYPES.has(row.type)),
-    [mergedRows]
-  );
 
   const groupedByEquipment = useMemo(() => {
     const groups = {};
@@ -278,61 +414,299 @@ const DeterminationsSection = ({
     return savedMap[row.key] || (row.legacyKey ? savedMap[row.legacyKey] : null);
   };
 
-  const persistItems = async (nextItems, nextExcluded = excludedKeys) => {
+  const getManufacturerId = (row) => {
+    const saved = getSavedRow(row);
+    return String(
+      row?.manufacturerId ??
+        row?.itemId ??
+        saved?.manufacturerId ??
+        saved?.itemId ??
+        ""
+    ).trim();
+  };
+
+  const getQtyInputValue = (row) => {
+    const draftValue = quantityDrafts[row.key];
+    if (draftValue !== undefined) return draftValue;
+    if (row?.legacyKey && quantityDrafts[row.legacyKey] !== undefined) {
+      return quantityDrafts[row.legacyKey];
+    }
+    const savedValue = getSavedRow(row)?.annualQty;
+    return String(savedValue ?? 0);
+  };
+
+  const toPositiveNumber = (value) => {
+    const normalized = String(value ?? "").trim().replace(",", ".");
+    const parsed = Number(normalized);
+    if (!Number.isFinite(parsed)) return 0;
+    return parsed > 0 ? parsed : 0;
+  };
+
+  const syncQuantityDrafts = useCallback((items = []) => {
+    const next = {};
+    (Array.isArray(items) ? items : []).forEach((item) => {
+      if (!item?.key) return;
+      next[item.key] = String(item.annualQty ?? 0);
+    });
+    quantityDraftsRef.current = next;
+    setQuantityDrafts(next);
+  }, []);
+
+  const getWindowLimit = (groupKey, tableType) =>
+    rowWindowByGroup[`${groupKey}:${tableType}`] || ROW_WINDOW_STEP;
+
+  const expandRowWindow = (groupKey, tableType) => {
+    setRowWindowByGroup((prev) => {
+      const key = `${groupKey}:${tableType}`;
+      const current = prev[key] || ROW_WINDOW_STEP;
+      return { ...prev, [key]: current + ROW_WINDOW_STEP };
+    });
+  };
+
+  const persistItems = async (nextItems, nextExcluded = excludedKeys, options = {}) => {
     if (!bcId) {
       showToast("Primero crea el Business Case", "warning");
       return;
     }
+    const { refresh = true, silent = false, revalidate = true } = options;
     setSaving(true);
+    const startedAt = Date.now();
     try {
+      const debugItemPayload = (nextItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
+      console.info("[BC_CONSUMPTION][FE][SAVE][REQUEST]", {
+        bcId,
+        itemsCount: Array.isArray(nextItems) ? nextItems.length : 0,
+        excludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
+        debugItem: debugItemPayload
+          ? {
+            key: debugItemPayload.key,
+            itemId: debugItemPayload.itemId,
+            annualQty: debugItemPayload.annualQty,
+            source: debugItemPayload.source,
+          }
+          : null,
+      });
       const payload = {
         items: nextItems,
         excluded: nextExcluded,
+        version: consumptionVersionRef.current,
+        idempotency_key: getIdempotencyKey("bc.consumption.save", {
+          items: nextItems,
+          excluded: nextExcluded,
+          version: consumptionVersionRef.current,
+        }),
       };
-      await api.put(`/business-case/${bcId}/consumption-items`, payload);
-      setSavedItems(nextItems);
-      setExcludedKeys(nextExcluded);
-      onSave();
+      const querySuffix = silent ? "?silent=true" : "";
+      const response = await api.put(`/business-case/${bcId}/consumption-items${querySuffix}`, payload);
+      const persisted = response?.data?.data || {};
+      const persistedItems = Array.isArray(persisted.items) ? persisted.items : nextItems;
+      const persistedExcluded = Array.isArray(persisted.excluded) ? persisted.excluded : nextExcluded;
+      const debugItemResponse = (persistedItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
+      console.info("[BC_CONSUMPTION][FE][SAVE][RESPONSE]", {
+        bcId,
+        itemsCount: persistedItems.length,
+        excludedCount: persistedExcluded.length,
+        debugItem: debugItemResponse
+          ? {
+            key: debugItemResponse.key,
+            itemId: debugItemResponse.itemId,
+            annualQty: debugItemResponse.annualQty,
+            source: debugItemResponse.source,
+          }
+          : null,
+      });
+      consumptionVersionRef.current = persisted?.version || consumptionVersionRef.current;
+      savedItemsRef.current = persistedItems;
+      excludedKeysRef.current = persistedExcluded;
+      setSavedItems(persistedItems);
+      setExcludedKeys(persistedExcluded);
+      syncQuantityDrafts(persistedItems);
+      pendingQtyChangesRef.current = {};
+      editedRowsRef.current = {};
+      setPendingChangesCount(0);
+      setHasStructureChanges(false);
+      if (revalidate) {
+        await loadExisting();
+      }
+      onSave({ refresh });
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "save_full_success",
+        durationMs: Date.now() - startedAt,
+        success: true,
+      });
     } catch (err) {
-      showToast(err?.response?.data?.message || "No se pudo guardar la informacion", "error");
+      const code = err?.response?.data?.code;
+      if (code === "CONSUMPTION_VERSION_CONFLICT") {
+        showToast("Otro usuario actualizo esta seccion. Recargando datos...", "warning");
+        await loadExisting();
+      } else {
+        showToast(err?.response?.data?.message || "No se pudo guardar la informacion", "error");
+      }
+      recordBusinessCaseTelemetry({
+        section: "determinations",
+        type: "save_full_error",
+        durationMs: Date.now() - startedAt,
+        success: false,
+      });
     } finally {
       setSaving(false);
     }
   };
 
+  const buildPersistPayloadFromDrafts = useCallback(() => {
+    const visibleRowMap = new Map();
+    mergedRows.forEach((row) => {
+      if (row?.key) visibleRowMap.set(row.key, row);
+    });
+    Object.values(editedRowsRef.current || {}).forEach((row) => {
+      if (row?.key && !visibleRowMap.has(row.key)) {
+        visibleRowMap.set(row.key, row);
+      }
+    });
+
+    // Conserva filas guardadas que no estén visibles por cambios de catálogo/equipo.
+    (savedItemsRef.current || []).forEach((item) => {
+      if (item?.key && !visibleRowMap.has(item.key)) {
+        visibleRowMap.set(item.key, item);
+      }
+    });
+
+    const nextExcluded = Array.from(new Set(excludedKeysRef.current || []));
+    const nextItems = [];
+
+    visibleRowMap.forEach((row) => {
+      const saved = savedItemsRef.current.find((item) => item?.key === row.key)
+        || (row.legacyKey
+          ? savedItemsRef.current.find((item) => item?.key === row.legacyKey)
+          : null);
+      const rawQty =
+        quantityDraftsRef.current[row.key]
+        ?? (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
+        ?? saved?.annualQty
+        ?? row?.annualQty
+        ?? 0;
+      const annualQty = toPositiveNumber(rawQty);
+      const isCatalog = String(row?.source || saved?.source || "").toLowerCase() === "catalog";
+      // Si el usuario puso cantidad > 0, reactivamos el item aunque haya quedado excluido previamente.
+      if (annualQty > 0) {
+        const keySet = new Set([row.key, row.legacyKey].filter(Boolean));
+        for (const key of keySet) {
+          const idx = nextExcluded.indexOf(key);
+          if (idx >= 0) nextExcluded.splice(idx, 1);
+        }
+      }
+      const isExcluded = nextExcluded.includes(row.key) || (row.legacyKey && nextExcluded.includes(row.legacyKey));
+
+      // Catálogo: solo persistimos cantidades > 0. Con 0 sigue visible en UI, no se excluye.
+      if (isCatalog) {
+        if (isExcluded || annualQty <= 0) return;
+      }
+
+      const name = String(row?.name || saved?.name || "").trim();
+      if (!name) return;
+
+      nextItems.push({
+        key: row.key,
+        itemId: row?.itemId ?? saved?.itemId ?? null,
+        name,
+        type: String(row?.type || saved?.type || "consumible").trim().toLowerCase(),
+        source: String(row?.source || saved?.source || "custom").trim().toLowerCase(),
+        catalogId: row?.catalogId ?? saved?.catalogId ?? null,
+        annualQty,
+        equipmentId: row?.equipmentId ?? saved?.equipmentId ?? null,
+        equipmentName: row?.equipmentName ?? saved?.equipmentName ?? null,
+      });
+    });
+
+    const debugItemFromPayload = nextItems.find((item) => String(item?.itemId || "").trim() === "3321193001");
+    console.info("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
+      bcId,
+      rowsVisible: visibleRowMap.size,
+      itemsToSave: nextItems.length,
+      excludedToSave: nextExcluded.length,
+      debugItem: debugItemFromPayload
+        ? {
+          key: debugItemFromPayload.key,
+          itemId: debugItemFromPayload.itemId,
+          annualQty: debugItemFromPayload.annualQty,
+          source: debugItemFromPayload.source,
+        }
+        : null,
+    });
+    return { nextItems, nextExcluded };
+  }, [bcId, mergedRows]);
+
+  const flushPendingQtyChanges = async (options = {}) => {
+    const { force = false } = options;
+    const changedKeys = Object.keys(pendingQtyChangesRef.current || {});
+    if (!force && !changedKeys.length && !hasStructureChanges) return;
+    const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
+    await persistItems(nextItems, nextExcluded, { refresh: true, silent: false });
+  };
+
   const handleQtyChange = (rowKey, value) => {
     const row = mergedRows.find((item) => item.key === rowKey);
     if (!row || !canEditType(row.type)) return;
-    const numeric = Number(value) || 0;
-    clearTimeout(debounceRefs.current[rowKey]);
-    debounceRefs.current[rowKey] = setTimeout(() => {
-      const baseItems = [...savedItems].filter((item) => item.key !== rowKey);
-      if (!row) return;
-      if (!numeric) {
-        if (row.source === "catalog") {
-          const nextExcluded = Array.from(new Set([...excludedKeys, row.key]));
-          persistItems(baseItems, nextExcluded);
-          return;
-        }
-        persistItems(baseItems);
-        return;
-      }
-      const nextExcluded = excludedKeys.filter((key) => key !== row.key);
-      const next = [
-        ...baseItems,
-        {
-          key: row.key,
-          name: row.name,
-          type: row.type,
-          source: row.source,
-          catalogId: row.catalogId || null,
-          annualQty: numeric,
-          equipmentId: row.equipmentId || null,
-          equipmentName: row.equipmentName || null,
-        },
-      ];
-      persistItems(next, nextExcluded);
-    }, 500);
+    editedRowsRef.current[rowKey] = row;
+    const nextDraftsRef = { ...quantityDraftsRef.current, [rowKey]: value };
+    if (row.legacyKey) {
+      nextDraftsRef[row.legacyKey] = value;
+    }
+    quantityDraftsRef.current = nextDraftsRef;
+    setQuantityDrafts((prev) => {
+      const next = { ...prev, [rowKey]: value };
+      if (row.legacyKey) next[row.legacyKey] = value;
+      return next;
+    });
+    const numeric = toPositiveNumber(value);
+    const savedNumeric = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
+    if (numeric !== savedNumeric) {
+      pendingQtyChangesRef.current[rowKey] = true;
+    } else {
+      delete pendingQtyChangesRef.current[rowKey];
+    }
+    setPendingChangesCount(Object.keys(pendingQtyChangesRef.current).length);
+    if (String(row?.itemId || "").trim() === "3321193001") {
+      console.info("[BC_CONSUMPTION][FE][QTY_CHANGE]", {
+        bcId,
+        rowKey,
+        itemId: row.itemId,
+        rawValue: value,
+        parsedValue: numeric,
+        savedQty: savedNumeric,
+      });
+    }
+    if (!autosaveEnabled) return;
+  };
+
+  const handleQtyBlur = (rowKey) => {
+    if (!autosaveEnabled) return;
+    if (!Object.prototype.hasOwnProperty.call(quantityDraftsRef.current, rowKey)) return;
+    const row = mergedRows.find((item) => item.key === rowKey);
+    if (!row || !canEditType(row.type)) return;
+    const value = quantityDraftsRef.current[rowKey];
+    const numeric = toPositiveNumber(value);
+    const savedNumeric = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
+    if (numeric !== savedNumeric) {
+      pendingQtyChangesRef.current[rowKey] = true;
+    } else {
+      delete pendingQtyChangesRef.current[rowKey];
+    }
+    setPendingChangesCount(Object.keys(pendingQtyChangesRef.current).length);
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+      autosaveTimeoutRef.current = null;
+    }
+  };
+
+  const handleSaveNow = () => {
+    // Guardado manual explícito: siempre persistimos snapshot actual para dejar avance en base.
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+      autosaveTimeoutRef.current = null;
+    }
+    flushPendingQtyChanges({ force: true });
   };
 
   const handleAddCustom = (groupKey, equipmentName, equipmentId) => {
@@ -361,7 +735,8 @@ const DeterminationsSection = ({
       },
     ];
     setNewItemByEquipment((prev) => ({ ...prev, [groupKey]: { id: "", name: "", type: "reactivo" } }));
-    persistItems(next);
+    setSavedItems(next);
+    setHasStructureChanges(true);
   };
 
   const startEditItem = (row) => {
@@ -384,7 +759,8 @@ const DeterminationsSection = ({
     });
     setEditingItemKey(null);
     setEditingItem({ id: "", name: "", type: "reactivo" });
-    persistItems(next);
+    setSavedItems(next);
+    setHasStructureChanges(true);
   };
 
   const cancelEditItem = () => {
@@ -394,13 +770,23 @@ const DeterminationsSection = ({
 
   const removeItem = async (row) => {
     if (!canEditType(row.type)) return;
+    const itemLabel = row?.name || row?.itemId || "este elemento";
+    const actionLabel = row?.source === "catalog" ? "quitar del listado" : "eliminar";
+    const confirmed = window.confirm(
+      `¿Confirmas ${actionLabel} "${itemLabel}"?\\n\\nLa acción quedará en borrador hasta presionar "Guardar informacion".`
+    );
+    if (!confirmed) return;
+
     const next = savedItems.filter((item) => item.key !== row.key);
     if (row.source === "catalog") {
       const nextExcluded = Array.from(new Set([...excludedKeys, row.key]));
-      await persistItems(next, nextExcluded);
+      setSavedItems(next);
+      setExcludedKeys(nextExcluded);
+      setHasStructureChanges(true);
       return;
     }
-    await persistItems(next);
+    setSavedItems(next);
+    setHasStructureChanges(true);
   };
 
   return (
@@ -423,7 +809,13 @@ const DeterminationsSection = ({
         </div>
       ) : (
         <div className="space-y-6">
-          {groupedByEquipment.map((group) => (
+          {groupedByEquipment.map((group) => {
+            const reactivosLimit = getWindowLimit(group.key, "reactivos");
+            const tecnicosLimit = getWindowLimit(group.key, "tecnicos");
+            const visibleReactivos = group.reactivos.slice(0, reactivosLimit);
+            const visibleTecnicos = group.tecnicos.slice(0, tecnicosLimit);
+
+            return (
             <div key={group.name} className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -450,11 +842,11 @@ const DeterminationsSection = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {group.reactivos.map((row) => {
-                        const saved = getSavedRow(row);
+                      {visibleReactivos.map((row) => {
                         const isCustom = row.source === "custom";
                         const isEditing = editingItemKey === row.key;
                         const canEditRow = canEditType(row.type);
+                        const manufacturerId = getManufacturerId(row);
                         return (
                           <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
                             <td className="py-3 px-4 text-gray-600">
@@ -467,7 +859,7 @@ const DeterminationsSection = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                   <input
                                     className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="ID"
+                                    placeholder="ID fabricante"
                                     value={editingItem.id}
                                     onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
                                     disabled={!canEditRow}
@@ -483,7 +875,9 @@ const DeterminationsSection = ({
                               ) : (
                                 <div className="space-y-0.5">
                                   <span className="font-semibold text-gray-900">{row.name}</span>
-                                  {row.itemId && <div className="text-xs text-gray-400">ID: {row.itemId}</div>}
+                                  {manufacturerId && (
+                                    <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
+                                  )}
                                 </div>
                               )}
                               {row.source === "catalog" && (
@@ -494,8 +888,9 @@ const DeterminationsSection = ({
                               <input
                                 type="number"
                                 min={0}
-                                defaultValue={saved?.annualQty || 0}
+                                value={getQtyInputValue(row)}
                                 onChange={(e) => handleQtyChange(row.key, e.target.value)}
+                                onBlur={() => handleQtyBlur(row.key)}
                                 className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
                                 placeholder="0"
                                 disabled={!canEditRow}
@@ -552,6 +947,17 @@ const DeterminationsSection = ({
                     </tbody>
                   </table>
                 </div>
+                {group.reactivos.length > visibleReactivos.length && (
+                  <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
+                    <button
+                      type="button"
+                      onClick={() => expandRowWindow(group.key, "reactivos")}
+                      className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                    >
+                      Mostrar mas ({group.reactivos.length - visibleReactivos.length} restantes)
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
@@ -572,11 +978,11 @@ const DeterminationsSection = ({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {group.tecnicos.map((row) => {
-                        const saved = getSavedRow(row);
+                      {visibleTecnicos.map((row) => {
                         const isCustom = row.source === "custom";
                         const isEditing = editingItemKey === row.key;
                         const canEditRow = canEditType(row.type);
+                        const manufacturerId = getManufacturerId(row);
                         return (
                           <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
                             <td className="py-3 px-4 text-gray-600">
@@ -589,7 +995,7 @@ const DeterminationsSection = ({
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                   <input
                                     className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="ID"
+                                    placeholder="ID fabricante"
                                     value={editingItem.id}
                                     onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
                                     disabled={!canEditRow}
@@ -605,7 +1011,9 @@ const DeterminationsSection = ({
                               ) : (
                                 <div className="space-y-0.5">
                                   <span className="font-semibold text-gray-900">{row.name}</span>
-                                  {row.itemId && <div className="text-xs text-gray-400">ID: {row.itemId}</div>}
+                                  {manufacturerId && (
+                                    <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
+                                  )}
                                 </div>
                               )}
                               {row.source === "catalog" && (
@@ -616,8 +1024,9 @@ const DeterminationsSection = ({
                               <input
                                 type="number"
                                 min={0}
-                                defaultValue={saved?.annualQty || 0}
+                                value={getQtyInputValue(row)}
                                 onChange={(e) => handleQtyChange(row.key, e.target.value)}
+                                onBlur={() => handleQtyBlur(row.key)}
                                 className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
                                 placeholder="0"
                                 disabled={!canEditRow}
@@ -674,6 +1083,17 @@ const DeterminationsSection = ({
                     </tbody>
                   </table>
                 </div>
+                {group.tecnicos.length > visibleTecnicos.length && (
+                  <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
+                    <button
+                      type="button"
+                      onClick={() => expandRowWindow(group.key, "tecnicos")}
+                      className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                    >
+                      Mostrar mas ({group.tecnicos.length - visibleTecnicos.length} restantes)
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div className="p-4 border border-gray-100 bg-gray-50/50 rounded-2xl">
@@ -684,7 +1104,7 @@ const DeterminationsSection = ({
                   <input
                     type="text"
                     className="border rounded-lg px-2 py-1"
-                    placeholder="ID del item"
+                    placeholder="ID fabricante"
                     value={newItemByEquipment[group.key]?.id || ""}
                     onChange={(e) =>
                       setNewItemByEquipment((prev) => ({
@@ -738,7 +1158,8 @@ const DeterminationsSection = ({
                 )}
               </div>
             </div>
-          ))}
+          );
+          })}
         </div>
       )}
 
@@ -747,9 +1168,22 @@ const DeterminationsSection = ({
           <div className="p-2 bg-amber-50 text-amber-600 rounded-full">
             <FiAlertTriangle size={16} />
           </div>
-          <span>Los cambios se guardan automaticamente (debounce 500ms).</span>
+          <span>Cambios pendientes de guardado en base de datos.</span>
+          {(pendingChangesCount > 0 || hasStructureChanges) && (
+            <span className="inline-flex items-center px-2 py-1 rounded-full bg-amber-100 text-amber-800 text-xs font-semibold">
+              Pendientes: {pendingChangesCount + (hasStructureChanges ? 1 : 0)}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-6 text-sm">
+          <button
+            type="button"
+            onClick={handleSaveNow}
+            disabled={saving}
+            className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Guardar ahora
+          </button>
           {saving && (
             <div className="flex items-center gap-2 text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
               <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-600"></div>
@@ -761,7 +1195,7 @@ const DeterminationsSection = ({
 
       <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t border-gray-100">
         <button
-          onClick={onSave}
+          onClick={handleSaveNow}
           className="bg-blue-600 text-white w-full sm:w-auto px-6 py-2.5 rounded-full font-semibold hover:bg-blue-700 active:scale-95 transition-all shadow-sm hover:shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Guardar informacion

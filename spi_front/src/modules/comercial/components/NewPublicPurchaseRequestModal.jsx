@@ -281,7 +281,6 @@ export const NewPublicPurchaseRequestModal = ({ isOpen, onClose, onSuccess }) =>
     try {
       const payload = {
         ...formData,
-        status: 'pending_commercial',
         request_type_id: 'compra_publica',
         // Limpiar IDs temporales antes de enviar
         equipment: formData.equipment.map(({ id, ...eq }) => eq)
