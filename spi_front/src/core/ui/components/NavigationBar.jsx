@@ -335,7 +335,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
   // âš™ï¸ OPERACIONES - Procesos operativos
   else if (["operaciones", "jefe_operaciones"].includes(scope)) {
-    groups.primary.push(purchasesWorkspaceLink);
+    groups.primary.push(purchasesWorkspaceLink, permisosLink);
     groups.secondary.push(businessCaseLink);
     if (auditActive) groups.secondary.push(auditPrepLink);
   }

@@ -11,6 +11,38 @@ const upload = multer({
   })
 });
 
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (match) return match[1];
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+    return null;
+  }
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().slice(0, 10);
+  }
+  const parsed = new Date(value);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
+  return null;
+};
+
+const normalizePermisoRow = (row) => {
+  const normalized = normalizeRow(row, [
+    "aprobacion_parcial_at",
+    "aprobacion_final_at",
+    "created_at",
+    "updated_at",
+  ]);
+  return {
+    ...normalized,
+    fecha_inicio: normalizeDateOnly(row?.fecha_inicio),
+    fecha_fin: normalizeDateOnly(row?.fecha_fin),
+    fecha_regreso: normalizeDateOnly(row?.fecha_regreso),
+  };
+};
+
 async function create(req, res) {
   try {
     const result = await permisosService.createSolicitud({ body: req.body, user: req.user });
@@ -96,17 +128,7 @@ async function listarPendientes(req, res) {
   try {
     const { stage } = req.query;
     const result = await permisosService.listarPendientes({ stage, approver: req.user });
-    const normalized = (result || []).map((row) =>
-      normalizeRow(row, [
-        "fecha_inicio",
-        "fecha_fin",
-        "fecha_regreso",
-        "aprobacion_parcial_at",
-        "aprobacion_final_at",
-        "created_at",
-        "updated_at",
-      ])
-    );
+    const normalized = (result || []).map((row) => normalizePermisoRow(row));
     res.json({ ok: true, data: normalized });
   } catch (error) {
     console.error("Error listando pendientes:", error);
@@ -117,17 +139,7 @@ async function listarPendientes(req, res) {
 async function listarMias(req, res) {
   try {
     const result = await permisosService.listarPorUsuario({ user: req.user });
-    const normalized = (result?.data || []).map((row) =>
-      normalizeRow(row, [
-        "fecha_inicio",
-        "fecha_fin",
-        "fecha_regreso",
-        "aprobacion_parcial_at",
-        "aprobacion_final_at",
-        "created_at",
-        "updated_at",
-      ])
-    );
+    const normalized = (result?.data || []).map((row) => normalizePermisoRow(row));
     res.json({ ok: true, ...result, data: normalized });
   } catch (error) {
     console.error("Error listando mis solicitudes:", error);
@@ -159,21 +171,15 @@ async function listarResumenColaboradores(req, res) {
       ...row,
       permisos: {
         ...row.permisos,
-        items: (row.permisos.items || []).map((item) =>
-          normalizeRow(item, [
-            "fecha_inicio",
-            "fecha_fin",
-            "aprobacion_parcial_at",
-            "aprobacion_final_at",
-            "created_at",
-          ])
-        ),
+        items: (row.permisos.items || []).map((item) => normalizePermisoRow(item)),
       },
       vacaciones: {
         ...row.vacaciones,
-        items: (row.vacaciones.items || []).map((item) =>
-          normalizeRow(item, ["fecha_inicio", "fecha_fin", "created_at"])
-        ),
+        items: (row.vacaciones.items || []).map((item) => ({
+          ...normalizeRow(item, ["created_at"]),
+          fecha_inicio: normalizeDateOnly(item?.fecha_inicio),
+          fecha_fin: normalizeDateOnly(item?.fecha_fin),
+        })),
       },
     }));
 

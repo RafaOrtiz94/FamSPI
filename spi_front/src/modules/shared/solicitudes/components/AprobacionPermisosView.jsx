@@ -113,6 +113,21 @@ const AprobacionPermisosView = ({ compact = false }) => {
         };
         return tipos[solicitud.tipo_permiso] || "Permiso";
     };
+
+    const formatDateCalendar = (value) => {
+        if (!value) return "N/A";
+        const text = String(value);
+        const datePart = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+        if (datePart) {
+            const year = Number(datePart[1]);
+            const month = Number(datePart[2]) - 1;
+            const day = Number(datePart[3]);
+            return new Date(year, month, day).toLocaleDateString("es-EC");
+        }
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return "N/A";
+        return parsed.toLocaleDateString("es-EC");
+    };
     const spacingClass = compact ? "space-y-4" : "space-y-6";
     const titleClass = compact ? "text-lg font-bold text-gray-900" : "text-2xl font-bold text-gray-900";
     const cardPadding = compact ? "p-3" : "p-6";
@@ -171,7 +186,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                     </p>
                                 </div>
                                 <div className="text-right text-[10px] text-gray-500 whitespace-nowrap">
-                                    {new Date(solicitud.created_at).toLocaleDateString()}
+                                    {formatDateCalendar(solicitud.created_at)}
                                 </div>
                             </div>
 
@@ -202,21 +217,19 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                 <div>
                                     <p className="text-[10px] text-gray-500">Creado</p>
                                     <p className={compact ? "text-xs font-medium text-gray-900" : "text-sm font-medium text-gray-900"}>
-                                        {new Date(solicitud.created_at).toLocaleDateString()}
+                                        {formatDateCalendar(solicitud.created_at)}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] text-gray-500">Inicio</p>
                                     <p className={compact ? "text-xs font-medium text-gray-900" : "text-sm font-medium text-gray-900"}>
-                                        {solicitud.fecha_inicio
-                                            ? new Date(solicitud.fecha_inicio).toLocaleDateString()
-                                            : "N/A"}
+                                        {formatDateCalendar(solicitud.fecha_inicio)}
                                     </p>
                                 </div>
                                 <div>
                                     <p className="text-[10px] text-gray-500">Fin</p>
                                     <p className={compact ? "text-xs font-medium text-gray-900" : "text-sm font-medium text-gray-900"}>
-                                        {solicitud.fecha_fin ? new Date(solicitud.fecha_fin).toLocaleDateString() : "N/A"}
+                                        {formatDateCalendar(solicitud.fecha_fin)}
                                     </p>
                                 </div>
                                 <div>
