@@ -40,8 +40,8 @@ app.set("trust proxy", 1);
 const RATE_LIMIT_WINDOW_MS =
   parseInt(process.env.RATE_LIMIT_WINDOW_MS || 15 * 60 * 1000, 10) || 15 * 60 * 1000;
 
-// 🔥 REDUCIDO (antes 4000 → ahora 300) para menor CPU/RAM
-const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 300 : 0), 10);
+// Ajuste por defecto más generoso en producción (si no se define RATE_LIMIT_MAX)
+const RATE_LIMIT_MAX = parseInt(process.env.RATE_LIMIT_MAX || (isProd ? 1200 : 0), 10);
 
 const DISABLE_RATE_LIMIT =
   process.env.DISABLE_RATE_LIMIT === "true" || (!isProd && RATE_LIMIT_MAX === 0);
@@ -198,6 +198,7 @@ app.use((req, res, next) => {
   if (
     req.path === "/ws" ||
     req.path.startsWith("/ws/") ||
+    req.path.startsWith("/internal/jobs") ||
     req.path.startsWith("/api/v1/equipment-purchases/events") ||
     req.path.startsWith("/api/v1/private-purchases/events") ||
     req.path.startsWith("/api/v1/auth/google") ||

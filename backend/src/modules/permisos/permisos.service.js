@@ -6,6 +6,7 @@ const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
 
 const ANNUAL_ALLOWANCE = 15;
+const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
 const ROLE_APPROVER = {
@@ -131,6 +132,36 @@ async function getVacationConsumption({ userId, userEmail, year }) {
     approved: Number(rows[0]?.approved || 0),
     pending: Number(rows[0]?.pending || 0),
   };
+}
+
+async function getHistoricVacationBalance({ userId, userEmail, year }) {
+  const yearValue = Number(year);
+  if (!Number.isFinite(yearValue)) return 0;
+  try {
+    if (userId) {
+      const { rows } = await db.query(
+        `SELECT COALESCE(SUM(dias), 0) AS total
+           FROM vacaciones_saldos_historicos
+          WHERE anio = $1
+            AND (user_id = $2 OR LOWER(user_email) = LOWER($3))`,
+        [yearValue, userId, userEmail || ""]
+      );
+      return Number(rows[0]?.total || 0);
+    }
+    if (userEmail) {
+      const { rows } = await db.query(
+        `SELECT COALESCE(SUM(dias), 0) AS total
+           FROM vacaciones_saldos_historicos
+          WHERE anio = $1
+            AND LOWER(user_email) = LOWER($2)`,
+        [yearValue, userEmail]
+      );
+      return Number(rows[0]?.total || 0);
+    }
+  } catch (error) {
+    if (error?.code !== "42P01") throw error;
+  }
+  return 0;
 }
 
 let tableReady = false;
@@ -270,7 +301,13 @@ async function createSolicitud({ body, user }) {
       userEmail: payload.user_email,
       year: requestYear,
     });
-    const remaining = allowanceInfo.allowance - consumption.approved - consumption.pending;
+    const historicalBalance = await getHistoricVacationBalance({
+      userId: payload.user_id,
+      userEmail: payload.user_email,
+      year: requestYear,
+    });
+    const remaining =
+      allowanceInfo.allowance + historicalBalance - consumption.approved - consumption.pending;
 
     if (allowanceInfo.eligible && !allowanceInfo.missingHireDate) {
       if (Number(payload.duracion_dias || 0) > Math.max(remaining, 0)) {
@@ -667,24 +704,41 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
   }
 
   const tenureYears = calculateYearsOfService(hireDate, asOfDate);
-  const eligible = tenureYears >= 1;
-  if (!eligible) {
+  if (tenureYears < 1) {
     const eligibleFrom = new Date(hireDate.getTime() + ONE_YEAR_MS);
     return {
       allowance: 0,
       tenureYears,
       eligible: false,
       eligibleFrom: eligibleFrom.toISOString().split("T")[0],
+      accruedThisYear: false,
       missingHireDate: false,
     };
   }
 
-  const extra = tenureYears > 5 ? tenureYears - 5 : 0;
+  const anniversaryThisYear = new Date(hireDate.getTime());
+  anniversaryThisYear.setFullYear(asOfDate.getFullYear());
+  const accruedThisYear = asOfDate >= anniversaryThisYear;
+  const eligibleFrom = anniversaryThisYear.toISOString().split("T")[0];
+  if (!accruedThisYear) {
+    return {
+      allowance: 0,
+      tenureYears,
+      eligible: true,
+      eligibleFrom,
+      accruedThisYear: false,
+      missingHireDate: false,
+    };
+  }
+
+  const yearsAtAnniversary = calculateYearsOfService(hireDate, anniversaryThisYear);
+  const extra = yearsAtAnniversary > 5 ? yearsAtAnniversary - 5 : 0;
   return {
-    allowance: ANNUAL_ALLOWANCE + extra,
+    allowance: Math.min(ANNUAL_ALLOWANCE + extra, MAX_ANNUAL_ALLOWANCE),
     tenureYears,
     eligible: true,
-    eligibleFrom: hireDate.toISOString().split("T")[0],
+    eligibleFrom,
+    accruedThisYear: true,
     missingHireDate: false,
   };
 };
@@ -722,14 +776,21 @@ async function listarResumenColaboradores() {
 
   const collaborators = new Map();
 
-  usersResult.rows.forEach((user) => {
+  for (const user of usersResult.rows) {
     if (String(user.applicant_source || "").toLowerCase() === "google_forms") {
-      return;
+      continue;
     }
     const userEmail = user.email || null;
     const key = userEmail || `user-${user.id}`;
-    if (collaborators.has(key)) return;
+    if (collaborators.has(key)) continue;
     const allowanceInfo = computeVacationAllowance(user.fecha_ingreso, new Date());
+    const year = new Date().getFullYear();
+    const historicalBalance = await getHistoricVacationBalance({
+      userId: user.id,
+      userEmail,
+      year,
+    });
+    const totalAllowance = allowanceInfo.allowance + historicalBalance;
     collaborators.set(key, {
       user_id: user.id,
       user_email: userEmail,
@@ -745,15 +806,18 @@ async function listarResumenColaboradores() {
       vacaciones: {
         dias_aprobados: 0,
         dias_pendientes: 0,
-        dias_disponibles: allowanceInfo.allowance,
-        dias_restantes: allowanceInfo.allowance,
+        dias_disponibles: totalAllowance,
+        dias_restantes: totalAllowance,
+        dias_base: allowanceInfo.allowance,
+        dias_arrastre: historicalBalance,
         missing_hire_date: allowanceInfo.missingHireDate,
         eligible: allowanceInfo.eligible,
         eligible_from: allowanceInfo.eligibleFrom,
+        accrued_this_year: allowanceInfo.accruedThisYear,
         items: [],
       },
     });
-  });
+  }
 
   rows.forEach((row) => {
     const key = row.user_email || `user-${row.id}`;
@@ -773,11 +837,14 @@ async function listarResumenColaboradores() {
         vacaciones: {
           dias_aprobados: 0,
           dias_pendientes: 0,
-          dias_disponibles: ANNUAL_ALLOWANCE,
-          dias_restantes: ANNUAL_ALLOWANCE,
+          dias_disponibles: 0,
+          dias_restantes: 0,
+          dias_base: 0,
+          dias_arrastre: 0,
           missing_hire_date: true,
           eligible: false,
           eligible_from: null,
+          accrued_this_year: false,
           items: [],
         },
       });
@@ -854,5 +921,3 @@ module.exports = {
   getSolicitudById,
   listarResumenColaboradores,
 };
-
-

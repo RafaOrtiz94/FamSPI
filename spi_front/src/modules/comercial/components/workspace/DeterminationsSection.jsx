@@ -222,7 +222,13 @@ const DeterminationsSection = ({
     if (!bcId) return;
     const start = Date.now();
     try {
-      const res = await api.get(`/business-case/${bcId}/consumption-items`);
+      const res = await api.get(`/business-case/${bcId}/consumption-items`, {
+        params: { _t: Date.now() },
+        headers: {
+          "Cache-Control": "no-cache, no-store, max-age=0",
+          Pragma: "no-cache",
+        },
+      });
       const data = res?.data?.data || {};
       const items = Array.isArray(data?.items) ? data.items : [];
       const excluded = Array.isArray(data?.excluded) ? data.excluded : [];
@@ -255,6 +261,10 @@ const DeterminationsSection = ({
       });
       return;
     } catch (err) {
+      if (err?.response?.status === 304) {
+        // 304 no trae cuerpo útil para axios; mantenemos estado actual y evitamos fallback destructivo.
+        return;
+      }
       // Fallback to businessCase metadata if API fails
       const stored = businessCase?.modern_bc_metadata?.consumption_items;
       const excluded = businessCase?.modern_bc_metadata?.consumption_excluded;

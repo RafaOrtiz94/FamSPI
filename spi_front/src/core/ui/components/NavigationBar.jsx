@@ -316,6 +316,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
     groups.primary.push(
       privateDeliveriesLink,
       deliveryActsLink,
+      permisosLink,
     );
     groups.secondary.push(viaticosLink);
   }
@@ -574,4 +575,3 @@ const NavigationBar = () => {
 };
 
 export default NavigationBar;
-

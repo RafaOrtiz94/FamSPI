@@ -87,7 +87,7 @@ class NotificationManager {
     }
   };
     this.asyncDispatchEnabled =
-      String(process.env.NOTIFICATION_ASYNC_DISPATCH_ENABLED ?? "true").trim().toLowerCase() !== "false";
+      String(process.env.NOTIFICATION_ASYNC_DISPATCH_ENABLED ?? "false").trim().toLowerCase() !== "false";
     this.defaultMaxAttempts = Number(process.env.NOTIFICATION_DISPATCH_MAX_ATTEMPTS || 5);
     this.defaultBatchLimit = Number(process.env.NOTIFICATION_DISPATCH_BATCH_LIMIT || 50);
   }

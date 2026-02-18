@@ -8,7 +8,14 @@ module.exports = (req, res, next) => {
   const JOBS_KEY = process.env.JOBS_KEY;
   
   if (!JOBS_KEY) {
-    logger.warn('JOBS_KEY no configurado - permitiendo todos los requests');
+    if (process.env.NODE_ENV === 'production') {
+      logger.error('JOBS_KEY no configurado en produccion - bloqueando endpoint interno');
+      return res.status(503).json({
+        error: 'Service unavailable',
+        message: 'Internal jobs auth is not configured'
+      });
+    }
+    logger.warn('JOBS_KEY no configurado - permitiendo requests solo en entorno no productivo');
     return next();
   }
   
