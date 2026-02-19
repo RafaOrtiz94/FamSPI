@@ -52,6 +52,8 @@ const ROLE_APPROVER = {
   finanzas: "jefe_financiero",
   tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
+  ti: "jefe_ti",
+  admin_ti: "jefe_ti",
   logistica: "jefe_logistica",
   operaciones: "jefe_operaciones",
   calidad: "jefe_calidad",

@@ -13,6 +13,26 @@ const { sendMail } = require('../../utils/mailer');
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 const loadNotificationService = () => require('./notifications.service');
+const DEFAULT_NOTIFICATION_TIMEZONE =
+  process.env.NOTIFICATION_TIMEZONE ||
+  process.env.APP_TIMEZONE ||
+  process.env.GOOGLE_CALENDAR_TZ ||
+  "America/Guayaquil";
+
+function formatNotificationDateTime(value) {
+  const parsed = value ? new Date(value) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return "Fecha no disponible";
+  return parsed.toLocaleString("es-EC", {
+    timeZone: DEFAULT_NOTIFICATION_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
 
 class NotificationManager {
   constructor() {
@@ -417,7 +437,7 @@ class NotificationManager {
           <p style="margin: 0; font-size: 16px; line-height: 1.5;">${notification.message}</p>
           <hr style="border: none; border-top: 1px solid #e9ecef; margin: 20px 0;">
           <p style="margin: 0; color: #6c757d; font-size: 14px;">
-            Recibido: ${new Date(notification.created_at).toLocaleString('es-ES')}
+            Recibido: ${formatNotificationDateTime(notification.created_at)}
           </p>
         </div>
       </div>

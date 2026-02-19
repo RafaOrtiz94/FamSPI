@@ -18,6 +18,8 @@ const ROLE_APPROVER = {
   finanzas: "jefe_financiero",
   tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
+  ti: "jefe_ti",
+  admin_ti: "jefe_ti",
   logistica: "jefe_logistica",
   operaciones: "jefe_operaciones",
   calidad: "jefe_calidad",
@@ -459,7 +461,7 @@ async function aprobarParcial({ id, approver }) {
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
         customTitle: "Solicitud aprobada parcialmente",
-        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobaci?n final.",
+        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobación final.",
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,

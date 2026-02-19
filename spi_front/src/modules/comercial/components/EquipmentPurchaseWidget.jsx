@@ -8,6 +8,7 @@ import {
   requestProforma,
   reserveEquipment,
   saveProviderResponse,
+  registerPublicPortalOutcome,
   uploadContract,
   requestDeliveryDates,
   submitDeliveryDates,
@@ -72,6 +73,7 @@ const CHECKLIST_ACTION_LABELS = {
   reserve_equipment: "Reservar equipos",
   submit_signed_with_inspection: "Subir proforma firmada",
   request_inspection: "Solicitar inspección de ambiente",
+  register_public_portal_outcome: "Registrar resultado portal público",
   upload_contract: "Subir contrato",
   request_delivery_dates: "Solicitar fechas de entrega",
   submit_delivery_dates: "Registrar fechas de entrega",
@@ -83,15 +85,30 @@ const CHECKLIST_ACTION_LABELS = {
 const toChecklistActionLabel = (action) =>
   CHECKLIST_ACTION_LABELS[action] || action || "Sin paso definido";
 
+const epwLog = (...args) => {
+  // Logs temporales para depuración de flujo ACP/proveedor.
+  console.log("[EPW_DEBUG]", ...args);
+};
+
 const normalizeUserTokens = (user) => {
   if (!user) return [];
+  const normalizeToken = (value) =>
+    String(value || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "");
   const rawRoles = user?.roles ?? user?.role ?? [];
   const rawScopes = user?.scope ?? [];
   const roleValues = Array.isArray(rawRoles) ? rawRoles : [rawRoles];
   const scopeValues = Array.isArray(rawScopes) ? rawScopes : [rawScopes];
   return [...roleValues, ...scopeValues]
-    .flatMap((value) => String(value || "").split(/[,\s]+/))
-    .map((value) => value.trim().toLowerCase())
+    .flatMap((value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return [];
+      return [raw, ...raw.split(/[,\s]+/)];
+    })
+    .map((value) => normalizeToken(value))
     .filter(Boolean);
 };
 
@@ -159,7 +176,23 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const { user } = useAuth();
   const roleTokens = useMemo(() => normalizeUserTokens(user), [user]);
   const hasRoleToken = React.useCallback(
-    (token) => roleTokens.some((role) => role === token || role.includes(token)),
+    (token) => {
+      const normalizedToken = String(token || "")
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "_")
+        .replace(/^_+|_+$/g, "");
+      const compactToken = normalizedToken.replace(/_/g, "");
+      return roleTokens.some((role) => {
+        const compactRole = String(role || "").replace(/_/g, "");
+        return (
+          role === normalizedToken ||
+          role.includes(normalizedToken) ||
+          compactRole === compactToken ||
+          compactRole.includes(compactToken)
+        );
+      });
+    },
     [roleTokens],
   );
   const isManager = ["acp_comercial", "gerencia", "jefe_comercial"].some((roleName) =>
@@ -191,7 +224,13 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [form, setForm] = useState({ clientId: "", providerEmail: "", assignedTo: "", equipment: [], notes: "" });
+  const [form, setForm] = useState({
+    clientId: "",
+    clientName: "",
+    assignedTo: "",
+    equipment: [],
+    notes: "",
+  });
   const [responseDraft, setResponseDraft] = useState({ open: false, id: null, outcome: "new", notes: "", items: [] });
   const [inspectionDraft, setInspectionDraft] = useState({});
   const [inspectionModal, setInspectionModal] = useState({
@@ -207,23 +246,21 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   const [expandedRequestId, setExpandedRequestId] = useState(null);
   const [inspectionCoordDrafts, setInspectionCoordDrafts] = useState({});
   const [deliveryDrafts, setDeliveryDrafts] = useState({});
+  const [portalOutcomeDrafts, setPortalOutcomeDrafts] = useState({});
   const [savingProviderContact, setSavingProviderContact] = useState(false);
   const [technicalScheduleDays, setTechnicalScheduleDays] = useState([]);
   const [calendarMonthByRequest, setCalendarMonthByRequest] = useState({});
-  const normalizedFormProviderEmail = useMemo(
-    () => String(form.providerEmail || "").trim().toLowerCase(),
-    [form.providerEmail],
-  );
-  const formProviderAlreadySaved = useMemo(
-    () =>
-      (meta.providerContacts || []).some(
-        (item) => String(item?.email || "").trim().toLowerCase() === normalizedFormProviderEmail,
-      ),
-    [meta.providerContacts, normalizedFormProviderEmail],
-  );
   const loadAll = React.useCallback(async () => {
     setLoading(true);
     try {
+      epwLog("loadAll:start", {
+        showCreation,
+        isManager,
+        userId: user?.id,
+        userRole: user?.role,
+        userScope: user?.scope,
+        roleTokens,
+      });
       const [metaRes, listRes, providerContactsRes] = await Promise.all([
         showCreation ? getEquipmentPurchaseMeta() : Promise.resolve({ clients: [], equipment: [], acp_users: [], provider_contacts: [] }),
         listEquipmentPurchases(),
@@ -238,14 +275,38 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
           : (providerContactsRes || []),
       });
       setRequests(listRes || []);
+      epwLog("loadAll:done", {
+        clients: (metaRes.clients || []).length,
+        equipment: (metaRes.equipment || []).length,
+        acpUsers: (metaRes.acp_users || []).length,
+        providerContacts: (providerContactsRes || metaRes.provider_contacts || []).length,
+        requests: (listRes || []).length,
+        pendingProviderAssignment: (listRes || []).filter((r) => r.status === "pending_provider_assignment").length,
+      });
     } catch (error) {
       console.error(error);
+      epwLog("loadAll:error", {
+        message: error?.message,
+        code: error?.response?.data?.code,
+        status: error?.response?.status,
+        backendMessage: error?.response?.data?.message,
+      });
       const apiError = getEquipmentPurchaseApiError(error, "No se pudo cargar las solicitudes de compra");
       showToast(apiError.message, "error");
     } finally {
       setLoading(false);
     }
-  }, [showCreation, isManager, showToast]);
+  }, [showCreation, isManager, showToast, user?.id, user?.role, user?.scope, roleTokens]);
+
+  useEffect(() => {
+    epwLog("auth-context", {
+      userId: user?.id,
+      userRole: user?.role,
+      userScope: user?.scope,
+      roleTokens,
+      isManager,
+    });
+  }, [user?.id, user?.role, user?.scope, roleTokens, isManager]);
 
   useEffect(() => {
     loadAll();
@@ -356,7 +417,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
         ...prev,
         equipment: exists
           ? prev.equipment.filter((x) => x.id !== id)
-          : [...prev.equipment, { id, type: "new" }],
+          : [...prev.equipment, { id, type: "new_available" }],
       };
     });
   };
@@ -371,8 +432,9 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
   };
 
   const handleCreate = async () => {
-    if (!form.clientId || !form.equipment.length) {
-      showToast("Cliente y equipos son obligatorios", "warning");
+    const hasClient = Boolean(form.clientId) || Boolean(String(form.clientName || "").trim());
+    if (!hasClient || !form.equipment.length) {
+      showToast("Nombre del cliente y equipos son obligatorios", "warning");
       return;
     }
     if (!isManager && !form.assignedTo) {
@@ -384,7 +446,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       const equipmentPayload = form.equipment.map((formEq) => {
         const eq = meta.equipment.find((e) => e.id === formEq.id);
         return {
-          id: eq.id,
+          equipment_id: eq.id,
           name: eq.name,
           sku: eq.sku,
           serial: eq.serial,
@@ -392,23 +454,20 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
           type: formEq.type
         };
       });
+      const normalizedClientName = String(selectedClient?.name || form.clientName || "").trim();
 
       await createEquipmentPurchase({
-        client_id: form.clientId,
-        client_name: selectedClient?.name,
+        client_id: form.clientId || null,
+        client_name: normalizedClientName,
         client_email: selectedClient?.client_email,
-        provider_email: isManager ? form.providerEmail : undefined,
         assigned_to: form.assignedTo || null,
         equipment: equipmentPayload,
         notes: form.notes,
       });
-      const successMessage = isManager && form.providerEmail
-        ? "Solicitud creada y correo enviado al proveedor"
-        : "Solicitud creada y enviada a ACP Comercial para gestionar proveedor";
-      showToast(successMessage, "success");
+      showToast("Solicitud creada y enviada a ACP Comercial para gestionar proveedor", "success");
       setForm({
         clientId: "",
-        providerEmail: "",
+        clientName: "",
         assignedTo: isManager ? "" : meta.acpUsers?.[0]?.id || "",
         equipment: [],
         notes: "",
@@ -546,8 +605,20 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
     const draft = availabilityDrafts[request.id] || {};
     const providerEmail = draft.provider_email ?? request.provider_email ?? "";
     const notes = draft.notes ?? request.notes ?? "";
+    epwLog("startAvailability:attempt", {
+      requestId: request?.id,
+      requestStatus: request?.status,
+      assignedTo: request?.assigned_to,
+      currentUserId: user?.id,
+      providerEmail,
+      hasProviderEmail: Boolean(String(providerEmail || "").trim()),
+      checklistAction: request?.checklist_state?.action,
+      checklistPending: request?.checklist_state?.pending || [],
+      draft,
+    });
 
     if (!providerEmail) {
+      epwLog("startAvailability:blocked:no-provider-email", { requestId: request?.id });
       showToast("Debes ingresar el correo del proveedor", "warning");
       return;
     }
@@ -557,16 +628,27 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       [{ id: "availability", label: "Enviando correo de disponibilidad" }],
       async () => {
         try {
-          await startAvailability(request.id, {
+          const payload = {
             provider_email: providerEmail,
             notes,
             expected_updated_at: request.updated_at,
-          });
+          };
+          epwLog("startAvailability:api:request", { requestId: request.id, payload });
+          const response = await startAvailability(request.id, payload);
+          epwLog("startAvailability:api:success", { requestId: request.id, response });
           showToast("Correo de disponibilidad enviado", "success");
           setAvailabilityDrafts((prev) => ({ ...prev, [request.id]: {} }));
           loadAll();
         } catch (error) {
           console.error(error);
+          epwLog("startAvailability:api:error", {
+            requestId: request?.id,
+            message: error?.message,
+            code: error?.response?.data?.code,
+            status: error?.response?.status,
+            backendMessage: error?.response?.data?.message,
+            details: error?.response?.data?.details,
+          });
           handleApiError(error, "No se pudo enviar el correo de disponibilidad");
         }
       },
@@ -575,13 +657,16 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
   const handleRegisterProviderContact = async ({ email }) => {
     const normalizedEmail = String(email || "").trim().toLowerCase();
+    epwLog("registerProvider:attempt", { email, normalizedEmail, userId: user?.id });
     if (!normalizedEmail) {
+      epwLog("registerProvider:blocked:invalid-email", { email });
       showToast("Debes ingresar un correo de proveedor válido", "warning");
       return;
     }
     setSavingProviderContact(true);
     try {
       const saved = await saveEquipmentProviderContact({ email: normalizedEmail });
+      epwLog("registerProvider:api:success", { normalizedEmail, saved });
       setMeta((prev) => {
         const previous = Array.isArray(prev.providerContacts) ? prev.providerContacts : [];
         const deduped = previous.filter(
@@ -594,6 +679,14 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
       });
       showToast("Proveedor guardado para reutilización", "success");
     } catch (error) {
+      epwLog("registerProvider:api:error", {
+        normalizedEmail,
+        message: error?.message,
+        code: error?.response?.data?.code,
+        status: error?.response?.status,
+        backendMessage: error?.response?.data?.message,
+        details: error?.response?.data?.details,
+      });
       handleApiError(error, "No se pudo guardar el proveedor");
     } finally {
       setSavingProviderContact(false);
@@ -707,6 +800,44 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
         } catch (error) {
           console.error(error);
           handleApiError(error, "No se pudo solicitar fechas de entrega");
+        }
+      },
+    );
+  };
+
+  const handleRegisterPublicPortalOutcome = async (request) => {
+    if (!request?.id) return;
+    const draft = portalOutcomeDrafts[request.id] || {};
+    const outcome = String(
+      draft.outcome ?? request.public_portal_outcome ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    if (!outcome) {
+      showToast("Debes seleccionar si el proceso fue ganado o no ganado", "warning");
+      return;
+    }
+    await runWithOverlay(
+      "Registrando resultado portal",
+      [{ id: "public-portal-outcome", label: "Guardando resultado" }],
+      async () => {
+        try {
+          await registerPublicPortalOutcome(request.id, {
+            outcome,
+            notes: draft.notes ?? request.public_portal_outcome_notes ?? "",
+            expected_updated_at: request.updated_at,
+          });
+          showToast(
+            outcome === "won"
+              ? "Resultado registrado: proceso ganado. Continúa con cliente e inspección."
+              : "Resultado registrado: proceso no ganado. Solicitud finalizada.",
+            "success",
+          );
+          setPortalOutcomeDrafts((prev) => ({ ...prev, [request.id]: {} }));
+          loadAll();
+        } catch (error) {
+          console.error(error);
+          handleApiError(error, "No se pudo registrar el resultado del portal");
         }
       },
     );
@@ -831,71 +962,34 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
             </div>
 
             <div className="space-y-4 p-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4">
                 <div>
                   <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Cliente</label>
                   <select
                     className="w-full mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
                     value={form.clientId}
-                    onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      const selected = meta.clients.find((c) => `${c.id}` === `${selectedId}`);
+                      setForm((prev) => ({
+                        ...prev,
+                        clientId: selectedId,
+                        clientName: selectedId ? (selected?.name || prev.clientName) : prev.clientName,
+                      }));
+                    }}
                   >
-                    <option value="">Selecciona un cliente</option>
+                    <option value="">Escribe solo razón social (opcional seleccionar cliente)</option>
                     {meta.clients.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
-                </div>
-                <div>
-                  <label className="text-xs font-semibold uppercase tracking-wide text-slate-600">Proveedor (correo)</label>
-                  {isManager && (meta.providerContacts || []).length > 0 && (
-                    <select
-                      className="w-full mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                      value=""
-                      onChange={(e) => {
-                        const selected = e.target.value;
-                        if (!selected) return;
-                        setForm((prev) => ({ ...prev, providerEmail: selected }));
-                        e.target.value = "";
-                      }}
-                    >
-                      <option value="">Selecciona proveedor guardado...</option>
-                      {(meta.providerContacts || []).map((item) => (
-                        <option key={`${item.id || item.email}`} value={item.email}>
-                          {item.display_name
-                            ? `${item.display_name} (${item.email})`
-                            : item.email}
-                        </option>
-                      ))}
-                    </select>
-                  )}
                   <input
-                    type="email"
+                    type="text"
                     className="w-full mt-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200"
-                    value={form.providerEmail}
-                    onChange={(e) => setForm((prev) => ({ ...prev, providerEmail: e.target.value }))}
-                    placeholder={isManager ? "correo@proveedor.com" : "Solo ACP Comercial"}
-                    disabled={!isManager}
+                    value={form.clientName}
+                    onChange={(e) => setForm((prev) => ({ ...prev, clientName: e.target.value }))}
+                    placeholder="Razón social del cliente"
                   />
-                  {isManager && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleRegisterProviderContact({ email: form.providerEmail })}
-                        disabled={!normalizedFormProviderEmail || formProviderAlreadySaved || savingProviderContact}
-                      >
-                        Guardar proveedor
-                      </Button>
-                      {formProviderAlreadySaved ? (
-                        <span className="text-[11px] text-emerald-700">Proveedor ya guardado</span>
-                      ) : (
-                        <span className="text-[11px] text-slate-500">Se guarda para futuras solicitudes.</span>
-                      )}
-                    </div>
-                  )}
-                  {!isManager && (
-                    <p className="text-xs text-slate-500 mt-2">El ACP Comercial completara el proveedor y enviara el correo.</p>
-                  )}
                 </div>
               </div>
 
@@ -935,10 +1029,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div className="text-xs text-slate-500">
-                  Recuerda validar cliente y equipos antes de enviar la solicitud.
+                  El proveedor y correo se registran despues por ACP Comercial.
                 </div>
                 <Button onClick={handleCreate} loading={creating} className="sm:w-auto w-full">
-                  Enviar correo de disponibilidad
+                  Crear solicitud pública
                 </Button>
               </div>
             </div>
@@ -1010,13 +1104,19 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
               {visibleRequests.map((req) => {
                 const statusConfig = STATUS_CONFIG[req.status] || STATUS_CONFIG.waiting_provider_response;
                 const providerResponse = req.provider_response || null;
-                const requestedMap = new Map((req.equipment || []).map((item) => [item.id, item]));
+                const requestedMap = new Map(
+                  (req.equipment || []).map((item, index) => [
+                    String(item.id || item.equipment_id || item.inventory_id || `eq_${index + 1}`),
+                    item,
+                  ]),
+                );
                 const availableItems = Array.isArray(providerResponse?.items)
                   ? providerResponse.items.map((item) => {
-                    const requestedItem = requestedMap.get(item.id) || {};
+                    const itemKey = String(item.id || item.equipment_id || item.inventory_id || "");
+                    const requestedItem = requestedMap.get(itemKey) || {};
                     return {
                       ...item,
-                      name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || item.id || "Equipo",
+                      name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || "Equipo",
                       requested_type: item.requested_type || requestedItem.type,
                       available_type: item.available_type || item.type,
                       decision: item.decision || (item.available_type === "none" ? "reject" : "accept"),
@@ -1034,9 +1134,6 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                 const equipmentTitle = showAvailableItems
                   ? "Equipos disponibles (respuesta del proveedor):"
                   : "Equipos solicitados:";
-                const availabilityDraft = availabilityDrafts[req.id] || {};
-                const draftProviderEmail = availabilityDraft.provider_email ?? req.provider_email ?? "";
-                const draftNotes = availabilityDraft.notes ?? req.notes ?? "";
                 const providerText = providerResponse
                   ? formatProviderOutcome(providerResponse.outcome)
                   : "Sin respuesta del proveedor";
@@ -1055,7 +1152,22 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                   })
                   : null;
                 const expanded = expandedRequestId === req.id;
+                const canManageThisRequest =
+                  isManager || String(req.assigned_to || "") === String(user?.id || "");
+                if (req.status === "pending_provider_assignment") {
+                  epwLog("request-card:pending-provider", {
+                    requestId: req.id,
+                    assignedTo: req.assigned_to,
+                    currentUserId: user?.id,
+                    isManager,
+                    canManageThisRequest,
+                    providerEmail: req.provider_email || "",
+                    checklistAction: req?.checklist_state?.action || null,
+                    checklistPending: req?.checklist_state?.pending || [],
+                  });
+                }
                 const inspectionCoordinationDraft = inspectionCoordDrafts[req.id] || {};
+                const publicPortalOutcome = String(req.public_portal_outcome || "").toLowerCase();
                 const inspectionMinDate = normalizeDateOnly(req.inspection_min_date);
                 const inspectionMaxDate = normalizeDateOnly(req.inspection_max_date);
                 const selectedInspectionDate = normalizeDateOnly(
@@ -1202,6 +1314,16 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                                   : "Pendiente propuesta"}
                           </span>
                         </p>
+                        <p className="text-xs text-slate-700">
+                          Resultado portal público:{" "}
+                          <span className="font-semibold">
+                            {publicPortalOutcome === "won"
+                              ? "Ganado"
+                              : publicPortalOutcome === "lost"
+                                ? "No ganado"
+                                : "Pendiente"}
+                          </span>
+                        </p>
                         {req.contract_deadline_date && (
                           <p className="text-xs text-slate-700">
                             Fecha límite contrato (110 días):{" "}
@@ -1233,7 +1355,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             Solicitud técnica #{req.inspection_request_id}
                           </p>
                         )}
-                        {!req.inspection_request_id && req.status === "pending_contract" && canRequestInspection && (
+                        {!req.inspection_request_id &&
+                          req.status === "pending_contract" &&
+                          canRequestInspection &&
+                          publicPortalOutcome === "won" && (
                           <Button
                             size="sm"
                             variant="outline"
@@ -1492,6 +1617,11 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             </div>
                           </div>
                         )}
+                        {req.status === "pending_contract" && publicPortalOutcome !== "won" && (
+                          <p className="text-[11px] text-slate-600">
+                            Debes registrar primero el resultado del portal público en "Ganado" para habilitar la inspección.
+                          </p>
+                        )}
                         {!canCoordinateInspection &&
                           !canReviewInspectionCoordination &&
                           req.status === "pending_contract" && (
@@ -1593,7 +1723,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                           <p className="text-[10px] uppercase tracking-wide text-slate-500">{equipmentTitle}</p>
                           <div className="space-y-2">
                             {equipmentList.map((eq, idx) => {
-                              const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || eq.id || "Equipo");
+                              const eqName = typeof eq === "string" ? eq : (eq.name || eq.label || eq.sku || "Equipo");
                               const requestedType = typeof eq === "object" ? eq.requested_type || eq.type : null;
                               const availableType = typeof eq === "object" ? eq.available_type || eq.type : null;
                               const decision = typeof eq === "object" ? eq.decision : null;
@@ -1601,14 +1731,22 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
 
                               const typeBadge = (type, label) => (
                                 <span
-                                  className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${type === 'new'
+                                  className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${type === 'new_available'
                                     ? 'bg-green-100 text-green-700'
+                                    : type === 'new_import'
+                                      ? 'bg-amber-100 text-amber-700'
                                     : type === 'cu'
                                       ? 'bg-blue-100 text-blue-700'
                                       : 'bg-gray-100 text-gray-600'
                                     }`}
                                 >
-                                  {label}: {type === 'new' ? 'Nuevo' : type === 'cu' ? 'CU' : 'Sin stock'}
+                                  {label}: {type === 'new_available'
+                                    ? 'Nuevo disponible'
+                                    : type === 'new_import'
+                                      ? 'Nuevo para importación'
+                                      : type === 'cu'
+                                        ? 'CU'
+                                        : 'Sin stock'}
                                 </span>
                               );
 
@@ -1655,10 +1793,10 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       </div>
                     )}
 
-                    {allowProcessModals && (
+                    {
                       <RequestActions
                         request={req}
-                        isManager={isManager}
+                        isManager={canManageThisRequest}
                         canAccessAttachments={canAccessAttachments}
                         canUploadSignedProforma={canUploadSignedProforma}
                         checklistState={req.checklist_state}
@@ -1692,8 +1830,16 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                             [requestId]: { ...prev[requestId], [field]: value },
                           }));
                         }}
+                        portalOutcomeDraft={portalOutcomeDrafts[req.id] || {}}
+                        onUpdatePortalOutcomeDraft={(requestId, field, value) => {
+                          setPortalOutcomeDrafts((prev) => ({
+                            ...prev,
+                            [requestId]: { ...prev[requestId], [field]: value },
+                          }));
+                        }}
+                        onRegisterPublicPortalOutcome={() => handleRegisterPublicPortalOutcome(req)}
                       />
-                    )}
+                    }
 
                     {req.checklist_state?.action && (
                       <details className="mt-3 rounded-lg border border-slate-200 bg-white">
@@ -1816,13 +1962,26 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
                       <div>
                         <p className="font-medium text-gray-800">{item.name}</p>
                         <p className="text-xs text-gray-500">
-                          Solicitado: {item.requested_type === "cu" ? "CU" : item.requested_type === "new" ? "Nuevo" : "Sin especificar"}
+                          Solicitado: {
+                            item.requested_type === "cu"
+                              ? "CU"
+                              : item.requested_type === "new_import"
+                                ? "Nuevo para importación"
+                                : item.requested_type === "new_available" || item.requested_type === "new"
+                                  ? "Nuevo disponible"
+                                  : "Sin especificar"
+                          }
                         </p>
                       </div>
                       {item.sku && <span className="text-[11px] text-gray-500">SKU: {item.sku}</span>}
                     </div>
                     <div className="space-y-1">
-                      {[{ value: "new", label: "Disponible en Nuevo" }, { value: "cu", label: "Disponible en CU" }, { value: "none", label: "Sin stock" }]
+                      {[
+                        { value: "new_available", label: "Nuevo disponible" },
+                        { value: "new_import", label: "Nuevo para importación" },
+                        { value: "cu", label: "CU" },
+                        { value: "none", label: "Sin stock" },
+                      ]
                         .map((option) => (
                           <label key={option.value} className="flex items-center gap-2">
                             <input

@@ -768,3 +768,29 @@ exports.updateChecklist = async (req, res, next) => {
     next(error);
   }
 };
+
+exports.registerPublicPortalOutcome = async (req, res, next) => {
+  try {
+    const { outcome, notes, expected_updated_at } = req.body || {};
+    const updated = await service.registerPublicPortalOutcome({
+      id: req.params.id,
+      user: req.user,
+      outcome,
+      notes,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "public_portal_outcome_registered",
+      meta: { outcome: String(outcome || "").toLowerCase() || null },
+    });
+  } catch (error) {
+    next(error);
+  }
+};

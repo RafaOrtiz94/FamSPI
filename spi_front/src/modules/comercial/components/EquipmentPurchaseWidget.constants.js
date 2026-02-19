@@ -149,7 +149,8 @@ export const STATUS_CONFIG = {
 
 // Equipment type labels
 export const EQUIPMENT_TYPE_LABELS = {
-    new: "Nuevo",
+    new_available: "Nuevo disponible",
+    new_import: "Nuevo para importación",
     cu: "CU",
     none: "Sin stock"
 };
@@ -162,7 +163,7 @@ export const DECISION_LABELS = {
 
 // Form validation messages
 export const VALIDATION_MESSAGES = {
-    clientRequired: "Cliente y equipos son obligatorios",
+    clientRequired: "Nombre del cliente y equipos son obligatorios",
     acpRequired: "Debes asignar la solicitud a un ACP Comercial",
     providerRequired: "Debes ingresar el correo del proveedor",
     fileRequired: "Selecciona un archivo",

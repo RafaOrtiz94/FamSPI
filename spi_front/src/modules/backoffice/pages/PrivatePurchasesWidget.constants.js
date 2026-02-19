@@ -36,6 +36,28 @@ export const PRIVATE_PURCHASE_STATUS_CONFIG = {
         badgeBg: "bg-indigo-100",
         badgeText: "text-indigo-800"
     },
+    offer_rejected_by_commercial: {
+        label: "Rechazada por Comercial",
+        iconName: "FiX",
+        ledColor: "bg-rose-500",
+        ledGlow: "shadow-lg shadow-rose-500/50",
+        cardBg: "bg-gradient-to-br from-white via-rose-50 to-white",
+        cardBorder: "border-l-4 border-rose-400",
+        cardShadow: "shadow-rose-200/60",
+        badgeBg: "bg-rose-100",
+        badgeText: "text-rose-800"
+    },
+    price_improvement_requested: {
+        label: "Mejora de precio solicitada",
+        iconName: "FiClock",
+        ledColor: "bg-amber-500",
+        ledGlow: "shadow-lg shadow-amber-500/50",
+        cardBg: "bg-gradient-to-br from-white via-amber-50 to-white",
+        cardBorder: "border-l-4 border-amber-400",
+        cardShadow: "shadow-amber-200/60",
+        badgeBg: "bg-amber-100",
+        badgeText: "text-amber-800"
+    },
     offer_signed: {
         label: "Oferta Firmada",
         iconName: "FiFileText",

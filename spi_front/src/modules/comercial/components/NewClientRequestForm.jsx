@@ -24,7 +24,6 @@ const COMMON_REQUIRED_FIELDS = [
   "establishment_city",
   "establishment_address",
   "establishment_reference",
-  "establishment_phone",
   "establishment_cellphone",
   "shipping_contact_name",
   "shipping_country",
@@ -32,16 +31,13 @@ const COMMON_REQUIRED_FIELDS = [
   "shipping_city",
   "shipping_province",
   "shipping_reference",
-  "shipping_phone",
   "shipping_cellphone",
   "shipping_delivery_hours",
-  "operating_permit_status",
 ];
 
 const NATURAL_REQUIRED_FIELDS = ["natural_person_firstname", "natural_person_lastname"];
 
 const LEGAL_REQUIRED_FIELDS = [
-  "legal_person_business_name",
   "nationality",
 ];
 
@@ -55,7 +51,7 @@ const LEGAL_REP_REQUIRED_FIELDS = [
 
 const FILE_REQUIREMENTS = {
   id_file: {
-    label: "Documento de identificación del solicitante",
+    label: "Documento de identificación del cliente",
     helper: "Formato PDF, máximo 10 MB.",
   },
   ruc_file: {
@@ -65,10 +61,6 @@ const FILE_REQUIREMENTS = {
   legal_rep_appointment_file: {
     label: "Nombramiento del representante legal",
     helper: "Solo personas jurídicas (PDF).",
-  },
-  operating_permit_file: {
-    label: "Permiso de funcionamiento",
-    helper: "Adjunta solo si el cliente ya cuenta con permiso vigente.",
   },
   consent_evidence_file: {
     label: "Evidencia del consentimiento",
@@ -141,19 +133,16 @@ const initialFilesState = {
   id_file: null,
   ruc_file: null,
   legal_rep_appointment_file: null,
-  operating_permit_file: null,
   consent_evidence_file: null,
 };
 
-const requiredFilesByType = (type, permitStatus, consentMethod) => {
-  const files = ["id_file"];
-  if (type === "persona_juridica") {
+const requiredFilesByType = (type, clientSector, consentMethod) => {
+  const isPublicSector = String(clientSector || "").toLowerCase() === "publico";
+  const files = isPublicSector ? [] : ["id_file"];
+  if (!isPublicSector && type === "persona_juridica") {
     files.push("legal_rep_appointment_file");
   }
-  if (permitStatus === "has_it") {
-    files.push("operating_permit_file");
-  }
-  if (consentMethod === "signed_document") {
+  if (!isPublicSector && consentMethod === "signed_document") {
     files.push("consent_evidence_file");
   }
   return files;
@@ -209,10 +198,10 @@ const NewClientRequestForm = ({
     () =>
       requiredFilesByType(
         formData.client_type,
-        formData.operating_permit_status,
+        formData.client_sector,
         formData.consent_capture_method,
       ),
-    [formData.client_type, formData.operating_permit_status, formData.consent_capture_method],
+    [formData.client_type, formData.client_sector, formData.consent_capture_method],
   );
 
   const submissionSteps = useMemo(
@@ -304,9 +293,6 @@ const NewClientRequestForm = ({
 
     if (name === "client_type" && value === "persona_natural") {
       setFiles((prev) => ({ ...prev, legal_rep_appointment_file: null }));
-    }
-    if (name === "operating_permit_status" && value !== "has_it") {
-      setFiles((prev) => ({ ...prev, operating_permit_file: null }));
     }
     // Solo resetear token si no está verificado aún
     if (name === "client_email" || name === "consent_recipient_email") {
@@ -826,14 +812,6 @@ const NewClientRequestForm = ({
         ) : (
           <Section title="Datos del cliente (persona jurídica)">
             <InputField
-              name="legal_person_business_name"
-              label="Razón social"
-              value={formData.legal_person_business_name}
-              onChange={handleChange}
-              required
-              error={errors.legal_person_business_name}
-            />
-            <InputField
               name="commercial_name"
               label="Nombre comercial"
               value={formData.commercial_name}
@@ -961,7 +939,7 @@ const NewClientRequestForm = ({
             />
             <InputField
               name="legal_rep_id_document"
-              label="Documento de identificación"
+              label="Documento de identificación del cliente"
               value={formData.legal_rep_id_document}
               onChange={handleChange}
               required
@@ -1066,19 +1044,7 @@ const NewClientRequestForm = ({
           />
         </Section>
 
-        <Section title="Documentos y permisos">
-          <div className="md:col-span-2">
-            <RadioGroup
-              name="operating_permit_status"
-              value={formData.operating_permit_status}
-              onChange={handleChange}
-              options={[
-                { label: "No cuenta con permiso", value: "does_not_have_it" },
-                { label: "En trámite", value: "in_progress" },
-                { label: "Tiene permiso vigente", value: "has_it" },
-              ]}
-            />
-          </div>
+        <Section title="Documentos">
           <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
             {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => {
               if (key === "consent_evidence_file" && formData.consent_capture_method === "email_link") {

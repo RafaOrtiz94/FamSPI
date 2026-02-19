@@ -52,6 +52,7 @@ const homePathsByScope = {
   logistica: "/dashboard/logistica",
   jefe_logistica: "/dashboard/logistica",
   calidad: "/dashboard/calidad",
+  jefe_calidad: "/dashboard/calidad",
 };
 
 const getHomeLink = (scope) => {
@@ -162,6 +163,12 @@ const asistenciaReportesLink = {
   name: "Asistencia Reportes",
   icon: FiClipboard,
   path: "/dashboard/talento-humano/asistencia-reportes",
+};
+
+const solicitudesTalentoLink = {
+  name: "Solicitudes",
+  icon: FiList,
+  path: "/dashboard/talento-humano/solicitudes",
 };
 
 const viaticosLink = {
@@ -329,7 +336,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
   // ðŸŽ¯ TI - TecnologÃ­a y auditorÃ­a
   else if (["ti", "jefe_ti", "admin_ti"].includes(scope)) {
     groups.critical.push(tiWorkspaceLink);
-    groups.primary.push(...talentoLinks, ...auditLinks);
+    groups.primary.push(permisosLink, ...talentoLinks, ...auditLinks);
     if (auditActive) groups.primary.push(auditPrepLink);
   }
 
@@ -346,7 +353,8 @@ const getPriorityGroups = (scope, role, auditActive) => {
   }
 
   // ðŸŽ¨ CALIDAD - Control de calidad
-  else if (["calidad"].includes(scope)) {
+  else if (["calidad", "jefe_calidad"].includes(scope)) {
+    groups.primary.push(solicitudesTalentoLink, permisosLink);
     if (auditActive) groups.primary.push(auditPrepLink);
   }
 

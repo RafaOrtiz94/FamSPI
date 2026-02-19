@@ -1,6 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import Button from "../../../core/ui/components/Button";
 
+const epwActionLog = (...args) => {
+    // Logs temporales para depurar habilitación de acciones ACP.
+    console.log("[EPW_DEBUG][ACTIONS]", ...args);
+};
+
 const PROFORMA_COOLDOWN_SECONDS = 4 * 60 * 60;
 
 const parseDateMs = (value) => {
@@ -80,20 +85,51 @@ const RequestActions = ({
     providerContacts = [],
     onRegisterProviderContact,
     savingProviderContact = false,
+    portalOutcomeDraft = {},
+    onUpdatePortalOutcomeDraft,
+    onRegisterPublicPortalOutcome,
 }) => {
-    if (!isManager) return null;
-
     const availabilityDraft = availabilityDrafts[request.id] || {};
     const draftProviderEmail = availabilityDraft.provider_email ?? request.provider_email ?? "";
     const draftNotes = availabilityDraft.notes ?? request.notes ?? "";
-    const pendingChecklist = Array.isArray(checklistState?.pending) ? checklistState.pending : [];
-    const pendingForStartAvailability = pendingChecklist.filter((key) => {
-        if (key === "provider_contact_verified" && draftProviderEmail) {
-            return false;
+    const hasProviderEmail = Boolean(String(draftProviderEmail || "").trim());
+    const disableStartAvailability = !hasProviderEmail;
+
+    useEffect(() => {
+        if (!isManager) {
+            epwActionLog("hidden:not-manager", {
+                requestId: request?.id,
+                requestStatus: request?.status,
+                isManager,
+                checklistState,
+            });
+            return;
         }
-        return true;
-    });
-    const disableStartAvailability = pendingForStartAvailability.length > 0;
+        epwActionLog("render", {
+            requestId: request?.id,
+            requestStatus: request?.status,
+            isManager,
+            providerEmailFromRequest: request?.provider_email || "",
+            providerEmailDraft: draftProviderEmail || "",
+            hasProviderEmail,
+            disableStartAvailability,
+            checklistAction: checklistState?.action || null,
+            checklistPending: checklistState?.pending || [],
+        });
+    }, [
+        request?.id,
+        request?.status,
+        isManager,
+        checklistState,
+        request?.provider_email,
+        draftProviderEmail,
+        hasProviderEmail,
+        disableStartAvailability,
+        checklistState?.action,
+        checklistState?.pending,
+    ]);
+
+    if (!isManager) return null;
 
     return (
         <div className="flex flex-wrap gap-2 pt-3 border-t border-white/50">
@@ -129,6 +165,9 @@ const RequestActions = ({
                     deliveryDraft={deliveryDraft}
                     onUpdateDeliveryDraft={onUpdateDeliveryDraft}
                     checklistState={checklistState}
+                    portalOutcomeDraft={portalOutcomeDraft}
+                    onUpdatePortalOutcomeDraft={onUpdatePortalOutcomeDraft}
+                    onRegisterPublicPortalOutcome={onRegisterPublicPortalOutcome}
                 />
             )}
         </div>
@@ -221,7 +260,7 @@ const AvailabilitySetup = ({
             </Button>
             {disabledAction && (
                 <p className="text-[11px] text-amber-700">
-                    Checklist pendiente: completa los ítems requeridos para habilitar esta acción.
+                    Debes ingresar el correo del proveedor para habilitar esta acción.
                 </p>
             )}
         </div>
@@ -251,6 +290,9 @@ const StatusBasedActions = ({
     deliveryDraft,
     onUpdateDeliveryDraft,
     checklistState,
+    portalOutcomeDraft,
+    onUpdatePortalOutcomeDraft,
+    onRegisterPublicPortalOutcome,
 }) => {
     const { status } = request;
     const [nowMs, setNowMs] = useState(() => Date.now());
@@ -370,18 +412,89 @@ const StatusBasedActions = ({
             );
 
         case "pending_contract":
-            return (
-                <div className="w-full space-y-2">
-                    <FileUploadSection
-                        requestId={request.id}
-                        action="contract"
-                        onUpload={onUploadContract}
-                        inspectionDraft={inspectionDraft}
-                        disabled={hasChecklistPending}
-                    />
-                    {pendingMessage}
-                </div>
-            );
+            {
+                const currentOutcome = String(
+                    portalOutcomeDraft?.outcome ??
+                        request.public_portal_outcome ??
+                        "",
+                )
+                    .trim()
+                    .toLowerCase();
+                const portalOutcomeRegistered = currentOutcome === "won" || currentOutcome === "lost";
+                const missingClientRegistration =
+                    currentOutcome === "won" && !request.client_id;
+                const missingInspectionRequest =
+                    currentOutcome === "won" && !request.inspection_request_id;
+
+                return (
+                    <div className="w-full space-y-2">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 space-y-2">
+                            <p className="text-[11px] uppercase tracking-wide text-slate-500">
+                                Resultado portal compras publicas
+                            </p>
+                            <select
+                                className="w-full border rounded px-2 py-1 text-sm bg-white"
+                                value={currentOutcome}
+                                onChange={(e) =>
+                                    onUpdatePortalOutcomeDraft?.(
+                                        request.id,
+                                        "outcome",
+                                        e.target.value,
+                                    )
+                                }
+                            >
+                                <option value="">Selecciona resultado</option>
+                                <option value="won">Ganado</option>
+                                <option value="lost">No ganado</option>
+                            </select>
+                            <textarea
+                                rows={2}
+                                className="w-full border rounded px-2 py-1 text-sm"
+                                value={portalOutcomeDraft?.notes ?? request.public_portal_outcome_notes ?? ""}
+                                onChange={(e) =>
+                                    onUpdatePortalOutcomeDraft?.(
+                                        request.id,
+                                        "notes",
+                                        e.target.value,
+                                    )
+                                }
+                                placeholder="Notas del resultado (opcional)"
+                            />
+                            <Button
+                                size="sm"
+                                onClick={onRegisterPublicPortalOutcome}
+                                fullWidth
+                                disabled={!currentOutcome}
+                            >
+                                Registrar resultado portal
+                            </Button>
+                            {portalOutcomeRegistered && (
+                                <p className="text-[11px] text-emerald-700">
+                                    Resultado registrado: {currentOutcome === "won" ? "Ganado" : "No ganado"}.
+                                </p>
+                            )}
+                            {missingClientRegistration && (
+                                <p className="text-[11px] text-amber-700">
+                                    Si el proceso fue ganado, registra el cliente antes de subir contrato.
+                                </p>
+                            )}
+                            {missingInspectionRequest && (
+                                <p className="text-[11px] text-amber-700">
+                                    Si el proceso fue ganado, solicita inspeccion de ambiente antes de subir contrato.
+                                </p>
+                            )}
+                        </div>
+                        <FileUploadSection
+                            requestId={request.id}
+                            action="contract"
+                            onUpload={onUploadContract}
+                            inspectionDraft={inspectionDraft}
+                            disabled={hasChecklistPending}
+                        />
+                        {pendingMessage}
+                    </div>
+                );
+            }
 
         case "contract_available":
             return (

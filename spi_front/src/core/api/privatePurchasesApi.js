@@ -52,6 +52,8 @@ export const PRIVATE_PURCHASE_STATES = {
   PENDING_MANAGER_SIGNATURE: 'pending_manager_signature',
   PENDING_CLIENT_SIGNATURE: 'pending_client_signature',
   OFFER_SIGNED: 'offer_signed',
+  OFFER_REJECTED_BY_COMMERCIAL: 'offer_rejected_by_commercial',
+  PRICE_IMPROVEMENT_REQUESTED: 'price_improvement_requested',
   CLIENT_REGISTRATION_REQUESTED: 'client_registration_requested',
   CLIENT_REGISTERED: 'client_registered',
   INSPECTION_REQUESTED: 'inspection_requested',

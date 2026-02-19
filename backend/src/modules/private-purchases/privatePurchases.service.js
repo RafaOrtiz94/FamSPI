@@ -44,7 +44,6 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
   inspection_date_coordinated: "Fecha de inspección coordinada",
   lopdp_approved: "Aprobación LOPDP confirmada",
   client_id_uploaded: "Documento de identificación del cliente cargado",
-  operating_permit_if_required: "Permiso de funcionamiento cargado (si aplica)",
   contract_draft_uploaded: "Contrato borrador cargado",
   contract_client_signed_uploaded: "Contrato firmado por cliente cargado",
   equipment_arrived: "Equipo marcado como arribado",
@@ -54,8 +53,8 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
 const formatEquipmentList = (equipment = []) => {
   return equipment
     .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
-      const name = item.name || item.sku || item.id || "Equipo";
+      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importación)" : " (Nuevo disponible)";
+      const name = item.name || item.sku || "Equipo";
       return `- ${name}${typeLabel}`;
     })
     .join("<br>");
@@ -362,10 +361,12 @@ class PrivatePurchasesService {
       throw new Error('Al menos un equipo es requerido');
     }
 
-    // Validar que todos los equipos tengan ID
-    const invalidEquipment = equipment.find(eq => !eq.id);
+    const invalidEquipment = equipment.find((eq) => {
+      const name = String(eq?.name || eq?.label || eq?.sku || "").trim();
+      return !name;
+    });
     if (invalidEquipment) {
-      throw new Error('Todos los equipos deben tener un ID vรกlido');
+      throw new Error('Todos los equipos deben tener al menos nombre o SKU');
     }
 
     const normalizedOfferKind = this._normalizeOfferKind(offerKind, { allowLegacyAlias: true });
@@ -416,11 +417,20 @@ class PrivatePurchasesService {
         RETURNING id, status
       `;
 
+      const normalizedEquipment = equipment.map((eq) => {
+        const { id, ...rest } = eq || {};
+        return {
+          ...rest,
+          name: rest?.name || rest?.label || rest?.sku || "Equipo",
+          type: rest?.type || "new_available"
+        };
+      });
+
       const values = [
         user.id,
         user.email,
         JSON.stringify(clientData),
-        JSON.stringify(equipment),
+        JSON.stringify(normalizedEquipment),
         PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
           normalizedOfferKind,
         notes
@@ -824,11 +834,12 @@ class PrivatePurchasesService {
         break;
 
       case 'acp_comercial':
-        whereClause = 'status IN ($1, $2, $3)';
+        whereClause = 'status IN ($1, $2, $3, $4)';
         params = [
           PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REQUESTED,
           PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_CONFIRMED,
-          PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REJECTED
+          PRIVATE_PURCHASE_STATES.ACP_AVAILABILITY_REJECTED,
+          PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED,
         ];
         break;
 
@@ -987,6 +998,17 @@ class PrivatePurchasesService {
   async transitionState(purchaseId, toState, user, reason = '') {
     logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Verificando contrato error para transitionState`);
 
+    const { rows } = await db.query(
+      'SELECT status FROM private_purchase_requests WHERE id = $1 LIMIT 1',
+      [purchaseId]
+    );
+    const currentState = rows[0]?.status;
+    if (!currentState) {
+      const error = new Error('Solicitud no encontrada');
+      error.status = 404;
+      throw error;
+    }
+
     // FASE 6: Validar contrato de errores consistente
     if (toState === PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED && (!reason || reason.trim().length === 0)) {
       logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][MISMATCH] Falta reason obligatorio para contract_rejected`);
@@ -996,6 +1018,48 @@ class PrivatePurchasesService {
       error.message = 'Motivo de rechazo es obligatorio';
       error.details = { requiredField: 'reason', forState: 'contract_rejected' };
       throw error;
+    }
+
+    if (toState === PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
+      const isCommercial = this._hasRoleToken(user, 'comercial') && !this._hasRoleToken(user, 'jefe_comercial');
+      if (!isCommercial) {
+        const error = new Error('Solo comercial puede rechazar la oferta');
+        error.status = 403;
+        error.code = 'ROLE_NOT_ALLOWED';
+        throw error;
+      }
+      if (![PRIVATE_PURCHASE_STATES.OFFER_SENT, PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE].includes(currentState)) {
+        const error = new Error('La oferta solo puede rechazarse cuando está enviada al cliente');
+        error.status = 409;
+        error.code = 'INVALID_STATE';
+        throw error;
+      }
+    }
+
+    if (toState === PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED) {
+      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      if (!isJefeComercial) {
+        const error = new Error('Solo jefe comercial puede solicitar mejora de precios');
+        error.status = 403;
+        error.code = 'ROLE_NOT_ALLOWED';
+        throw error;
+      }
+      if (currentState !== PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
+        const error = new Error('La mejora de precios solo aplica tras rechazo de oferta por comercial');
+        error.status = 409;
+        error.code = 'INVALID_STATE';
+        throw error;
+      }
+    }
+
+    if (toState === PRIVATE_PURCHASE_STATES.REJECTED && currentState === PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL) {
+      const isJefeComercial = this._hasRoleToken(user, 'jefe_comercial');
+      if (!isJefeComercial) {
+        const error = new Error('Solo jefe comercial puede confirmar el rechazo final');
+        error.status = 403;
+        error.code = 'ROLE_NOT_ALLOWED';
+        throw error;
+      }
     }
 
     logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][FIXED] Contrato errores validado para transitionState`);
@@ -1024,7 +1088,25 @@ class PrivatePurchasesService {
     }
 
     const purchase = rows[0];
-    if (purchase.offer_document_id) {
+    const isImprovementFlow = purchase.status === PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED;
+    const isAcp = this._hasRoleToken(user, 'acp_comercial');
+    const isBackoffice = this._hasRoleToken(user, 'backoffice');
+
+    if (isImprovementFlow && !isAcp) {
+      const error = new Error('La oferta con mejora de precios debe ser cargada por ACP Comercial');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    if (!isImprovementFlow && !isBackoffice && !isAcp) {
+      const error = new Error('Solo backoffice o ACP Comercial pueden cargar oferta');
+      error.status = 403;
+      error.code = 'ROLE_NOT_ALLOWED';
+      throw error;
+    }
+
+    if (!isImprovementFlow && purchase.offer_document_id) {
       const error = new Error('Oferta ya fue subida anteriormente');
       error.status = 409;
       error.code = 'DOC_ALREADY_EXISTS';
@@ -1036,11 +1118,20 @@ class PrivatePurchasesService {
     const stored = await uploadBase64File(fileName, offerBase64, mimeType || 'application/pdf', folderId);
 
     const { rows: updatedRows } = await db.query(
-      'UPDATE private_purchase_requests SET offer_document_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
-      [stored.id, purchaseId]
+      `UPDATE private_purchase_requests
+          SET offer_document_id = $1,
+              offer_signed_document_id = CASE WHEN $3 THEN NULL ELSE offer_signed_document_id END,
+              offer_signed_uploaded_at = CASE WHEN $3 THEN NULL ELSE offer_signed_uploaded_at END,
+              updated_at = NOW()
+        WHERE id = $2
+        RETURNING *`,
+      [stored.id, purchaseId, isImprovementFlow]
     );
 
-    await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SENT, user, 'Oferta enviada');
+    const transitionReason = isImprovementFlow
+      ? 'Oferta mejorada enviada por ACP Comercial'
+      : 'Oferta enviada';
+    await this.transitionState(purchaseId, PRIVATE_PURCHASE_STATES.OFFER_SENT, user, transitionReason);
 
     return {
       ...updatedRows[0],
@@ -2749,7 +2840,7 @@ class PrivatePurchasesService {
     const snapshot = purchase?.client_snapshot || {};
     const equipment = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
     const equipos = equipment.map((item) => ({
-      nombre_equipo: item?.name || item?.label || item?.sku || item?.id || "Equipo",
+      nombre_equipo: item?.name || item?.label || item?.sku || "Equipo",
       estado: item?.type || item?.estado || "nuevo",
       unidad_id: item?.unidad_id || item?.id || "",
       serial: item?.serial || "",
@@ -3387,7 +3478,7 @@ class PrivatePurchasesService {
         break;
 
       case 'backoffice_comercial':
-        statusFilter = `WHERE status IN ('${PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE}', '${PRIVATE_PURCHASE_STATES.OFFER_SENT}', '${PRIVATE_PURCHASE_STATES.PENDING_MANAGER_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.OFFER_SIGNED}', '${PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED}', '${PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL}', '${PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED}')`;
+        statusFilter = `WHERE status IN ('${PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE}', '${PRIVATE_PURCHASE_STATES.OFFER_SENT}', '${PRIVATE_PURCHASE_STATES.PENDING_MANAGER_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.OFFER_SIGNED}', '${PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL}', '${PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED}', '${PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED}', '${PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE}', '${PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_APPROVAL}', '${PRIVATE_PURCHASE_STATES.CONTRACT_REJECTED}')`;
         break;
 
       case 'gerencia_general':
@@ -3804,7 +3895,6 @@ class PrivatePurchasesService {
             "inspection_act_uploaded",
             "lopdp_approved",
             "client_id_uploaded",
-            "operating_permit_if_required",
             "provider_response_registered",
             "offer_uploaded",
             "signed_offer_uploaded",
@@ -3821,7 +3911,6 @@ class PrivatePurchasesService {
             "inspection_act_uploaded",
             "lopdp_approved",
             "client_id_uploaded",
-            "operating_permit_if_required",
             "provider_response_registered",
             "offer_uploaded",
             "signed_offer_uploaded",
@@ -3855,12 +3944,7 @@ class PrivatePurchasesService {
           snapshot?.name ||
           snapshot?.client_name ||
           "";
-        const clientIdentifier =
-          snapshot?.ruc_cedula ||
-          snapshot?.client_identifier ||
-          snapshot?.identification ||
-          "";
-        return Boolean(String(clientName).trim() && String(clientIdentifier).trim());
+        return Boolean(String(clientName).trim());
       }
       case "equipment_defined":
         return Array.isArray(row?.equipment) && row.equipment.length > 0;
@@ -3894,12 +3978,9 @@ class PrivatePurchasesService {
         );
       }
       case "client_id_uploaded":
-        return Boolean(clientRequest?.id_file_id || snapshot?.id_file_id);
-      case "operating_permit_if_required": {
-        const permitStatus = String(clientRequest?.operating_permit_status || "").toLowerCase();
-        if (permitStatus !== "has_it") return true;
-        return Boolean(clientRequest?.operating_permit_file_id);
-      }
+        return String(clientRequest?.client_sector || "").toLowerCase() === "publico"
+          ? true
+          : Boolean(clientRequest?.id_file_id || snapshot?.id_file_id);
       case "contract_draft_uploaded":
         return Boolean(row?.contract_document_id);
       case "contract_client_signed_uploaded":

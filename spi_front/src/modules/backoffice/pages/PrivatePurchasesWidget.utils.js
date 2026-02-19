@@ -309,7 +309,8 @@ export const canPerformPrivatePurchaseAction = (user, action, request) => {
 
     switch (action) {
         case "send_offer":
-            return isBackofficeUser && status === "acp_availability_confirmed";
+            return (isBackofficeUser && status === "acp_availability_confirmed") ||
+                (isAcpUser && status === "price_improvement_requested");
         case "upload_signed_offer":
             return isCommercialUser && ["offer_sent", "pending_client_signature"].includes(status);
         case "register_client":

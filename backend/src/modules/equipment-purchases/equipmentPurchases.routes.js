@@ -48,6 +48,12 @@ router.post("/", verifyToken, requireRole(creatorRoles), ctrl.create);
 router.post("/provider-contacts", verifyToken, requireRole(managerRoles), ctrl.saveProviderContact);
 router.post("/:id/start-availability", verifyToken, requireRole(managerRoles), ctrl.startAvailability);
 router.post("/:id/provider-response", verifyToken, requireRole(managerRoles), ctrl.saveProviderResponse);
+router.patch(
+  "/:id/public-portal-outcome",
+  verifyToken,
+  requireRole(managerRoles),
+  ctrl.registerPublicPortalOutcome,
+);
 router.patch("/:id/checklist", verifyToken, requireRole(creatorRoles), ctrl.updateChecklist);
 router.post("/:id/request-proforma", verifyToken, requireRole(managerRoles), ctrl.requestProforma);
 router.post(

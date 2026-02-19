@@ -220,15 +220,32 @@ const CHECKLIST_ITEMS = {
     auto: true,
     validator: (request) => Boolean(request?.auto_business_case_resolved_factible),
   },
+  public_portal_awarded: {
+    label: "Proceso ganado en portal de compras públicas",
+    auto: true,
+    validator: (request) =>
+      String(request?.public_portal_outcome || request?.extra?.public_portal_outcome?.outcome || "")
+        .toLowerCase() === "won",
+  },
   signed_proforma_uploaded: {
     label: "Proforma firmada subida",
     auto: true,
     validator: (request) => Boolean(request?.signed_proforma_file_id),
   },
+  client_registered: {
+    label: "Cliente registrado",
+    auto: true,
+    validator: (request) => Boolean(request?.client_id),
+  },
   inspection_date_confirmed: {
     label: "Fecha de inspección coordinada",
     auto: true,
     validator: (request) => Boolean(request?.inspection_scheduled_date),
+  },
+  inspection_requested: {
+    label: "Inspección de ambiente solicitada",
+    auto: true,
+    validator: (request) => Boolean(request?.inspection_request_id),
   },
   inspection_site_ready: {
     label: "Inspección en sitio F.ST-07 completada",
@@ -270,7 +287,6 @@ const ACTION_CHECKLIST_REQUIREMENTS = {
   start_availability: [
     "client_confirmed",
     "equipment_confirmed",
-    "assignee_confirmed",
     "provider_contact_verified",
     "commercial_context_validated",
   ],
@@ -279,11 +295,12 @@ const ACTION_CHECKLIST_REQUIREMENTS = {
   submit_signed_with_inspection: ["proforma_terms_validated"],
   request_inspection: ["signed_proforma_uploaded"],
   upload_contract: [
-    "inspection_date_confirmed",
-    "contract_ready_for_signature",
     "business_case_resolved_factible",
+    "public_portal_awarded",
+    "client_registered",
+    "inspection_requested",
   ],
-  request_delivery_dates: ["inspection_date_confirmed"],
+  request_delivery_dates: [],
   submit_delivery_dates: [],
   mark_equipment_arrived: ["delivery_dates_defined"],
   mark_dispatch_ready: ["delivery_dates_defined", "equipment_arrived"],
@@ -296,6 +313,7 @@ const ACTION_ALLOWED_STATUSES = {
   reserve_equipment: [STATUS.PROFORMA_RECEIVED],
   submit_signed_with_inspection: [STATUS.WAITING_SIGNED_PROFORMA],
   request_inspection: [STATUS.WAITING_SIGNED_PROFORMA, STATUS.PENDING_CONTRACT],
+  register_public_portal_outcome: [STATUS.PENDING_CONTRACT],
   coordinate_inspection_date: [STATUS.WAITING_SIGNED_PROFORMA, STATUS.PENDING_CONTRACT],
   upload_contract: [STATUS.PENDING_CONTRACT],
   request_delivery_dates: [STATUS.CONTRACT_AVAILABLE],
@@ -307,17 +325,20 @@ const ACTION_ALLOWED_STATUSES = {
 const PURCHASE_PROCESS_TEMPLATE_ID =
   process.env.PURCHASE_PROCESS_TEMPLATE_ID || process.env.EQUIPMENT_PURCHASE_PROCESS_TEMPLATE_ID || null;
 const CLIENT_DOCUMENT_FIELDS = [
-  { key: "id_file_id", label: "Documento de identificación" },
+  { key: "id_file_id", label: "Documento de identificación del cliente" },
   { key: "ruc_file_id", label: "RUC" },
   { key: "legal_rep_appointment_file_id", label: "Nombramiento representante legal" },
-  { key: "operating_permit_file_id", label: "Permiso de funcionamiento" },
   { key: "consent_evidence_file_id", label: "Evidencia de consentimiento LOPDP" },
   { key: "approval_letter_file_id", label: "Oficio de aprobación" },
   { key: "consent_record_file_id", label: "Registro de consentimiento" },
 ];
 
 function normalizeRole(role) {
-  return String(role || "").trim().toLowerCase();
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function getRoleTokens(user) {
@@ -326,14 +347,27 @@ function getRoleTokens(user) {
   const roleValues = Array.isArray(rawRole) ? rawRole : [rawRole];
   const scopeValues = Array.isArray(rawScope) ? rawScope : [rawScope];
   return [...roleValues, ...scopeValues]
-    .flatMap((value) => String(value || "").split(/[,\s]+/))
-    .map((value) => value.trim().toLowerCase())
+    .flatMap((value) => {
+      const raw = String(value || "").trim();
+      if (!raw) return [];
+      return [raw, ...raw.split(/[,\s]+/)];
+    })
+    .map((value) => normalizeRole(value))
     .filter(Boolean);
 }
 
 function hasRoleToken(user, token) {
-  const normalizedToken = String(token || "").toLowerCase();
-  return getRoleTokens(user).some((role) => role.includes(normalizedToken));
+  const normalizedToken = normalizeRole(token);
+  const compactToken = normalizedToken.replace(/_/g, "");
+  return getRoleTokens(user).some((role) => {
+    const compactRole = String(role || "").replace(/_/g, "");
+    return (
+      role === normalizedToken ||
+      role.includes(normalizedToken) ||
+      compactRole === compactToken ||
+      compactRole.includes(compactToken)
+    );
+  });
 }
 
 function canViewInspectionQueue(user) {
@@ -686,6 +720,10 @@ function mapRequestRow(row = {}) {
     ? Math.max(0, Math.ceil((proformaRetryAvailableAt.getTime() - Date.now()) / 1000))
     : 0;
   const contractTimeline = getContractTimelineFromSignedProforma(row?.signed_proforma_uploaded_at);
+  const portalOutcomeRaw = extra?.public_portal_outcome && typeof extra.public_portal_outcome === "object"
+    ? extra.public_portal_outcome
+    : {};
+  const publicPortalOutcome = String(portalOutcomeRaw.outcome || "").trim().toLowerCase() || null;
   return {
     ...row,
     extra,
@@ -719,6 +757,11 @@ function mapRequestRow(row = {}) {
     contract_reminder_date: contractTimeline.reminderDate,
     contract_deadline_days_remaining: contractTimeline.daysRemaining,
     contract_deadline_overdue: contractTimeline.isOverdue,
+    public_portal_outcome: publicPortalOutcome,
+    public_portal_outcome_notes: portalOutcomeRaw.notes || null,
+    public_portal_outcome_at: portalOutcomeRaw.recorded_at || null,
+    public_portal_outcome_by: portalOutcomeRaw.recorded_by || null,
+    public_portal_outcome_by_email: portalOutcomeRaw.recorded_by_email || null,
     proforma_request_locked: isProformaRequestLocked,
     proforma_retry_available_at: proformaRetryAvailableAt ? proformaRetryAvailableAt.toISOString() : null,
     proforma_retry_remaining_seconds: proformaRetryRemainingSeconds,
@@ -880,8 +923,12 @@ function getAcceptedItems(request) {
 
 function formatEquipmentList(items) {
   const list = (items || []).map((item) => {
-    const label = item.available_type === "cu" ? "CU" : "Nuevo";
-    const name = item.name || item.sku || item.id || "Equipo";
+    const label = item.available_type === "cu"
+      ? "CU"
+      : item.available_type === "new_import"
+        ? "Nuevo para importación"
+        : "Nuevo disponible";
+    const name = item.name || item.sku || "Equipo";
     return `<li>${name} (${label})</li>`;
   });
   return list.length ? `<ul>${list.join("")}</ul>` : "<p>Sin equipos disponibles</p>";
@@ -929,8 +976,12 @@ async function buildReport({ subject, html, request, actionLabel, user }) {
     doc.fontSize(12);
     if (acceptedItems.length) {
       acceptedItems.forEach((item, idx) => {
-        const label = item.available_type === "cu" ? "CU" : "Nuevo";
-        const name = item.name || item.sku || item.id || `Equipo ${idx + 1}`;
+        const label = item.available_type === "cu"
+          ? "CU"
+          : item.available_type === "new_import"
+            ? "Nuevo para importación"
+            : "Nuevo disponible";
+        const name = item.name || item.sku || `Equipo ${idx + 1}`;
         const serial = item.serial ? ` - Serie: ${item.serial}` : "";
         doc.text(`• ${name}${serial} (${label})`);
       });
@@ -943,8 +994,12 @@ async function buildReport({ subject, html, request, actionLabel, user }) {
       doc.fontSize(14).text("Equipos solicitados");
       doc.fontSize(12);
       requestedItems.forEach((item, idx) => {
-        const label = item.type === "cu" ? "CU" : "Nuevo";
-        const name = item.name || item.sku || item.id || `Equipo ${idx + 1}`;
+        const label = item.type === "cu"
+          ? "CU"
+          : item.type === "new_import"
+            ? "Nuevo para importación"
+            : "Nuevo disponible";
+        const name = item.name || item.sku || `Equipo ${idx + 1}`;
         const serial = item.serial ? ` - Serie: ${item.serial}` : "";
         doc.text(`• ${name}${serial} (${label})`);
       });
@@ -2185,8 +2240,8 @@ async function createPurchaseRequest({
   user,
   clientId,
   clientName,
+  clientBusinessName,
   clientEmail,
-  providerEmail,
   assignedTo,
   equipment = [],
   notes,
@@ -2194,7 +2249,8 @@ async function createPurchaseRequest({
   requestType = "purchase",
 }) {
   await ensureTables();
-  if (!clientName) {
+  const normalizedClientName = String(clientName || clientBusinessName || "").trim();
+  if (!normalizedClientName) {
     throw new Error("El cliente es obligatorio");
   }
 
@@ -2203,7 +2259,7 @@ async function createPurchaseRequest({
   }
 
   const canSendAvailability = canManageAll(user);
-  const provider = canSendAvailability ? providerEmail : null;
+  const provider = null;
 
   const assigneeUser = assignedTo ? await getUserById(assignedTo) : null;
   const resolvedAssignee = assigneeUser || (canSendAvailability ? user : null);
@@ -2214,7 +2270,7 @@ async function createPurchaseRequest({
 
   const id = uuidv4();
   const createdAt = new Date();
-  const folderId = await ensurePurchaseFolder(clientName);
+  const folderId = await ensurePurchaseFolder(normalizedClientName);
 
   const extraPayload = {
     ...(extra || {}),
@@ -2222,46 +2278,8 @@ async function createPurchaseRequest({
     lis_system: extra?.requires_lis ? (extra?.lis_system || null) : null,
   };
 
-  let emailFileId = null;
-  let status = STATUS.PENDING_PROVIDER;
-
-  const equipmentList = equipment
-    .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
-      const name = item.name || item.sku || item.id || "Equipo";
-      return `• ${name}${typeLabel}`;
-    })
-    .join("<br>");
-
-  const html = `
-      <h2>Solicitud de disponibilidad</h2>
-      <p>Equipos requeridos para la solicitud #${id}:</p>
-      <p>${equipmentList}</p>
-      ${notes ? `<p>Notas: ${notes}</p>` : ""}
-    `;
-
-  const requestSnapshot = {
-    id,
-    client_name: clientName,
-    provider_email: provider,
-    equipment,
-    created_at: createdAt,
-    notes,
-  };
-
-  if (provider) {
-    emailFileId = await sendAndArchive({
-      user,
-      to: provider,
-      subject: `Disponibilidad de equipos - Solicitud #${id}`,
-      html,
-      folderId,
-      prefix: "disponibilidad",
-      request: requestSnapshot,
-      actionLabel: "Informe de disponibilidad de equipos",
-    });
-    status = STATUS.WAITING_PROVIDER;
-  }
+  const emailFileId = null;
+  const status = STATUS.PENDING_PROVIDER;
 
   const { rows } = await db.query(
     `INSERT INTO equipment_purchase_requests (
@@ -2278,13 +2296,13 @@ async function createPurchaseRequest({
       resolvedAssignee?.email || null,
       resolvedAssignee?.fullname || resolvedAssignee?.name || resolvedAssignee?.email || null,
       clientId || null,
-      clientName,
+      normalizedClientName,
       clientEmail || null,
       notes || null,
       provider,
       JSON.stringify(equipment),
       status,
-      provider ? new Date() : null,
+      null,
       emailFileId,
       folderId,
       JSON.stringify(extraPayload || {}),
@@ -2335,14 +2353,15 @@ async function createPurchaseRequest({
 
 async function startAvailabilityRequest({ id, user, providerEmail, notes, expected_updated_at }) {
   await ensureTables();
-  if (!canManageAll(user)) {
-    throw createAppError("Solo el ACP Comercial puede enviar el correo de disponibilidad", {
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  const isAssignee = String(request?.assigned_to || "") === String(user?.id || "");
+  if (!canManageAll(user) && !isAssignee) {
+    throw createAppError("Solo el ACP Comercial asignado puede enviar el correo de disponibilidad", {
       status: 403,
       code: "FORBIDDEN_ROLE_ACTION",
     });
   }
-  const request = await getById(id, user);
-  assertRequestExists(request);
   assertNoStaleWrite(request, expected_updated_at);
   if (!providerEmail) throw createAppError("El correo del proveedor es obligatorio", { code: "PROVIDER_EMAIL_REQUIRED" });
   assertActionStatus(request, "start_availability");
@@ -2357,12 +2376,24 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
     provider_email: providerEmail || request.provider_email,
     notes: notes || request.notes,
   };
-  assertChecklistReady(requestForChecklist, "start_availability");
+  // Para iniciar disponibilidad ACP solo requiere datos base de solicitud + correo proveedor.
+  // No bloquear este paso por checklist dinámico.
+  if (!requestForChecklist.client_name) {
+    throw createAppError("La solicitud debe tener cliente para enviar disponibilidad", {
+      status: 409,
+      code: "CHECKLIST_INCOMPLETE",
+      details: { action: "start_availability", pending: ["client_confirmed"] },
+    });
+  }
 
   const equipmentList = equipment
     .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : " (Nuevo)";
-      const name = item.name || item.sku || item.id || "Equipo";
+      const typeLabel = item.type === "cu"
+        ? " (CU)"
+        : item.type === "new_import"
+          ? " (Nuevo para importación)"
+          : " (Nuevo disponible)";
+      const name = item.name || item.sku || "Equipo";
       return `• ${name}${typeLabel}`;
     })
     .join("<br>");
@@ -3637,6 +3668,158 @@ async function reviewInspectionDateProposal({ id, user, decision, review_notes, 
   return updated;
 }
 
+function isResolvedBusinessCaseStage(stage) {
+  const normalized = String(stage || "").trim().toLowerCase();
+  if (!normalized) return false;
+  if (normalized.startsWith("pending")) return false;
+  if (["draft", "en_proceso", "in_progress"].includes(normalized)) return false;
+  return true;
+}
+
+async function registerPublicPortalOutcome({ id, user, outcome, notes, expected_updated_at }) {
+  await ensureTables();
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  assertActionStatus(request, "register_public_portal_outcome");
+
+  const isAssignee = String(request?.assigned_to || "") === String(user?.id || "");
+  if (!canManageAll(user) && !isAssignee) {
+    throw createAppError("Solo ACP Comercial asignado puede registrar resultado del portal público", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+
+  const normalizedOutcome = String(outcome || "").trim().toLowerCase();
+  if (!["won", "lost"].includes(normalizedOutcome)) {
+    throw createAppError("Resultado inválido. Usa 'won' o 'lost'.", {
+      status: 400,
+      code: "INVALID_PORTAL_OUTCOME",
+    });
+  }
+
+  let autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  if (!autoBusinessCaseId) {
+    try {
+      autoBusinessCaseId = await ensureAutoBusinessCaseForPurchase({
+        purchaseRequest: request,
+        user,
+        inspectionId: request?.inspection_request_id || null,
+      });
+    } catch (bcCreateError) {
+      logger.error(
+        { bcCreateError, requestId: request?.id },
+        "No se pudo crear/enlazar BC automático al registrar resultado del portal",
+      );
+    }
+  }
+  if (!autoBusinessCaseId) {
+    throw createAppError("No se encontró el Business Case automático asociado", {
+      status: 409,
+      code: "BUSINESS_CASE_REQUIRED",
+    });
+  }
+
+  const bcRes = await db.query(
+    `SELECT id, status, bc_stage
+       FROM equipment_purchase_requests
+      WHERE id = $1
+        AND COALESCE(request_type, 'purchase') = 'business_case'
+      LIMIT 1`,
+    [autoBusinessCaseId],
+  );
+  const bc = bcRes.rows[0] || null;
+  if (!bc) {
+    throw createAppError("El Business Case asociado no existe o no es válido", {
+      status: 409,
+      code: "BUSINESS_CASE_INVALID",
+    });
+  }
+
+  if (!isResolvedBusinessCaseStage(bc.bc_stage)) {
+    throw createAppError(
+      "Primero debes resolver el Business Case antes de registrar el resultado del portal público",
+      {
+        status: 409,
+        code: "BUSINESS_CASE_NOT_RESOLVED",
+        details: {
+          business_case_id: autoBusinessCaseId,
+          bc_stage: bc.bc_stage || null,
+          bc_status: bc.status || null,
+        },
+      },
+    );
+  }
+
+  if (normalizedOutcome === "won" && String(bc.bc_stage || "").toLowerCase() !== "factible") {
+    throw createAppError(
+      "No puedes marcar como ganado: el Business Case no está resuelto como factible",
+      {
+        status: 409,
+        code: "BUSINESS_CASE_NOT_READY",
+        details: {
+          business_case_id: autoBusinessCaseId,
+          bc_stage: bc.bc_stage || null,
+          bc_status: bc.status || null,
+        },
+      },
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+  const mergedExtra = mergeExtra(request?.extra, {
+    public_portal_outcome: {
+      outcome: normalizedOutcome,
+      notes: String(notes || "").trim() || null,
+      recorded_at: nowIso,
+      recorded_by: user?.id || null,
+      recorded_by_email: user?.email || null,
+    },
+    ...(normalizedOutcome === "lost"
+      ? {
+          cancellation: {
+            by_user_id: user?.id || null,
+            by_user_email: user?.email || null,
+            reason: String(notes || "").trim() || "Proceso no adjudicado en portal de compras públicas",
+            cancelled_at: nowIso,
+          },
+        }
+      : {}),
+  });
+
+  const nextStatus = normalizedOutcome === "won" ? STATUS.PENDING_CONTRACT : STATUS.NO_STOCK;
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET status = $1,
+            extra = $2::jsonb,
+            updated_at = now()
+      WHERE id = $3
+      RETURNING *`,
+    [nextStatus, JSON.stringify(mergedExtra), id],
+  );
+
+  const updated = mapRequestRow(rows[0]);
+  try {
+    await notifyUsers({
+      userIds: [updated.created_by, updated.assigned_to],
+      title: normalizedOutcome === "won" ? "Proceso ganado en portal público" : "Proceso no adjudicado",
+      message:
+        normalizedOutcome === "won"
+          ? `Continúa con registro de cliente e inspección para ${updated.client_name || "cliente"}.`
+          : `Solicitud cerrada para ${updated.client_name || "cliente"} por no adjudicación.`,
+      type: "task",
+      source: "equipment_purchases",
+      priority: 1,
+      meta: { request_id: updated.id, public_portal_outcome: normalizedOutcome },
+    });
+  } catch (notifyError) {
+    logger.warn({ notifyError, requestId: updated.id }, "No se pudieron enviar notificaciones de resultado portal");
+  }
+
+  return updated;
+}
+
 async function uploadContract({ id, user, file, expected_updated_at }) {
   await ensureTables();
   const request = await getById(id, user);
@@ -3645,7 +3828,21 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   assertActionStatus(request, "upload_contract");
   assertChecklistReady(request, "upload_contract");
 
-  const autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  let autoBusinessCaseId = request?.extra?.auto_business_case_id || null;
+  if (!autoBusinessCaseId) {
+    try {
+      autoBusinessCaseId = await ensureAutoBusinessCaseForPurchase({
+        purchaseRequest: request,
+        user,
+        inspectionId: request?.inspection_request_id || null,
+      });
+    } catch (bcCreateError) {
+      logger.error(
+        { bcCreateError, requestId: request?.id },
+        "No se pudo crear/enlazar BC automático al subir contrato",
+      );
+    }
+  }
   if (!autoBusinessCaseId) {
     throw createAppError("No se encontró el Business Case automático asociado", {
       status: 409,
@@ -3715,7 +3912,7 @@ async function uploadContract({ id, user, file, expected_updated_at }) {
   setImmediate(async () => {
     try {
       const acceptedItems = getAcceptedItems(completed);
-      const equipmentNames = acceptedItems.map(item => item.name || item.sku || item.id || "Equipo").join(", ");
+      const equipmentNames = acceptedItems.map(item => item.name || item.sku || "Equipo").join(", ");
 
       // Notificar al usuario que creó la solicitud
       if (request.created_by) {
@@ -4146,6 +4343,7 @@ module.exports = {
   coordinateInspectionDate,
   registerSiteInspection,
   reviewInspectionDateProposal,
+  registerPublicPortalOutcome,
   uploadContract,
   requestDeliveryDates,
   submitDeliveryDates,

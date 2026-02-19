@@ -26,11 +26,15 @@ import Button from "../../../core/ui/components/Button";
  * @param {Function} props.onSubmitDeliveryDates - Submit delivery dates handler
  * @param {Function} props.onOpenClientRegistrationModal - Open client registration modal handler
  * @param {Function} props.onOpenInspectionModal - Open inspection request modal handler
+ * @param {Function} props.onCommercialRejectOffer - Commercial reject offer handler
+ * @param {Function} props.onManagerAcceptCommercialReject - Manager accept commercial rejection handler
+ * @param {Function} props.onManagerRequestPriceImprovement - Manager request price improvement handler
  */
 const PrivatePurchaseActions = ({
     request,
     isBackofficeUser,
     isManagerUser,
+    isChiefCommercial,
     isAcpUser,
     isPureCommercial,
     processingAction,
@@ -49,6 +53,9 @@ const PrivatePurchaseActions = ({
     onSubmitDeliveryDates,
     onOpenClientRegistrationModal,
     onOpenInspectionModal,
+    onCommercialRejectOffer,
+    onManagerAcceptCommercialReject,
+    onManagerRequestPriceImprovement,
 }) => {
     const { status } = request;
 
@@ -75,8 +82,11 @@ const PrivatePurchaseActions = ({
                     status={status}
                     request={request}
                     processingAction={processingAction}
+                    isChiefCommercial={isChiefCommercial}
                     onUploadContract={onUploadContract}
                     onManagerReject={onManagerReject}
+                    onManagerAcceptCommercialReject={onManagerAcceptCommercialReject}
+                    onManagerRequestPriceImprovement={onManagerRequestPriceImprovement}
                 />
             )}
 
@@ -87,6 +97,7 @@ const PrivatePurchaseActions = ({
                     processingAction={processingAction}
                     onSendAvailabilityEmail={onSendAvailabilityEmail}
                     onRegisterProviderResponse={onRegisterProviderResponse}
+                    onSendOffer={onSendOffer}
                 />
             )}
 
@@ -99,6 +110,7 @@ const PrivatePurchaseActions = ({
                     onSubmitDeliveryDates={onSubmitDeliveryDates}
                     onOpenClientRegistrationModal={onOpenClientRegistrationModal}
                     onOpenInspectionModal={onOpenInspectionModal}
+                    onCommercialRejectOffer={onCommercialRejectOffer}
                 />
             )}
         </div>
@@ -230,6 +242,7 @@ const AcpActions = ({
     processingAction,
     onSendAvailabilityEmail,
     onRegisterProviderResponse,
+    onSendOffer,
 }) => {
     switch (status) {
         case "acp_availability_requested":
@@ -264,6 +277,17 @@ const AcpActions = ({
                 </div>
             );
 
+        case "price_improvement_requested":
+            return (
+                <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => onSendOffer(request.id)}
+                >
+                    Subir oferta mejorada
+                </Button>
+            );
+
         default:
             return null;
     }
@@ -277,8 +301,11 @@ const ManagerActions = ({
     status,
     request,
     processingAction,
+    isChiefCommercial,
     onUploadContract,
     onManagerReject,
+    onManagerAcceptCommercialReject,
+    onManagerRequestPriceImprovement,
 }) => {
     switch (status) {
         case "pending_contract_approval":
@@ -303,6 +330,29 @@ const ManagerActions = ({
                 </div>
             );
 
+        case "offer_rejected_by_commercial":
+            if (!isChiefCommercial) return null;
+            return (
+                <div className="flex flex-wrap gap-2">
+                    <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => onManagerAcceptCommercialReject(request.id)}
+                        loading={processingAction?.type === "commercial_reject_accept" && processingAction?.id === request.id}
+                    >
+                        Aceptar rechazo
+                    </Button>
+                    <Button
+                        size="sm"
+                        variant="warning"
+                        onClick={() => onManagerRequestPriceImprovement(request.id)}
+                        loading={processingAction?.type === "price_improvement_request" && processingAction?.id === request.id}
+                    >
+                        Solicitar mejora de precio
+                    </Button>
+                </div>
+            );
+
         default:
             return null;
     }
@@ -320,14 +370,20 @@ const CommercialActions = ({
     onSubmitDeliveryDates,
     onOpenClientRegistrationModal,
     onOpenInspectionModal,
+    onCommercialRejectOffer,
 }) => {
     switch (status) {
         case "offer_sent":
         case "pending_client_signature":
             return (
-                <Button size="sm" variant="success" onClick={() => onUploadSigned(request.id)}>
-                    Subir firma cliente
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="success" onClick={() => onUploadSigned(request.id)}>
+                        Subir firma cliente
+                    </Button>
+                    <Button size="sm" variant="danger" onClick={() => onCommercialRejectOffer(request.id)}>
+                        Rechazar oferta
+                    </Button>
+                </div>
             );
         case "offer_signed":
             if (!request.client_registered_at) {

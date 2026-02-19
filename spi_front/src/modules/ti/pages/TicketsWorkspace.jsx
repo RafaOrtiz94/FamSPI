@@ -20,6 +20,16 @@ const STATUS_OPTIONS = [
   { value: "cerrado", label: "Cerrado" },
   { value: "reabierto", label: "Reabierto" },
 ];
+const ALLOWED_STATUS_TRANSITIONS = {
+  abierto: new Set(["triage", "en_progreso", "en_espera", "resuelto", "cerrado"]),
+  triage: new Set(["en_progreso", "en_espera", "resuelto", "cerrado"]),
+  en_progreso: new Set(["en_espera", "resuelto", "cerrado"]),
+  en_espera: new Set(["triage", "en_progreso", "resuelto", "cerrado"]),
+  resuelto: new Set(["cerrado", "reabierto"]),
+  cerrado: new Set(["reabierto"]),
+  reabierto: new Set(["triage", "en_progreso", "en_espera", "resuelto", "cerrado"]),
+};
+
 
 const TYPE_OPTIONS = [
   { value: "", label: "Todos" },
@@ -136,6 +146,14 @@ const TicketsWorkspace = () => {
     } finally {
       setBusyId(null);
     }
+  };
+
+
+  const getStatusOptionsForTicket = (currentStatus) => {
+    const normalizedCurrent = String(currentStatus || "").trim().toLowerCase();
+    const allowed = ALLOWED_STATUS_TRANSITIONS[normalizedCurrent];
+    if (!allowed) return STATUS_OPTIONS;
+    return STATUS_OPTIONS.filter((opt) => opt.value === normalizedCurrent || allowed.has(opt.value));
   };
 
   const handleToggleEvents = async (ticketId) => {
@@ -359,7 +377,7 @@ const TicketsWorkspace = () => {
                       onChange={(e) => handleStatusChange(ticket.id, e.target.value)}
                       className="rounded-lg border border-slate-300 px-2 py-1 text-xs"
                     >
-                      {STATUS_OPTIONS.map((opt) => (
+                      {getStatusOptionsForTicket(ticket.status).map((opt) => (
                         <option key={opt.value} value={opt.value}>{opt.label}</option>
                       ))}
                     </select>

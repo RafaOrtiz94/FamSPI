@@ -104,10 +104,16 @@ const EquipmentTypeSelector = ({ currentType, onChange }) => {
     return (
         <div className="flex gap-2">
             <TypeButton
-                type="new"
-                label="Nuevo"
-                selected={currentType === "new"}
-                onClick={() => onChange("new")}
+                type="new_available"
+                label="Nuevo disponible"
+                selected={currentType === "new_available"}
+                onClick={() => onChange("new_available")}
+            />
+            <TypeButton
+                type="new_import"
+                label="Nuevo para importación"
+                selected={currentType === "new_import"}
+                onClick={() => onChange("new_import")}
             />
             <TypeButton
                 type="cu"
@@ -126,8 +132,10 @@ const EquipmentTypeSelector = ({ currentType, onChange }) => {
 const TypeButton = ({ type, label, selected, onClick }) => {
     const baseClasses = "px-3 py-1 text-xs rounded-full font-semibold border transition-all";
     const selectedClasses = selected
-        ? type === "new"
+        ? type === "new_available"
             ? "bg-emerald-100 text-emerald-700 border-emerald-200"
+            : type === "new_import"
+                ? "bg-amber-100 text-amber-700 border-amber-200"
             : "bg-sky-100 text-sky-700 border-sky-200"
         : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50";
 

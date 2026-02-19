@@ -100,6 +100,7 @@ module.exports = {
     required: [
       "data_processing_consent",
       "consent_capture_method",
+      "client_sector",
       "client_type",
       "commercial_name",
       "client_email",
@@ -108,14 +109,12 @@ module.exports = {
       "establishment_city",
       "establishment_address",
       "establishment_reference",
-      "establishment_phone",
       "establishment_cellphone",
       "shipping_contact_name",
       "shipping_address",
       "shipping_city",
       "shipping_province",
       "shipping_reference",
-      "shipping_phone",
       "shipping_cellphone",
       "shipping_delivery_hours",
       "legal_rep_name",
@@ -123,7 +122,6 @@ module.exports = {
       "legal_rep_id_document",
       "legal_rep_cellphone",
       "legal_rep_email",
-      "operating_permit_status",
     ],
     properties: {
       data_processing_consent: { type: "boolean", const: true },
@@ -134,6 +132,7 @@ module.exports = {
       consent_capture_details: { type: "string" },
       consent_recipient_email: { type: "string", format: "email" },
       consent_email_token_id: { type: "string", minLength: 10 },
+      client_sector: { type: "string", enum: ["privado", "publico"] },
       client_type: { type: "string", enum: ["persona_natural", "persona_juridica"] },
 
       // Datos comunes
@@ -167,7 +166,6 @@ module.exports = {
       natural_person_firstname: { type: "string" },
       natural_person_lastname: { type: "string" },
 
-      legal_person_business_name: { type: "string" },
       nationality: { type: "string" },
       legal_rep_name: {
         anyOf: [
@@ -214,7 +212,15 @@ module.exports = {
           properties: { client_type: { const: "persona_juridica" } },
         },
         then: {
-          required: ["legal_person_business_name", "nationality"],
+          required: ["nationality"],
+        },
+      },
+      {
+        if: {
+          properties: { client_sector: { const: "publico" } },
+        },
+        then: {
+          properties: { client_type: { const: "persona_juridica" } },
         },
       },
       {        

@@ -141,6 +141,7 @@ const AppRoutes = () => {
               "jefe_operaciones",
               "jefe_logistica",
               "calidad",
+              "jefe_calidad",
             ]}
           />
         }
@@ -351,6 +352,7 @@ const AppRoutes = () => {
                   "jefe_comercial",
                   "talento_humano",
                   "operaciones",
+                  "jefe_calidad",
                 ]}
               />
             }

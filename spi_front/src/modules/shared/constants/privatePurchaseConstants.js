@@ -10,6 +10,8 @@ export const PRIVATE_PURCHASE_STATUS_DEFINITIONS = [
   { value: "pending_manager_signature", label: "Pendiente firma jefe", accent: "bg-indigo-50 text-indigo-700" },
   { value: "pending_client_signature", label: "Pendiente firma cliente", accent: "bg-teal-50 text-teal-700" },
   { value: "offer_sent", label: "Oferta enviada", accent: "bg-indigo-50 text-indigo-700" },
+  { value: "offer_rejected_by_commercial", label: "Oferta rechazada por comercial", accent: "bg-rose-50 text-rose-700" },
+  { value: "price_improvement_requested", label: "Mejora de precio solicitada", accent: "bg-amber-50 text-amber-700" },
   { value: "offer_signed", label: "Oferta firmada", accent: "bg-green-50 text-green-700" },
   { value: "client_registration_requested", label: "Cliente no registrado", accent: "bg-cyan-50 text-cyan-700" },
   { value: "client_registered", label: "Cliente registrado", accent: "bg-teal-50 text-teal-700" },

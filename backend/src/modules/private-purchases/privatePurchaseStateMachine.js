@@ -420,6 +420,39 @@ class PrivatePurchaseStateMachine {
                 // Already included above
                 break;
 
+            case PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL:
+                // Notify jefe_comercial for final decision
+                {
+                    const jefeComercial = await this._getUsersByRole('jefe_comercial');
+                    recipients.push(...jefeComercial.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'Oferta rechazada por comercial, requiere decision'
+                    })));
+                }
+                break;
+
+            case PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED:
+                // Notify ACP + backoffice to submit improved offer
+                {
+                    const acpUsers = await this._getUsersByRole('acp_comercial');
+                    recipients.push(...acpUsers.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: true,
+                        extraInfo: 'Se solicito mejora de precios'
+                    })));
+                    const backofficeUsers = await this._getUsersByRole('backoffice_comercial');
+                    recipients.push(...backofficeUsers.map(u => ({
+                        userId: u.id,
+                        sendEmail: true,
+                        sendChat: false,
+                        extraInfo: 'Se solicito mejora de precios'
+                    })));
+                }
+                break;
+
             case PRIVATE_PURCHASE_STATES.OFFER_SIGNED:
                 // Notify BackOffice for review
                 {
@@ -699,6 +732,8 @@ class PrivatePurchaseStateMachine {
             [PRIVATE_PURCHASE_STATES.PENDING_MANAGER_SIGNATURE]: 'Pendiente Firma Gerencia',
             [PRIVATE_PURCHASE_STATES.PENDING_CLIENT_SIGNATURE]: 'Pendiente Firma Cliente',
             [PRIVATE_PURCHASE_STATES.OFFER_SIGNED]: 'Oferta Firmada',
+            [PRIVATE_PURCHASE_STATES.OFFER_REJECTED_BY_COMMERCIAL]: 'Rechazado por usuario comercial',
+            [PRIVATE_PURCHASE_STATES.PRICE_IMPROVEMENT_REQUESTED]: 'Mejora de precios solicitada',
             [PRIVATE_PURCHASE_STATES.CLIENT_REGISTRATION_REQUESTED]: 'Registro Cliente Solicitado',
             [PRIVATE_PURCHASE_STATES.CLIENT_REGISTERED]: 'Cliente Registrado',
             [PRIVATE_PURCHASE_STATES.PENDING_CONTRACT_CLIENT_SIGNATURE]: 'Pendiente firma cliente (contrato)',
@@ -759,7 +794,6 @@ class PrivatePurchaseStateMachine {
             'INSPECTION_ACT',
             'LOPDP_APPROVAL',
             'CLIENT_ID',
-            'OPERATING_PERMIT',
             'ACP_RESPONSE',
             'OFFER_DOCUMENT',
             'SIGNED_OFFER',
@@ -803,6 +837,7 @@ class PrivatePurchaseStateMachine {
                 SELECT
                     id,
                     client_type,
+                    client_sector,
                     ruc_cedula,
                     operating_permit_status,
                     id_file_id,
@@ -861,11 +896,13 @@ class PrivatePurchaseStateMachine {
             presentDocs.push('LOPDP_APPROVAL');
         }
 
-        // Check client ID document
+        // Check client ID document (no obligatorio para cliente público)
+        const clientSector = (clientRequest?.client_sector || '').toLowerCase();
+        const isPublicClient = clientSector === 'publico';
         const idFileId = clientRequest?.id_file_id || purchase.client_snapshot?.id_file_id;
-        if (!idFileId) {
+        if (!isPublicClient && !idFileId) {
             missingDocs.push('CLIENT_ID');
-        } else {
+        } else if (idFileId) {
             presentDocs.push('CLIENT_ID');
         }
 
@@ -873,16 +910,6 @@ class PrivatePurchaseStateMachine {
         const rucFileId = clientRequest?.ruc_file_id || purchase.client_snapshot?.ruc_file_id;
         if (rucFileId) {
             presentDocs.push('RUC_FILE');
-        }
-
-        // Check operating permit when applicable
-        const permitStatus = (clientRequest?.operating_permit_status || '').toLowerCase();
-        const requiresPermit = permitStatus === 'has_it';
-        const permitFileId = clientRequest?.operating_permit_file_id;
-        if (requiresPermit && !permitFileId) {
-            missingDocs.push('OPERATING_PERMIT');
-        } else if (permitFileId) {
-            presentDocs.push('OPERATING_PERMIT');
         }
 
         // Check ACP response

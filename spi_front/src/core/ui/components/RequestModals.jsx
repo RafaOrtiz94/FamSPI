@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { FiPlus, FiTrash2, FiAlertTriangle } from "react-icons/fi";
+import { FiPlus, FiTrash2, FiCheckCircle } from "react-icons/fi";
 import Button from "./Button";
 import Modal from "./Modal";
 import ProcessingOverlay from "./ProcessingOverlay";
 import { useUI } from "../useUI";
 import api from "../../api/index";
-import { getEquiposDisponibles, getEquipmentModels } from "../../api/inventarioApi";
+import { getEquipmentModels } from "../../api/inventarioApi";
 
 /**
  * Componentes de modales para diferentes tipos de solicitudes
@@ -364,41 +364,48 @@ export const MaintenanceRequestModal = ({ isOpen, onClose, onSuccess }) => {
 // ============================================================================
 
 export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
-
+  const TYPE_CHIPS = {
+    new_available: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    new_import: "bg-amber-100 text-amber-800 border-amber-200",
+    cu: "bg-sky-100 text-sky-800 border-sky-200",
+  };
+  const sanitizeDigits = (value, max) => String(value || "").replace(/\D/g, "").slice(0, max);
   const { showToast } = useUI();
   const [formData, setFormData] = useState({
-    client_id: '', // ← ID directo del cliente
-    client_snapshot: { // ← Mantener para compatibilidad con UI
-      commercial_name: '',
-      client_email: '',
-      first_name: '',
-      last_name: '',
-      client_identifier: ''
+    client_id: "",
+    client_snapshot: {
+      commercial_name: "",
+      client_email: "",
+      first_name: "",
+      last_name: "",
+      client_identifier: "",
+      identifier_type: "ruc"
     },
     equipment: [],
-    notes: '',
-    offer_kind: 'venta'
+    notes: "",
+    offer_kind: "venta"
   });
+  const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [progressStep, setProgressStep] = useState(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // Estados para equipos dinámicos
   const [equipmentOptions, setEquipmentOptions] = useState([]);
   const [loadingEquipment, setLoadingEquipment] = useState(false);
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
 
-  // Estados para selector híbrido de cliente
-  const [clientSearchTerm, setClientSearchTerm] = useState('');
+  const [clientSearchTerm, setClientSearchTerm] = useState("");
   const [showClientDropdown, setShowClientDropdown] = useState(false);
   const [filteredClients, setFilteredClients] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [isNewClient, setIsNewClient] = useState(false);
+  const [equipmentSearch, setEquipmentSearch] = useState("");
+  const [activeSection, setActiveSection] = useState(0);
 
   // Filtrar clientes basado en el término de búsqueda
   useEffect(() => {
-    if (clientSearchTerm.trim() === '') {
+    if (clientSearchTerm.trim() === "") {
       setFilteredClients([]);
       setShowClientDropdown(false);
       return;
@@ -406,115 +413,132 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
 
     const filtered = availableClients.filter(client =>
       client && // Verificar que el cliente existe
-      ((client.commercial_name || client.nombre || '').toLowerCase().includes(clientSearchTerm.toLowerCase()) ||
-        (client.email || '').toLowerCase().includes(clientSearchTerm.toLowerCase()))
-    ).slice(0, 5); // Limitar a 5 resultados
+      ((client.commercial_name || client.nombre || "").toLowerCase().includes(clientSearchTerm.toLowerCase()) ||
+        (client.email || "").toLowerCase().includes(clientSearchTerm.toLowerCase()))
+    ).slice(0, 6);
 
-    // Filtrar cualquier elemento undefined/null adicional
     const cleanFiltered = filtered.filter(client => client != null);
 
     setFilteredClients(cleanFiltered);
     setShowClientDropdown(cleanFiltered.length > 0);
   }, [clientSearchTerm, availableClients]);
 
-  // Handler para selección de cliente del dropdown
-  const handleClientSelect = (client) => {
-    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client object:', client);
-    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client exists:', !!client);
+  const filteredEquipmentOptions = useMemo(() => {
+    const term = equipmentSearch.trim().toLowerCase();
+    if (!term) return equipmentOptions;
+    return equipmentOptions.filter((eq) => {
+      const name = String(eq?.name || eq?.nombre || eq?.modelo || "").toLowerCase();
+      return name.includes(term);
+    });
+  }, [equipmentOptions, equipmentSearch]);
 
+  const validationIssues = useMemo(() => {
+    const issues = [];
+    if (!String(formData.client_snapshot.commercial_name || "").trim()) {
+      issues.push("Ingresa el nombre comercial del cliente");
+    }
+
+    const identifierType = String(formData.client_snapshot.identifier_type || "ruc");
+    const expectedLength = identifierType === "cedula" ? 10 : 13;
+    const identifierLabel = identifierType === "cedula" ? "cédula" : "RUC";
+    const digits = sanitizeDigits(formData.client_snapshot.client_identifier, expectedLength);
+    if (digits.length !== expectedLength) {
+      issues.push(`La ${identifierLabel} debe tener ${expectedLength} dígitos`);
+    }
+
+    if (!formData.equipment.length) {
+      issues.push("Agrega al menos un equipo");
+    }
+
+    if (formData.equipment.some((eq) => !String(eq?.name || eq?.sku || "").trim())) {
+      issues.push("Todos los equipos deben tener al menos nombre o SKU");
+    }
+
+    return issues;
+  }, [formData]);
+
+  const canSubmit = validationIssues.length === 0 && !loading;
+
+  const handleClientSelect = (client) => {
     if (!client) {
-      console.error('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] ERROR: Client is undefined/null');
       return;
     }
 
     setSelectedClient(client);
-    setClientSearchTerm(client.nombre || client.commercial_name || '');
+    setClientSearchTerm(client.nombre || client.commercial_name || "");
     setShowClientDropdown(false);
     setIsNewClient(false);
 
-    // Actualizar formData con verificación de seguridad
     const clientData = {
-      commercial_name: client.nombre || client.commercial_name || '',
-      client_email: client.client_email || client.email || '',
-      first_name: client.first_name || '',
-      last_name: client.last_name || '',
-      client_identifier: client.identificador || client.identifier || client.id || ''
+      commercial_name: client.nombre || client.commercial_name || "",
+      client_email: client.client_email || client.email || "",
+      first_name: client.first_name || "",
+      last_name: client.last_name || "",
+      client_identifier: sanitizeDigits(client.identificador || client.identifier || client.id || "", 13),
+      identifier_type:
+        sanitizeDigits(client.identificador || client.identifier || client.id || "", 13).length === 10 ? "cedula" : "ruc"
     };
-
-    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Client data to set:', clientData);
 
     setFormData(prev => ({
       ...prev,
       client_id: client.id,
       client_snapshot: clientData
     }));
-
-    console.log('[FLOW_COMERCIAL][FE][MODAL][CLIENT_SELECT] Form data updated successfully');
+    setErrors((prev) => ({
+      ...prev,
+      client_name: "",
+      client_identifier: "",
+    }));
   };
 
-  // Handler para cambio en el input de búsqueda
   const handleClientSearchChange = (value) => {
     setClientSearchTerm(value);
 
-    if (value.trim() === '') {
-      // Campo vacío - reset
+    if (value.trim() === "") {
       setSelectedClient(null);
       setIsNewClient(false);
       setFormData(prev => ({
         ...prev,
-        client_id: '',
+        client_id: "",
         client_snapshot: {
-          commercial_name: '',
-          client_email: '',
-          first_name: '',
-          last_name: '',
-          client_identifier: ''
+          commercial_name: "",
+          client_email: "",
+          first_name: "",
+          last_name: "",
+          client_identifier: "",
+          identifier_type: "ruc"
         }
       }));
       return;
     }
 
-    // Debug: mostrar todos los clientes disponibles
-    console.log('[CLIENT_SELECTOR] Buscando cliente:', value);
-    console.log('[CLIENT_SELECTOR] Clientes disponibles:', availableClients.map(c => ({
-      id: c.id,
-      nombre: c.nombre,
-      commercial_name: c.commercial_name
-    })));
-
-    // Buscar si existe un cliente exacto con ese nombre (insensible a mayúsculas)
     const exactMatch = availableClients.find(client => {
-      const clientName = (client.nombre || client.commercial_name || '').toLowerCase().trim();
+      const clientName = (client.nombre || client.commercial_name || "").toLowerCase().trim();
       const inputValue = value.toLowerCase().trim();
-      const matches = clientName === inputValue;
-      console.log(`[CLIENT_SELECTOR] Comparando "${clientName}" === "${inputValue}" → ${matches}`);
-      return matches;
+      return clientName === inputValue;
     });
 
     if (exactMatch) {
-      // Si coincide exactamente con un cliente existente, selecciónalo automáticamente
-      console.log('[CLIENT_SELECTOR] ✅ Cliente existente encontrado:', exactMatch.nombre || exactMatch.commercial_name);
       handleClientSelect(exactMatch);
     } else {
-      // No coincide exactamente - es un cliente nuevo
-      console.log('[CLIENT_SELECTOR] 🔵 Cliente nuevo detectado:', value);
       setSelectedClient(null);
       setIsNewClient(true);
       setFormData(prev => ({
         ...prev,
-        client_id: `new_${Date.now()}`, // ID temporal para nuevos clientes
+        client_id: `new_${Date.now()}`,
         client_snapshot: {
           commercial_name: value,
-          client_email: '',
-          first_name: '',
-          last_name: '',
-          client_identifier: ''
+          client_email: "",
+          first_name: "",
+          last_name: "",
+          client_identifier: "",
+          identifier_type: "ruc"
         }
       }));
     }
+    setErrors((prev) => ({ ...prev, client_name: "" }));
   };
 
-  // Cargar clientes disponibles
   useEffect(() => {
     if (!isOpen) return;
 
@@ -522,14 +546,8 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
       setLoadingClients(true);
       try {
         const response = await api.get('/clients');
-        console.log('[CLIENT_SELECTOR] API Response:', response);
-        console.log('[CLIENT_SELECTOR] Response.data:', response.data);
-        console.log('[CLIENT_SELECTOR] Response.data.data:', response.data?.data);
-
-        // La API devuelve { ok: true, data: [...] }, necesitamos response.data.data
         const clientsData = response.data?.data || response.data || [];
         setAvailableClients(Array.isArray(clientsData) ? clientsData : []);
-        console.log('[CLIENT_SELECTOR] Clientes procesados:', clientsData);
       } catch (error) {
         console.error('Error loading clients for private purchase:', error);
         showToast("Error al cargar clientes", "error");
@@ -541,14 +559,12 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     loadClients();
   }, [isOpen, showToast]);
 
-  // Cargar equipos disponibles desde la base de datos
   useEffect(() => {
     if (!isOpen) return;
 
     const loadEquipment = async () => {
       setLoadingEquipment(true);
       try {
-        // Usar endpoint real para obtener modelos de equipos disponibles
         const equipmentModels = await getEquipmentModels();
         setEquipmentOptions(Array.isArray(equipmentModels) ? equipmentModels : []);
       } catch (error) {
@@ -563,117 +579,83 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     loadEquipment();
   }, [isOpen, showToast]);
 
-  // Reset form when modal closes
   useEffect(() => {
-    console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Modal isOpen changed:', isOpen);
     if (!isOpen) {
-      try {
-        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Resetting form data');
-
-        // Reset form data safely
-        setFormData({
-          client_id: '', // ← ID directo del cliente
-          client_snapshot: { // ← Mantener para compatibilidad con UI
-            commercial_name: '',
-            client_email: '',
-            first_name: '',
-            last_name: '',
-            client_identifier: ''
-          },
-          equipment: [],
-          notes: '',
-          offer_kind: 'venta'
-        });
-
-        // Reset estados del selector híbrido
-        setClientSearchTerm('');
-        setSelectedClient(null);
-        setFilteredClients([]);
-        setShowClientDropdown(false);
-        setIsNewClient(false);
-
-        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Form reset completed successfully');
-      } catch (error) {
-        console.error('[FLOW_COMERCIAL][FE][MODAL][RESET] ERROR during form reset:', error);
-        // Fallback: force a complete reset even if there's an error
-        setFormData({
-          client_id: '',
-          client_snapshot: {
-            commercial_name: '',
-            client_email: '',
-            first_name: '',
-            last_name: '',
-            client_identifier: ''
-          },
-          equipment: [],
-          notes: '',
-          offer_kind: 'venta'
-        });
-        setClientSearchTerm('');
-        setSelectedClient(null);
-        setFilteredClients([]);
-        setShowClientDropdown(false);
-        setIsNewClient(false);
-        console.log('[FLOW_COMERCIAL][FE][MODAL][RESET] Fallback reset completed');
-      }
+      setFormData({
+        client_id: "",
+        client_snapshot: {
+          commercial_name: "",
+          client_email: "",
+          first_name: "",
+          last_name: "",
+          client_identifier: "",
+          identifier_type: "ruc",
+        },
+        equipment: [],
+        notes: "",
+        offer_kind: "venta",
+      });
+      setErrors({});
+      setClientSearchTerm("");
+      setSelectedClient(null);
+      setFilteredClients([]);
+      setShowClientDropdown(false);
+      setIsNewClient(false);
+      setEquipmentSearch("");
+      setActiveSection(0);
+      setConfirmOpen(false);
+      setProgressStep(null);
     }
   }, [isOpen]);
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!formData.client_id || !formData.equipment?.length) {
-      showToast("Completa el nombre del cliente y agrega al menos un equipo", "error");
-      return;
-    }
-
+  const submitConfirmed = async () => {
+    const identifierType = String(formData.client_snapshot.identifier_type || "ruc");
+    const expectedLength = identifierType === "cedula" ? 10 : 13;
+    const identifierDigits = sanitizeDigits(formData.client_snapshot.client_identifier, expectedLength);
     setLoading(true);
     setProgressStep("validating");
 
     try {
       setProgressStep("uploading");
 
-      // Ajustar payload para coincidir con la API del backend
       const payload = {
         client_data: {
           id: formData.client_id,
-          // Construir explícitamente para asegurar que 'name' esté incluido
-          name: formData.client_snapshot.commercial_name || formData.client_snapshot.name || '',
-          commercial_name: formData.client_snapshot.commercial_name || '',
-          client_email: formData.client_snapshot.client_email || '',
-          first_name: formData.client_snapshot.first_name || '',
-          last_name: formData.client_snapshot.last_name || '',
-          client_identifier: formData.client_snapshot.client_identifier || ''
+          name: formData.client_snapshot.commercial_name || formData.client_snapshot.name || "",
+          commercial_name: formData.client_snapshot.commercial_name || "",
+          client_email: formData.client_snapshot.client_email || "",
+          first_name: formData.client_snapshot.first_name || "",
+          last_name: formData.client_snapshot.last_name || "",
+          client_identifier: identifierDigits || "",
+          identifier_type: identifierType,
         },
         equipment: formData.equipment,
         offer_kind: formData.offer_kind,
-        notes: formData.notes
+        notes: formData.notes,
       };
-
-      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Payload enviado:', JSON.stringify(payload, null, 2));
-      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Campo name presente:', !!payload.client_data.name);
-      console.log('[FLOW_COMERCIAL][FE][SUBMIT] Valor de name:', payload.client_data.name);
 
       setProgressStep("submitting");
       const response = await api.post('/private-purchases', payload);
 
       setProgressStep("notifying");
       showToast("Solicitud de compra privada creada correctamente", "success");
+      setConfirmOpen(false);
       onSuccess?.(response.data);
       onClose();
 
-      // Reset form
       setFormData({
-        client_id: '', // ← Cambiado: usar ID directo
+        client_id: "",
         client_snapshot: {
-          commercial_name: '',
-          client_email: '',
-          first_name: '',
-          last_name: '',
-          client_identifier: ''
+          commercial_name: "",
+          client_email: "",
+          first_name: "",
+          last_name: "",
+          client_identifier: "",
+          identifier_type: "ruc"
         },
         equipment: [],
-        notes: '',
-        offer_kind: 'venta'
+        notes: "",
+        offer_kind: "venta"
       });
 
     } catch (error) {
@@ -683,6 +665,42 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
       setLoading(false);
       setProgressStep(null);
     }
+  };
+
+  const validateForm = () => {
+    const nextErrors = {};
+
+    if (!String(formData.client_snapshot.commercial_name || "").trim()) {
+      nextErrors.client_name = "El nombre comercial es obligatorio";
+    }
+
+    const identifierType = String(formData.client_snapshot.identifier_type || "ruc");
+    const expectedLength = identifierType === "cedula" ? 10 : 13;
+    const digits = sanitizeDigits(formData.client_snapshot.client_identifier, expectedLength);
+    if (digits.length !== expectedLength) {
+      nextErrors.client_identifier = `Ingresa un ${identifierType === "cedula" ? "número de cédula" : "RUC"} válido de ${expectedLength} dígitos`;
+    }
+
+    if (!formData.equipment.length) {
+      nextErrors.equipment = "Agrega al menos un equipo";
+    }
+
+    formData.equipment.forEach((eq, idx) => {
+      if (!String(eq?.name || eq?.sku || "").trim()) {
+        nextErrors[`equipment_${idx}`] = "Selecciona un equipo válido";
+      }
+    });
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleReviewAndConfirm = () => {
+    if (!validateForm()) {
+      showToast("Revisa los campos marcados", "warning");
+      return;
+    }
+    setConfirmOpen(true);
   };
 
   const handleChange = (e) => {
@@ -707,17 +725,39 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
   const addEquipment = () => {
     setFormData(prev => ({
       ...prev,
-      equipment: [...prev.equipment, { name: '', sku: '', type: 'new' }]
+      equipment: [...prev.equipment, { equipment_id: "", name: "", sku: "", type: "new_available" }]
     }));
+    setErrors((prev) => ({ ...prev, equipment: "" }));
   };
 
   const updateEquipment = (index, field, value) => {
-    setFormData(prev => ({
-      ...prev,
-      equipment: prev.equipment.map((item, i) =>
-        i === index ? { ...item, [field]: value } : item
-      )
-    }));
+    if (field === "equipment_id") {
+      const selected = equipmentOptions.find((opt) => String(opt.id || opt.unidad_id) === String(value));
+      setFormData(prev => ({
+        ...prev,
+        equipment: prev.equipment.map((item, i) =>
+          i === index
+            ? {
+                ...item,
+                equipment_id: value,
+                name: selected?.nombre || selected?.name || selected?.modelo || "",
+                sku: selected?.sku || selected?.modelo || "",
+              }
+            : item
+        )
+      }));
+    } else {
+      setFormData(prev => ({
+        ...prev,
+        equipment: prev.equipment.map((item, i) =>
+          i === index ? { ...item, [field]: value } : item
+        )
+      }));
+    }
+
+    if (errors[`equipment_${index}`]) {
+      setErrors((prev) => ({ ...prev, [`equipment_${index}`]: "" }));
+    }
   };
 
   const removeEquipment = (index) => {
@@ -737,8 +777,11 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     [],
   );
 
+  const sectionClasses = (idx) =>
+    `rounded-xl border border-slate-200 bg-white p-4 shadow-sm ${activeSection === idx ? "block" : "hidden md:block"}`;
+
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Solicitar Compra Privada">
+    <Modal isOpen={isOpen} onClose={onClose} title="Nueva Compra Privada" maxWidth="max-w-6xl">
       {loading && (
         <ProcessingOverlay
           title="Creando solicitud de compra privada"
@@ -746,16 +789,36 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
           activeStep={progressStep || "validating"}
         />
       )}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        {/* Información del Cliente */}
-        <div className="border-b pb-4">
-          <h3 className="text-lg font-semibold text-gray-900 mb-3">Información del Cliente</h3>
-          <div className="grid grid-cols-2 gap-4">
+
+      <div className="mb-3 flex items-center justify-between md:hidden">
+        {["Cliente", "Equipos", "Resumen"].map((label, idx) => (
+          <button
+            key={label}
+            type="button"
+            onClick={() => setActiveSection(idx)}
+            className={`rounded-full px-3 py-1 text-xs font-semibold ${
+              activeSection === idx ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-600"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          handleReviewAndConfirm();
+        }}
+        className="space-y-4"
+      >
+        <div className={sectionClasses(0)}>
+          <h3 className="mb-3 text-base font-semibold text-slate-900">Información del Cliente</h3>
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <div className="relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-sm font-medium text-slate-700">
                 Nombre comercial *
               </label>
-              {/* Selector híbrido de cliente */}
               <div className="relative">
                 <input
                   type="text"
@@ -766,64 +829,54 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                       setShowClientDropdown(true);
                     }
                   }}
-                  onBlur={() => {
-                    // Delay para permitir clicks en el dropdown
-                    setTimeout(() => setShowClientDropdown(false), 200);
-                  }}
+                  onBlur={() => setTimeout(() => setShowClientDropdown(false), 160)}
                   placeholder={loadingClients ? "Cargando clientes..." : "Escribe o selecciona un cliente"}
-                  className={`w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent ${selectedClient ? 'bg-green-50 border-green-300' : isNewClient ? 'bg-blue-50 border-blue-300' : ''
-                    }`}
+                  className={`w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 ${
+                    errors.client_name ? "border-rose-400" : "border-slate-300"
+                  } ${selectedClient ? "bg-emerald-50" : isNewClient ? "bg-blue-50" : "bg-white"}`}
                   disabled={loadingClients}
                 />
 
-                {/* Indicador visual del tipo de cliente */}
                 {selectedClient && (
-                  <span className="absolute right-2 top-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded">
-                    Existente
+                  <span title="Cliente registrado" className="absolute right-2 top-2 rounded bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
+                    Registrado
                   </span>
                 )}
                 {isNewClient && !selectedClient && (
-                  <span className="absolute right-2 top-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                  <span title="Cliente nuevo" className="absolute right-2 top-2 rounded bg-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-800">
                     Nuevo
                   </span>
                 )}
 
-                {/* Dropdown de sugerencias */}
                 {showClientDropdown && filteredClients.length > 0 && (
-                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  <div className="absolute z-20 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
                     {filteredClients.map((client) => {
-                      // Verificación defensiva de cliente
                       if (!client) {
-                        console.warn('[CLIENT_DROPDOWN] Cliente undefined/null encontrado');
                         return null;
                       }
                       return (
-                        <div
-                          key={client.id || Math.random()}
+                        <button
+                          key={client.id || `${client.nombre}-${client.commercial_name}`}
+                          type="button"
                           onClick={() => handleClientSelect(client)}
-                          className="px-3 py-2 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                          className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
                         >
-                          <div className="font-medium text-gray-900">
+                          <p className="text-sm font-medium text-slate-900">
                             {client.commercial_name || client.nombre || 'Cliente sin nombre'}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {(client.email || client.client_email) && `${client.email || client.client_email} • `}
-                            ID: {client.id || 'Sin ID'}
-                          </div>
-                        </div>
+                          </p>
+                        </button>
                       );
                     })}
                   </div>
                 )}
               </div>
-
-              {/* Mensaje informativo */}
-              <p className="text-xs text-gray-500 mt-1">
+              <p className="mt-1 text-xs text-slate-500">
                 {loadingClients ? "Cargando..." : "Escribe para buscar clientes existentes o crea uno nuevo"}
               </p>
+              {errors.client_name && <p className="mt-1 text-xs text-rose-600">{errors.client_name}</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
+              <label className="mb-1 block text-sm font-medium text-slate-700">
                 Email
               </label>
               <input
@@ -831,155 +884,305 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
                 name="client_snapshot.client_email"
                 value={formData.client_snapshot.client_email}
                 onChange={handleChange}
-                className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
                 placeholder="cliente@empresa.com"
-                readOnly={selectedClient} // Solo readonly si hay cliente seleccionado
+                readOnly={selectedClient}
               />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Documento *
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <select
+                  value={formData.client_snapshot.identifier_type || 'ruc'}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      client_snapshot: {
+                        ...prev.client_snapshot,
+                        identifier_type: e.target.value,
+                        client_identifier: "",
+                      },
+                    }))
+                  }
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                >
+                  <option value="ruc">RUC</option>
+                  <option value="cedula">Cédula</option>
+                </select>
+                <input
+                  type="text"
+                  value={formData.client_snapshot.client_identifier}
+                  onChange={(e) => {
+                    const identifierType = formData.client_snapshot.identifier_type || "ruc";
+                    const maxLen = identifierType === 'cedula' ? 10 : 13;
+                    const digits = sanitizeDigits(e.target.value, maxLen);
+                    setFormData((prev) => ({
+                      ...prev,
+                      client_snapshot: {
+                        ...prev.client_snapshot,
+                        client_identifier: digits,
+                      },
+                    }));
+                    setErrors((prev) => ({ ...prev, client_identifier: "" }));
+                  }}
+                  placeholder={formData.client_snapshot.identifier_type === 'cedula' ? '10 dígitos' : '13 dígitos'}
+                  className={`rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 ${
+                    errors.client_identifier ? "border-rose-400" : "border-slate-300"
+                  }`}
+                />
+              </div>
+              {errors.client_identifier && <p className="mt-1 text-xs text-rose-600">{errors.client_identifier}</p>}
             </div>
           </div>
         </div>
 
-        {/* Equipos */}
-        <div className="border-b pb-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-lg font-semibold text-gray-900">Equipos</h3>
+        <div className={sectionClasses(1)}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 className="text-base font-semibold text-slate-900">Equipos</h3>
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              {formData.equipment.length} seleccionados
+            </span>
+          </div>
+
+          <div className="mb-3 grid gap-2 md:grid-cols-[1fr_auto]">
+            <input
+              type="text"
+              value={equipmentSearch}
+              onChange={(e) => setEquipmentSearch(e.target.value)}
+              placeholder="Buscar equipo por nombre..."
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+            />
             <Button
               type="button"
               onClick={addEquipment}
-              size="sm"
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              className="bg-slate-900 text-white hover:bg-slate-800"
               disabled={loadingEquipment}
             >
-              <FiPlus className="mr-1" size={14} />
-              Agregar Equipo
+              <FiPlus className="mr-1" size={14} /> Agregar Equipo
             </Button>
           </div>
 
+          {errors.equipment && <p className="mb-2 text-xs text-rose-600">{errors.equipment}</p>}
+
           {formData.equipment.length === 0 ? (
-            <p className="text-sm text-gray-500 text-center py-4">
-              No hay equipos agregados. Haz clic en "Agregar Equipo" para comenzar.
+            <p className="rounded-lg border border-dashed border-slate-300 py-6 text-center text-sm text-slate-500">
+              No hay equipos agregados.
             </p>
           ) : (
             <div className="space-y-3">
               {formData.equipment.map((item, index) => (
-                <div key={index} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg">
-                  <div className="flex-1 grid grid-cols-2 gap-3">
-                    <select
-                      value={item.name}
-                      onChange={(e) => {
-                        const selected = equipmentOptions.find(opt => opt.nombre === e.target.value || opt.name === e.target.value);
-                        updateEquipment(index, 'id', selected?.id || selected?.unidad_id || `temp_${Date.now()}_${index}`);
-                        updateEquipment(index, 'name', e.target.value);
-                        updateEquipment(index, 'sku', selected?.sku || selected?.modelo || '');
-                      }}
-                      disabled={loadingEquipment}
-                      className="border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                <div key={`private-eq-${index}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="text-sm font-semibold text-slate-800">Equipo #{index + 1}</p>
+                    <button
+                      type="button"
+                      onClick={() => removeEquipment(index)}
+                      className="text-rose-600 hover:text-rose-700"
+                      aria-label={`Eliminar equipo ${index + 1}`}
                     >
-                      <option value="">
-                        {loadingEquipment ? "Cargando equipos..." : "Selecciona equipo"}
-                      </option>
-                      {equipmentOptions.map((opt) => (
-                        <option key={opt.id || opt.unidad_id} value={opt.nombre || opt.name || ""}>
-                          {opt.nombre || opt.name || "Equipo"} ({opt.sku || opt.modelo || "Sin SKU"})
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      placeholder="SKU/Modelo"
-                      value={item.sku}
-                      onChange={(e) => updateEquipment(index, 'sku', e.target.value)}
-                      className="border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      readOnly
-                    />
+                      <FiTrash2 size={16} />
+                    </button>
                   </div>
-                  <select
-                    value={item.type}
-                    onChange={(e) => updateEquipment(index, 'type', e.target.value)}
-                    className="border rounded px-2 py-1 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="new">Nuevo</option>
-                    <option value="cu">CU</option>
-                  </select>
-                  <Button
-                    type="button"
-                    onClick={() => removeEquipment(index)}
-                    size="sm"
-                    variant="danger"
-                    className="bg-red-500 hover:bg-red-600 text-white"
-                  >
-                    <FiTrash2 size={14} />
-                  </Button>
+
+                  <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Equipo</label>
+                      <select
+                        value={item.equipment_id || ""}
+                        onChange={(e) => updateEquipment(index, "equipment_id", e.target.value)}
+                        disabled={loadingEquipment}
+                        className={`w-full rounded-lg border px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300 ${
+                          errors[`equipment_${index}`] ? "border-rose-400" : "border-slate-300"
+                        }`}
+                      >
+                        <option value="">
+                          {loadingEquipment ? "Cargando equipos..." : "Selecciona equipo"}
+                        </option>
+                        {filteredEquipmentOptions.map((opt) => (
+                          <option key={opt.id || opt.unidad_id} value={opt.id || opt.unidad_id}>
+                            {opt.nombre || opt.name || opt.modelo || "Equipo"}
+                          </option>
+                        ))}
+                      </select>
+                      {errors[`equipment_${index}`] && (
+                        <p className="mt-1 text-xs text-rose-600">{errors[`equipment_${index}`]}</p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">SKU</label>
+                      <input
+                        type="text"
+                        placeholder="SKU/Modelo"
+                        value={item.sku || ""}
+                        onChange={(e) => updateEquipment(index, "sku", e.target.value)}
+                        className="w-full rounded-lg border border-slate-300 px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Estado</label>
+                      <div className="flex flex-wrap gap-2">
+                        {[
+                          { value: "new_available", label: "Nuevo disponible" },
+                          { value: "new_import", label: "Nuevo importación" },
+                          { value: "cu", label: "CU" },
+                        ].map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => updateEquipment(index, "type", opt.value)}
+                            className={`rounded-full border px-2 py-1 text-xs font-semibold ${
+                              item.type === opt.value
+                                ? TYPE_CHIPS[opt.value]
+                                : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
 
-        {/* Notas y Tipo de Oferta */}
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Tipo de oferta
-            </label>
-            <select
-              name="offer_kind"
-              value={formData.offer_kind}
-              onChange={handleChange}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="venta">Venta</option>
-              <option value="alquiler">Alquiler</option>
-              <option value="comodato">Comodato</option>
-            </select>
-
-            {/* Aviso para comodato */}
-            {formData.offer_kind === 'comodato' && (
-              <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                <div className="text-sm">
-                  <p className="font-medium text-amber-800">Comodato solo disponible para clientes registrados</p>
-                  <p className="text-amber-700 mt-1">
-                    El comodato requiere que el cliente esté previamente registrado en el sistema.
-                    Si el cliente no está registrado, será necesario crearlo antes de continuar.
-                  </p>
-                </div>
-              </div>
-            )}
+        <div className={sectionClasses(2)}>
+          <h3 className="mb-3 text-base font-semibold text-slate-900">Resumen y notas</h3>
+          <div className="grid gap-3 lg:grid-cols-4">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Cliente</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {formData.client_snapshot.commercial_name || "Pendiente"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Documento</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {formData.client_snapshot.client_identifier || "Pendiente"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Tipo oferta</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">
+                {formData.offer_kind || "Pendiente"}
+              </p>
+            </div>
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs uppercase tracking-wide text-slate-500">Equipos</p>
+              <p className="mt-1 text-sm font-semibold text-slate-900">{formData.equipment.length}</p>
+            </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Notas adicionales
-            </label>
-            <textarea
-              name="notes"
-              value={formData.notes}
-              onChange={handleChange}
-              rows={3}
-              className="w-full border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="Información adicional sobre la solicitud..."
-            />
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Tipo de oferta
+              </label>
+              <select
+                name="offer_kind"
+                value={formData.offer_kind}
+                onChange={handleChange}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+              >
+                <option value="venta">Venta</option>
+                <option value="alquiler">Alquiler</option>
+                <option value="comodato">Comodato</option>
+              </select>
+
+              {formData.offer_kind === 'comodato' && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
+                  <div className="text-sm">
+                    <p className="font-medium text-amber-800">Comodato solo disponible para clientes registrados</p>
+                    <p className="mt-1 text-amber-700">
+                      El comodato requiere que el cliente esté previamente registrado en el sistema.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Notas adicionales
+              </label>
+              <textarea
+                name="notes"
+                value={formData.notes}
+                onChange={handleChange}
+                rows={3}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                placeholder="Información adicional sobre la solicitud..."
+              />
+            </div>
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-4">
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={onClose}
-            disabled={loading}
-          >
-            Cancelar
-          </Button>
-          <Button
-            type="submit"
-            disabled={loading || !formData.client_id || formData.equipment.length === 0}
-            isLoading={loading}
-          >
-            Crear Solicitud
-          </Button>
+        <div className="sticky bottom-0 z-10 rounded-lg border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur">
+          <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs text-slate-500">Resumen rápido</p>
+              <p className="text-sm font-medium text-slate-800">
+                {formData.client_snapshot.commercial_name || "Sin cliente"} · {formData.equipment.length} equipo(s)
+              </p>
+              {!canSubmit && <p className="text-xs text-amber-700">Falta: {validationIssues[0]}</p>}
+            </div>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={onClose}
+                disabled={loading}
+              >
+                Cancelar
+              </Button>
+              <Button
+                type="submit"
+                disabled={!canSubmit}
+                isLoading={loading}
+              >
+                Revisar y confirmar
+              </Button>
+            </div>
+          </div>
         </div>
       </form>
+
+      {confirmOpen && (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl">
+            <div className="mb-3 flex items-center gap-2">
+              <FiCheckCircle className="text-emerald-600" />
+              <h4 className="text-lg font-semibold text-slate-900">Confirmar creación</h4>
+            </div>
+            <div className="space-y-2 text-sm text-slate-700">
+              <p><span className="font-semibold">Cliente:</span> {formData.client_snapshot.commercial_name}</p>
+              <p>
+                <span className="font-semibold">Documento:</span>{" "}
+                {sanitizeDigits(
+                  formData.client_snapshot.client_identifier,
+                  formData.client_snapshot.identifier_type === "cedula" ? 10 : 13
+                )}
+              </p>
+              <p><span className="font-semibold">Tipo de oferta:</span> {formData.offer_kind}</p>
+              <p><span className="font-semibold">Equipos:</span> {formData.equipment.length}</p>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button type="button" variant="secondary" onClick={() => setConfirmOpen(false)} disabled={loading}>
+                Volver
+              </Button>
+              <Button type="button" onClick={submitConfirmed} isLoading={loading}>
+                Confirmar creación
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </Modal>
   );
 };

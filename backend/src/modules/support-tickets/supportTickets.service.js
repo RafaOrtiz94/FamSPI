@@ -918,18 +918,18 @@ async function updateTicketStatus({ ticketId, status, comment, actorUser }) {
       `
         UPDATE support_tickets
         SET
-          status = $2,
-          assigned_ti_user_id = COALESCE(assigned_ti_user_id, $3),
+          status = $2::varchar,
+          assigned_ti_user_id = COALESCE(assigned_ti_user_id, $3::integer),
           first_response_at = CASE
-            WHEN first_response_at IS NULL AND $2 <> 'abierto' THEN NOW()
+            WHEN first_response_at IS NULL AND $2::varchar <> 'abierto' THEN NOW()
             ELSE first_response_at
           END,
           on_hold_reason = CASE
-            WHEN $2 = 'en_espera' THEN $4
+            WHEN $2::varchar = 'en_espera' THEN $4::text
             ELSE NULL
           END,
           resolved_at = ${resolvedAtSQL},
-          closed_by_requester = CASE WHEN $2 = 'reabierto' THEN FALSE ELSE closed_by_requester END,
+          closed_by_requester = CASE WHEN $2::varchar = 'reabierto' THEN FALSE ELSE closed_by_requester END,
           updated_at = NOW()
         WHERE id = $1
         RETURNING *

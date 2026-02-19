@@ -97,13 +97,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     .reduce((acc, req) => acc + calculateDays(req), 0);
                 setApprovedVacationDays(approvedDays);
                 setPendingVacationDays(pendingDays);
-
-                console.info("[VACACIONES][RESUMEN][FRONT]", {
-                    summary: summaryResp?.data,
-                    approvedDays,
-                    pendingDays,
-                    totalRows: vacationRows.length
-                });
             }
         } catch (error) {
             console.error("Error loading vacation summary:", error);
@@ -431,18 +424,24 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         };
 
         const summaryRemaining = vacationSummary?.remaining;
-        const summaryAllowance = toNumber(vacationSummary?.allowance) || 15;
-        const summaryTaken = toNumber(vacationSummary?.taken);
-        const summaryPending = toNumber(vacationSummary?.pending);
+        const summaryAllowance = vacationSummary?.allowance ?? 0;
+        const summaryTaken = vacationSummary?.taken ?? 0;
+        const summaryPending = vacationSummary?.pending ?? 0;
         const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
             ? toNumber(summaryRemaining)
-            : summaryAllowance - summaryTaken - summaryPending;
+            : toNumber(summaryAllowance) - toNumber(summaryTaken) - toNumber(summaryPending);
         const isAdvanceRequest = vacationSummary?.eligible === false && !vacationSummary?.missing_hire_date;
-        const remaining = isAdvanceRequest
-            ? baseRemaining - approvedVacationDays - pendingVacationDays
-            : Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays);
-        const usedDisplay = summaryTaken + approvedVacationDays;
-        const pendingDisplay = summaryPending + pendingVacationDays;
+        const summaryHasUsage =
+            vacationSummary &&
+            vacationSummary.taken !== undefined &&
+            vacationSummary.pending !== undefined;
+        const remaining = summaryHasUsage
+            ? (isAdvanceRequest ? baseRemaining : Math.max(0, baseRemaining))
+            : (isAdvanceRequest
+                ? baseRemaining - approvedVacationDays - pendingVacationDays
+                : Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays));
+        const usedDisplay = summaryHasUsage ? toNumber(summaryTaken) : approvedVacationDays;
+        const pendingDisplay = summaryHasUsage ? toNumber(summaryPending) : pendingVacationDays;
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
         const allowMissingHireDate = vacationSummary?.missing_hire_date;
         const canSubmit = days > 0 && hasDates && (allowMissingHireDate || isAdvanceRequest || days <= remaining);

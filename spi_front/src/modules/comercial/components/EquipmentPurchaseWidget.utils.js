@@ -32,6 +32,11 @@ const ICON_COMPONENTS = {
     FiDownload,
 };
 
+const normalizeEquipmentType = (type) => {
+    if (type === "new") return "new_available";
+    return type || "none";
+};
+
 /**
  * Get icon component by name
  * @param {string} iconName - Name of the icon (e.g., 'FiClock')
@@ -80,14 +85,14 @@ export const formatProviderOutcome = (outcome) => {
 export const normalizeResponseItems = (request) => {
     const equipment = Array.isArray(request?.equipment) ? request.equipment : [];
 
-    return equipment.map((item) => ({
-        id: item.id,
-        name: item.name || item.label || item.sku || item.id || "Equipo",
+    return equipment.map((item, index) => ({
+        id: item.equipment_id || item.inventory_id || item.id || `eq_${index + 1}`,
+        name: item.name || item.label || item.sku || "Equipo",
         sku: item.sku,
         serial: item.serial,
         requested_type: item.type,
-        available_type: item.type,
-        decision: item.type === "none" ? "reject" : "accept",
+        available_type: normalizeEquipmentType(item.type),
+        decision: normalizeEquipmentType(item.type) === "none" ? "reject" : "accept",
     }));
 };
 
@@ -113,16 +118,18 @@ export const dedupeEquipmentList = (list = []) => {
  * @returns {object} Equipment list info
  */
 export const getEquipmentDisplayList = (req, providerResponse) => {
-    const requestedMap = new Map((req.equipment || []).map((item) => [item.id, item]));
+    const requestedMap = new Map(
+        (req.equipment || []).map((item, index) => [item.id || item.equipment_id || item.inventory_id || `eq_${index + 1}`, item]),
+    );
     const availableItems = Array.isArray(providerResponse?.items)
         ? providerResponse.items.map((item) => {
             const requestedItem = requestedMap.get(item.id) || {};
             return {
                 ...item,
-                name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || item.id || "Equipo",
+                name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || "Equipo",
                 requested_type: item.requested_type || requestedItem.type,
-                available_type: item.available_type || item.type,
-                decision: item.decision || (item.available_type === "none" ? "reject" : "accept"),
+                available_type: normalizeEquipmentType(item.available_type || item.type),
+                decision: item.decision || (normalizeEquipmentType(item.available_type || item.type) === "none" ? "reject" : "accept"),
             };
         })
         : [];
@@ -133,7 +140,7 @@ export const getEquipmentDisplayList = (req, providerResponse) => {
         : (req.equipment || []).map((item) => ({
             ...item,
             requested_type: item.type,
-            available_type: item.type,
+            available_type: normalizeEquipmentType(item.type),
         }));
 
     const equipmentTitle = showAvailableItems
@@ -201,8 +208,9 @@ export const getPaginationInfo = (filteredRequests, compactList, currentPage) =>
 export const validateForm = (form, isManager, meta) => {
     const errors = [];
 
-    if (!form.clientId) {
-        errors.push("Cliente es obligatorio");
+    const hasClient = Boolean(form?.clientId) || Boolean(String(form?.clientName || "").trim());
+    if (!hasClient) {
+        errors.push("Nombre del cliente es obligatorio");
     }
 
     if (!form.equipment.length) {
@@ -252,7 +260,7 @@ export const getEquipmentPayload = (equipment, metaEquipment) => {
     return equipment.map((formEq) => {
         const eq = metaEquipment.find((e) => e.id === formEq.id);
         return {
-            id: eq.id,
+            equipment_id: eq.id,
             name: eq.name,
             sku: eq.sku,
             serial: eq.serial,

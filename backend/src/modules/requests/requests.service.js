@@ -84,10 +84,9 @@ addFormats(ajv);
 ajv.addSchema(requestSchemas.newClient, 'newClient');
 
 const CLIENT_FILE_LABELS = {
-  id_file: "Documento de identificación (PDF)",
+  id_file: "Documento de identificación del cliente (PDF)",
   ruc_file: "RUC en PDF",
   legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
-  operating_permit_file: "Permiso de funcionamiento (PDF)",
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
   approval_letter: "Oficio de aprobación",
 };
@@ -2098,14 +2097,15 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
 
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
-  const requiredFileFields = ["id_file"];
-  if ((data.client_type || "").toLowerCase() === "persona_juridica") {
+  const isPublicSector = String(data.client_sector || "privado").toLowerCase() === "publico";
+  const requiredFileFields = [];
+  if (!isPublicSector) {
+    requiredFileFields.push("id_file");
+  }
+  if (!isPublicSector && (data.client_type || "").toLowerCase() === "persona_juridica") {
     requiredFileFields.push("legal_rep_appointment_file");
   }
-  if (data.operating_permit_status === "has_it") {
-    requiredFileFields.push("operating_permit_file");
-  }
-  if (consentCaptureMethod === "signed_document") {
+  if (!isPublicSector && consentCaptureMethod === "signed_document") {
     requiredFileFields.push("consent_evidence_file");
   }
   const missingFiles = requiredFileFields.filter((field) => !hasFile(field));
@@ -2183,6 +2183,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       "lopdp_consent_status", "consent_capture_method", "consent_capture_details",
       "legal_person_business_name", "nationality", "natural_person_firstname",
       "natural_person_lastname", "commercial_name", "establishment_name", "ruc_cedula",
+      "client_sector",
       "establishment_province", "establishment_city", "establishment_address",
       "establishment_reference", "establishment_phone", "establishment_cellphone",
       "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
@@ -2200,6 +2201,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       consentStatus, consentCaptureMethod, storedConsentCaptureDetails,
       data.legal_person_business_name || null, data.nationality || null, data.natural_person_firstname || null,
       data.natural_person_lastname || null, commercial_name, data.establishment_name || null, rucCedula,
+      data.client_sector || "privado",
       data.establishment_province, data.establishment_city, data.establishment_address,
       data.establishment_reference || null, data.establishment_phone || null, data.establishment_cellphone || null,
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,

@@ -52,6 +52,7 @@ const PermisosStatusWidget = () => {
     "jefe_operaciones",
     "jefe_calidad",
     "jefe_tecnico",
+    "jefe_ti",
     "jefe_logistica",
   ].some((r) =>
     roleCandidates.some((candidate) => candidate.includes(r))

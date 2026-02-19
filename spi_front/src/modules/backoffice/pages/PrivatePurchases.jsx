@@ -190,6 +190,7 @@ const PrivatePurchasesPage = () => {
     normalizedRole.includes("gerencia") ||
     normalizedRole.includes("jefe_comercial");
   const isGerenciaGeneral = hasRoleToken("gerencia_general");
+  const isChiefCommercial = hasRoleToken("jefe_comercial");
   const isTechnicalCoordinator =
     hasRoleToken("jefe_tecnico") ||
     hasRoleToken("jefe_servicio_tecnico") ||
@@ -212,6 +213,8 @@ const PrivatePurchasesPage = () => {
     acp_availability_rejected: "Backoffice Comercial",
     offer_sent: "Comercial",
     pending_client_signature: "Comercial",
+    offer_rejected_by_commercial: "Jefe Comercial",
+    price_improvement_requested: "ACP Comercial",
     offer_signed: "Backoffice Comercial",
     client_registration_requested: "Comercial",
     client_registered: "Backoffice Comercial",
@@ -253,6 +256,9 @@ const PrivatePurchasesPage = () => {
     availability_reject: "availabilityReject",
     offer_upload: "offerUpload",
     signed_upload: "signedUpload",
+    commercial_reject_accept: "reject",
+    price_improvement_request: "forward",
+    offer_reject_by_commercial: "reject",
   };
   const processingConfigKey =
     processingAction ? processingActionTypeMap[processingAction.type] || null : null;
@@ -587,6 +593,7 @@ const PrivatePurchasesPage = () => {
         count: sum([
           "offer_sent",
           "pending_client_signature",
+          "offer_rejected_by_commercial",
           "offer_signed",
           "client_registration_requested",
           "client_registered",
@@ -604,6 +611,7 @@ const PrivatePurchasesPage = () => {
           "acp_availability_requested",
           "acp_availability_confirmed",
           "acp_availability_rejected",
+          "price_improvement_requested",
           "business_case_in_progress",
           "business_case_under_review",
           "business_case_feasibility_approved",
@@ -789,6 +797,73 @@ const PrivatePurchasesPage = () => {
     } catch (error) {
       console.error(error);
       showToast("No se pudo rechazar el contrato", "error");
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleCommercialRejectOffer = async (requestId) => {
+    const request = requestId ? getRequestById(requestId) : selectedRequest;
+    if (!request) return;
+    setProcessingAction({ id: request.id, type: "offer_reject_by_commercial" });
+    try {
+      const reason = window.prompt("Motivo de rechazo (opcional):", "") || "";
+      await transitionPrivatePurchaseState(
+        request.id,
+        "offer_rejected_by_commercial",
+        reason.trim(),
+      );
+      showToast("Oferta rechazada por comercial", "success");
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo rechazar la oferta", "error");
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleManagerAcceptCommercialReject = async (requestId) => {
+    const request = requestId ? getRequestById(requestId) : selectedRequest;
+    if (!request) return;
+    if (!window.confirm("¿Confirmas finalizar esta solicitud por rechazo comercial?")) {
+      return;
+    }
+    setProcessingAction({ id: request.id, type: "commercial_reject_accept" });
+    try {
+      await transitionPrivatePurchaseState(request.id, "rejected");
+      showToast("Solicitud finalizada por rechazo comercial", "success");
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo finalizar la solicitud", "error");
+    } finally {
+      setProcessingAction(null);
+    }
+  };
+
+  const handleManagerRequestPriceImprovement = async (requestId) => {
+    const request = requestId ? getRequestById(requestId) : selectedRequest;
+    if (!request) return;
+    setProcessingAction({ id: request.id, type: "price_improvement_request" });
+    try {
+      const reason = window.prompt("Detalle de mejora de precio (opcional):", "") || "";
+      await transitionPrivatePurchaseState(
+        request.id,
+        "price_improvement_requested",
+        reason.trim(),
+      );
+      showToast("Se solicitó mejora de precios a ACP Comercial", "success");
+      fetchPrivatePurchases({
+        status: statusFilter !== "all" ? statusFilter : undefined,
+      });
+    } catch (error) {
+      console.error(error);
+      showToast("No se pudo solicitar la mejora de precios", "error");
     } finally {
       setProcessingAction(null);
     }
@@ -1109,9 +1184,9 @@ const PrivatePurchasesPage = () => {
     const normalizedItems = Array.isArray(request.equipment)
       ? request.equipment.map((item) => ({
         id: item.id,
-        name: item.name || item.label || item.sku || item.id || "Equipo",
+        name: item.name || item.label || item.sku || "Equipo",
         requested_type: item.type,
-        available_type: "new", // default to available new
+        available_type: "new_available",
         decision: "accept", // default to accept
         sku: item.sku
       }))
@@ -1656,6 +1731,7 @@ const PrivatePurchasesPage = () => {
                       request={req}
                       isBackofficeUser={isBackofficeUser}
                       isManagerUser={isManagerUser}
+                      isChiefCommercial={isChiefCommercial}
                       isAcpUser={isAcpUser}
                       isPureCommercial={isPureCommercial}
                       processingAction={processingAction}
@@ -1718,6 +1794,18 @@ const PrivatePurchasesPage = () => {
                       onOpenInspectionModal={(id) => {
                         setSelectedId(id);
                         handleAutoInspectionRequest(id);
+                      }}
+                      onCommercialRejectOffer={(id) => {
+                        setSelectedId(id);
+                        handleCommercialRejectOffer(id);
+                      }}
+                      onManagerAcceptCommercialReject={(id) => {
+                        setSelectedId(id);
+                        handleManagerAcceptCommercialReject(id);
+                      }}
+                      onManagerRequestPriceImprovement={(id) => {
+                        setSelectedId(id);
+                        handleManagerRequestPriceImprovement(id);
                       }}
                     />
 
@@ -1802,14 +1890,22 @@ const PrivatePurchasesPage = () => {
 
                                     const typeBadge = (type, label) => (
                                       <span
-                                        className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${type === 'new'
+                                        className={`px-2 py-0.5 text-[10px] rounded-full font-semibold ${type === 'new_available'
                                           ? 'bg-green-100 text-green-700'
+                                          : type === 'new_import'
+                                            ? 'bg-amber-100 text-amber-700'
                                           : type === 'cu'
                                             ? 'bg-blue-100 text-blue-700'
                                             : 'bg-gray-100 text-gray-600'
                                           }`}
                                       >
-                                        {label}: {type === 'new' ? 'Nuevo' : type === 'cu' ? 'CU' : 'Sin stock'}
+                                        {label}: {type === 'new_available'
+                                          ? 'Nuevo disponible'
+                                          : type === 'new_import'
+                                            ? 'Nuevo para importación'
+                                            : type === 'cu'
+                                              ? 'CU'
+                                              : 'Sin stock'}
                                       </span>
                                     );
 
@@ -2291,7 +2387,15 @@ const PrivatePurchasesPage = () => {
                     <div>
                       <p className="font-medium text-gray-800">{item.name}</p>
                       <p className="text-xs text-gray-500">
-                        Solicitado: {item.requested_type === "cu" ? "CU" : item.requested_type === "new" ? "Nuevo" : "Sin especificar"}
+                        Solicitado: {
+                          item.requested_type === "cu"
+                            ? "CU"
+                            : item.requested_type === "new_import"
+                              ? "Nuevo para importación"
+                              : item.requested_type === "new_available" || item.requested_type === "new"
+                                ? "Nuevo disponible"
+                                : "Sin especificar"
+                        }
                       </p>
                     </div>
                     {item.sku && <span className="text-[11px] text-gray-500">SKU: {item.sku}</span>}
@@ -2299,7 +2403,12 @@ const PrivatePurchasesPage = () => {
 
                   {/* Opciones de disponibilidad */}
                   <div className="space-y-1 mb-3">
-                    {[{ value: "new", label: "Disponible en Nuevo" }, { value: "cu", label: "Disponible en CU" }, { value: "none", label: "Sin stock" }]
+                    {[
+                      { value: "new_available", label: "Nuevo disponible" },
+                      { value: "new_import", label: "Nuevo para importación" },
+                      { value: "cu", label: "CU" },
+                      { value: "none", label: "Sin stock" },
+                    ]
                       .map((option) => (
                         <label key={option.value} className="flex items-center gap-2">
                           <input
@@ -2489,7 +2598,13 @@ const PrivatePurchasesPage = () => {
                 {Array.isArray(detailModalRequest.equipment) && detailModalRequest.equipment.length ? (
                   <ul className="space-y-2">
                     {detailModalRequest.equipment.map((item, idx) => {
-                      const typeLabel = item?.type === "cu" ? "CU" : item?.type === "new" ? "Nuevo" : (item?.type || "N/D").toUpperCase();
+                      const typeLabel = item?.type === "cu"
+                        ? "CU"
+                        : item?.type === "new_import"
+                          ? "Nuevo para importación"
+                          : item?.type === "new_available" || item?.type === "new"
+                            ? "Nuevo disponible"
+                            : (item?.type || "N/D").toUpperCase();
                       return (
                         <li
                           key={item?.id || item?.sku || idx}
