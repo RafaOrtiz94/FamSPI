@@ -147,6 +147,14 @@ const ClientRequestManagement = () => {
         );
     };
 
+    const formatClientType = (value) => {
+        const normalized = String(value || "").toLowerCase();
+        if (normalized === "persona_juridica") return "Persona Jurídica";
+        if (normalized === "persona_natural") return "Persona Natural";
+        if (normalized === "sub_distribuidor") return "Sub distribuidor";
+        return "Tipo no definido";
+    };
+
     const totalPages = Math.ceil(totalCount / pageSize);
 
     return (
@@ -231,7 +239,7 @@ const ClientRequestManagement = () => {
                                         </div>
                                         <div className="flex items-center space-x-2">
                                             <FiUser className="w-4 h-4 text-gray-400" />
-                                            <span><strong>Tipo:</strong> {request.client_type === 'persona_juridica' ? 'Persona Jurídica' : 'Persona Natural'}</span>
+                                            <span><strong>Tipo:</strong> {formatClientType(request.client_type)}</span>
                                         </div>
                                         <div className="flex items-center space-x-2">
                                             <FiMail className="w-4 h-4 text-gray-400" />
@@ -341,7 +349,7 @@ const ClientRequestManagement = () => {
                                 <div>
                                     <p className="text-gray-500">Tipo de Cliente</p>
                                     <p className="font-medium text-gray-900">
-                                        {selectedRequest.client_type === 'persona_juridica' ? 'Persona Jurídica' : 'Persona Natural'}
+                                        {formatClientType(selectedRequest.client_type)}
                                     </p>
                                 </div>
                                 {selectedRequest.legal_person_business_name && (

@@ -32,7 +32,6 @@ const COMMON_REQUIRED_FIELDS = [
   "shipping_province",
   "shipping_reference",
   "shipping_cellphone",
-  "shipping_delivery_hours",
 ];
 
 const NATURAL_REQUIRED_FIELDS = ["natural_person_firstname", "natural_person_lastname"];
@@ -61,6 +60,14 @@ const FILE_REQUIREMENTS = {
   legal_rep_appointment_file: {
     label: "Nombramiento del representante legal",
     helper: "Solo personas jurídicas (PDF).",
+  },
+  bpadt_certification_file: {
+    label: "Certificación BPADT",
+    helper: "Solo sub distribuidores (PDF).",
+  },
+  operating_permit_file: {
+    label: "Permiso de funcionamiento",
+    helper: "Solo sub distribuidores (PDF).",
   },
   consent_evidence_file: {
     label: "Evidencia del consentimiento",
@@ -97,6 +104,7 @@ const initialFormState = {
   consent_recipient_email: "",
   client_sector: "privado", // Nuevo campo: público o privado
   client_type: "persona_natural",
+  natural_person_document_type: "cedula",
   natural_person_firstname: "",
   natural_person_lastname: "",
   legal_person_business_name: "",
@@ -110,7 +118,6 @@ const initialFormState = {
   establishment_city: "",
   establishment_address: "",
   establishment_reference: "",
-  establishment_phone: "",
   establishment_cellphone: "",
   legal_rep_name: "",
   legal_rep_position: "",
@@ -123,8 +130,10 @@ const initialFormState = {
   shipping_city: "",
   shipping_province: "",
   shipping_reference: "",
-  shipping_phone: "",
   shipping_cellphone: "",
+  has_specific_delivery_schedule: false,
+  shipping_delivery_start_time: "",
+  shipping_delivery_end_time: "",
   shipping_delivery_hours: "",
   operating_permit_status: "does_not_have_it",
 };
@@ -133,14 +142,26 @@ const initialFilesState = {
   id_file: null,
   ruc_file: null,
   legal_rep_appointment_file: null,
+  bpadt_certification_file: null,
+  operating_permit_file: null,
   consent_evidence_file: null,
 };
 
 const requiredFilesByType = (type, clientSector, consentMethod) => {
   const isPublicSector = String(clientSector || "").toLowerCase() === "publico";
   const files = isPublicSector ? [] : ["id_file"];
+  const normalizedType = String(type || "").toLowerCase();
+  const isSubDistributor = normalizedType === "sub_distribuidor";
   if (!isPublicSector && type === "persona_juridica") {
     files.push("legal_rep_appointment_file");
+  }
+  if (!isPublicSector && isSubDistributor) {
+    files.push(
+      "ruc_file",
+      "legal_rep_appointment_file",
+      "bpadt_certification_file",
+      "operating_permit_file",
+    );
   }
   if (!isPublicSector && consentMethod === "signed_document") {
     files.push("consent_evidence_file");
@@ -160,7 +181,14 @@ const NewClientRequestForm = ({
   const { showToast } = useUI();
   const [formData, setFormData] = useState(
     initialData
-      ? { ...initialFormState, ...initialData, data_processing_consent: true } // Asumimos consentimiento si ya existe (o se debe volver a pedir?)
+      ? {
+          ...initialFormState,
+          ...initialData,
+          natural_person_document_type:
+            initialData?.natural_person_document_type
+            || (String(initialData?.ruc_cedula || "").trim().length === 13 ? "ruc" : "cedula"),
+          data_processing_consent: true,
+        } // Asumimos consentimiento si ya existe (o se debe volver a pedir?)
       : initialFormState
   );
   const [files, setFiles] = useState(initialFilesState);
@@ -231,6 +259,21 @@ const NewClientRequestForm = ({
     setConsentTokenCode("");
   }, [initialData]);
 
+  useEffect(() => {
+    const raw = initialData?.shipping_delivery_hours || "";
+    if (!raw) return;
+    const match = String(raw).match(/^([01]\d|2[0-3]):([0-5]\d)\s*-\s*([01]\d|2[0-3]):([0-5]\d)$/);
+    if (!match) return;
+    const start = `${match[1]}:${match[2]}`;
+    const end = `${match[3]}:${match[4]}`;
+    setFormData((prev) => ({
+      ...prev,
+      has_specific_delivery_schedule: true,
+      shipping_delivery_start_time: prev.shipping_delivery_start_time || start,
+      shipping_delivery_end_time: prev.shipping_delivery_end_time || end,
+    }));
+  }, [initialData]);
+
   const resetConsentTokenFlow = () => {
     setConsentTokenState({ status: "idle", tokenId: null, expiresAt: null, verifiedAt: null, lastEmail: "" });
     setConsentTokenCode("");
@@ -246,10 +289,12 @@ const NewClientRequestForm = ({
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    const fieldValue = type === "checkbox" ? checked : value;
 
     setFormData((prev) => {
-      const nextValue = type === "checkbox" ? checked : value;
+      let nextValue = type === "checkbox" ? checked : value;
+      if (name === "ruc_cedula") {
+        nextValue = String(nextValue).replace(/\D/g, "");
+      }
       const nextState = { ...prev, [name]: nextValue };
 
       // Si cambia el email del cliente, sincronizar con consent_recipient_email
@@ -277,9 +322,18 @@ const NewClientRequestForm = ({
         nextState.shipping_city = "";
       }
 
+      if (name === "has_specific_delivery_schedule" && !nextValue) {
+        nextState.shipping_delivery_start_time = "";
+        nextState.shipping_delivery_end_time = "";
+        nextState.shipping_delivery_hours = "";
+      }
+
       // Si el sector es público, siempre debe ser persona jurídica
       if (name === "client_sector" && value === "publico") {
         nextState.client_type = "persona_juridica";
+      }
+      if (name === "natural_person_document_type") {
+        nextState.ruc_cedula = "";
       }
 
       return nextState;
@@ -292,7 +346,12 @@ const NewClientRequestForm = ({
     });
 
     if (name === "client_type" && value === "persona_natural") {
-      setFiles((prev) => ({ ...prev, legal_rep_appointment_file: null }));
+      setFiles((prev) => ({
+        ...prev,
+        legal_rep_appointment_file: null,
+        bpadt_certification_file: null,
+        operating_permit_file: null,
+      }));
     }
     // Solo resetear token si no está verificado aún
     if (name === "client_email" || name === "consent_recipient_email") {
@@ -468,11 +527,35 @@ const NewClientRequestForm = ({
     };
 
     COMMON_REQUIRED_FIELDS.forEach(checkField);
+    if (formData.has_specific_delivery_schedule) {
+      checkField("shipping_delivery_start_time");
+      checkField("shipping_delivery_end_time");
+      const start = (formData.shipping_delivery_start_time || "").trim();
+      const end = (formData.shipping_delivery_end_time || "").trim();
+      if (start && end && start >= end) {
+        validationErrors.shipping_delivery_end_time = "La hora de fin debe ser mayor a la hora de inicio.";
+      }
+    }
     if (formData.client_type === "persona_natural") {
       NATURAL_REQUIRED_FIELDS.forEach(checkField);
     } else {
       LEGAL_REQUIRED_FIELDS.forEach(checkField);
       LEGAL_REP_REQUIRED_FIELDS.forEach(checkField);
+    }
+
+    const docNumber = (formData.ruc_cedula || "").trim();
+    if (docNumber && !/^\d+$/.test(docNumber)) {
+      validationErrors.ruc_cedula = "Solo se permiten dígitos.";
+    }
+    if (formData.client_type === "persona_natural") {
+      const docType = formData.natural_person_document_type;
+      if (!docType) {
+        validationErrors.natural_person_document_type = "Selecciona el tipo de documento.";
+      } else if (docType === "ruc" && docNumber.length !== 13) {
+        validationErrors.ruc_cedula = "El RUC debe tener exactamente 13 dígitos.";
+      } else if (docType === "cedula" && docNumber.length !== 10) {
+        validationErrors.ruc_cedula = "La cédula debe tener exactamente 10 dígitos.";
+      }
     }
 
     const missingFiles = requiredFiles.filter((field) => !files[field]);
@@ -510,6 +593,16 @@ const NewClientRequestForm = ({
     try {
       setProgressStep("uploading");
       const payload = { ...formData };
+      // Se omite telefono fijo cuando ya se gestiona celular.
+      delete payload.establishment_phone;
+      delete payload.shipping_phone;
+      if (payload.has_specific_delivery_schedule) {
+        payload.shipping_delivery_hours = `${payload.shipping_delivery_start_time} - ${payload.shipping_delivery_end_time}`;
+      } else {
+        payload.shipping_delivery_hours = "";
+        payload.shipping_delivery_start_time = "";
+        payload.shipping_delivery_end_time = "";
+      }
       if (payload.consent_capture_method !== "email_link") {
         delete payload.consent_email_token_id;
       }
@@ -554,6 +647,8 @@ const NewClientRequestForm = ({
     consentMethodIsEmail &&
     tokenStatus === "verified" &&
     Boolean(formData.consent_email_token_id);
+  const isSubDistributor = formData.client_type === "sub_distribuidor";
+  const isLegalClientType = formData.client_type === "persona_juridica" || isSubDistributor;
 
   return (
     <form onSubmit={handleSubmit} className={`space-y-6 ${className}`}>
@@ -759,6 +854,7 @@ const NewClientRequestForm = ({
                 options={[
                   { label: "Persona natural", value: "persona_natural" },
                   { label: "Persona jurídica", value: "persona_juridica" },
+                  { label: "Sub distribuidor", value: "sub_distribuidor" },
                 ]}
               />
             </div>
@@ -791,11 +887,22 @@ const NewClientRequestForm = ({
               required
               error={errors.commercial_name}
             />
+            <SelectField
+              name="natural_person_document_type"
+              label="Tipo de documento"
+              value={formData.natural_person_document_type}
+              onChange={handleChange}
+              options={["cedula", "ruc"]}
+              required
+              error={errors.natural_person_document_type}
+            />
             <InputField
               name="ruc_cedula"
-              label="RUC/Cédula"
+              label={formData.natural_person_document_type === "ruc" ? "RUC" : "Cédula"}
               value={formData.ruc_cedula}
               onChange={handleChange}
+              inputMode="numeric"
+              maxLength={formData.natural_person_document_type === "ruc" ? 13 : 10}
               required
               error={errors.ruc_cedula}
             />
@@ -810,7 +917,7 @@ const NewClientRequestForm = ({
             />
           </Section>
         ) : (
-          <Section title="Datos del cliente (persona jurídica)">
+          <Section title={`Datos del cliente (${isSubDistributor ? "sub distribuidor" : "persona jurídica"})`}>
             <InputField
               name="commercial_name"
               label="Nombre comercial"
@@ -824,6 +931,8 @@ const NewClientRequestForm = ({
               label="RUC"
               value={formData.ruc_cedula}
               onChange={handleChange}
+              inputMode="numeric"
+              maxLength={13}
               required
               error={errors.ruc_cedula}
             />
@@ -902,14 +1011,6 @@ const NewClientRequestForm = ({
             error={errors.establishment_reference}
           />
           <InputField
-            name="establishment_phone"
-            label="Teléfono"
-            value={formData.establishment_phone}
-            onChange={handleChange}
-            required
-            error={errors.establishment_phone}
-          />
-          <InputField
             name="establishment_cellphone"
             label="Celular"
             value={formData.establishment_cellphone}
@@ -919,7 +1020,7 @@ const NewClientRequestForm = ({
           />
         </Section>
 
-        {formData.client_type === "persona_juridica" && (
+        {isLegalClientType && (
           <Section title="Representante legal y contacto">
             <InputField
               name="legal_rep_name"
@@ -1019,14 +1120,6 @@ const NewClientRequestForm = ({
             error={errors.shipping_reference}
           />
           <InputField
-            name="shipping_phone"
-            label="Teléfono"
-            value={formData.shipping_phone}
-            onChange={handleChange}
-            required
-            error={errors.shipping_phone}
-          />
-          <InputField
             name="shipping_cellphone"
             label="Celular"
             value={formData.shipping_cellphone}
@@ -1034,31 +1127,78 @@ const NewClientRequestForm = ({
             required
             error={errors.shipping_cellphone}
           />
-          <InputField
-            name="shipping_delivery_hours"
-            label="Horario de entregas"
-            value={formData.shipping_delivery_hours}
-            onChange={handleChange}
-            required
-            error={errors.shipping_delivery_hours}
-          />
+          <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+            <label className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+              <input
+                type="checkbox"
+                name="has_specific_delivery_schedule"
+                checked={Boolean(formData.has_specific_delivery_schedule)}
+                onChange={handleChange}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              El cliente tiene un horario específico de entregas
+            </label>
+            {formData.has_specific_delivery_schedule && (
+              <details open className="mt-3 rounded-lg border border-blue-200 bg-white p-3 dark:border-blue-900/50 dark:bg-slate-900/50">
+                <summary className="cursor-pointer text-sm font-semibold text-blue-700 dark:text-blue-300">
+                  Registrar horario de entregas
+                </summary>
+                <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <InputField
+                    name="shipping_delivery_start_time"
+                    label="Hora de inicio"
+                    type="time"
+                    value={formData.shipping_delivery_start_time}
+                    onChange={handleChange}
+                    required
+                    error={errors.shipping_delivery_start_time}
+                  />
+                  <InputField
+                    name="shipping_delivery_end_time"
+                    label="Hora de fin"
+                    type="time"
+                    value={formData.shipping_delivery_end_time}
+                    onChange={handleChange}
+                    required
+                    error={errors.shipping_delivery_end_time}
+                  />
+                </div>
+              </details>
+            )}
+          </div>
         </Section>
 
         <Section title="Documentos">
           <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
             {Object.entries(FILE_REQUIREMENTS).map(([key, meta]) => {
+              const resolvedMeta =
+                formData.client_type === "sub_distribuidor" && key === "id_file"
+                  ? { ...meta, label: "Cédula del representante legal" }
+                  : formData.client_type === "sub_distribuidor" && key === "ruc_file"
+                    ? { ...meta, helper: "Obligatorio para sub distribuidores (PDF)." }
+                    : meta;
               if (key === "consent_evidence_file" && formData.consent_capture_method === "email_link") {
                 return null;
               }
-              if (key === "legal_rep_appointment_file" && formData.client_type !== "persona_juridica") {
+              if (
+                key === "legal_rep_appointment_file"
+                && formData.client_type !== "persona_juridica"
+                && formData.client_type !== "sub_distribuidor"
+              ) {
+                return null;
+              }
+              if (key === "bpadt_certification_file" && formData.client_type !== "sub_distribuidor") {
+                return null;
+              }
+              if (key === "operating_permit_file" && formData.client_type !== "sub_distribuidor") {
                 return null;
               }
               return (
                 <FileInput
                   key={key}
                   name={key}
-                  label={meta.label}
-                  helper={meta.helper}
+                  label={resolvedMeta.label}
+                  helper={resolvedMeta.helper}
                   onChange={handleFileChange}
                   required={requiredFiles.includes(key)}
                   error={errors.files?.[key]}
@@ -1122,7 +1262,17 @@ const SelectField = ({ label, name, value, onChange, options, required = false, 
   </label>
 );
 
-const InputField = ({ label, name, value, onChange, type = "text", required = false, error, disabled = false }) => (
+const InputField = ({
+  label,
+  name,
+  value,
+  onChange,
+  type = "text",
+  required = false,
+  error,
+  disabled = false,
+  ...inputProps
+}) => (
   <label className="text-sm font-medium text-gray-700 dark:text-gray-200">
     {label} {required && <span className="text-red-500">*</span>}
     <input
@@ -1132,6 +1282,7 @@ const InputField = ({ label, name, value, onChange, type = "text", required = fa
       onChange={onChange}
       required={required}
       disabled={disabled}
+      {...inputProps}
       className={`mt-1 w-full rounded-xl border px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200 dark:bg-gray-800 dark:text-gray-100 ${error ? "border-red-400 focus:border-red-500 focus:ring-red-200" : "border-gray-300 dark:border-gray-600"
         } ${disabled ? "cursor-not-allowed opacity-60" : ""}`}
     />

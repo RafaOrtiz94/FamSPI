@@ -144,6 +144,7 @@ export const createClientRequest = async (formData = {}, files = {}) => {
   Object.entries(formData).forEach(([key, value]) => {
     if (value === undefined || value === null) return;
     const normalized = typeof value === "string" ? value.trim() : value;
+    if (normalized === "") return;
     data.append(key, normalized);
   });
 
@@ -223,6 +224,7 @@ export const updateClientRequest = async (id, formData = {}, files = {}) => {
   Object.entries(formData).forEach(([key, value]) => {
     if (value === undefined || value === null) return;
     const normalized = typeof value === "string" ? value.trim() : value;
+    if (normalized === "") return;
     data.append(key, normalized);
   });
 

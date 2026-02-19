@@ -87,9 +87,18 @@ const CLIENT_FILE_LABELS = {
   id_file: "Documento de identificación del cliente (PDF)",
   ruc_file: "RUC en PDF",
   legal_rep_appointment_file: "Nombramiento del representante legal (PDF)",
+  bpadt_certification_file: "Certificación BPADT (PDF)",
+  operating_permit_file: "Permiso de funcionamiento (PDF)",
   consent_evidence_file: "Evidencia del consentimiento LOPDP",
   approval_letter: "Oficio de aprobación",
 };
+
+async function ensureClientRequestFileColumns() {
+  await db.query(`
+    ALTER TABLE client_requests
+      ADD COLUMN IF NOT EXISTS bpadt_certification_file_id VARCHAR(255);
+  `);
+}
 
 const parseRecipients = (value = "") =>
   value
@@ -271,6 +280,7 @@ function getClientRequestAttachments(request = {}) {
       field: "legal_rep_appointment_file_id",
       label: CLIENT_FILE_LABELS.legal_rep_appointment_file,
     },
+    { key: "bpadt_certification_file", field: "bpadt_certification_file_id", label: CLIENT_FILE_LABELS.bpadt_certification_file },
     { key: "operating_permit_file", field: "operating_permit_file_id", label: CLIENT_FILE_LABELS.operating_permit_file },
     { key: "consent_evidence_file", field: "consent_evidence_file_id", label: CLIENT_FILE_LABELS.consent_evidence_file },
     { key: "approval_letter", field: "approval_letter_file_id", label: CLIENT_FILE_LABELS.approval_letter },
@@ -2071,6 +2081,8 @@ async function resubmit({ id, user_id, payload }) {
  */
 
 async function createClientRequest(user, rawData = {}, rawFiles = {}) {
+  await ensureClientRequestFileColumns();
+
   const data = Object.fromEntries(
     Object.entries(rawData || {}).map(([key, value]) => [
       key,
@@ -2098,17 +2110,27 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
   const normalizedFiles = rawFiles && typeof rawFiles === "object" ? rawFiles : {};
   const hasFile = (field) => Array.isArray(normalizedFiles[field]) && normalizedFiles[field].length > 0;
   const isPublicSector = String(data.client_sector || "privado").toLowerCase() === "publico";
+  const normalizedClientType = String(data.client_type || "").toLowerCase();
   const requiredFileFields = [];
   if (!isPublicSector) {
     requiredFileFields.push("id_file");
   }
-  if (!isPublicSector && (data.client_type || "").toLowerCase() === "persona_juridica") {
+  if (!isPublicSector && normalizedClientType === "persona_juridica") {
     requiredFileFields.push("legal_rep_appointment_file");
+  }
+  if (!isPublicSector && normalizedClientType === "sub_distribuidor") {
+    requiredFileFields.push(
+      "ruc_file",
+      "legal_rep_appointment_file",
+      "bpadt_certification_file",
+      "operating_permit_file",
+    );
   }
   if (!isPublicSector && consentCaptureMethod === "signed_document") {
     requiredFileFields.push("consent_evidence_file");
   }
-  const missingFiles = requiredFileFields.filter((field) => !hasFile(field));
+  const uniqueRequiredFiles = [...new Set(requiredFileFields)];
+  const missingFiles = uniqueRequiredFiles.filter((field) => !hasFile(field));
   if (missingFiles.length) {
     const readable = missingFiles
       .map((field) => CLIENT_FILE_LABELS[field] || field)
@@ -2190,7 +2212,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
       "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
       "shipping_delivery_hours", "operating_permit_status", "drive_folder_id",
-      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "operating_permit_file_id",
+      "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "bpadt_certification_file_id", "operating_permit_file_id",
       "consent_evidence_file_id", "lopdp_consent_method", "lopdp_consent_details", "lopdp_consent_at",
       "lopdp_consent_ip", "lopdp_consent_user_agent", "consent_email_token_id"
     ];
@@ -2208,7 +2230,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       data.legal_rep_email || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
       data.shipping_province, data.shipping_reference || null, data.shipping_phone || null, data.shipping_cellphone || null,
       data.shipping_delivery_hours || null, data.operating_permit_status || null, driveFolderId,
-      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.operating_permit_file_id || null,
+      fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.bpadt_certification_file_id || null, fileIds.operating_permit_file_id || null,
       fileIds.consent_evidence_file_id || null, lopdpConsentMethod, lopdpConsentDetails,
       lopdpConsentAt, null, null, consentEmailTokenId || null
     ];
@@ -2627,6 +2649,8 @@ async function grantConsent({ token, audit = {} }) {
 }
 
 async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
+  await ensureClientRequestFileColumns();
+
   const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1", [id]);
   const request = rows[0];
   if (!request) {
@@ -2689,6 +2713,7 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
   if (fileIds.legal_rep_appointment_file_id) fieldsToUpdate.push("legal_rep_appointment_file_id");
   if (fileIds.ruc_file_id) fieldsToUpdate.push("ruc_file_id");
   if (fileIds.id_file_id) fieldsToUpdate.push("id_file_id");
+  if (fileIds.bpadt_certification_file_id) fieldsToUpdate.push("bpadt_certification_file_id");
   if (fileIds.operating_permit_file_id) fieldsToUpdate.push("operating_permit_file_id");
   if (fileIds.consent_evidence_file_id) fieldsToUpdate.push("consent_evidence_file_id");
 

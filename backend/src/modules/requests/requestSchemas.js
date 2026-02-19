@@ -116,7 +116,6 @@ module.exports = {
       "shipping_province",
       "shipping_reference",
       "shipping_cellphone",
-      "shipping_delivery_hours",
       "legal_rep_name",
       "legal_rep_position",
       "legal_rep_id_document",
@@ -133,11 +132,12 @@ module.exports = {
       consent_recipient_email: { type: "string", format: "email" },
       consent_email_token_id: { type: "string", minLength: 10 },
       client_sector: { type: "string", enum: ["privado", "publico"] },
-      client_type: { type: "string", enum: ["persona_natural", "persona_juridica"] },
+      client_type: { type: "string", enum: ["persona_natural", "persona_juridica", "sub_distribuidor"] },
+      natural_person_document_type: { type: "string", enum: ["cedula", "ruc"] },
 
       // Datos comunes
       commercial_name: { type: "string", minLength: 2 },
-      ruc_cedula: { type: "string", minLength: 10, maxLength: 13 },
+      ruc_cedula: { type: "string", minLength: 10, maxLength: 13, pattern: "^[0-9]+$" },
       client_email: { type: "string", format: "email" },
 
       // Datos del Establecimiento
@@ -146,7 +146,12 @@ module.exports = {
       establishment_city: { type: "string", minLength: 2 },
       establishment_address: { type: "string", minLength: 4 },
       establishment_reference: { type: "string", minLength: 3 },
-      establishment_phone: { type: "string", minLength: 6 },
+      establishment_phone: {
+        anyOf: [
+          { type: "string", minLength: 6 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
       establishment_cellphone: { type: "string", minLength: 6 },
 
       // Datos de Envío
@@ -155,9 +160,22 @@ module.exports = {
       shipping_city: { type: "string", minLength: 2 },
       shipping_province: { type: "string", minLength: 2 },
       shipping_reference: { type: "string", minLength: 3 },
-      shipping_phone: { type: "string", minLength: 6 },
+      shipping_phone: {
+        anyOf: [
+          { type: "string", minLength: 6 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
       shipping_cellphone: { type: "string", minLength: 6 },
-      shipping_delivery_hours: { type: "string", minLength: 3 },
+      has_specific_delivery_schedule: { type: "boolean" },
+      shipping_delivery_start_time: { type: "string", pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$" },
+      shipping_delivery_end_time: { type: "string", pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$" },
+      shipping_delivery_hours: {
+        anyOf: [
+          { type: "string", minLength: 3 },
+          { type: "string", maxLength: 0 },
+        ],
+      },
 
       // Permiso de funcionamiento
       operating_permit_status: { type: "string", enum: ["has_it", "in_progress", "does_not_have_it"] },
@@ -204,12 +222,46 @@ module.exports = {
           properties: { client_type: { const: "persona_natural" } },
         },
         then: {
-          required: ["natural_person_firstname", "natural_person_lastname"],
+          required: ["natural_person_firstname", "natural_person_lastname", "natural_person_document_type"],
+        },
+      },
+      {
+        if: {
+          properties: {
+            client_type: { const: "persona_natural" },
+            natural_person_document_type: { const: "ruc" },
+          },
+        },
+        then: {
+          properties: {
+            ruc_cedula: { type: "string", minLength: 13, maxLength: 13, pattern: "^[0-9]{13}$" },
+          },
+        },
+      },
+      {
+        if: {
+          properties: {
+            client_type: { const: "persona_natural" },
+            natural_person_document_type: { const: "cedula" },
+          },
+        },
+        then: {
+          properties: {
+            ruc_cedula: { type: "string", minLength: 10, maxLength: 10, pattern: "^[0-9]{10}$" },
+          },
         },
       },
       {
         if: {
           properties: { client_type: { const: "persona_juridica" } },
+        },
+        then: {
+          required: ["nationality"],
+        },
+      },
+      {
+        if: {
+          properties: { client_type: { const: "sub_distribuidor" } },
         },
         then: {
           required: ["nationality"],
@@ -254,6 +306,14 @@ module.exports = {
           properties: {
             consent_capture_details: { type: "string", minLength: 5 },
           },
+        },
+      },
+      {
+        if: {
+          properties: { has_specific_delivery_schedule: { const: true } },
+        },
+        then: {
+          required: ["shipping_delivery_start_time", "shipping_delivery_end_time"],
         },
       },
     ],

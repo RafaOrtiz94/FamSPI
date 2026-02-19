@@ -169,6 +169,7 @@ const ClientesPage = () => {
     const value = (type || "").toLowerCase();
     if (value === "persona_juridica" || value.includes("jurid")) return "Persona Jurídica";
     if (value === "persona_natural" || value.includes("natur")) return "Persona Natural";
+    if (value === "sub_distribuidor" || value.includes("sub_dis")) return "Sub distribuidor";
     return "Tipo no especificado";
   };
 
@@ -1755,6 +1756,7 @@ const ClientesPage = () => {
                         <option value="">Selecciona...</option>
                         <option value="persona_juridica">Persona juridica</option>
                         <option value="persona_natural">Persona natural</option>
+                        <option value="sub_distribuidor">Sub distribuidor</option>
                       </select>
                     </div>
                     <div className="space-y-1">

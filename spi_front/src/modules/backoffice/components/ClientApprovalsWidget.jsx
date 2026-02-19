@@ -104,6 +104,7 @@ const ClientApprovalsWidget = () => {
     { key: "id_file_id", label: "Cédula/ID" },
     { key: "ruc_file_id", label: "RUC" },
     { key: "legal_rep_appointment_file_id", label: "Nombramiento" },
+    { key: "bpadt_certification_file_id", label: "Certificación BPADT" },
     { key: "operating_permit_file_id", label: "Permiso operación" },
     { key: "consent_evidence_file_id", label: "Consentimiento" },
   ];
