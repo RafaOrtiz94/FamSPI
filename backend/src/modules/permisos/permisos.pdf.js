@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { PDFDocument } = require("pdf-lib");
+const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
 const { uploadJustificante } = require("./permisos.drive");
 
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/F.RH-10_V01_SOLICITUD DE PERMISO.pdf");
@@ -231,6 +231,117 @@ function fillCommonFields(form, solicitud) {
 }
 
 /**
+ * Genera constancia legal de validacion de firma avanzada.
+ * Este documento sirve como respaldo de autenticidad, integridad y trazabilidad.
+ */
+async function generateFirmaLegalValidationPdf({ solicitud, signatures = [] }) {
+  try {
+    const pdfDoc = await PDFDocument.create();
+    let page = pdfDoc.addPage([612, 792]); // Carta
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const marginX = 48;
+    let y = 750;
+
+    const drawLine = (text, opts = {}) => {
+      const size = opts.size || 10;
+      const fontRef = opts.bold ? boldFont : font;
+      page.drawText(String(text || ""), {
+        x: marginX,
+        y,
+        size,
+        font: fontRef,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+      y -= opts.gap || 14;
+    };
+
+    const drawSection = (title) => {
+      y -= 6;
+      drawLine(title, { size: 11, bold: true, gap: 16 });
+    };
+
+    const now = new Date();
+    const timeline = Array.isArray(signatures) ? signatures : [];
+    const solicitudSig = timeline.find((item) => item.stage === "solicitud") || null;
+    const partialSig = timeline.find((item) => item.stage === "aprobacion_parcial") || null;
+    const finalSig = timeline.find((item) => item.stage === "aprobacion_final") || null;
+    const rechazoSig = timeline.find((item) => item.stage === "rechazo") || null;
+    const approvalSig = finalSig || rechazoSig || partialSig || null;
+
+    drawLine("SPI Fam - Constancia de Validacion Legal de Firma Avanzada", { size: 14, bold: true, gap: 20 });
+    drawLine(`Documento generado: ${now.toLocaleString("es-EC")}`);
+    drawLine(`Solicitud ID: ${solicitud?.id || "N/A"}`);
+    drawLine(`Tipo: ${solicitud?.tipo_solicitud || "N/A"}${solicitud?.tipo_permiso ? ` / ${solicitud.tipo_permiso}` : ""}`);
+    drawLine(`Estado final: ${solicitud?.status || "N/A"}`);
+
+    drawSection("Autenticidad");
+    drawLine(`Solicitante: ${solicitudSig?.signer_name || solicitud?.user_fullname || solicitud?.user_email || "No disponible"}`);
+    drawLine(`Aprobador: ${approvalSig?.signer_name || solicitud?.approver_fullname || solicitud?.aprobacion_final_por || "No disponible"}`);
+
+    drawSection("Integridad");
+    drawLine(`Hash solicitud (SHA-256): ${solicitudSig?.signature_hash_sha256 || "No disponible"}`);
+    drawLine(`Hash aprobacion (SHA-256): ${approvalSig?.signature_hash_sha256 || "No disponible"}`);
+    drawLine(`Encadenamiento previo: ${approvalSig?.previous_signature_hash_sha256 || "No disponible"}`);
+
+    drawSection("Trazabilidad");
+    drawLine(`Fecha/hora solicitud: ${solicitudSig?.signed_at ? new Date(solicitudSig.signed_at).toLocaleString("es-EC") : "No disponible"}`);
+    drawLine(`Fecha/hora aprobacion: ${approvalSig?.signed_at ? new Date(approvalSig.signed_at).toLocaleString("es-EC") : "No disponible"}`);
+    drawLine(`Usuario solicitante: ${solicitudSig?.signer_email || solicitud?.user_email || "No disponible"}`);
+    drawLine(`Usuario aprobador: ${approvalSig?.signer_email || solicitud?.approver_email || "No disponible"}`);
+    drawLine(`IP solicitud: ${solicitudSig?.ip_address || "No disponible"}`);
+    drawLine(`IP aprobacion: ${approvalSig?.ip_address || "No disponible"}`);
+
+    drawSection("Workflow y Conservacion");
+    drawLine(`Estados de flujo: solicitado -> ${finalSig ? "aprobado" : rechazoSig ? "rechazado" : "en proceso"}`);
+    drawLine(`Documento fuente: F.RH-10${solicitud?.pdf_generado_url ? ` (${solicitud.pdf_generado_url})` : ""}`);
+    drawLine("Este registro forma parte del expediente digital interno y su conservacion depende de la politica documental vigente.");
+
+    // Timeline resumido
+    y -= 6;
+    drawLine("Eventos de firma registrados:", { bold: true });
+    if (!timeline.length) {
+      drawLine("- Sin eventos disponibles.");
+    } else {
+      timeline.forEach((event) => {
+        if (y < 80) {
+          y = 750;
+          pdfDoc.addPage([612, 792]);
+        }
+        if (y < 80) {
+          page = pdfDoc.addPage([612, 792]);
+          y = 750;
+        }
+        const eventDate = event?.signed_at ? new Date(event.signed_at).toLocaleString("es-EC") : "N/A";
+        drawLine(`- ${event.stage} | ${event.signer_name || event.signer_email || "N/A"} | ${eventDate}`);
+      });
+    }
+
+    const pdfBytes = await pdfDoc.save();
+    const user = {
+      email: solicitud?.user_email,
+      fullname: solicitud?.user_fullname,
+      id: solicitud?.user_id,
+    };
+
+    const driveFile = await uploadJustificante({
+      user,
+      solicitudId: solicitud?.id,
+      tipoJustificante: "ValidacionLegalFirma",
+      fileBuffer: Buffer.from(pdfBytes),
+      fileName: `Validacion_Legal_Firma_${solicitud?.id || "SNA"}.pdf`,
+      mimeType: "application/pdf",
+      existingFolderId: solicitud?.drive_folder_id || null,
+    });
+
+    return driveFile.webViewLink;
+  } catch (error) {
+    console.error("Error generando PDF legal de firma:", error);
+    return null;
+  }
+}
+
+/**
  * Formatear fecha
  */
 function formatDate(date) {
@@ -241,4 +352,5 @@ function formatDate(date) {
 
 module.exports = {
   generateFRH10,
+  generateFirmaLegalValidationPdf,
 };

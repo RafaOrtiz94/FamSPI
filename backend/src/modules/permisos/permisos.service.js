@@ -2,7 +2,7 @@ const db = require("../../config/db");
 const crypto = require("crypto");
 const { logAction } = require("../../utils/audit");
 const { validatePermisoRequest } = require("./permisos.validation");
-const { generateFRH10 } = require("./permisos.pdf");
+const { generateFRH10, generateFirmaLegalValidationPdf } = require("./permisos.pdf");
 const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
 
@@ -412,6 +412,7 @@ async function ensureTable() {
       aprobacion_final_at TIMESTAMPTZ,
       aprobacion_final_por TEXT,
       pdf_generado_url TEXT,
+      pdf_validacion_legal_url TEXT,
       observaciones TEXT[],
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMPTZ DEFAULT now(),
@@ -435,6 +436,7 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS aprobacion_final_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_user_id INTEGER");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_email TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_check1");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_subtipo_calamidad_check");
     await db.query(
@@ -815,7 +817,8 @@ async function aprobarFinal({ id, approver, meta }) {
       await notificationManager.sendNotification({
         userId: update.rows[0].user_id,
         customTitle: "Solicitud aprobada",
-        customMessage: "Tu solicitud fue aprobada de forma definitiva.",
+        customMessage:
+          "Tu solicitud fue aprobada de forma definitiva. No necesitas firmar ningun documento adicional; la solicitud ya fue validada legalmente con firma avanzada en SPI.",
         type: "success",
         source: "permisos_vacaciones",
         priority: 1,
@@ -871,6 +874,7 @@ async function aprobarFinal({ id, approver, meta }) {
   }
 
   let pdfUrl = null;
+  let legalPdfUrl = null;
   try {
     const signaturesBySolicitud = await getSignaturesBySolicitudIds([update.rows[0].id]);
     const signatures = signaturesBySolicitud.get(update.rows[0].id) || [];
@@ -893,17 +897,26 @@ async function aprobarFinal({ id, approver, meta }) {
     };
 
     pdfUrl = await generateFRH10(pdfPayload);
+    legalPdfUrl = await generateFirmaLegalValidationPdf({
+      solicitud: {
+        ...update.rows[0],
+        user_fullname: requesterIdentity?.fullname || update.rows[0].user_fullname || update.rows[0].user_email,
+        approver_fullname: approverName,
+      },
+      signatures,
+    });
   } catch (pdfError) {
     logger.warn({ pdfError, solicitudId: update.rows[0]?.id }, "No se pudo generar PDF con firmas avanzadas");
   }
 
-  if (pdfUrl) {
+  if (pdfUrl || legalPdfUrl) {
     await db.query(
       `UPDATE permisos_vacaciones
-          SET pdf_generado_url = $2,
+          SET pdf_generado_url = COALESCE($2, pdf_generado_url),
+              pdf_validacion_legal_url = COALESCE($3, pdf_validacion_legal_url),
               updated_at = now()
         WHERE id = $1`,
-      [id, pdfUrl]
+      [id, pdfUrl, legalPdfUrl]
     );
   }
 
@@ -912,6 +925,7 @@ async function aprobarFinal({ id, approver, meta }) {
   return {
     ...responseRow,
     pdf_generado_url: pdfUrl || responseRow.pdf_generado_url || null,
+    pdf_validacion_legal_url: legalPdfUrl || responseRow.pdf_validacion_legal_url || null,
   };
 }
 

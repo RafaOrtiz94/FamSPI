@@ -63,6 +63,9 @@ const PermisosStatusWidget = () => {
   const showAdvancedSignatureWidget = roleCandidates.some((candidate) =>
     ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
   );
+  const canViewLegalValidationDoc = roleCandidates.some((candidate) =>
+    ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
+  );
 
   const [activeTab, setActiveTab] = useState("mine");
   const [misSolicitudes, setMisSolicitudes] = useState([]);
@@ -524,6 +527,21 @@ const PermisosStatusWidget = () => {
             >
               <FiDownload className="w-3 h-3" />
               Descargar F.RH-10
+            </a>
+          </div>
+        )}
+
+        {canViewLegalValidationDoc && solicitud.pdf_validacion_legal_url && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2">
+            <p className="text-xs font-semibold text-slate-900 mb-1.5">Constancia legal de firma:</p>
+            <a
+              href={solicitud.pdf_validacion_legal_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+            >
+              <FiDownload className="w-3 h-3" />
+              Descargar validacion legal
             </a>
           </div>
         )}
