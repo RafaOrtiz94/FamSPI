@@ -160,6 +160,7 @@ async function listarResumenColaboradores(req, res) {
       "talento_humano",
       "jefe_talento_humano",
       "jefe_financiero",
+      "jefe_ti",
       "gerencia",
       "gerencia_general",
       "gerente_general",

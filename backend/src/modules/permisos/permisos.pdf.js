@@ -194,6 +194,10 @@ function fillCommonFields(form, solicitud) {
       setTextField(["Sol_por", "sol_por"], solicitud.user_fullname);
     }
 
+    if (solicitud.firma_solicitante_texto) {
+      setTextField(["Firma", "firma", "Frima", "frima"], solicitud.firma_solicitante_texto);
+    }
+
     if (solicitud.user_document_id) {
       setTextField(["DI", "di"], solicitud.user_document_id);
     }
@@ -208,6 +212,10 @@ function fillCommonFields(form, solicitud) {
         ["Apr_por", "apr_por"],
         solicitud.approver_fullname || solicitud.aprobacion_final_por
       );
+    }
+
+    if (solicitud.firma_aprobador_texto) {
+      setTextField(["Firma_2", "firma_2", "Frima_2", "frima_2"], solicitud.firma_aprobador_texto);
     }
 
     if (solicitud.approver_document_id) {

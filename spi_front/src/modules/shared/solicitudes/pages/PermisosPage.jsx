@@ -111,7 +111,7 @@ const PermisosPage = () => {
         ].map(normalizeRole);
 
         return candidates.some((role) =>
-            ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas"].includes(role)
+            ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(role)
         );
     }, [user]);
 

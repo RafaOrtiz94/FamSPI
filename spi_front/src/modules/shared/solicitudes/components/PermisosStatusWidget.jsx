@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FiClock,
   FiCheck,
@@ -76,6 +76,7 @@ const PermisosStatusWidget = () => {
   const [rejectReason, setRejectReason] = useState("");
   const [activeException, setActiveException] = useState(null);
   const [attendance, setAttendance] = useState(null);
+  const refreshPromiseRef = useRef(null);
 
   const normalizeDateValue = (value) => {
     if (!value) return null;
@@ -144,45 +145,56 @@ const PermisosStatusWidget = () => {
     }
   };
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      const requests = [getMisSolicitudes()];
-      if (isApprover) {
-        requests.push(getPendientes("pending"));
-        requests.push(getPendientes("pending_final"));
-      }
-      const [mineResp, pendingResp, finalResp] = await Promise.all(requests);
+  const loadData = async ({ silent = false } = {}) => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
 
-      if (mineResp?.ok) {
-        setMisSolicitudes((mineResp.data || []).map(normalizeSolicitudDates));
+    const promise = (async () => {
+      if (!silent) setLoading(true);
+      try {
+        const requests = [getMisSolicitudes()];
+        if (isApprover) {
+          requests.push(getPendientes("pending"));
+          requests.push(getPendientes("pending_final"));
+        }
+        const [mineResp, pendingResp, finalResp] = await Promise.all(requests);
+
+        if (mineResp?.ok) {
+          setMisSolicitudes((mineResp.data || []).map(normalizeSolicitudDates));
+        }
+        if (pendingResp?.ok) {
+          const filtered = (pendingResp.data || [])
+            .map(normalizeSolicitudDates)
+            .filter((s) => s.user_email !== userEmail)
+            .filter((s) => canSeeSolicitudForApproval(s));
+          setPendientesParcial(filtered);
+        } else {
+          setPendientesParcial([]);
+        }
+        if (finalResp?.ok) {
+          const filtered = (finalResp.data || [])
+            .map(normalizeSolicitudDates)
+            .filter((s) => s.user_email !== userEmail)
+            .filter((s) => canSeeSolicitudForApproval(s));
+          setPendientesFinal(filtered);
+        } else {
+          setPendientesFinal([]);
+        }
+      } catch (error) {
+        console.error("Error loading permisos:", error);
+        if (!silent) showToast("Error al cargar solicitudes", "error");
+      } finally {
+        if (!isTalentRole) {
+          await Promise.all([fetchActiveException(), fetchAttendance()]);
+        }
+        if (!silent) setLoading(false);
       }
-      if (pendingResp?.ok) {
-        const filtered = (pendingResp.data || [])
-          .map(normalizeSolicitudDates)
-          .filter((s) => s.user_email !== userEmail)
-          .filter((s) => canSeeSolicitudForApproval(s));
-        setPendientesParcial(filtered);
-      } else {
-        setPendientesParcial([]);
-      }
-      if (finalResp?.ok) {
-        const filtered = (finalResp.data || [])
-          .map(normalizeSolicitudDates)
-          .filter((s) => s.user_email !== userEmail)
-          .filter((s) => canSeeSolicitudForApproval(s));
-        setPendientesFinal(filtered);
-      } else {
-        setPendientesFinal([]);
-      }
-    } catch (error) {
-      console.error("Error loading permisos:", error);
-      showToast("Error al cargar solicitudes", "error");
+    })();
+
+    refreshPromiseRef.current = promise;
+    try {
+      await promise;
     } finally {
-      if (!isTalentRole) {
-        await Promise.all([fetchActiveException(), fetchAttendance()]);
-      }
-      setLoading(false);
+      refreshPromiseRef.current = null;
     }
   };
 

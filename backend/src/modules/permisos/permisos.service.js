@@ -69,6 +69,13 @@ function getDisplayName(user = {}) {
   return user?.fullname || user?.name || user?.email || "";
 }
 
+function resolveActorId(user = {}) {
+  const candidate = user?.id ?? user?.user_id ?? user?.sub ?? null;
+  const numeric = Number(candidate);
+  if (Number.isFinite(numeric) && numeric > 0) return numeric;
+  return null;
+}
+
 async function getUserIdentity(userId) {
   if (!userId) return null;
   try {
@@ -246,6 +253,17 @@ function buildWorkflowSignatureSummary(signatures = []) {
   };
 }
 
+function buildPdfSignatureText(signature) {
+  if (!signature) return "";
+  const signedAt = signature?.signed_at ? new Date(signature.signed_at) : null;
+  const signedAtText = signedAt && !Number.isNaN(signedAt.getTime())
+    ? signedAt.toLocaleDateString("es-EC")
+    : "";
+  const shortHash = String(signature?.signature_hash_sha256 || "").slice(0, 12);
+  const hashLabel = shortHash ? `SHA-256:${shortHash}` : "SHA-256";
+  return `Firma avanzada SPI ${hashLabel}${signedAtText ? ` ${signedAtText}` : ""}`;
+}
+
 async function getSignaturesBySolicitudIds(solicitudIds = []) {
   if (!Array.isArray(solicitudIds) || solicitudIds.length === 0) return new Map();
   const { rows } = await db.query(
@@ -290,7 +308,8 @@ async function recordWorkflowSignature({
   meta = {},
   consentText,
 }) {
-  if (!solicitud?.id || !actor?.id || !stage) return null;
+  const actorId = resolveActorId(actor);
+  if (!solicitud?.id || !actorId || !stage) return null;
 
   const { rows: previousRows } = await db.query(
     `SELECT signature_hash_sha256
@@ -308,7 +327,7 @@ async function recordWorkflowSignature({
     stableStringify({
       solicitud_id: solicitud.id,
       stage,
-      signer_user_id: actor.id,
+      signer_user_id: actorId,
       signer_email: actor.email || null,
       signed_at: signedAtIso,
       payload_hash_sha256: payloadHash,
@@ -345,7 +364,7 @@ async function recordWorkflowSignature({
     [
       solicitud.id,
       stage,
-      actor.id,
+      actorId,
       actor.email || null,
       actorName,
       actorRole,
@@ -467,18 +486,19 @@ async function ensureTable() {
 async function createSolicitud({ body, user, meta }) {
   await ensureTable();
   let requesterIdentity = null;
-  if (user?.id) {
+  const requesterUserId = resolveActorId(user);
+  if (requesterUserId) {
     try {
-      requesterIdentity = await getUserIdentity(user.id);
+      requesterIdentity = await getUserIdentity(requesterUserId);
     } catch (error) {
-      logger.warn({ error, userId: user?.id }, "No se pudo resolver identidad del solicitante");
+      logger.warn({ error, userId: requesterUserId }, "No se pudo resolver identidad del solicitante");
     }
   }
   const payload = { ...body };
   payload.tipo_solicitud = payload.tipo_solicitud || "permiso";
   payload.user_email = requesterIdentity?.email || user?.email;
   payload.user_fullname = requesterIdentity?.fullname || getDisplayName(user);
-  payload.user_id = user?.id;
+  payload.user_id = requesterUserId;
   const approverRole = resolveApproverRole(user?.role || user?.rol || "");
   const approverUser = await findApproverByRole(approverRole);
   payload.approver_role = approverRole;
@@ -658,7 +678,8 @@ async function createSolicitud({ body, user, meta }) {
 function canApprove({ approverRole, approverUserId, approver }) {
   const roleCandidates = getApproverRoleCandidates(approver);
   if (roleCandidates.length === 0) return false;
-  if (approverUserId) return approver?.id === approverUserId;
+  const approverActorId = resolveActorId(approver);
+  if (approverUserId) return approverActorId === approverUserId;
   if (!approverRole) return false;
   const expected = String(approverRole || "").toLowerCase();
   if (GERENCIA_GENERAL_ROLES.has(expected)) {
@@ -776,31 +797,17 @@ async function aprobarFinal({ id, approver, meta }) {
     throw err;
   }
   const requesterIdentity = await getUserIdentity(solicitud.user_id).catch(() => null);
-  const approverIdentity = await getUserIdentity(approver?.id).catch(() => null);
+  const approverIdentity = await getUserIdentity(resolveActorId(approver)).catch(() => null);
   const approverName = approverIdentity?.fullname || getDisplayName(approver);
-  const approvalDate = new Date();
-
-  const pdfPayload = {
-    ...solicitud,
-    user_fullname: requesterIdentity?.fullname || solicitud.user_fullname || solicitud.user_email,
-    user_document_id: requesterIdentity?.cedula || "",
-    approver_fullname: approverName,
-    approver_document_id: approverIdentity?.cedula || "",
-    aprobacion_final_por: approverName,
-    aprobacion_final_at: approvalDate,
-  };
-
-  const pdfUrl = await generateFRH10(pdfPayload);
   const update = await db.query(
     `UPDATE permisos_vacaciones
         SET status = 'approved',
             aprobacion_final_at = now(),
             aprobacion_final_por = $2,
-            pdf_generado_url = $3,
             updated_at = now()
       WHERE id = $1
     RETURNING *`,
-    [id, approverName, pdfUrl]
+    [id, approverName]
   );
   await logAction({ usuario_email: approver?.email, modulo: "permisos", accion: "aprobar_final" });
   try {
@@ -820,8 +827,39 @@ async function aprobarFinal({ id, approver, meta }) {
     logger.warn({ notifyError, solicitudId: update.rows[0]?.id }, "No se pudo notificar aprobaci?n final");
   }
 
+  let existingSignatures = [];
   try {
-    await recordWorkflowSignature({
+    const signaturesBySolicitud = await getSignaturesBySolicitudIds([update.rows[0].id]);
+    existingSignatures = signaturesBySolicitud.get(update.rows[0].id) || [];
+  } catch (signatureFetchError) {
+    logger.warn({ signatureFetchError, solicitudId: update.rows[0]?.id }, "No se pudieron consultar firmas existentes");
+  }
+
+  const hasRequesterSignature = existingSignatures.some(
+    (item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD
+  );
+  if (!hasRequesterSignature && update.rows[0]?.user_id) {
+    try {
+      await recordWorkflowSignature({
+        solicitud: update.rows[0],
+        stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
+        actor: {
+          id: update.rows[0].user_id,
+          email: update.rows[0].user_email,
+          fullname: requesterIdentity?.fullname || update.rows[0].user_fullname || update.rows[0].user_email,
+          role: "solicitante",
+        },
+        meta,
+        consentText: "Firma de solicitante reconstruida al momento de aprobacion final",
+      });
+    } catch (requesterSignatureError) {
+      logger.warn({ requesterSignatureError, solicitudId: update.rows[0]?.id }, "No se pudo registrar firma de solicitante en aprobacion final");
+    }
+  }
+
+  let approvalSignature = null;
+  try {
+    approvalSignature = await recordWorkflowSignature({
       solicitud: update.rows[0],
       stage: WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL,
       actor: approver,
@@ -832,8 +870,49 @@ async function aprobarFinal({ id, approver, meta }) {
     logger.warn({ signatureError, solicitudId: update.rows[0]?.id }, "No se pudo registrar firma de aprobacion final");
   }
 
+  let pdfUrl = null;
+  try {
+    const signaturesBySolicitud = await getSignaturesBySolicitudIds([update.rows[0].id]);
+    const signatures = signaturesBySolicitud.get(update.rows[0].id) || [];
+    const solicitudSignature = signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
+    const finalSignature =
+      approvalSignature ||
+      signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL) ||
+      null;
+
+    const pdfPayload = {
+      ...update.rows[0],
+      user_fullname: requesterIdentity?.fullname || update.rows[0].user_fullname || update.rows[0].user_email,
+      user_document_id: requesterIdentity?.cedula || "",
+      approver_fullname: approverName,
+      approver_document_id: approverIdentity?.cedula || "",
+      aprobacion_final_por: approverName,
+      aprobacion_final_at: update.rows[0].aprobacion_final_at,
+      firma_solicitante_texto: buildPdfSignatureText(solicitudSignature),
+      firma_aprobador_texto: buildPdfSignatureText(finalSignature),
+    };
+
+    pdfUrl = await generateFRH10(pdfPayload);
+  } catch (pdfError) {
+    logger.warn({ pdfError, solicitudId: update.rows[0]?.id }, "No se pudo generar PDF con firmas avanzadas");
+  }
+
+  if (pdfUrl) {
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET pdf_generado_url = $2,
+              updated_at = now()
+        WHERE id = $1`,
+      [id, pdfUrl]
+    );
+  }
+
   const enriched = await attachWorkflowSignatures([update.rows[0]]);
-  return enriched[0] || update.rows[0];
+  const responseRow = enriched[0] || update.rows[0];
+  return {
+    ...responseRow,
+    pdf_generado_url: pdfUrl || responseRow.pdf_generado_url || null,
+  };
 }
 
 async function rechazar({ id, approver, observaciones, meta }) {
