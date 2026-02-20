@@ -253,15 +253,11 @@ function buildWorkflowSignatureSummary(signatures = []) {
   };
 }
 
-function buildPdfSignatureText(signature) {
-  if (!signature) return "";
-  const signedAt = signature?.signed_at ? new Date(signature.signed_at) : null;
-  const signedAtText = signedAt && !Number.isNaN(signedAt.getTime())
-    ? signedAt.toLocaleDateString("es-EC")
-    : "";
-  const shortHash = String(signature?.signature_hash_sha256 || "").slice(0, 12);
-  const hashLabel = shortHash ? `SHA-256:${shortHash}` : "SHA-256";
-  return `Firma avanzada SPI ${hashLabel}${signedAtText ? ` ${signedAtText}` : ""}`;
+function buildPdfSignatureText(signature, fallbackName = "") {
+  const signerName = String(signature?.signer_name || fallbackName || "").trim();
+  if (!signerName) return "";
+  // Formato textual tipo e-signature (similar a DocuSign) para campos de formulario.
+  return `/s/ ${signerName}`;
 }
 
 async function getSignaturesBySolicitudIds(solicitudIds = []) {
@@ -892,8 +888,14 @@ async function aprobarFinal({ id, approver, meta }) {
       approver_document_id: approverIdentity?.cedula || "",
       aprobacion_final_por: approverName,
       aprobacion_final_at: update.rows[0].aprobacion_final_at,
-      firma_solicitante_texto: buildPdfSignatureText(solicitudSignature),
-      firma_aprobador_texto: buildPdfSignatureText(finalSignature),
+      firma_solicitante_texto: buildPdfSignatureText(
+        solicitudSignature,
+        requesterIdentity?.fullname || update.rows[0].user_fullname || update.rows[0].user_email
+      ),
+      firma_aprobador_texto: buildPdfSignatureText(
+        finalSignature,
+        approverName
+      ),
     };
 
     pdfUrl = await generateFRH10(pdfPayload);
