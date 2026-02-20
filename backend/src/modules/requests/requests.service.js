@@ -98,6 +98,126 @@ async function ensureClientRequestFileColumns() {
     ALTER TABLE client_requests
       ADD COLUMN IF NOT EXISTS bpadt_certification_file_id VARCHAR(255);
   `);
+  await db.query(`
+    ALTER TABLE client_requests
+      ADD COLUMN IF NOT EXISTS participates_public_procurement BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS public_process_codes TEXT;
+  `);
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_request_quality_checks (
+      id SERIAL PRIMARY KEY,
+      client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
+      item_key VARCHAR(80) NOT NULL,
+      status VARCHAR(24) NOT NULL DEFAULT 'pending',
+      notes TEXT,
+      validated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      validated_by_email TEXT,
+      validated_by_role TEXT,
+      validated_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (client_request_id, item_key)
+    );
+  `);
+}
+
+const QUALITY_REVIEW_ROLES = new Set(["calidad", "jefe_calidad"]);
+const QUALITY_CHECK_STATUS = new Set(["pending", "valid", "inconsistent", "not_applicable"]);
+
+function normalizeRole(role = "") {
+  return String(role || "").trim().toLowerCase();
+}
+
+function isQualityReviewer(role = "") {
+  return QUALITY_REVIEW_ROLES.has(normalizeRole(role));
+}
+
+function isSubDistributorRequest(request = {}) {
+  return String(request?.client_type || "").toLowerCase() === "sub_distribuidor";
+}
+
+function getSubDistributorChecklistItems(request = {}) {
+  const participates = request?.participates_public_procurement === true
+    || String(request?.participates_public_procurement || "").toLowerCase() === "true";
+  return [
+    { key: "ruc_file", label: "RUC", required: true, kind: "file", field: "ruc_file_id" },
+    { key: "legal_rep_appointment_file", label: "Nombramiento", required: true, kind: "file", field: "legal_rep_appointment_file_id" },
+    { key: "id_file", label: "Cédula del representante legal", required: true, kind: "file", field: "id_file_id" },
+    { key: "bpadt_certification_file", label: "Certificación BPADT", required: true, kind: "file", field: "bpadt_certification_file_id" },
+    { key: "operating_permit_file", label: "Permiso de funcionamiento", required: true, kind: "file", field: "operating_permit_file_id" },
+    { key: "public_process_codes", label: "Códigos de proceso", required: participates, kind: "field", field: "public_process_codes" },
+  ];
+}
+
+async function getClientRequestQualityChecks(clientRequestId, client = db) {
+  await ensureClientRequestFileColumns();
+  const { rows } = await client.query(
+    `
+      SELECT id, client_request_id, item_key, status, notes, validated_by_user_id,
+             validated_by_email, validated_by_role, validated_at, updated_at
+      FROM client_request_quality_checks
+      WHERE client_request_id = $1
+    `,
+    [clientRequestId],
+  );
+  return rows || [];
+}
+
+function buildQualityChecklistState(request = {}, qualityChecks = []) {
+  if (!isSubDistributorRequest(request)) {
+    return {
+      enabled: false,
+      items: [],
+      summary: {
+        required_total: 0,
+        required_reviewed: 0,
+        required_pending: 0,
+        has_inconsistent: false,
+        can_backoffice_approve: true,
+      },
+    };
+  }
+
+  const byKey = new Map((qualityChecks || []).map((row) => [row.item_key, row]));
+  const items = getSubDistributorChecklistItems(request).map((item) => {
+    const existing = byKey.get(item.key);
+    const hasEvidence = item.kind === "file"
+      ? Boolean(request[item.field])
+      : Boolean(String(request[item.field] || "").trim());
+    const fallbackStatus = item.required ? "pending" : "not_applicable";
+    const status = existing?.status || fallbackStatus;
+    return {
+      key: item.key,
+      label: item.label,
+      required: item.required,
+      status,
+      notes: existing?.notes || "",
+      validated_at: existing?.validated_at || null,
+      validated_by_email: existing?.validated_by_email || null,
+      validated_by_role: existing?.validated_by_role || null,
+      has_evidence: hasEvidence,
+      evidence_file_id: item.kind === "file" ? request[item.field] || null : null,
+      evidence_link: item.kind === "file" && request[item.field] ? buildDriveLink(request[item.field]) : null,
+      evidence_value: item.kind === "field" ? String(request[item.field] || "").trim() : null,
+    };
+  });
+
+  const requiredItems = items.filter((item) => item.required);
+  const requiredReviewed = requiredItems.filter((item) => item.status === "valid" || item.status === "inconsistent").length;
+  const requiredPending = requiredItems.length - requiredReviewed;
+  const hasInconsistent = requiredItems.some((item) => item.status === "inconsistent");
+
+  return {
+    enabled: true,
+    items,
+    summary: {
+      required_total: requiredItems.length,
+      required_reviewed: requiredReviewed,
+      required_pending: requiredPending,
+      has_inconsistent: hasInconsistent,
+      can_backoffice_approve: requiredPending === 0 && !hasInconsistent,
+    },
+  };
 }
 
 const parseRecipients = (value = "") =>
@@ -2089,8 +2209,16 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       typeof value === "string" ? value.trim() : value,
     ]),
   );
+  ["has_specific_delivery_schedule", "participates_public_procurement"].forEach((field) => {
+    if (data[field] === "true") data[field] = true;
+    if (data[field] === "false") data[field] = false;
+  });
 
-  const booleanFields = ["data_processing_consent"];
+  const booleanFields = [
+    "data_processing_consent",
+    "has_specific_delivery_schedule",
+    "participates_public_procurement",
+  ];
   booleanFields.forEach((field) => {
     if (data[field] === "true") data[field] = true;
     if (data[field] === "false") data[field] = false;
@@ -2211,7 +2339,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
       "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
       "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
-      "shipping_delivery_hours", "operating_permit_status", "drive_folder_id",
+      "shipping_delivery_hours", "operating_permit_status", "participates_public_procurement", "public_process_codes", "drive_folder_id",
       "legal_rep_appointment_file_id", "ruc_file_id", "id_file_id", "bpadt_certification_file_id", "operating_permit_file_id",
       "consent_evidence_file_id", "lopdp_consent_method", "lopdp_consent_details", "lopdp_consent_at",
       "lopdp_consent_ip", "lopdp_consent_user_agent", "consent_email_token_id"
@@ -2229,7 +2357,7 @@ async function createClientRequest(user, rawData = {}, rawFiles = {}) {
       data.legal_rep_name || null, data.legal_rep_position || null, data.legal_rep_id_document || null, data.legal_rep_cellphone || null,
       data.legal_rep_email || null, data.shipping_contact_name, data.shipping_address, data.shipping_city,
       data.shipping_province, data.shipping_reference || null, data.shipping_phone || null, data.shipping_cellphone || null,
-      data.shipping_delivery_hours || null, data.operating_permit_status || null, driveFolderId,
+      data.shipping_delivery_hours || null, data.operating_permit_status || null, data.participates_public_procurement === true, data.public_process_codes || null, driveFolderId,
       fileIds.legal_rep_appointment_file_id || null, fileIds.ruc_file_id || null, fileIds.id_file_id || null, fileIds.bpadt_certification_file_id || null, fileIds.operating_permit_file_id || null,
       fileIds.consent_evidence_file_id || null, lopdpConsentMethod, lopdpConsentDetails,
       lopdpConsentAt, null, null, consentEmailTokenId || null
@@ -2363,7 +2491,7 @@ async function listClientRequests({ page = 1, pageSize = 25, status, q, createdB
   const offset = (page - 1) * pageSize;
   const params = [];
   let whereClause = "WHERE 1=1";
-  if (status) {
+  if (status && status !== "all") {
     params.push(status);
     whereClause += ` AND status = $${params.length}`;
   }
@@ -2412,6 +2540,7 @@ async function getClientRequestSummary({ createdBy } = {}) {
 }
 
 async function getClientRequestById(id, user) {
+  await ensureClientRequestFileColumns();
   if (!id || !user) throw new Error("ID de solicitud y usuario son obligatorios.");
   const { rows } = await db.query(
     `SELECT cr.*, COALESCE(
@@ -2436,17 +2565,99 @@ async function getClientRequestById(id, user) {
     error.status = 404;
     throw error;
   }
-  const allowedRoles = ["backoffice_comercial", "gerencia"];
-  const isAllowed = allowedRoles.includes(user.role) || request.created_by === user.email;
+  const allowedRoles = ["backoffice_comercial", "gerencia", "calidad", "jefe_calidad"];
+  const userRole = normalizeRole(user.role);
+  const isAllowed = allowedRoles.includes(userRole) || request.created_by === user.email;
   if (!isAllowed) {
     const error = new Error("Acceso denegado a esta solicitud.");
     error.status = 403;
     throw error;
   }
+  const qualityChecks = await getClientRequestQualityChecks(request.id);
+  const qualityChecklist = buildQualityChecklistState(request, qualityChecks);
   return {
     ...request,
     attachments: getClientRequestAttachments(request),
+    quality_checklist: qualityChecklist,
   };
+}
+
+async function updateClientRequestQualityChecklist({ id, user, item_key, status, notes }) {
+  await ensureClientRequestFileColumns();
+  const role = normalizeRole(user?.role);
+  if (!isQualityReviewer(role)) {
+    const error = new Error("Solo calidad puede validar el checklist de esta solicitud.");
+    error.status = 403;
+    throw error;
+  }
+  const normalizedStatus = String(status || "").trim().toLowerCase();
+  if (!QUALITY_CHECK_STATUS.has(normalizedStatus)) {
+    const error = new Error("Estado de checklist inválido.");
+    error.status = 400;
+    throw error;
+  }
+  const normalizedKey = String(item_key || "").trim();
+  if (!normalizedKey) {
+    const error = new Error("Debes enviar el item_key del checklist.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { rows } = await db.query("SELECT * FROM client_requests WHERE id = $1 LIMIT 1", [id]);
+  const request = rows[0];
+  if (!request) {
+    const error = new Error("Solicitud no encontrada.");
+    error.status = 404;
+    throw error;
+  }
+  if (!isSubDistributorRequest(request)) {
+    const error = new Error("El checklist de calidad aplica solo para clientes sub distribuidor.");
+    error.status = 400;
+    throw error;
+  }
+
+  const itemDefinition = getSubDistributorChecklistItems(request).find((entry) => entry.key === normalizedKey);
+  if (!itemDefinition) {
+    const error = new Error("Item de checklist no reconocido para esta solicitud.");
+    error.status = 400;
+    throw error;
+  }
+  if (itemDefinition.required && normalizedStatus === "not_applicable") {
+    const error = new Error("No puedes marcar como N/A un item obligatorio.");
+    error.status = 400;
+    throw error;
+  }
+
+  await db.query(
+    `
+      INSERT INTO client_request_quality_checks (
+        client_request_id, item_key, status, notes,
+        validated_by_user_id, validated_by_email, validated_by_role, validated_at, updated_at
+      )
+      VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),NOW())
+      ON CONFLICT (client_request_id, item_key)
+      DO UPDATE SET
+        status = EXCLUDED.status,
+        notes = EXCLUDED.notes,
+        validated_by_user_id = EXCLUDED.validated_by_user_id,
+        validated_by_email = EXCLUDED.validated_by_email,
+        validated_by_role = EXCLUDED.validated_by_role,
+        validated_at = NOW(),
+        updated_at = NOW()
+    `,
+    [
+      id,
+      normalizedKey,
+      normalizedStatus,
+      notes ? String(notes).trim() : null,
+      user?.id || null,
+      user?.email || null,
+      role,
+    ],
+  );
+
+  const qualityChecks = await getClientRequestQualityChecks(id);
+  return buildQualityChecklistState(request, qualityChecks);
 }
 
 async function processClientRequest({ id, user, action, rejection_reason }) {
@@ -2467,6 +2678,20 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
     const error = new Error("No se puede aprobar una solicitud sin el consentimiento LOPDP del cliente.");
     error.status = 400;
     throw error;
+  }
+  if (newStatus === "approved" && isSubDistributorRequest(request)) {
+    const qualityChecks = await getClientRequestQualityChecks(request.id);
+    const qualityChecklist = buildQualityChecklistState(request, qualityChecks);
+    if (qualityChecklist.summary.required_pending > 0) {
+      const error = new Error("Calidad debe validar todo el checklist antes de aprobar.");
+      error.status = 400;
+      throw error;
+    }
+    if (qualityChecklist.summary.has_inconsistent) {
+      const error = new Error("La solicitud tiene inconsistencias marcadas por calidad. Solo se puede rechazar.");
+      error.status = 400;
+      throw error;
+    }
   }
   const approvalStatus = newStatus === 'approved' ? 'aprobado' : 'rechazado';
   const approvedBy = newStatus === 'approved' ? user?.id || null : null;
@@ -2707,7 +2932,8 @@ async function updateClientRequest(id, user, rawData = {}, rawFiles = {}) {
     "legal_rep_name", "legal_rep_position", "legal_rep_id_document", "legal_rep_cellphone",
     "legal_rep_email", "shipping_contact_name", "shipping_address", "shipping_city",
     "shipping_province", "shipping_reference", "shipping_phone", "shipping_cellphone",
-    "shipping_delivery_hours", "operating_permit_status"
+    "shipping_delivery_hours", "operating_permit_status",
+    "participates_public_procurement", "public_process_codes",
   ];
 
   if (fileIds.legal_rep_appointment_file_id) fieldsToUpdate.push("legal_rep_appointment_file_id");
@@ -2790,6 +3016,7 @@ module.exports = {
   listClientRequests,
   getClientRequestSummary,
   getClientRequestById,
+  updateClientRequestQualityChecklist,
   processClientRequest,
   grantConsent,
   sendConsentEmailToken,

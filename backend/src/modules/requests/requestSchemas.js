@@ -167,6 +167,8 @@ module.exports = {
         ],
       },
       shipping_cellphone: { type: "string", minLength: 6 },
+      participates_public_procurement: { type: "boolean" },
+      public_process_codes: { type: "string" },
       has_specific_delivery_schedule: { type: "boolean" },
       shipping_delivery_start_time: { type: "string", pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$" },
       shipping_delivery_end_time: { type: "string", pattern: "^([01]\\d|2[0-3]):([0-5]\\d)$" },

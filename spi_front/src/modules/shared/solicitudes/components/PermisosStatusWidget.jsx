@@ -2,13 +2,13 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   FiClock,
   FiCheck,
-  FiX,
   FiFileText,
   FiDownload,
   FiAlertCircle,
   FiUpload,
   FiEye,
   FiUsers,
+  FiShield,
 } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import Card from "../../../../core/ui/components/Card";
@@ -60,6 +60,9 @@ const PermisosStatusWidget = () => {
   const isGerencia = gerenciaGeneralRoles.has(role) || gerenciaGeneralRoles.has(scope);
   const isApprover = isJefe || isGerencia;
   const isTalentRole = ["talento_humano", "jefe_talento_humano", "talento-humano", "jefe_financiero", "jefe_finanzas"].includes(scope);
+  const showAdvancedSignatureWidget = roleCandidates.some((candidate) =>
+    ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
+  );
 
   const [activeTab, setActiveTab] = useState("mine");
   const [misSolicitudes, setMisSolicitudes] = useState([]);
@@ -354,6 +357,13 @@ const PermisosStatusWidget = () => {
       : solicitud.observaciones
       ? [solicitud.observaciones]
       : [];
+    const signatureSummary = solicitud.firma_avanzada_resumen || null;
+    const signatureStatusColor =
+      signatureSummary?.estado === "completa"
+        ? "text-emerald-700 border-emerald-200 bg-emerald-50"
+        : signatureSummary?.estado === "parcial"
+        ? "text-amber-700 border-amber-200 bg-amber-50"
+        : "text-slate-600 border-slate-200 bg-slate-50";
 
     return (
       <motion.div
@@ -503,6 +513,45 @@ const PermisosStatusWidget = () => {
               <FiDownload className="w-3 h-3" />
               Descargar F.RH-10
             </a>
+          </div>
+        )}
+
+        {showAdvancedSignatureWidget && signatureSummary && (
+          <div className={`rounded-lg border p-2 mt-2 ${signatureStatusColor}`}>
+            <p className="text-xs font-semibold mb-1.5 flex items-center gap-1">
+              <FiShield className="w-3 h-3" />
+              Firma avanzada workflow ({signatureSummary.estado || "pendiente"})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+              <div>
+                <p className="font-semibold">Solicitante</p>
+                <p>
+                  {signatureSummary.solicitud_firmada
+                    ? `${signatureSummary.solicitud?.signer_name || "Firmado"} · ${formatDateTime(
+                        signatureSummary.solicitud?.signed_at
+                      )}`
+                    : "Pendiente"}
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold">Aprobacion</p>
+                <p>
+                  {signatureSummary.aprobacion_firmada
+                    ? `${signatureSummary.aprobacion?.signer_name || "Firmado"} · ${formatDateTime(
+                        signatureSummary.aprobacion?.signed_at
+                      )}`
+                    : "Pendiente"}
+                </p>
+              </div>
+              {signatureSummary.aprobacion?.payload_hash_sha256 && (
+                <div className="sm:col-span-2">
+                  <p className="font-semibold">SHA-256</p>
+                  <p className="font-mono break-all">
+                    {String(signatureSummary.aprobacion.payload_hash_sha256).slice(0, 20)}...
+                  </p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 

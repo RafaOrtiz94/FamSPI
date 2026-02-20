@@ -1,26 +1,15 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { FiRefreshCw } from "react-icons/fi";
-import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
-import { getClientRequests, getRequestById } from "../../../core/api/requestsApi";
-import { getDocumentsByRequest } from "../../../core/api/documentsApi";
-import { getFilesByRequest } from "../../../core/api/filesApi";
+import { getClientRequests } from "../../../core/api/requestsApi";
 import { useNavigate } from "react-router-dom";
-import RequestDetailModal from "../../comercial/components/RequestDetailModal";
 
 const ClientRequests = () => {
-  const { showToast } = useUI();
   const navigate = useNavigate();
   const [filters, setFilters] = useState({ q: "", status: "pending_approval" });
   const { data, loading, execute: fetchRequests } = useApi(getClientRequests, {
     errorMsg: "Error al cargar las solicitudes de clientes",
-  });
-  const [detail, setDetail] = useState({
-    open: false,
-    loading: false,
-    data: null,
-    error: null,
   });
 
   const loadRequests = useCallback(async () => {
@@ -36,44 +25,8 @@ const ClientRequests = () => {
     setFilters((prev) => ({ ...prev, [name]: value }));
   };
 
-  const handleViewDetails = async (req) => {
-    setDetail({ open: true, loading: true, data: null, error: null });
-    try {
-      const requestResponse = await getRequestById(req.id);
-      const documents = await getDocumentsByRequest(req.id);
-      const files = await getFilesByRequest(req.id);
-
-      const normalizedRequest =
-        requestResponse?.request || requestResponse || {};
-      let payload = normalizedRequest.payload;
-      if (typeof payload === "string") {
-        try {
-          payload = JSON.parse(payload);
-        } catch {
-          payload = {};
-        }
-      }
-      payload = payload || {};
-
-      setDetail({
-        open: true,
-        loading: false,
-        data: {
-          request: { ...normalizedRequest, payload },
-          documents: documents || [],
-          files: files || [],
-        },
-        error: null,
-      });
-    } catch (error) {
-      console.error("No se pudieron cargar los detalles:", error);
-      setDetail({
-        open: true,
-        loading: false,
-        data: null,
-        error: "No se pudo cargar el detalle de la solicitud",
-      });
-    }
+  const handleViewDetails = (req) => {
+    navigate(`/dashboard/backoffice/client-request/${req.id}`);
   };
 
   const requests = data?.rows || [];
@@ -179,12 +132,6 @@ const ClientRequests = () => {
           </table>
         </div>
       </motion.div>
-      <RequestDetailModal
-        detail={detail}
-        onClose={() =>
-          setDetail({ open: false, loading: false, data: null, error: null })
-        }
-      />
     </>
   );
 };

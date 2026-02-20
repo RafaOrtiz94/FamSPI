@@ -16,6 +16,7 @@ const ClientApprovalsWidget = () => {
   const [requests, setRequests] = useState([]);
   const [approvedRequests, setApprovedRequests] = useState([]);
   const [approvedDetails, setApprovedDetails] = useState({});
+  const [pendingDetails, setPendingDetails] = useState({});
   const [loading, setLoading] = useState(false);
   const [loadingApproved, setLoadingApproved] = useState(false);
   const [rejectContext, setRejectContext] = useState({
@@ -28,7 +29,16 @@ const ClientApprovalsWidget = () => {
     setLoading(true);
     try {
       const data = await getClientRequests({ page: 1, pageSize: 4, status: "pending_approval" });
-      setRequests(data.rows || data || []);
+      const rows = data.rows || data || [];
+      setRequests(rows);
+      const details = await Promise.all(
+        rows.map((req) => getClientRequestById(req.id).catch(() => null))
+      );
+      const detailMap = {};
+      details.forEach((detail, index) => {
+        if (detail) detailMap[rows[index]?.id] = detail;
+      });
+      setPendingDetails(detailMap);
     } catch (error) {
       console.error(error);
       showToast("No pudimos cargar las solicitudes pendientes", "error");
@@ -178,7 +188,12 @@ const ClientApprovalsWidget = () => {
         </div>
       ) : (
         <div className="space-y-4">
-          {requests.map((req) => (
+          {requests.map((req) => {
+            const detail = pendingDetails[req.id];
+            const isSubDistributor = String(detail?.client_type || "").toLowerCase() === "sub_distribuidor";
+            const canApproveByQuality = detail?.quality_checklist?.summary?.can_backoffice_approve !== false;
+            const approveBlocked = isSubDistributor && !canApproveByQuality;
+            return (
             <div
               key={req.id}
               className="rounded-none border border-gray-200 border-x-0 px-4 py-3 bg-white shadow-none transition-all duration-200 sm:rounded-xl sm:border sm:shadow-sm sm:hover:shadow-md"
@@ -223,6 +238,8 @@ const ClientApprovalsWidget = () => {
                     variant="success"
                     leftIcon={<FiCheck />}
                     loading={processingId === `approve-${req.id}`}
+                    disabled={approveBlocked}
+                    title={approveBlocked ? "Bloqueado por checklist de calidad (pendientes o inconsistencias)." : "Aprobar"}
                     onClick={() => handleProcess(req.id, "approve")}
                   >
                     Aprobar
@@ -240,7 +257,8 @@ const ClientApprovalsWidget = () => {
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

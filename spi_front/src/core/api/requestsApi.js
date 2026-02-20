@@ -217,6 +217,15 @@ export const processClientRequest = async (id, action, rejection_reason) => {
   return response.data?.data || response.data;
 };
 
+export const updateClientRequestQualityChecklist = async (id, { item_key, status, notes } = {}) => {
+  const response = await api.put(`/requests/new-client/${id}/quality-checklist`, {
+    item_key,
+    status,
+    notes,
+  });
+  return response.data?.data || response.data;
+};
+
 /** Actualizar solicitud de nuevo cliente (correccion) */
 export const updateClientRequest = async (id, formData = {}, files = {}) => {
   const data = new FormData();

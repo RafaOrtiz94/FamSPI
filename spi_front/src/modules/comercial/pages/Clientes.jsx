@@ -61,6 +61,11 @@ const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
 const VISIT_ALLOWED_ROLES = new Set([...FULL_ACCESS_ROLES, ...ADVISOR_ROLES]);
 const BACKOFFICE_PANEL_ROLES = new Set(["backoffice", "backoffice_comercial"]);
 const ACP_COMMERCIAL_ROLES = new Set(["acp_comercial"]);
+const CHECKIN_CARDS_HIDDEN_ROLES = new Set([
+  "acp_comercial",
+  "backoffice_comercial",
+  "jefe_comercial",
+]);
 const ASSIGNABLE_ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
 
 const normalizeStatus = (status) => {
@@ -1138,6 +1143,8 @@ const ClientesPage = () => {
   };
 
   const showVisitFlow = canVisitClients;
+  const canSeeCheckInOutCards = showVisitFlow && !hasAnyRole(CHECKIN_CARDS_HIDDEN_ROLES);
+  const canSeeDailyManagedClients = showVisitFlow && roleTokens.includes("comercial");
 
   return (
     <div className="space-y-4 sm:space-y-6 pb-6 px-3 sm:px-0">
@@ -1293,6 +1300,7 @@ const ClientesPage = () => {
       {
         showVisitFlow && (
           <>
+            {canSeeCheckInOutCards && (
             <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
@@ -1348,8 +1356,10 @@ const ClientesPage = () => {
                 </div>
               )}
             </Card>
+            )}
 
-            {/* Widget: Clientes asignados / registrados por mí */}
+            {/* Widget: Clientes asignados / registrados por mí (solo comercial) */}
+            {canSeeDailyManagedClients && (
             <Card className="rounded-none border-x-0 p-4 shadow-none sm:rounded-3xl sm:border sm:p-5 sm:shadow-[0_15px_35px_rgba(15,23,42,0.08)] space-y-4">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
@@ -1469,6 +1479,7 @@ const ClientesPage = () => {
                 </p>
               )}
             </Card>
+            )}
           </>
         )
       }

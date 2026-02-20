@@ -43,9 +43,15 @@ const normalizePermisoRow = (row) => {
   };
 };
 
+const getRequestMeta = (req) => ({
+  ipAddress: req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || null,
+  userAgent: req.headers["user-agent"] || null,
+  sessionId: req.headers["x-session-id"] || req.body?.session_id || null,
+});
+
 async function create(req, res) {
   try {
-    const result = await permisosService.createSolicitud({ body: req.body, user: req.user });
+    const result = await permisosService.createSolicitud({ body: req.body, user: req.user, meta: getRequestMeta(req) });
     res.status(201).json({ ok: true, data: result });
   } catch (error) {
     console.error("Error creando solicitud:", error);
@@ -56,7 +62,7 @@ async function create(req, res) {
 async function aprobarParcial(req, res) {
   try {
     const { id } = req.params;
-    const result = await permisosService.aprobarParcial({ id: Number(id), approver: req.user });
+    const result = await permisosService.aprobarParcial({ id: Number(id), approver: req.user, meta: getRequestMeta(req) });
     res.json({ ok: true, data: result });
   } catch (error) {
     console.error("Error aprobando parcialmente:", error);
@@ -104,7 +110,7 @@ async function uploadJustificantes(req, res) {
 async function aprobarFinal(req, res) {
   try {
     const { id } = req.params;
-    const result = await permisosService.aprobarFinal({ id: Number(id), approver: req.user });
+    const result = await permisosService.aprobarFinal({ id: Number(id), approver: req.user, meta: getRequestMeta(req) });
     res.json({ ok: true, data: result });
   } catch (error) {
     console.error("Error aprobando finalmente:", error);
@@ -116,7 +122,7 @@ async function rechazar(req, res) {
   try {
     const { id } = req.params;
     const { observaciones } = req.body;
-    const result = await permisosService.rechazar({ id: Number(id), approver: req.user, observaciones });
+    const result = await permisosService.rechazar({ id: Number(id), approver: req.user, observaciones, meta: getRequestMeta(req) });
     res.json({ ok: true, data: result });
   } catch (error) {
     console.error("Error rechazando:", error);

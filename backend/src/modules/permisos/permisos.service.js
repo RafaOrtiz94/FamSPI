@@ -1,4 +1,5 @@
 const db = require("../../config/db");
+const crypto = require("crypto");
 const { logAction } = require("../../utils/audit");
 const { validatePermisoRequest } = require("./permisos.validation");
 const { generateFRH10 } = require("./permisos.pdf");
@@ -8,6 +9,12 @@ const logger = require("../../config/logger");
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const WORKFLOW_SIGNATURE_STAGES = {
+  SOLICITUD: "solicitud",
+  APROBACION_PARCIAL: "aprobacion_parcial",
+  APROBACION_FINAL: "aprobacion_final",
+  RECHAZO: "rechazo",
+};
 
 const ROLE_APPROVER = {
   comercial: "jefe_comercial",
@@ -166,6 +173,196 @@ async function getHistoricVacationBalance({ userId, userEmail, year }) {
   return 0;
 }
 
+function getRequestMeta(meta = {}) {
+  return {
+    ipAddress: meta?.ipAddress || null,
+    userAgent: meta?.userAgent || null,
+    sessionId: meta?.sessionId || null,
+  };
+}
+
+function stableStringify(input) {
+  if (input === null || input === undefined) return "";
+  if (Array.isArray(input)) return `[${input.map((item) => stableStringify(item)).join(",")}]`;
+  if (input instanceof Date) return input.toISOString();
+  if (typeof input === "object") {
+    return `{${Object.keys(input)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(input[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(input);
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+function buildSignatureSnapshot(solicitud = {}) {
+  return {
+    id: solicitud.id,
+    tipo_solicitud: solicitud.tipo_solicitud,
+    tipo_permiso: solicitud.tipo_permiso,
+    status: solicitud.status,
+    user_id: solicitud.user_id,
+    user_email: solicitud.user_email,
+    approver_user_id: solicitud.approver_user_id,
+    approver_email: solicitud.approver_email,
+    fecha_inicio: solicitud.fecha_inicio,
+    fecha_fin: solicitud.fecha_fin,
+    fecha_regreso: solicitud.fecha_regreso,
+    duracion_horas: solicitud.duracion_horas,
+    duracion_dias: solicitud.duracion_dias,
+    periodo_vacaciones: solicitud.periodo_vacaciones,
+    justificantes_urls: solicitud.justificantes_urls || [],
+    observaciones: solicitud.observaciones || [],
+    aprobacion_parcial_at: solicitud.aprobacion_parcial_at,
+    aprobacion_final_at: solicitud.aprobacion_final_at,
+    updated_at: solicitud.updated_at,
+  };
+}
+
+function buildWorkflowSignatureSummary(signatures = []) {
+  const byStage = signatures.reduce((acc, signature) => {
+    acc[signature.stage] = signature;
+    return acc;
+  }, {});
+  const solicitud = byStage[WORKFLOW_SIGNATURE_STAGES.SOLICITUD] || null;
+  const aprobacion =
+    byStage[WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL] ||
+    byStage[WORKFLOW_SIGNATURE_STAGES.RECHAZO] ||
+    byStage[WORKFLOW_SIGNATURE_STAGES.APROBACION_PARCIAL] ||
+    null;
+  const signedStages = Object.keys(byStage).length;
+
+  return {
+    estado: signedStages >= 2 ? "completa" : signedStages === 1 ? "parcial" : "pendiente",
+    signed_stages: signedStages,
+    solicitud_firmada: Boolean(solicitud),
+    aprobacion_firmada: Boolean(aprobacion),
+    solicitud,
+    aprobacion,
+    timeline: signatures,
+  };
+}
+
+async function getSignaturesBySolicitudIds(solicitudIds = []) {
+  if (!Array.isArray(solicitudIds) || solicitudIds.length === 0) return new Map();
+  const { rows } = await db.query(
+    `SELECT id, solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
+            signature_type, auth_method, consent_text, ip_address::text AS ip_address,
+            user_agent, session_id, payload_hash_sha256, previous_signature_hash_sha256,
+            signature_hash_sha256, signed_at, created_at
+       FROM permisos_vacaciones_firmas
+      WHERE solicitud_id = ANY($1)
+      ORDER BY signed_at ASC, id ASC`,
+    [solicitudIds]
+  );
+
+  const grouped = new Map();
+  rows.forEach((row) => {
+    if (!grouped.has(row.solicitud_id)) grouped.set(row.solicitud_id, []);
+    grouped.get(row.solicitud_id).push(row);
+  });
+  return grouped;
+}
+
+async function attachWorkflowSignatures(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const ids = rows.map((row) => row.id).filter(Boolean);
+  if (ids.length === 0) return rows;
+
+  const signaturesBySolicitud = await getSignaturesBySolicitudIds(ids);
+  return rows.map((row) => {
+    const signatures = signaturesBySolicitud.get(row.id) || [];
+    return {
+      ...row,
+      firmas_workflow: signatures,
+      firma_avanzada_resumen: buildWorkflowSignatureSummary(signatures),
+    };
+  });
+}
+
+async function recordWorkflowSignature({
+  solicitud,
+  stage,
+  actor,
+  meta = {},
+  consentText,
+}) {
+  if (!solicitud?.id || !actor?.id || !stage) return null;
+
+  const { rows: previousRows } = await db.query(
+    `SELECT signature_hash_sha256
+       FROM permisos_vacaciones_firmas
+      WHERE solicitud_id = $1
+      ORDER BY signed_at DESC, id DESC
+      LIMIT 1`,
+    [solicitud.id]
+  );
+
+  const previousSignatureHash = previousRows[0]?.signature_hash_sha256 || null;
+  const signedAtIso = new Date().toISOString();
+  const payloadHash = sha256Hex(stableStringify(buildSignatureSnapshot(solicitud)));
+  const signatureHash = sha256Hex(
+    stableStringify({
+      solicitud_id: solicitud.id,
+      stage,
+      signer_user_id: actor.id,
+      signer_email: actor.email || null,
+      signed_at: signedAtIso,
+      payload_hash_sha256: payloadHash,
+      previous_signature_hash_sha256: previousSignatureHash,
+    })
+  );
+
+  const actorName = getDisplayName(actor);
+  const actorRole = String(actor?.role || actor?.scope || actor?.rol || "").toLowerCase() || null;
+  const requestMeta = getRequestMeta(meta);
+
+  const { rows } = await db.query(
+    `INSERT INTO permisos_vacaciones_firmas (
+      solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
+      signature_type, auth_method, consent_text, ip_address, user_agent, session_id,
+      payload_hash_sha256, previous_signature_hash_sha256, signature_hash_sha256, signed_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,'advanced_electronic','oauth_corporate',$7,$8,$9,$10,$11,$12,$13,$14)
+    ON CONFLICT (solicitud_id, stage)
+    DO UPDATE SET
+      signer_user_id = EXCLUDED.signer_user_id,
+      signer_email = EXCLUDED.signer_email,
+      signer_name = EXCLUDED.signer_name,
+      signer_role = EXCLUDED.signer_role,
+      consent_text = EXCLUDED.consent_text,
+      ip_address = EXCLUDED.ip_address,
+      user_agent = EXCLUDED.user_agent,
+      session_id = EXCLUDED.session_id,
+      payload_hash_sha256 = EXCLUDED.payload_hash_sha256,
+      previous_signature_hash_sha256 = EXCLUDED.previous_signature_hash_sha256,
+      signature_hash_sha256 = EXCLUDED.signature_hash_sha256,
+      signed_at = EXCLUDED.signed_at,
+      updated_at = NOW()
+    RETURNING *`,
+    [
+      solicitud.id,
+      stage,
+      actor.id,
+      actor.email || null,
+      actorName,
+      actorRole,
+      consentText || `Firma avanzada ${stage} en permisos/vacaciones SPI`,
+      requestMeta.ipAddress,
+      requestMeta.userAgent,
+      requestMeta.sessionId,
+      payloadHash,
+      previousSignatureHash,
+      signatureHash,
+      signedAtIso,
+    ]
+  );
+
+  return rows[0] || null;
+}
+
 let tableReady = false;
 let tablePromise = null;
 
@@ -224,6 +421,38 @@ async function ensureTable() {
     await db.query(
       "ALTER TABLE permisos_vacaciones ADD CONSTRAINT permisos_vacaciones_subtipo_calamidad_check CHECK ((tipo_permiso = 'calamidad' AND subtipo_calamidad IS NOT NULL AND length(trim(subtipo_calamidad)) > 0) OR tipo_permiso != 'calamidad')"
     );
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS permisos_vacaciones_firmas (
+        id BIGSERIAL PRIMARY KEY,
+        solicitud_id BIGINT NOT NULL REFERENCES permisos_vacaciones(id) ON DELETE CASCADE,
+        stage TEXT NOT NULL,
+        signer_user_id INTEGER NOT NULL REFERENCES users(id),
+        signer_email TEXT,
+        signer_name TEXT NOT NULL,
+        signer_role TEXT,
+        signature_type TEXT NOT NULL DEFAULT 'advanced_electronic',
+        auth_method TEXT NOT NULL DEFAULT 'oauth_corporate',
+        consent_text TEXT,
+        ip_address INET,
+        user_agent TEXT,
+        session_id TEXT,
+        payload_hash_sha256 VARCHAR(64) NOT NULL,
+        previous_signature_hash_sha256 VARCHAR(64),
+        signature_hash_sha256 VARCHAR(64) NOT NULL,
+        signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        CONSTRAINT permisos_vacaciones_firmas_stage_check
+          CHECK (stage IN ('solicitud', 'aprobacion_parcial', 'aprobacion_final', 'rechazo')),
+        CONSTRAINT permisos_vacaciones_firmas_payload_hash_check
+          CHECK (payload_hash_sha256 ~ '^[a-f0-9]{64}$'),
+        CONSTRAINT permisos_vacaciones_firmas_signature_hash_check
+          CHECK (signature_hash_sha256 ~ '^[a-f0-9]{64}$'),
+        CONSTRAINT permisos_vacaciones_firmas_prev_hash_check
+          CHECK (previous_signature_hash_sha256 IS NULL OR previous_signature_hash_sha256 ~ '^[a-f0-9]{64}$'),
+        CONSTRAINT permisos_vacaciones_firmas_unique_stage UNIQUE (solicitud_id, stage)
+      );
+    `);
 
     tableReady = true;
   })();
@@ -235,7 +464,7 @@ async function ensureTable() {
   }
 }
 
-async function createSolicitud({ body, user }) {
+async function createSolicitud({ body, user, meta }) {
   await ensureTable();
   let requesterIdentity = null;
   if (user?.id) {
@@ -410,8 +639,20 @@ async function createSolicitud({ body, user }) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de solicitud");
   }
 
-  
-return rows[0];
+  try {
+    await recordWorkflowSignature({
+      solicitud: rows[0],
+      stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
+      actor: user,
+      meta,
+      consentText: "Confirmo la solicitud de permiso/vacaciones en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar firma avanzada en solicitud");
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
 }
 
 function canApprove({ approverRole, approverUserId, approver }) {
@@ -426,7 +667,7 @@ function canApprove({ approverRole, approverUserId, approver }) {
   return roleCandidates.includes(expected);
 }
 
-async function aprobarParcial({ id, approver }) {
+async function aprobarParcial({ id, approver, meta }) {
   await ensureTable();
   const existing = await db.query(
     `SELECT approver_role, approver_user_id, status, tipo_solicitud FROM permisos_vacaciones WHERE id = $1 LIMIT 1`,
@@ -472,7 +713,21 @@ async function aprobarParcial({ id, approver }) {
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar aprobaci?n parcial");
   }
-  return rows[0];
+
+  try {
+    await recordWorkflowSignature({
+      solicitud: rows[0],
+      stage: WORKFLOW_SIGNATURE_STAGES.APROBACION_PARCIAL,
+      actor: approver,
+      meta,
+      consentText: "Confirmo la aprobacion parcial de la solicitud en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar firma de aprobacion parcial");
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
 }
 
 async function subirJustificantes({ id, urls, user }) {
@@ -506,10 +761,11 @@ async function subirJustificantes({ id, urls, user }) {
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: id }, "No se pudo notificar justificantes");
   }
-  return rows[0];
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
 }
 
-async function aprobarFinal({ id, approver }) {
+async function aprobarFinal({ id, approver, meta }) {
   await ensureTable();
   const { rows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = rows[0];
@@ -563,10 +819,24 @@ async function aprobarFinal({ id, approver }) {
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: update.rows[0]?.id }, "No se pudo notificar aprobaci?n final");
   }
-  return update.rows[0];
+
+  try {
+    await recordWorkflowSignature({
+      solicitud: update.rows[0],
+      stage: WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL,
+      actor: approver,
+      meta,
+      consentText: "Confirmo la aprobacion final de la solicitud en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: update.rows[0]?.id }, "No se pudo registrar firma de aprobacion final");
+  }
+
+  const enriched = await attachWorkflowSignatures([update.rows[0]]);
+  return enriched[0] || update.rows[0];
 }
 
-async function rechazar({ id, approver, observaciones }) {
+async function rechazar({ id, approver, observaciones, meta }) {
   await ensureTable();
   const current = await db.query(`SELECT approver_role, approver_user_id FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
   const solicitud = current.rows[0];
@@ -610,7 +880,21 @@ async function rechazar({ id, approver, observaciones }) {
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar rechazo");
   }
-  return rows[0];
+
+  try {
+    await recordWorkflowSignature({
+      solicitud: rows[0],
+      stage: WORKFLOW_SIGNATURE_STAGES.RECHAZO,
+      actor: approver,
+      meta,
+      consentText: "Confirmo el rechazo de la solicitud en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar firma de rechazo");
+  }
+
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  return enriched[0] || rows[0];
 }
 
 async function listarPendientes({ stage, approver }) {
@@ -631,7 +915,7 @@ async function listarPendientes({ stage, approver }) {
       ORDER BY created_at DESC`,
     [statusFilter, approver?.id || null, roleCandidates]
   );
-  return rows;
+  return attachWorkflowSignatures(rows);
 }
 
 async function listarPorUsuario({ user }) {
@@ -654,7 +938,8 @@ async function listarPorUsuario({ user }) {
     { total: 0, status: {} }
   );
 
-  return { data: rows, summary };
+  const data = await attachWorkflowSignatures(rows);
+  return { data, summary };
 }
 
 async function getSolicitudById(id) {
@@ -663,7 +948,8 @@ async function getSolicitudById(id) {
     `SELECT * FROM permisos_vacaciones WHERE id = $1`,
     [id]
   );
-  return rows[0] || null;
+  const data = await attachWorkflowSignatures(rows);
+  return data[0] || null;
 }
 
 function calculateVacationDays(row) {

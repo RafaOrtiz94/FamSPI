@@ -445,6 +445,33 @@ exports.getClientRequestById = asyncHandler(async (req, res) => {
   });
 });
 
+exports.updateClientRequestQualityChecklist = asyncHandler(async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { item_key, status, notes } = req.body || {};
+  const result = await service.updateClientRequestQualityChecklist({
+    id,
+    user: req.user,
+    item_key,
+    status,
+    notes,
+  });
+
+  await logAction({
+    user_id: req.user.id,
+    module: "client_requests",
+    action: "quality_checklist_update",
+    entity: "client_requests",
+    entity_id: id,
+    details: { item_key, status },
+  });
+
+  res.json({
+    ok: true,
+    message: "Checklist de calidad actualizado.",
+    data: normalizeRequestDates(result),
+  });
+});
+
 // ============================================================
 // 🔄 Procesar Solicitud (Aprobar/Rechazar)
 // ============================================================

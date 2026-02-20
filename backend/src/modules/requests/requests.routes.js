@@ -68,6 +68,8 @@ router.get(
   requireRole([
     "backoffice_comercial",
     "gerencia",
+    "calidad",
+    "jefe_calidad",
     "comercial",
     "jefe_comercial",
     "acp_comercial",
@@ -84,6 +86,8 @@ router.get(
   requireRole([
     "backoffice_comercial",
     "gerencia",
+    "calidad",
+    "jefe_calidad",
     "comercial",
     "jefe_comercial",
     "acp_comercial",
@@ -97,8 +101,15 @@ router.get(
 router.get(
   "/new-client/:id",
   verifyToken,
-  requireRole(["backoffice_comercial", "gerencia", "comercial", "jefe_comercial"]),
+  requireRole(["backoffice_comercial", "gerencia", "calidad", "jefe_calidad", "comercial", "jefe_comercial"]),
   ctrl.getClientRequestById
+);
+
+router.put(
+  "/new-client/:id/quality-checklist",
+  verifyToken,
+  requireRole(["calidad", "jefe_calidad"]),
+  ctrl.updateClientRequestQualityChecklist,
 );
 
 // 🔄 PROCESAR SOLICITUD DE NUEVO CLIENTE (Aprobar/Rechazar)

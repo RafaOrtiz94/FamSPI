@@ -397,6 +397,8 @@ const AppRoutes = () => {
                 allowedRoles={[
                   "backoffice_comercial",
                   "gerencia",
+                  "calidad",
+                  "jefe_calidad",
                   "comercial",
                   "jefe_comercial",
                   "acp_comercial",
@@ -406,7 +408,21 @@ const AppRoutes = () => {
           >
             <Route path="/dashboard/backoffice/client-requests" element={<ClientRequests />} />
             <Route path="/dashboard/backoffice/client-request/:id" element={<ClientRequestReview />} />
-            <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+            <Route
+              element={(
+                <ProtectedRoute
+                  allowedRoles={[
+                    "backoffice_comercial",
+                    "gerencia",
+                    "comercial",
+                    "jefe_comercial",
+                    "acp_comercial",
+                  ]}
+                />
+              )}
+            >
+              <Route path="/dashboard/backoffice/private-purchases" element={<PrivatePurchasesPage />} />
+            </Route>
           </Route>
 
           {/* 🛒 Workspace de Compras Unificado */}

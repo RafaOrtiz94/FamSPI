@@ -3,8 +3,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import { FiArrowLeft, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
 import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
-import { getClientRequestById, processClientRequest } from "../../../core/api/requestsApi";
+import {
+  getClientRequestById,
+  processClientRequest,
+  updateClientRequestQualityChecklist,
+} from "../../../core/api/requestsApi";
 import Button from "../../../core/ui/components/Button";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const fieldLabels = {
   commercial_name: "Razón social",
@@ -62,6 +67,7 @@ const excludedFields = new Set([
   "approval_letter_file_id",
   "approval_status",
   "consent_history",
+  "quality_checklist",
 ]);
 
 const formatValue = (value) => {
@@ -76,11 +82,14 @@ const ClientRequestReview = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { showToast } = useUI();
+  const { user } = useAuth();
   const { data, loading, execute: fetchRequest } = useApi(getClientRequestById, {
     errorMsg: "No se pudo cargar la solicitud",
     transformResponse: (response) => response,
   });
   const [processing, setProcessing] = useState(null);
+  const [checklistDraft, setChecklistDraft] = useState({});
+  const [savingChecklistItem, setSavingChecklistItem] = useState(null);
   const fetchRequestRef = useRef(fetchRequest);
 
   useEffect(() => {
@@ -95,9 +104,30 @@ const ClientRequestReview = () => {
   const requestDetail = data?.data || data?.result || data?.payload || data || {};
   const payload = requestDetail?.payload || requestDetail?.data || requestDetail;
   const attachments = Array.isArray(requestDetail.attachments) ? requestDetail.attachments : [];
+  const qualityChecklist = requestDetail?.quality_checklist || { enabled: false, items: [], summary: {} };
+  const normalizedRole = String(user?.role || "").toLowerCase();
+  const canQualityReview = ["calidad", "jefe_calidad"].includes(normalizedRole);
+  const canBackofficeProcess = normalizedRole === "backoffice_comercial";
+  const isSubDistributor = String(requestDetail?.client_type || "").toLowerCase() === "sub_distribuidor";
+  const qualitySummary = qualityChecklist?.summary || {};
+  const approveBlockedByQuality = isSubDistributor && !qualitySummary.can_backoffice_approve;
+  const approveBlockMessage = qualitySummary.has_inconsistent
+    ? "Calidad marcó inconsistencias. Solo puedes rechazar."
+    : "Falta validación completa de calidad para aprobar.";
   const normalizedFields = Object.entries(requestDetail)
     .filter(([key, value]) => !excludedFields.has(key) && value !== null && value !== undefined)
     .map(([key, value]) => ({ key, value }));
+
+  useEffect(() => {
+    const nextDraft = {};
+    (qualityChecklist?.items || []).forEach((item) => {
+      nextDraft[item.key] = {
+        status: item.status || (item.required ? "pending" : "not_applicable"),
+        notes: item.notes || "",
+      };
+    });
+    setChecklistDraft(nextDraft);
+  }, [requestDetail?.id, qualityChecklist?.items]);
 
   const handleProcess = async (action) => {
     let reason;
@@ -116,6 +146,40 @@ const ClientRequestReview = () => {
       showToast("No se pudo procesar la solicitud", "error");
     } finally {
       setProcessing(null);
+    }
+  };
+
+  const handleChecklistDraftChange = (itemKey, patch) => {
+    setChecklistDraft((prev) => ({
+      ...prev,
+      [itemKey]: {
+        ...(prev[itemKey] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const handleSaveChecklistItem = async (item) => {
+    if (!canQualityReview) return;
+    const draft = checklistDraft[item.key] || {};
+    const nextStatus = draft.status || (item.required ? "pending" : "not_applicable");
+    setSavingChecklistItem(item.key);
+    try {
+      await updateClientRequestQualityChecklist(id, {
+        item_key: item.key,
+        status: nextStatus,
+        notes: draft.notes || "",
+      });
+      showToast("Checklist actualizado.", "success");
+      await refresh();
+    } catch (error) {
+      console.error(error);
+      showToast(
+        error?.response?.data?.message || "No se pudo actualizar el checklist",
+        "error",
+      );
+    } finally {
+      setSavingChecklistItem(null);
     }
   };
 
@@ -196,6 +260,107 @@ const ClientRequestReview = () => {
     );
   };
 
+  const qualityStatusStyles = {
+    pending: "bg-amber-100 text-amber-800",
+    valid: "bg-emerald-100 text-emerald-800",
+    inconsistent: "bg-rose-100 text-rose-800",
+    not_applicable: "bg-slate-100 text-slate-700",
+  };
+
+  const renderQualityChecklist = () => {
+    if (!isSubDistributor || !qualityChecklist?.enabled) return null;
+
+    const checklistItems = Array.isArray(qualityChecklist.items) ? qualityChecklist.items : [];
+    return (
+      <section className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-3">
+        <h2 className="text-lg font-semibold text-gray-900">Checklist de validación (Calidad)</h2>
+        <p className="text-sm text-gray-600">
+          Backoffice solo podrá aprobar cuando calidad haya validado todos los ítems obligatorios y no existan inconsistencias.
+        </p>
+        <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+          Obligatorios validados: {qualitySummary.required_reviewed || 0}/{qualitySummary.required_total || 0}
+          {" · "}Pendientes: {qualitySummary.required_pending || 0}
+          {" · "}Inconsistencias: {qualitySummary.has_inconsistent ? "Sí" : "No"}
+        </div>
+        <div className="space-y-3">
+          {checklistItems.map((item) => {
+            const draft = checklistDraft[item.key] || {};
+            const currentStatus = draft.status || item.status || (item.required ? "pending" : "not_applicable");
+            const availableStatuses = item.required
+              ? ["pending", "valid", "inconsistent"]
+              : ["not_applicable", "pending", "valid", "inconsistent"];
+            return (
+              <div key={item.key} className="rounded-xl border border-gray-100 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">{item.label}</p>
+                    <p className="text-xs text-gray-500">
+                      {item.required ? "Obligatorio" : "Opcional"}
+                      {item.evidence_file_id && (
+                        <>
+                          {" · "}
+                          <a
+                            href={item.evidence_link}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:underline"
+                          >
+                            Ver documento
+                          </a>
+                        </>
+                      )}
+                      {!item.evidence_file_id && item.evidence_value ? ` · ${item.evidence_value}` : ""}
+                    </p>
+                  </div>
+                  <span className={`px-2 py-1 rounded-full text-xs font-semibold ${qualityStatusStyles[item.status] || "bg-gray-100 text-gray-700"}`}>
+                    {String(item.status || "pending").replace(/_/g, " ")}
+                  </span>
+                </div>
+
+                <div className="mt-3 grid grid-cols-1 md:grid-cols-[180px_minmax(0,1fr)_auto] gap-2">
+                  <select
+                    value={currentStatus}
+                    disabled={!canQualityReview}
+                    onChange={(e) => handleChecklistDraftChange(item.key, { status: e.target.value })}
+                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  >
+                    {availableStatuses.map((status) => (
+                      <option key={status} value={status}>
+                        {status.replace(/_/g, " ")}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={draft.notes || ""}
+                    disabled={!canQualityReview}
+                    onChange={(e) => handleChecklistDraftChange(item.key, { notes: e.target.value })}
+                    placeholder="Notas de validación"
+                    className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                  {canQualityReview && (
+                    <Button
+                      variant="secondary"
+                      loading={savingChecklistItem === item.key}
+                      onClick={() => handleSaveChecklistItem(item)}
+                    >
+                      Guardar
+                    </Button>
+                  )}
+                </div>
+                {item.validated_at && (
+                  <p className="mt-2 text-[11px] text-gray-500">
+                    Última validación: {new Date(item.validated_at).toLocaleString()} por {item.validated_by_email || "calidad"}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -217,24 +382,36 @@ const ClientRequestReview = () => {
             <FiRefreshCw className={loading ? "animate-spin" : ""} />
             Actualizar
           </button>
-          <Button
-            variant="success"
-            leftIcon={<FiCheck />}
-            loading={processing === "approve"}
-            onClick={() => handleProcess("approve")}
-          >
-            Aprobar
-          </Button>
-          <Button
-            variant="danger"
-            leftIcon={<FiX />}
-            loading={processing === "reject"}
-            onClick={() => handleProcess("reject")}
-          >
-            Rechazar
-          </Button>
+          {canBackofficeProcess && (
+            <>
+              <Button
+                variant="success"
+                leftIcon={<FiCheck />}
+                loading={processing === "approve"}
+                disabled={approveBlockedByQuality}
+                onClick={() => handleProcess("approve")}
+                title={approveBlockedByQuality ? approveBlockMessage : "Aprobar"}
+              >
+                Aprobar
+              </Button>
+              <Button
+                variant="danger"
+                leftIcon={<FiX />}
+                loading={processing === "reject"}
+                onClick={() => handleProcess("reject")}
+              >
+                Rechazar
+              </Button>
+            </>
+          )}
         </div>
       </div>
+
+      {canBackofficeProcess && approveBlockedByQuality && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          {approveBlockMessage}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
@@ -257,6 +434,7 @@ const ClientRequestReview = () => {
               <Field label="Notas">{payload.notes || payload.observaciones || "—"}</Field>
             </div>
           </section>
+          {renderQualityChecklist()}
         </div>
         <div className="space-y-4">
           <section className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm space-y-3">

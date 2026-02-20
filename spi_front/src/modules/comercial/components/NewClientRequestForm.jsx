@@ -131,6 +131,8 @@ const initialFormState = {
   shipping_province: "",
   shipping_reference: "",
   shipping_cellphone: "",
+  participates_public_procurement: false,
+  public_process_codes: "",
   has_specific_delivery_schedule: false,
   shipping_delivery_start_time: "",
   shipping_delivery_end_time: "",
@@ -326,6 +328,9 @@ const NewClientRequestForm = ({
         nextState.shipping_delivery_start_time = "";
         nextState.shipping_delivery_end_time = "";
         nextState.shipping_delivery_hours = "";
+      }
+      if (name === "participates_public_procurement" && !nextValue) {
+        nextState.public_process_codes = "";
       }
 
       // Si el sector es público, siempre debe ser persona jurídica
@@ -953,6 +958,34 @@ const NewClientRequestForm = ({
               required
               error={errors.client_email}
             />
+            {isSubDistributor && (
+              <div className="md:col-span-2 rounded-xl border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-900/40">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+                  <input
+                    type="checkbox"
+                    name="participates_public_procurement"
+                    checked={Boolean(formData.participates_public_procurement)}
+                    onChange={handleChange}
+                    className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  Participa en compras públicas
+                </label>
+                <p className="mt-2 text-xs text-gray-600 dark:text-gray-300">
+                  Los códigos de proceso son opcionales. Si participa en compras públicas, calidad podrá validarlos desde checklist.
+                </p>
+                {formData.participates_public_procurement && (
+                  <div className="mt-3">
+                    <TextAreaField
+                      name="public_process_codes"
+                      label="Código(s) de proceso (opcional)"
+                      value={formData.public_process_codes}
+                      onChange={handleChange}
+                      rows={3}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
           </Section>
         )}
 

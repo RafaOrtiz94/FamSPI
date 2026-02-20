@@ -171,6 +171,12 @@ const solicitudesTalentoLink = {
   path: "/dashboard/talento-humano/solicitudes",
 };
 
+const clientRequestsReviewLink = {
+  name: "Solicitudes Cliente",
+  icon: FiClipboard,
+  path: "/dashboard/backoffice/client-requests",
+};
+
 const viaticosLink = {
   name: "Workspace Viaticos",
   icon: FiDollarSign,
@@ -357,7 +363,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
   // ðŸŽ¨ CALIDAD - Control de calidad
   else if (["calidad", "jefe_calidad"].includes(scope)) {
-    groups.primary.push(solicitudesTalentoLink, permisosLink);
+    groups.primary.push(clientRequestsReviewLink, solicitudesTalentoLink, permisosLink);
     if (auditActive) groups.primary.push(auditPrepLink);
   }
 
