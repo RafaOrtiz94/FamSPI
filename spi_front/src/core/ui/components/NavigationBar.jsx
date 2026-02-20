@@ -356,9 +356,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
   // 📦 LOGISTICA - Despachos y actas
   else if (["logistica", "jefe_logistica"].includes(scope)) {
     groups.primary.push(logisticaPurchasesLink);
-    if (scope === "jefe_logistica") {
-      groups.primary.push(permisosLink);
-    }
+    groups.primary.push(permisosLink);
   }
 
   // ðŸŽ¨ CALIDAD - Control de calidad

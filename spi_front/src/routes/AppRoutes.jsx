@@ -139,6 +139,7 @@ const AppRoutes = () => {
               "admin_ti",
               "operaciones",
               "jefe_operaciones",
+              "logistica",
               "jefe_logistica",
               "calidad",
               "jefe_calidad",
