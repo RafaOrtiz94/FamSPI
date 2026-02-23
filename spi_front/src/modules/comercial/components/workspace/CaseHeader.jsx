@@ -3,6 +3,39 @@ import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTri
 import Card from "../../../../core/ui/components/Card";
 import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
 
+const resolvePurchaseOrigin = (bcPurchaseType, metadata = {}) => {
+  const normalizedType = String(bcPurchaseType || "").toLowerCase();
+  const sourceModule = String(metadata?.source_module || "").toLowerCase();
+
+  if (normalizedType.includes("pub") || normalizedType.includes("publico")) return "publica";
+  if (normalizedType.includes("priv")) return "privada";
+  if (sourceModule.includes("equipment_purchases")) return "publica";
+  if (sourceModule.includes("private_purchases")) return "privada";
+  return "no_definida";
+};
+
+const resolveInitiator = (guidance = {}) => {
+  const bc = guidance?.businessCase || {};
+  const name =
+    guidance?.created_by_name ||
+    guidance?.createdByName ||
+    bc?.created_by_name ||
+    bc?.createdByName ||
+    guidance?.modern_bc_metadata?.created_by_name ||
+    guidance?.modern_bc_metadata?.createdByName ||
+    null;
+  const email =
+    guidance?.created_by_email ||
+    guidance?.createdByEmail ||
+    bc?.created_by_email ||
+    bc?.createdByEmail ||
+    guidance?.modern_bc_metadata?.created_by_email ||
+    guidance?.modern_bc_metadata?.createdByEmail ||
+    null;
+  const id = guidance?.created_by || guidance?.createdBy || bc?.created_by || bc?.createdBy || null;
+  return name || email || (id ? `Usuario ${id}` : "No disponible");
+};
+
 const CaseHeader = ({ uiGuidance, onRefresh }) => {
   const workspace = useBusinessCaseWorkspaceOptional();
   const resolvedGuidance = uiGuidance || workspace?.uiGuidance || null;
@@ -57,6 +90,22 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
     return Math.min(100, Math.round((completed / required) * 100));
   }, [preflow?.completedRequiredSections?.length, preflow?.requiredSections?.length]);
 
+  const purchaseOrigin = useMemo(
+    () => resolvePurchaseOrigin(resolvedGuidance?.bc_purchase_type, resolvedGuidance?.modern_bc_metadata),
+    [resolvedGuidance?.bc_purchase_type, resolvedGuidance?.modern_bc_metadata],
+  );
+  const purchaseOriginBadge = purchaseOrigin === "publica"
+    ? "bg-emerald-100 text-emerald-800"
+    : purchaseOrigin === "privada"
+      ? "bg-indigo-100 text-indigo-800"
+      : "bg-slate-100 text-slate-700";
+  const purchaseOriginLabel = purchaseOrigin === "publica"
+    ? "Compra publica"
+    : purchaseOrigin === "privada"
+      ? "Compra privada"
+      : "Origen no definido";
+  const initiatorLabel = useMemo(() => resolveInitiator(resolvedGuidance), [resolvedGuidance]);
+
   return (
     <Card className="p-4 sm:p-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 sm:gap-6">
@@ -70,6 +119,9 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
             <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${currentStateDisplay.color}`}>
               <currentStateDisplay.icon size={14} />
               {currentStateDisplay.label}
+            </div>
+            <div className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs sm:text-sm font-semibold ${purchaseOriginBadge}`}>
+              {purchaseOriginLabel}
             </div>
           </div>
 
@@ -86,6 +138,10 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
             <div className="flex items-center gap-2">
               <FiAlertTriangle className="text-gray-600" />
               <span>{completionSummary?.pendingSections ?? 0} pendientes</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <FiFileText className="text-slate-600" />
+              <span>Iniciado por: {initiatorLabel}</span>
             </div>
             {preflow?.isActive && (
               <div className={`flex items-center gap-2 ${preflow?.isExpired ? "text-rose-700" : "text-indigo-700"}`}>

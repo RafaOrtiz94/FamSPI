@@ -525,12 +525,24 @@ async function createBusinessCase(data, user) {
     }
   });
 
-  const bcResult = await db.query(`SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`, [returnedId]);
+  const bcResult = await db.query(
+    `SELECT vc.*, u.fullname AS created_by_name, u.email AS created_by_email
+       FROM v_business_cases_complete vc
+       LEFT JOIN users u ON u.id = vc.created_by
+      WHERE vc.business_case_id = $1`,
+    [returnedId],
+  );
   return mapBusinessCase(bcResult.rows[0]);
 }
 
 async function getBusinessCaseById(id) {
-  const { rows } = await db.query(`SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`, [id]);
+  const { rows } = await db.query(
+    `SELECT vc.*, u.fullname AS created_by_name, u.email AS created_by_email
+       FROM v_business_cases_complete vc
+       LEFT JOIN users u ON u.id = vc.created_by
+      WHERE vc.business_case_id = $1`,
+    [id],
+  );
   if (!rows.length) {
     const error = new Error("Business Case no encontrado");
     error.status = 404;
@@ -591,34 +603,37 @@ async function listBusinessCases(filters = {}) {
   // Fix: Convert dates to ISO strings to prevent {} serialization
   const query = `
     SELECT
-      business_case_id,
-      client_name,
-      client_id,
-      bc_purchase_type,
-      status,
-      bc_stage,
-      bc_progress,
-      bc_duration_years,
-      bc_equipment_cost,
-      bc_target_margin_percentage,
-      bc_calculation_mode,
-      bc_show_roi,
-      bc_show_margin,
-      assigned_to_email,
-      assigned_to_name,
-      drive_folder_id,
-      extra,
-      modern_bc_metadata,
-      CASE WHEN created_at IS NOT NULL THEN created_at::text ELSE NULL END as created_at,
-      CASE WHEN updated_at IS NOT NULL THEN updated_at::text ELSE NULL END as updated_at,
-      created_by,
-      CASE WHEN bc_created_at IS NOT NULL THEN bc_created_at::text ELSE NULL END as bc_created_at,
-      uses_modern_system,
-      bc_system_type,
+      v.business_case_id,
+      v.client_name,
+      v.client_id,
+      v.bc_purchase_type,
+      v.status,
+      v.bc_stage,
+      v.bc_progress,
+      v.bc_duration_years,
+      v.bc_equipment_cost,
+      v.bc_target_margin_percentage,
+      v.bc_calculation_mode,
+      v.bc_show_roi,
+      v.bc_show_margin,
+      v.assigned_to_email,
+      v.assigned_to_name,
+      v.drive_folder_id,
+      v.extra,
+      v.modern_bc_metadata,
+      CASE WHEN v.created_at IS NOT NULL THEN v.created_at::text ELSE NULL END as created_at,
+      CASE WHEN v.updated_at IS NOT NULL THEN v.updated_at::text ELSE NULL END as updated_at,
+      v.created_by,
+      u.fullname AS created_by_name,
+      u.email AS created_by_email,
+      CASE WHEN v.bc_created_at IS NOT NULL THEN v.bc_created_at::text ELSE NULL END as bc_created_at,
+      v.uses_modern_system,
+      v.bc_system_type,
       COUNT(*) OVER() AS total_count
-    FROM v_business_cases
+    FROM v_business_cases v
+    LEFT JOIN users u ON u.id = v.created_by
     ${whereClause}
-    ORDER BY created_at DESC
+    ORDER BY v.created_at DESC
     LIMIT $${params.length - 1} OFFSET $${params.length}
   `;
 

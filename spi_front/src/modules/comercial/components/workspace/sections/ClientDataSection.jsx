@@ -32,6 +32,20 @@ const getClientLabel = (client) =>
   client?.id ||
   "Cliente";
 
+const normalizeClientType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["persona_natural", "natural", "pn"].includes(normalized)) return "persona_natural";
+  if (["persona_juridica", "juridica", "jurídica", "pj", "sub_distribuidor"].includes(normalized)) {
+    return "persona_juridica";
+  }
+  return "";
+};
+
+const isPublicPurchaseType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized.includes("public");
+};
+
 const AccordionSection = ({
   id,
   title,
@@ -94,6 +108,10 @@ const ClientDataSection = ({
 
   // Explicit state for selected client to handle async reconciliation
   const [selectedClient, setSelectedClient] = useState(null);
+  const fallbackBusinessCase = uiGuidance?.businessCase || {};
+  const bcPurchaseType = businessCase?.bc_purchase_type || fallbackBusinessCase?.bc_purchase_type || "";
+  const startedAsPublic = isPublicPurchaseType(bcPurchaseType);
+  const originLabel = startedAsPublic ? "Compra publica" : "Compra privada";
 
   // FIX: Initialize form with empty values - don't set client ID until options are loaded
   const initializeForm = () => {
@@ -103,7 +121,6 @@ const ClientDataSection = ({
 
     try {
       // Initialize form with empty/default values (don't set client ID yet)
-      const fallbackBusinessCase = uiGuidance?.businessCase || {};
       const metadata =
         businessCase?.modern_bc_metadata ||
         fallbackBusinessCase?.modern_bc_metadata ||
@@ -114,10 +131,14 @@ const ClientDataSection = ({
           fallbackBusinessCase?.client_name ||
           "",
         clientType:
-          businessCase?.clientType ||
-          fallbackBusinessCase?.clientType ||
-          metadata.clientType ||
-          "",
+          startedAsPublic
+            ? "persona_juridica"
+            : normalizeClientType(
+                businessCase?.clientType ||
+                fallbackBusinessCase?.clientType ||
+                metadata.clientType ||
+                "",
+              ),
         contractingEntity:
           businessCase?.contractingEntity ||
           fallbackBusinessCase?.contractingEntity ||
@@ -171,6 +192,7 @@ const ClientDataSection = ({
 
   const [naFields, setNaFields] = useState({});
   const watchClient = watch("client");
+  const watchClientType = watch("clientType");
   const [openSections, setOpenSections] = useState(() =>
     SECTION_ORDER.reduce((acc, id) => {
       acc[id] = id === "general";
@@ -329,8 +351,12 @@ const ClientDataSection = ({
     const naClientType = Boolean(naFields.clientType);
     const naProvinceCity = Boolean(naFields.provinceCity);
 
+    if (startedAsPublic) {
+      setValue("clientType", "persona_juridica", { shouldDirty: true });
+    }
+
     if (!selectedClient) {
-      if (!naClientType) setValue("clientType", "", { shouldDirty: true });
+      if (!naClientType && !startedAsPublic) setValue("clientType", "", { shouldDirty: true });
       if (!naProvinceCity) setValue("provinceCity", "", { shouldDirty: true });
       return;
     }
@@ -339,13 +365,22 @@ const ClientDataSection = ({
       .filter(Boolean)
       .join(", ");
 
-    if (!naClientType) {
-      setValue("clientType", selectedClient?.client_type || "", { shouldDirty: true });
+    if (!naClientType && !startedAsPublic) {
+      setValue(
+        "clientType",
+        normalizeClientType(
+          selectedClient?.client_type ||
+          selectedClient?.person_type ||
+          selectedClient?.tipo_persona ||
+          watchClientType,
+        ),
+        { shouldDirty: true },
+      );
     }
     if (!naProvinceCity) {
       setValue("provinceCity", provinceCity || "", { shouldDirty: true });
     }
-  }, [selectedClient, setValue, naFields.clientType, naFields.provinceCity]);
+  }, [selectedClient, setValue, naFields.clientType, naFields.provinceCity, startedAsPublic, watchClientType]);
 
   const handleSave = async (formData) => {
     if (!bcId) {
@@ -357,9 +392,13 @@ const ClientDataSection = ({
     const client_name = selected ? getClientLabel(selected) : String(formData.client || "").trim();
     const client_id = selected?.id && Number.isFinite(Number(selected.id)) ? Number(selected.id) : undefined;
 
+    const finalClientType = startedAsPublic
+      ? "persona_juridica"
+      : normalizeClientType(formData.clientType);
+
     const metadata = {
       notes: formData.notes,
-      clientType: formData.clientType,
+      clientType: finalClientType,
       contractingEntity: formData.contractingEntity,
       provinceCity: formData.provinceCity,
     };
@@ -407,7 +446,14 @@ const ClientDataSection = ({
   // Check permissions based on role
   const canEdit = () => {
     const role = permissions?.userRole || "comercial";
-    return ["comercial", "acp_comercial", "jefe_tecnico", "jefe_operaciones"].includes(role);
+    return [
+      "comercial",
+      "acp_comercial",
+      "backoffice_comercial",
+      "jefe_comercial",
+      "jefe_tecnico",
+      "jefe_operaciones",
+    ].includes(role);
   };
 
   if (loading) {
@@ -439,6 +485,9 @@ const ClientDataSection = ({
             Captura lo necesario para que operaciones pueda continuar con el Business Case.
             {!canEdit() && " (Solo lectura)"}
           </p>
+          <div className="mt-2 inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            Origen del flujo: {originLabel}
+          </div>
         </div>
       </div>
 
@@ -531,15 +580,22 @@ const ClientDataSection = ({
         <label className="flex flex-col gap-1.5">
           <div className="flex items-center justify-between">
             <span className="text-sm font-bold text-gray-700">Tipo de Cliente</span>
-            {renderNAButton("clientType")}
           </div>
-          <input
-            type="text"
-            className={naInputClass("clientType")}
-            readOnly={Boolean(selectedClient) || isNA("clientType")}
-            {...register("clientType")}
-            disabled={!canEdit()}
-          />
+          <select
+            className="w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 disabled:bg-gray-100 disabled:text-gray-500"
+            {...register("clientType", { required: "El tipo de cliente es obligatorio" })}
+            disabled={!canEdit() || startedAsPublic}
+          >
+            <option value="">Selecciona tipo</option>
+            <option value="persona_natural">Persona natural</option>
+            <option value="persona_juridica">Persona juridica</option>
+          </select>
+          {startedAsPublic && (
+            <p className="text-xs text-slate-500 ml-1">
+              En compras publicas, el tipo de cliente siempre es persona juridica.
+            </p>
+          )}
+          {errors.clientType && <p className="text-xs text-rose-500 font-medium ml-1">{errors.clientType.message}</p>}
         </label>
 
         <label className="flex flex-col gap-1.5">

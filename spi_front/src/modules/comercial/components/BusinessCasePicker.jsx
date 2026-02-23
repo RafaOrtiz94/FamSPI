@@ -17,6 +17,40 @@ const normalizeBusinessCases = (payload) => {
   return [];
 };
 
+const resolvePurchaseOrigin = (bc = {}) => {
+  const type = String(bc.bc_purchase_type || bc.bcPurchaseType || "").toLowerCase();
+  const sourceModule = String(bc.modern_bc_metadata?.source_module || "").toLowerCase();
+
+  if (type.includes("pub") || type.includes("publico")) return "publica";
+  if (type.includes("priv")) return "privada";
+  if (sourceModule.includes("equipment_purchases")) return "publica";
+  if (sourceModule.includes("private_purchases")) return "privada";
+  return "no_definida";
+};
+
+const getOriginBadge = (origin) => {
+  if (origin === "publica") return { label: "Compra publica", className: "bg-emerald-100 text-emerald-800" };
+  if (origin === "privada") return { label: "Compra privada", className: "bg-indigo-100 text-indigo-800" };
+  return { label: "Origen no definido", className: "bg-slate-100 text-slate-700" };
+};
+
+const resolveInitiator = (bc = {}) => {
+  const name =
+    bc.created_by_name ||
+    bc.createdByName ||
+    bc.modern_bc_metadata?.created_by_name ||
+    bc.modern_bc_metadata?.createdByName ||
+    null;
+  const email =
+    bc.created_by_email ||
+    bc.createdByEmail ||
+    bc.modern_bc_metadata?.created_by_email ||
+    bc.modern_bc_metadata?.createdByEmail ||
+    null;
+  const id = bc.created_by || bc.createdBy || null;
+  return name || email || (id ? `Usuario ${id}` : "No disponible");
+};
+
 const BusinessCasePicker = () => {
   const navigate = useNavigate();
   const [businessCases, setBusinessCases] = useState([]);
@@ -47,6 +81,10 @@ const BusinessCasePicker = () => {
           updated_at: bc.updated_at || bc.updatedAt || bc.updated || bc.created_at || bc.createdAt || bc.created || null,
           current_stage: bc.current_stage || bc.bc_stage || bc.stage || bc.status || '',
           status: bc.status || bc.state || 'draft',
+          bc_purchase_type: bc.bc_purchase_type || bc.bcPurchaseType || "",
+          created_by: bc.created_by || bc.createdBy || null,
+          created_by_name: bc.created_by_name || bc.createdByName || null,
+          created_by_email: bc.created_by_email || bc.createdByEmail || null,
           modern_bc_metadata: bc.modern_bc_metadata || {},
           extra: bc.extra || {},
         }));
@@ -290,6 +328,16 @@ const BusinessCasePicker = () => {
                   className="bg-white/80 backdrop-blur-sm rounded-xl p-6 shadow-sm hover:shadow-md transition-all duration-200 cursor-pointer group"
                   onClick={() => handleSelectBC(bc.id)}
                 >
+                  {(() => {
+                    const origin = resolvePurchaseOrigin(bc);
+                    const originBadge = getOriginBadge(origin);
+                    return (
+                      <div className={`mb-3 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[11px] font-semibold ${originBadge.className}`}>
+                        <span>{originBadge.label}</span>
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex items-start justify-between mb-4">
                     <div>
                       <h3 className="text-lg font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
@@ -321,6 +369,10 @@ const BusinessCasePicker = () => {
                     <div className="flex items-center gap-2">
                       <FiCalendar className="h-4 w-4" />
                       <span>Creado: {formatDateSafe(bc.created_at)}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <FiUser className="h-4 w-4" />
+                      <span>Iniciado por: {resolveInitiator(bc)}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <FiUser className="h-4 w-4" />
