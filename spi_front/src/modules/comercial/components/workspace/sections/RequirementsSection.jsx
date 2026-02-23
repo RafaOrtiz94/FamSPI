@@ -142,7 +142,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Proyecci?n del plazo (meses)</label>
+            <label className="text-sm font-medium text-gray-700">Proyección del plazo (meses)</label>
             <input
               type="number"
               min={1}
@@ -171,7 +171,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
           </div>
 
           <div className="flex flex-col gap-1">
-            <label className="text-sm font-medium text-gray-700">Determinaci?n efectiva</label>
+            <label className="text-sm font-medium text-gray-700">Determinación efectiva</label>
             <div className="flex flex-wrap items-center gap-3">
               <label className="inline-flex items-center gap-2 text-sm text-gray-700">
                 <input

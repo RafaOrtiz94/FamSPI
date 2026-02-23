@@ -5,8 +5,24 @@ import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 
 const DEFAULT_EQUIPMENT_PAIRS = [
-  { id: Date.now(), primary: null, backup: null, requiresBackup: false } // Start with one empty pair
+  { id: Date.now(), primary: null, primary_type: "new_available", backup: null, requiresBackup: false } // Start with one empty pair
 ];
+
+const EQUIPMENT_TYPE_OPTIONS = [
+  { value: "new_available", label: "Nuevo" },
+  { value: "cu", label: "CU" },
+  { value: "installed_client", label: "Instalado en cliente" },
+];
+
+const normalizeEquipmentType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["new_available", "new_import", "nuevo", "new"].includes(normalized)) return "new_available";
+  if (normalized === "cu") return "cu";
+  if (["installed_client", "instalado_cliente", "installed", "instalado_en_cliente"].includes(normalized)) {
+    return "installed_client";
+  }
+  return "new_available";
+};
 
 const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => (
   <div
@@ -114,6 +130,10 @@ const EquipmentSection = ({
     return {
       equipmentPairs: equipmentDetails.map((detail, index) => ({
         id: detail.id || Date.now() + index,
+        primary_type: normalizeEquipmentType(
+          detail.primary_type ||
+          detail.primary?.type
+        ),
         requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
         primary: detail.primary ? {
           id: detail.primary.id,
@@ -139,7 +159,7 @@ const EquipmentSection = ({
     };
   }, [businessCase]);
 
-  // Pairs state: Array of { id, primary: {}, backup: {}, requiresBackup }
+  // Pairs state: Array of { id, primary: {}, primary_type, backup: {}, requiresBackup }
   const [equipmentPairs, setEquipmentPairs] = useState(() => sectionData.equipmentPairs);
 
   useEffect(() => {
@@ -232,7 +252,7 @@ const EquipmentSection = ({
   const addPair = () => {
     // Generate deterministic ID based on existing pairs to ensure consistency
     const maxId = equipmentPairs.length > 0 ? Math.max(...equipmentPairs.map(p => p.id)) : 0;
-    const newPair = { id: maxId + 1, primary: null, backup: null, requiresBackup: false };
+    const newPair = { id: maxId + 1, primary: null, primary_type: "new_available", backup: null, requiresBackup: false };
     const newPairs = [...equipmentPairs, newPair];
     setEquipmentPairs(newPairs);
     setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
@@ -257,7 +277,11 @@ const EquipmentSection = ({
       raw: item?.raw,
     });
     updatePair(pairId, {
-      primary: { ...item },
+      primary: {
+        ...item,
+        type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type),
+      },
+      primary_type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type),
       backup: null,
       requiresBackup: false,
     });
@@ -326,6 +350,7 @@ const EquipmentSection = ({
       const payload = {
         equipment_pairs: equipmentPairs.map(p => ({
           primary_id: p.primary.id,
+          primary_type: normalizeEquipmentType(p.primary_type),
           requires_backup: Boolean(p.requiresBackup),
           backup_id: p.requiresBackup ? (p.backup?.id || null) : null,
           backup_install_simultaneous: p.requiresBackup && p.backup ? Boolean(p.backup.install_with_primary) : false,
@@ -373,6 +398,29 @@ const EquipmentSection = ({
               {/* Primary Selection */}
               <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-gray-700">Equipo Principal</h4>
+                <div className="w-full sm:max-w-sm">
+                  <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Tipo de equipo
+                  </label>
+                  <select
+                    value={normalizeEquipmentType(pair.primary_type)}
+                    onChange={(e) =>
+                      updatePair(pair.id, {
+                        primary_type: normalizeEquipmentType(e.target.value),
+                        primary: pair.primary
+                          ? { ...pair.primary, type: normalizeEquipmentType(e.target.value) }
+                          : pair.primary,
+                      })
+                    }
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
+                  >
+                    {EQUIPMENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 {/* Simple Search for this pair (uses global items but could filter locally) */}
                 <div className="flex gap-2 mb-2">
                   <input
@@ -396,6 +444,11 @@ const EquipmentSection = ({
                 ) : (
                   <div className="relative">
                     <EquipmentCard item={pair.primary} selected />
+                    <div className="mt-2">
+                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                        {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
+                      </span>
+                    </div>
                     <button
                       onClick={() => updatePair(pair.id, { primary: null, backup: null, requiresBackup: false })}
                       className="absolute top-2 right-2 text-red-500 hover:text-red-700"

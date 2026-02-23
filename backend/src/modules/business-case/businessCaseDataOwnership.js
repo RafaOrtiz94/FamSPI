@@ -42,6 +42,20 @@ const deterministicUuidFromLegacyId = (value) => {
 const resolveActorUuid = (value) =>
   normalizeUuid(value) || deterministicUuidFromLegacyId(value) || SYSTEM_ACTOR_UUID;
 
+const parseJsonbSafe = (value, fallback = {}) => {
+  if (value === null || value === undefined) return { ...fallback };
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : { ...fallback };
+    } catch (_) {
+      return { ...fallback };
+    }
+  }
+  return { ...fallback };
+};
+
 // Canonical section definitions
 const SECTIONS = {
   GENERAL: 'general',
@@ -272,7 +286,8 @@ class BusinessCaseDataOwnership {
 
       // Check if section is already completed
       const existing = await client.query(
-        `SELECT id, completed_by, completed_at, canonical_state
+        `SELECT id, completed_by, completed_at, canonical_state,
+                created_at, first_completed_at, first_completed_by, metadata
          FROM business_case_section_ownership
          WHERE business_case_id = $1 AND section_name = $2`,
         [businessCaseId, section]
@@ -306,7 +321,7 @@ class BusinessCaseDataOwnership {
           [
             actorUserId, userRole, now, canonicalState,
             JSON.stringify({
-              ...JSON.parse(existingRecord.metadata || '{}'),
+              ...parseJsonbSafe(existingRecord.metadata, {}),
               ...mergedMetadata,
               last_modified: now
             }),
@@ -391,7 +406,7 @@ class BusinessCaseDataOwnership {
         firstCompletedBy: row.first_completed_by,
         firstCompletedAt: row.first_completed_at,
         completionCount: row.completion_count,
-        metadata: JSON.parse(row.metadata || '{}')
+        metadata: parseJsonbSafe(row.metadata, {})
       };
     });
 
@@ -485,7 +500,7 @@ class BusinessCaseDataOwnership {
       performedBy: row.performed_by,
       performedByRole: row.performed_by_role,
       canonicalState: row.canonical_state,
-      metadata: JSON.parse(row.metadata || '{}'),
+      metadata: parseJsonbSafe(row.metadata, {}),
       performedAt: row.performed_at
     }));
   }

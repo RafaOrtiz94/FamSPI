@@ -39,8 +39,19 @@ const BusinessCaseWorkspace = () => {
 
     const startedAt = Date.now();
     try {
-      if (bcId && options?.section) {
-        await recordSectionCompletion(bcId, options.section, options?.reason || null);
+      const shouldMarkComplete = options?.markComplete !== false;
+      if (bcId && options?.section && shouldMarkComplete) {
+        const sectionLabel = String(options.section || "seccion").replace(/_/g, " ");
+        const confirmMessage =
+          `Vas a confirmar y cerrar la seccion "${sectionLabel}".\n\n` +
+          "Si continuas, se bloqueara y avanzara al siguiente paso.\n\n" +
+          "¿Deseas continuar?";
+        const confirmed = window.confirm(confirmMessage);
+        if (confirmed) {
+          await recordSectionCompletion(bcId, options.section, options?.reason || null);
+        } else {
+          showToast("Puedes seguir editando esta seccion antes de continuar.", "info");
+        }
       }
       // Refresh UI guidance and business case to rehydrate saved fields
       const [data, businessCaseData] = await Promise.all([
@@ -49,7 +60,7 @@ const BusinessCaseWorkspace = () => {
       ]);
       setUiGuidance(normalizeUIGuidanceResponse(data));
       setBusinessCase(businessCaseData);
-      showToast("Sección guardada y datos actualizados", "success");
+      showToast("Seccion guardada y datos actualizados", "success");
       recordBusinessCaseTelemetry({
         section: "workspace",
         type: "refresh_after_save_success",

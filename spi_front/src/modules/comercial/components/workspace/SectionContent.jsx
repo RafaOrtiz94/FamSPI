@@ -38,7 +38,7 @@ const SectionContent = ({
     try {
       await lockSection(businessCaseId, selectedSection);
       showToast("Seccion bloqueada para edicion", "success");
-      forwardSave();
+      forwardSave({ markComplete: false });
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo bloquear la seccion", "error");
     } finally {
@@ -52,7 +52,7 @@ const SectionContent = ({
     try {
       await unlockSection(businessCaseId, selectedSection);
       showToast("Seccion desbloqueada", "success");
-      forwardSave();
+      forwardSave({ markComplete: false });
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo desbloquear la seccion", "error");
     } finally {
