@@ -110,6 +110,20 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
     if (!required) return 0;
     return Math.min(100, Math.round((completed / required) * 100));
   }, [preflow?.completedRequiredSections?.length, preflow?.requiredSections?.length]);
+  const preflowCompletedSet = useMemo(
+    () => new Set(preflow?.completedRequiredSections || []),
+    [preflow?.completedRequiredSections],
+  );
+  const preflowSlaStatus = useMemo(() => {
+    if (!preflow?.isActive) return null;
+    if (preflow?.isExpired) {
+      return { label: "SLA 48h vencido", badge: "bg-rose-100 text-rose-800 border-rose-200" };
+    }
+    if (countdownUrgency === "critical") {
+      return { label: "SLA 48h por vencer", badge: "bg-amber-100 text-amber-800 border-amber-200" };
+    }
+    return { label: "SLA 48h en tiempo", badge: "bg-emerald-100 text-emerald-800 border-emerald-200" };
+  }, [preflow?.isActive, preflow?.isExpired, countdownUrgency]);
 
   const purchaseOrigin = useMemo(
     () => resolvePurchaseOrigin(resolvedGuidance?.bc_purchase_type, resolvedGuidance?.modern_bc_metadata),
@@ -172,6 +186,12 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
                 </span>
               </div>
             )}
+            {preflowSlaStatus && (
+              <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${preflowSlaStatus.badge}`}>
+                <FiAlertTriangle size={12} />
+                <span>{preflowSlaStatus.label}</span>
+              </div>
+            )}
             {preflow?.isActive && (
               <div className="flex items-center gap-2 text-xs text-indigo-800">
                 <span>Avance comercial:</span>
@@ -203,6 +223,27 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
               <span className="font-mono text-base font-bold">
                 {preflow?.isExpired ? "00:00:00" : countdownLabelDetailed || "00:00:00"}
               </span>
+            </div>
+          )}
+
+          {preflow?.isActive && Array.isArray(preflow?.requiredSections) && preflow.requiredSections.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">SLA por seccion:</span>
+              {preflow.requiredSections.map((sectionKey) => {
+                const completed = preflowCompletedSet.has(sectionKey);
+                return (
+                  <span
+                    key={sectionKey}
+                    className={`rounded-full border px-2 py-1 text-xs font-medium ${
+                      completed
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                        : "border-slate-200 bg-slate-50 text-slate-700"
+                    }`}
+                  >
+                    {sectionKey} · {completed ? "ok" : "pendiente"}
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>

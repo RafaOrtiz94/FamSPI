@@ -139,6 +139,11 @@ const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "jefe_operaciones",
 ]);
 
+function hasTextValue(value) {
+  if (value === null || value === undefined) return false;
+  return String(value).trim().length > 0;
+}
+
 function isTruthyFlag(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -327,13 +332,12 @@ function buildOwnershipCompletionRules(ownershipInfo = {}) {
 
 function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail }) {
   const clientName = String(businessCase?.client_name || "Cliente sin nombre").trim();
-  const processNumber = String(
-    businessCase?.process_code ||
-      businessCase?.bc_number ||
-      businessCase?.business_case_id ||
-      businessCase?.id ||
-      "N/A",
-  ).trim();
+  const processNumber = String(businessCase?.process_code || "").trim();
+  if (!processNumber) {
+    const error = new Error("Debe existir numero de proceso (process_code) para enviar notificaciones.");
+    error.status = 409;
+    throw error;
+  }
   const deadlineText = gate?.deadlineAt
     ? new Date(gate.deadlineAt).toLocaleString("es-EC", {
       timeZone: process.env.APP_TIMEZONE || "America/Guayaquil",
@@ -345,20 +349,85 @@ function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail
       hour12: false,
     })
     : "sin fecha";
+  const purchaseType = String(businessCase?.bc_purchase_type || "").toLowerCase();
+  const isPublic = purchaseType.includes("public");
+  const flowLabel = isPublic ? "Compra Publica (Comodato)" : "Compra Privada (Comodato)";
+  const actorLabel = actorEmail || "usuario comercial";
 
   return {
     subject: `${clientName} - Proceso ${processNumber}`,
     message:
-      `El comercial cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
-      `Desde esta carga aplica la ventana de 48 horas y vence el ${deadlineText}.`,
+      `Flujo: ${flowLabel}. ` +
+      `${actorLabel} cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
+      `Desde esta carga aplica la ventana obligatoria de 48 horas y vence el ${deadlineText}.`,
     metadata: {
       businessCaseId: businessCase?.id || businessCase?.business_case_id,
       clientName,
       processNumber,
+      flowLabel,
       actor: actorEmail || null,
       deadlineAt: gate?.deadlineAt || null,
     },
   };
+}
+
+async function registerDeterminationsGroupedNotificationAudit({
+  businessCaseId,
+  actorUserId,
+  actorEmail,
+  flowType,
+  clientName,
+  processCode,
+  emailTo,
+  emailCc,
+  deadlineAt,
+  source = "business_case.determinations_gate_grouped_mail",
+}) {
+  try {
+    await db.query(
+      `
+      INSERT INTO bc_notification_legal_audit (
+        business_case_id,
+        actor_user_id,
+        actor_email,
+        flow_type,
+        client_name,
+        process_code,
+        source,
+        email_to,
+        email_cc,
+        payload,
+        created_at
+      ) VALUES (
+        $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10::jsonb, NOW()
+      )
+      `,
+      [
+        businessCaseId,
+        actorUserId || null,
+        actorEmail || null,
+        flowType || null,
+        clientName || null,
+        processCode || null,
+        source,
+        emailTo || null,
+        Array.isArray(emailCc) ? emailCc : [],
+        JSON.stringify({
+          deadline_at: deadlineAt || null,
+          legal_traceability: true,
+        }),
+      ],
+    );
+  } catch (error) {
+    logger.warn(
+      {
+        error: error.message,
+        businessCaseId,
+        source,
+      },
+      "No se pudo registrar auditoria legal de notificacion agrupada",
+    );
+  }
 }
 
 async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }) {
@@ -398,6 +467,18 @@ async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }
       notified_roles: DETERMINATIONS_UPLOAD_MAIL_ROLES,
       process_key: `business_case.determinations_gate_grouped_mail:${payload.metadata.businessCaseId}`,
     },
+  });
+
+  await registerDeterminationsGroupedNotificationAudit({
+    businessCaseId: payload.metadata.businessCaseId,
+    actorUserId: actorUser?.id || null,
+    actorEmail: actorUser?.email || null,
+    flowType: payload.metadata.flowLabel || null,
+    clientName: payload.metadata.clientName,
+    processCode: payload.metadata.processNumber,
+    emailTo: primaryTo,
+    emailCc: ccEmails,
+    deadlineAt: payload.metadata.deadlineAt || null,
   });
 }
 
@@ -2038,6 +2119,12 @@ async function uploadDeterminationsStatDocument(req, res) {
     }
 
     const bc = await businessCaseService.getBusinessCaseById(id);
+    if (!hasTextValue(bc?.process_code)) {
+      return res.status(409).json({
+        ok: false,
+        message: "Debe completar el numero de proceso antes de cargar el documento de estadistica.",
+      });
+    }
     const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
     const ownershipRules = buildOwnershipCompletionRules(ownershipInfo);
     const preflowInfo = preflowService.buildPreflowInfo(bc, ownershipRules);
@@ -2056,6 +2143,25 @@ async function uploadDeterminationsStatDocument(req, res) {
         message:
           `Debes completar las secciones previas hasta LIS antes de subir el documento estadístico. Pendientes: ${missingRequired.join(", ")}.`,
       });
+    }
+    const currentDocument = await determinationsGateService.getCurrentDocument(id);
+    const isSameCurrentHash = String(currentDocument?.document_hash_sha256 || "").toLowerCase() === String(fileHash || "").toLowerCase();
+    if (isSameCurrentHash) {
+      const gate = determinationsGateService.buildGateInfo({
+        businessCase: bc,
+        role,
+        currentDocument,
+      });
+      const responseBody = {
+        ok: true,
+        data: gate,
+        meta: {
+          reused_existing_document: true,
+          reason: "same_sha256_hash",
+        },
+      };
+      await completeIdempotentWrite(idempotencySession, responseBody, 200);
+      return res.json(responseBody);
     }
     const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
       ? { ...bc.modern_bc_metadata }
