@@ -572,11 +572,27 @@ async function createSolicitud({ body, user, meta }) {
   payload.user_email = requesterIdentity?.email || user?.email;
   payload.user_fullname = requesterIdentity?.fullname || getDisplayName(user);
   payload.user_id = requesterUserId;
+  const consentVersion = String(payload.fam_sign_notice_version || "FS-AUTO-2026.02").trim();
+  const consentTextFromUi = String(payload.fam_sign_consent_text || "").trim();
+  const famSignConsentText =
+    consentTextFromUi ||
+    `Acepto el uso de Fam Sign para firma y aprobacion automatica de esta solicitud (${consentVersion}).`;
   const approverRole = resolveApproverRole(user?.role || user?.rol || "");
   const approverUser = await findApproverByRole(approverRole);
   payload.approver_role = approverRole;
-  payload.approver_user_id = approverUser?.id || null;
-  payload.approver_email = approverUser?.email || null;
+  payload.approver_user_id = approverUser?.id || payload.user_id || null;
+  payload.approver_email = approverUser?.email || payload.user_email || null;
+  const autoApprovalActor = {
+    id: payload.approver_user_id || payload.user_id || null,
+    email: payload.approver_email || payload.user_email || null,
+    fullname:
+      approverUser?.fullname ||
+      payload.user_fullname ||
+      payload.user_email ||
+      "Aprobador automatico Fam Sign",
+    role: approverRole || user?.role || user?.scope || null,
+  };
+  const autoApprovalName = getDisplayName(autoApprovalActor) || "Aprobacion automatica Fam Sign";
 
   let driveMeta = {};
   let justificacionRequerida = [];
@@ -664,8 +680,8 @@ async function createSolicitud({ body, user, meta }) {
       duracion_horas, duracion_dias, fecha_inicio, fecha_fin, fecha_regreso,
       es_recuperable, periodo_vacaciones, justificacion_requerida, 
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
-      status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'pending') RETURNING *`,
+      status, aprobacion_final_at, aprobacion_final_por
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'approved', NOW(), $24) RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -690,6 +706,7 @@ async function createSolicitud({ body, user, meta }) {
       driveMeta.drive_doc_link || null,
       driveMeta.drive_pdf_link || null,
       driveMeta.folderId || null,
+      autoApprovalName,
     ]
   );
 
@@ -699,25 +716,9 @@ async function createSolicitud({ body, user, meta }) {
     if (payload.user_id) {
       await notificationManager.sendNotification({
         userId: payload.user_id,
-        customTitle: "Solicitud enviada",
-        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue enviada para aprobaci?n.`,
-        type: "info",
-        source: "permisos_vacaciones",
-        priority: 0,
-        email: true,
-        meta: {
-          solicitud_id: rows[0].id,
-          tipo_solicitud: payload.tipo_solicitud,
-          solicitante: payload.user_email,
-        },
-      });
-    }
-    if (payload.approver_user_id && payload.approver_user_id != payload.user_id) {
-      await notificationManager.sendNotification({
-        userId: payload.approver_user_id,
-        customTitle: "Nueva solicitud de permisos/vacaciones",
-        customMessage: `${payload.user_fullname || payload.user_email} ha enviado una solicitud de ${payload.tipo_solicitud}.`,
-        type: "task",
+        customTitle: "Solicitud aprobada automaticamente",
+        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue aprobada automaticamente mediante Fam Sign.`,
+        type: "success",
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
@@ -725,6 +726,8 @@ async function createSolicitud({ body, user, meta }) {
           solicitud_id: rows[0].id,
           tipo_solicitud: payload.tipo_solicitud,
           solicitante: payload.user_email,
+          auto_approved: true,
+          fam_sign_notice_version: consentVersion,
         },
       });
     }
@@ -738,10 +741,95 @@ async function createSolicitud({ body, user, meta }) {
       stage: WORKFLOW_SIGNATURE_STAGES.SOLICITUD,
       actor: user,
       meta,
-      consentText: "Confirmo la solicitud de permiso/vacaciones en SPI",
+      consentText: famSignConsentText,
     });
   } catch (signatureError) {
     logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en solicitud");
+  }
+
+  let verificationToken = rows[0]?.legal_verification_token || null;
+  if (!verificationToken) {
+    verificationToken = generateLegalVerificationToken();
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET legal_verification_token = $2,
+              legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+              updated_at = now()
+        WHERE id = $1`,
+      [rows[0].id, verificationToken]
+    );
+  }
+
+  try {
+    await recordWorkflowSignature({
+      solicitud: rows[0],
+      stage: WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL,
+      actor: autoApprovalActor,
+      meta,
+      consentText: `Aprobacion automatica Fam Sign ejecutada con consentimiento del solicitante (${consentVersion}).`,
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en aprobacion automatica");
+  }
+
+  try {
+    const signaturesBySolicitud = await getSignaturesBySolicitudIds([rows[0].id]);
+    const signatures = signaturesBySolicitud.get(String(rows[0].id)) || [];
+    const workflowSummary = buildWorkflowSignatureSummary(signatures);
+    const solicitudSignature = signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
+    const finalSignature =
+      signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL) || null;
+
+    const pdfPayload = {
+      ...rows[0],
+      user_fullname: requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email,
+      user_document_id: requesterIdentity?.cedula || "",
+      approver_fullname: autoApprovalName,
+      approver_document_id: "",
+      aprobacion_final_por: autoApprovalName,
+      aprobacion_final_at: rows[0].aprobacion_final_at,
+      firma_solicitante_texto: buildPdfSignatureText(
+        solicitudSignature,
+        requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email
+      ),
+      firma_aprobador_texto: buildPdfSignatureText(finalSignature, autoApprovalName),
+      firma_workflow_estado: workflowSummary?.estado || "pendiente",
+      firma_solicitante_at: solicitudSignature?.signed_at || null,
+      firma_aprobador_at: finalSignature?.signed_at || null,
+      firma_solicitante_hash: solicitudSignature?.signature_hash_sha256 || null,
+      firma_aprobador_hash: finalSignature?.signature_hash_sha256 || null,
+      firma_aprobador_prev_hash: finalSignature?.previous_signature_hash_sha256 || null,
+      legal_verification_token: verificationToken,
+      legal_verification_url: buildLegalVerificationUrl(verificationToken),
+      workflow_signature_summary: workflowSummary,
+    };
+
+    const pdfUrl = await generateFRH10(pdfPayload);
+    const legalPdfUrl = await generateFirmaLegalValidationPdf({
+      solicitud: {
+        ...rows[0],
+        user_fullname: requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email,
+        approver_fullname: autoApprovalName,
+      },
+      signatures,
+      verification: {
+        token: verificationToken,
+        url: buildLegalVerificationUrl(verificationToken),
+      },
+    });
+
+    if (pdfUrl || legalPdfUrl) {
+      await db.query(
+        `UPDATE permisos_vacaciones
+            SET pdf_generado_url = COALESCE($2, pdf_generado_url),
+                pdf_validacion_legal_url = COALESCE($3, pdf_validacion_legal_url),
+                updated_at = now()
+          WHERE id = $1`,
+        [rows[0].id, pdfUrl, legalPdfUrl]
+      );
+    }
+  } catch (pdfError) {
+    logger.warn({ pdfError, solicitudId: rows[0]?.id }, "No se pudo generar evidencia legal en creacion automatica");
   }
 
   const enriched = await attachWorkflowSignatures([rows[0]]);

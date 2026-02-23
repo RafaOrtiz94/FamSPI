@@ -131,9 +131,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setLoading(true);
         showLoader();
         try {
+            const famSignConsentText =
+                "Al enviar esta solicitud acepto el uso de Fam Sign como firma electronica para la firma de solicitud y su aprobacion automatica en SPI.";
             const payload = {
                 tipo_solicitud: tipoSolicitud,
                 ...formData,
+                fam_sign_notice_version: "FS-AUTO-2026.02",
+                fam_sign_consent_text: famSignConsentText,
             };
 
             if (tipoSolicitud === "permiso") {
@@ -160,8 +164,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             if (response.ok) {
                 showToast(
                     tipoSolicitud === "vacaciones"
-                        ? "Solicitud de vacaciones creada exitosamente"
-                        : "Solicitud de permiso creada exitosamente",
+                        ? "Solicitud de vacaciones creada y aprobada automaticamente"
+                        : "Solicitud de permiso creada y aprobada automaticamente",
                     "success"
                 );
                 onSuccess?.();
@@ -625,11 +629,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </div>
             </div>
 
-            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-xs text-blue-700">
-                    <strong>Importante:</strong> Tu solicitud será enviada a tu jefe inmediato para aprobación.
-                    {tipoSolicitud === "permiso" &&
-                        " Después de la aprobación parcial, deberás subir los documentos justificantes."}
+            <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">
+                <p className="text-xs text-indigo-800">
+                    <strong>Consentimiento Fam Sign:</strong> Al enviar esta solicitud aceptas el uso de la firma electronica
+                    Fam Sign para registrar la firma del solicitante y la aprobacion automatica del flujo.
+                </p>
+                <p className="text-xs text-indigo-700">
+                    Este consentimiento queda registrado en la trazabilidad legal de la solicitud
+                    (evento de firma, sello temporal e integridad criptografica).
                 </p>
             </div>
 
