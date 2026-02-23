@@ -79,7 +79,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                 work_days_per_week: data.workDaysPerWeek ? parseInt(data.workDaysPerWeek) : null,
                 shifts_per_day: data.shiftsPerDay ? parseInt(data.shiftsPerDay) : null,
                 hours_per_shift: data.hoursPerShift ? parseFloat(data.hoursPerShift) : null,
-                quality_controls_per_shift: data.qcPerShift ? parseInt(data.qcPerShift) : null,
+                quality_controls_per_shift: data.qcPerShift ? parseFloat(data.qcPerShift) : null,
                 control_levels: data.controlLevels ? parseInt(data.controlLevels) : null,
                 routine_qc_frequency: data.routineQCFrequency || null,
                 special_tests: data.specialTests || null,
@@ -193,10 +193,11 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                             <input
                                 type="number"
                                 min="0"
+                                step="0.1"
                                 {...register("qcPerShift")}
                                 disabled={!canEdit}
                                 className={inputClasses}
-                                placeholder="Ej: 3"
+                                placeholder="Ej: 3.5"
                             />
                         </div>
 
