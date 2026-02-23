@@ -1,6 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { FiBell, FiCheckCircle, FiAlertTriangle, FiInfo, FiZap, FiX } from "react-icons/fi";
+import { useLocation, useNavigate } from "react-router-dom";
+import {
+  FiBell,
+  FiCheckCircle,
+  FiAlertTriangle,
+  FiInfo,
+  FiZap,
+  FiX,
+  FiShoppingCart,
+  FiPackage,
+  FiCalendar,
+  FiFileText,
+} from "react-icons/fi";
 import { useNotifications } from "../NotificationContext";
 
 const typeIcon = {
@@ -13,6 +24,42 @@ const formatDate = (dateString) => {
   if (!dateString) return "";
   const date = new Date(dateString);
   return date.toLocaleString();
+};
+
+const normalizeSource = (source) => String(source || "").trim().toLowerCase();
+
+const getMetaValue = (notification, keys = []) => {
+  const meta = notification?.meta || {};
+  const data = meta?.data || {};
+
+  for (const key of keys) {
+    if (meta[key] !== undefined && meta[key] !== null && meta[key] !== "") return meta[key];
+    if (data[key] !== undefined && data[key] !== null && data[key] !== "") return data[key];
+  }
+
+  return null;
+};
+
+const resolveNotificationIcon = (notification) => {
+  const source = normalizeSource(notification?.source);
+  const tipoSolicitud = String(getMetaValue(notification, ["tipo_solicitud"]) || "").toLowerCase();
+
+  if (source.startsWith("private_purchase")) {
+    return <FiShoppingCart className="text-cyan-600" />;
+  }
+
+  if (source.startsWith("equipment_purchase") || source.startsWith("equipment_purchases")) {
+    return <FiPackage className="text-indigo-600" />;
+  }
+
+  if (source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) {
+    if (tipoSolicitud === "vacaciones" || source.startsWith("vacaciones")) {
+      return <FiCalendar className="text-emerald-600" />;
+    }
+    return <FiFileText className="text-amber-600" />;
+  }
+
+  return typeIcon[notification?.type] || <FiInfo className="text-slate-400" />;
 };
 
 export default function NotificationBell() {
@@ -28,6 +75,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
 
   useEffect(() => {
@@ -52,9 +100,6 @@ export default function NotificationBell() {
 
   const recent = useMemo(() => {
     const sorted = [...notifications].sort((a, b) => {
-      const unreadScore = (b.status !== "read") - (a.status !== "read");
-      if (unreadScore !== 0) return unreadScore;
-
       const priorityScore = (b.priority || 0) - (a.priority || 0);
       if (priorityScore !== 0) return priorityScore;
 
@@ -63,41 +108,60 @@ export default function NotificationBell() {
     return sorted.slice(0, 6);
   }, [notifications]);
 
-  const resolvePurchaseId = (notification) => {
-    const meta = notification?.meta || {};
-    return (
-      meta.purchase_id ||
-      meta.purchaseId ||
-      meta.data?.purchase_id ||
-      meta.data?.purchaseId ||
-      null
-    );
+  const resolvePrivatePurchaseBasePath = () => {
+    const pathname = String(location?.pathname || "").toLowerCase();
+    if (pathname.includes("/dashboard/logistica/")) return "/dashboard/logistica/private-purchases";
+    if (pathname.includes("/dashboard/operaciones/")) return "/dashboard/operaciones/private-purchases";
+    return "/dashboard/backoffice/private-purchases";
+  };
+
+  const resolveFallbackTargetPath = (notification) => {
+    const source = normalizeSource(notification?.source);
+    const purchaseId = getMetaValue(notification, ["purchase_id", "purchaseId"]);
+    const publicRequestId = getMetaValue(notification, ["request_id", "requestId"]);
+    const solicitudId = getMetaValue(notification, ["solicitud_id", "solicitudId"]);
+    const businessCaseId = getMetaValue(notification, ["business_case_id", "businessCaseId", "bc_id", "bcId"]);
+
+    if (source.startsWith("private_purchase") && purchaseId) {
+      return `${resolvePrivatePurchaseBasePath()}?purchaseId=${purchaseId}`;
+    }
+
+    if ((source.startsWith("equipment_purchase") || source.startsWith("equipment_purchases")) && publicRequestId) {
+      return `/dashboard/comercial/equipment-purchases?requestId=${publicRequestId}`;
+    }
+
+    if ((source.startsWith("permisos_vacaciones") || source.startsWith("vacaciones")) && solicitudId) {
+      return `/dashboard/talento-humano/permisos?solicitudId=${solicitudId}`;
+    }
+
+    if (source.startsWith("business_case") && businessCaseId) {
+      return `/dashboard/business-case/workspace/${businessCaseId}`;
+    }
+
+    return null;
   };
 
   const resolveTargetPath = (notification) => {
-    const meta = notification?.meta || {};
-    return (
-      meta.target_path ||
-      meta.targetPath ||
-      meta.data?.target_path ||
-      meta.data?.targetPath ||
-      null
-    );
+    const metaTargetPath = getMetaValue(notification, [
+      "target_path",
+      "targetPath",
+      "url",
+      "path",
+      "redirect_to",
+      "redirectTo",
+    ]);
+    if (metaTargetPath) return metaTargetPath;
+    return resolveFallbackTargetPath(notification);
   };
 
   const handleItemClick = async (notification) => {
     if (!notification) return;
     await markAsRead(notification.id);
+
     const targetPath = resolveTargetPath(notification);
     if (targetPath) {
       setOpen(false);
       navigate(targetPath);
-      return;
-    }
-    const purchaseId = resolvePurchaseId(notification);
-    if (purchaseId) {
-      setOpen(false);
-      navigate(`/dashboard/backoffice/private-purchases?purchaseId=${purchaseId}`);
     }
   };
 
@@ -162,7 +226,7 @@ export default function NotificationBell() {
                   }`}
               >
                 <div className="mt-1">
-                  {typeIcon[notif.type] || <FiInfo className="text-slate-400" />}
+                  {resolveNotificationIcon(notif)}
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center justify-between gap-2">
@@ -199,7 +263,7 @@ export default function NotificationBell() {
             ))}
           </div>
           <div className="px-4 py-2 border-t border-slate-200 bg-slate-50 text-[11px] text-slate-500">
-            Solo se muestran las 6 notificaciones más recientes. Las de prioridad alta aparecen arriba.
+            Solo se muestran las 6 notificaciones mas recientes. Se priorizan urgencia alta y fecha reciente.
           </div>
         </div>
       )}

@@ -60,7 +60,7 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
 const formatEquipmentList = (equipment = []) => {
   return equipment
     .map((item) => {
-      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importación)" : " (Nuevo disponible)";
+      const typeLabel = item.type === "cu" ? " (CU)" : item.type === "new_import" ? " (Nuevo para importación)" : item.type === "installed_client" ? " (Instalado en cliente)" : " (Nuevo disponible)";
       const name = item.name || item.sku || "Equipo";
       return `- ${name}${typeLabel}`;
     })

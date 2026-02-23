@@ -5,8 +5,24 @@ import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 
 const DEFAULT_EQUIPMENT_PAIRS = [
-  { id: Date.now(), primary: null, backup: null, requiresBackup: false } // Start with one empty pair
+  { id: Date.now(), primary: null, primary_type: "new_available", backup: null, requiresBackup: false } // Start with one empty pair
 ];
+
+const EQUIPMENT_TYPE_OPTIONS = [
+  { value: "new_available", label: "Nuevo" },
+  { value: "cu", label: "CU" },
+  { value: "installed_client", label: "Instalado en cliente" },
+];
+
+const normalizeEquipmentType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["new_available", "nuevo", "new"].includes(normalized)) return "new_available";
+  if (normalized === "cu") return "cu";
+  if (["installed_client", "instalado_cliente", "installed", "instalado_en_cliente"].includes(normalized)) {
+    return "installed_client";
+  }
+  return "new_available";
+};
 
 const EquipmentSection = ({
   businessCase,
@@ -32,6 +48,10 @@ const EquipmentSection = ({
     return {
       equipmentPairs: equipmentDetails.map((detail, index) => ({
         id: detail.id || Date.now() + index,
+        primary_type: normalizeEquipmentType(
+          detail.primary_type ||
+          detail.primary?.type
+        ),
         requiresBackup: Boolean(
           detail.requires_backup ??
           detail.requiresBackup ??
@@ -101,6 +121,7 @@ const EquipmentSection = ({
       const payload = {
         equipment_pairs: pairsData.map(p => ({
           primary_id: p.primary.id,
+          primary_type: normalizeEquipmentType(p.primary_type),
           requires_backup: Boolean(p.requiresBackup),
           backup_id: p.requiresBackup ? (p.backup?.id || null) : null,
           backup_install_simultaneous: p.backup?.install_with_primary || false,
@@ -292,7 +313,7 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
 
   const addPair = () => {
     const maxId = equipmentPairs.length > 0 ? Math.max(...equipmentPairs.map(p => p.id)) : 0;
-    const newPair = { id: maxId + 1, primary: null, backup: null, requiresBackup: false };
+    const newPair = { id: maxId + 1, primary: null, primary_type: "new_available", backup: null, requiresBackup: false };
     const newPairs = [...equipmentPairs, newPair];
     onUpdatePairs(newPairs);
     setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
@@ -330,7 +351,8 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
       raw: normalized?.raw,
     });
     updatePair(pairId, {
-      primary: { ...normalized },
+      primary: { ...normalized, type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type) },
+      primary_type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type),
       backup: null,
     });
     showToast("Equipo principal seleccionado", "success");
@@ -506,6 +528,30 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
                     <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                     Equipo Principal
                 </h4>
+                <div className="w-full sm:max-w-sm">
+                  <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    Tipo de equipo
+                  </label>
+                  <select
+                    value={normalizeEquipmentType(pair.primary_type)}
+                    onChange={(e) =>
+                      updatePair(pair.id, {
+                        primary_type: normalizeEquipmentType(e.target.value),
+                        primary: pair.primary
+                          ? { ...pair.primary, type: normalizeEquipmentType(e.target.value) }
+                          : pair.primary,
+                      })
+                    }
+                    disabled={disabled}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white disabled:opacity-60"
+                  >
+                    {EQUIPMENT_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="flex flex-col sm:flex-row gap-2 mb-2">
                   <div className="relative w-full">
                     <FiSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -535,6 +581,11 @@ const EquipmentSelectorCore = ({ equipmentPairs, onUpdatePairs, onSave, disabled
                 ) : (
                   <div className="relative group">
                     <EquipmentCard item={pair.primary} selected />
+                    <div className="mt-2">
+                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                        {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
+                      </span>
+                    </div>
                     <button
                       onClick={() => updatePair(pair.id, { primary: null, backup: null, requiresBackup: false })}
                       disabled={disabled}

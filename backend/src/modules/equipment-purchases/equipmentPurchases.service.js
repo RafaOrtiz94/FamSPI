@@ -927,7 +927,9 @@ function formatEquipmentList(items) {
       ? "CU"
       : item.available_type === "new_import"
         ? "Nuevo para importación"
-        : "Nuevo disponible";
+        : item.available_type === "installed_client"
+          ? "Instalado en cliente"
+          : "Nuevo disponible";
     const name = item.name || item.sku || "Equipo";
     return `<li>${name} (${label})</li>`;
   });
@@ -980,7 +982,9 @@ async function buildReport({ subject, html, request, actionLabel, user }) {
           ? "CU"
           : item.available_type === "new_import"
             ? "Nuevo para importación"
-            : "Nuevo disponible";
+            : item.available_type === "installed_client"
+              ? "Instalado en cliente"
+              : "Nuevo disponible";
         const name = item.name || item.sku || `Equipo ${idx + 1}`;
         const serial = item.serial ? ` - Serie: ${item.serial}` : "";
         doc.text(`• ${name}${serial} (${label})`);
@@ -998,7 +1002,9 @@ async function buildReport({ subject, html, request, actionLabel, user }) {
           ? "CU"
           : item.type === "new_import"
             ? "Nuevo para importación"
-            : "Nuevo disponible";
+            : item.type === "installed_client"
+              ? "Instalado en cliente"
+              : "Nuevo disponible";
         const name = item.name || item.sku || `Equipo ${idx + 1}`;
         const serial = item.serial ? ` - Serie: ${item.serial}` : "";
         doc.text(`• ${name}${serial} (${label})`);
@@ -2392,7 +2398,9 @@ async function startAvailabilityRequest({ id, user, providerEmail, notes, expect
         ? " (CU)"
         : item.type === "new_import"
           ? " (Nuevo para importación)"
-          : " (Nuevo disponible)";
+          : item.type === "installed_client"
+            ? " (Instalado en cliente)"
+            : " (Nuevo disponible)";
       const name = item.name || item.sku || "Equipo";
       return `• ${name}${typeLabel}`;
     })
@@ -4357,3 +4365,5 @@ module.exports = {
   getTechnicalScheduleCalendar,
   STATUS,
 };
+
+

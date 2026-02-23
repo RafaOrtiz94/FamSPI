@@ -20,6 +20,18 @@ const SECTION_FIELDS = {
 
 const SECTION_ORDER = ["general"];
 
+const normalizeText = (value) => String(value || "").trim().toLowerCase();
+
+const getClientLabel = (client) =>
+  client?.nombre ||
+  client?.commercial_name ||
+  client?.name ||
+  client?.display_name ||
+  client?.email ||
+  client?.identificador ||
+  client?.id ||
+  "Cliente";
+
 const AccordionSection = ({
   id,
   title,
@@ -76,7 +88,11 @@ const ClientDataSection = ({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // FIX: Explicit state for selected client to handle async race condition
+  const [showClientDropdown, setShowClientDropdown] = useState(false);
+  const [filteredClients, setFilteredClients] = useState([]);
+  const [isNewClient, setIsNewClient] = useState(false);
+
+  // Explicit state for selected client to handle async reconciliation
   const [selectedClient, setSelectedClient] = useState(null);
 
   // FIX: Initialize form with empty values - don't set client ID until options are loaded
@@ -93,7 +109,10 @@ const ClientDataSection = ({
         fallbackBusinessCase?.modern_bc_metadata ||
         {};
       const initialData = {
-        client: "", // Don't set client ID - wait for reconciliation
+        client:
+          businessCase?.client_name ||
+          fallbackBusinessCase?.client_name ||
+          "",
         clientType:
           businessCase?.clientType ||
           fallbackBusinessCase?.clientType ||
@@ -227,6 +246,18 @@ const ClientDataSection = ({
     });
   }, [errors]);
 
+  const findClientByInput = (value) => {
+    const needle = normalizeText(value);
+    if (!needle) return null;
+    return (
+      clients.find((c) => String(c.id) === String(value)) ||
+      clients.find((c) => normalizeText(c.email) === needle) ||
+      clients.find((c) => normalizeText(c.identificador) === needle) ||
+      clients.find((c) => normalizeText(getClientLabel(c)) === needle) ||
+      null
+    );
+  };
+
   useEffect(() => {
     const fetchClients = async () => {
       setLoadingClients(true);
@@ -253,64 +284,68 @@ const ClientDataSection = ({
     fetchClients();
   }, []);
 
-  // FIX: Resolve selected client when both clients list and saved value are available
+  // Resolve selected client when both client list and saved values are available
   useEffect(() => {
-    if (clients.length > 0 && businessCase?.client_id) {
-      const savedClientValue = businessCase.client_id;
-      if (savedClientValue) {
-        const clientOption = clients.find(
-          (c) =>
-            String(c.id) === String(savedClientValue)
-        );
+    if (clients.length === 0) return;
 
-        if (clientOption) {
-          // Use the same value format as the select options
-          const selectValue = clientOption.id || clientOption.email || clientOption.identificador || clientOption.nombre || clientOption.name;
-          setSelectedClient(selectValue);
-          setValue("client", selectValue, { shouldDirty: false });
-        }
+    if (businessCase?.client_id) {
+      const clientOption = clients.find((c) => String(c.id) === String(businessCase.client_id));
+      if (clientOption) {
+        const label = getClientLabel(clientOption);
+        setSelectedClient(clientOption);
+        setValue("client", label, { shouldDirty: false });
       }
+      return;
     }
-  }, [clients, businessCase, setValue]);
+
+    const fromName = findClientByInput(businessCase?.client_name);
+    if (fromName) {
+      setSelectedClient(fromName);
+      setValue("client", getClientLabel(fromName), { shouldDirty: false });
+    }
+  }, [clients, businessCase?.client_id, businessCase?.client_name, setValue]);
+
+  useEffect(() => {
+    const term = normalizeText(watchClient);
+    if (!term) {
+      setFilteredClients([]);
+      setShowClientDropdown(false);
+      setSelectedClient(null);
+      setIsNewClient(false);
+      return;
+    }
+
+    const exact = findClientByInput(watchClient);
+    setSelectedClient(exact);
+    setIsNewClient(Boolean(term) && !exact);
+
+    const matches = clients
+      .filter((client) => normalizeText(getClientLabel(client)).includes(term))
+      .slice(0, 8);
+    setFilteredClients(matches);
+  }, [watchClient, clients]);
 
   useEffect(() => {
     const naClientType = Boolean(naFields.clientType);
     const naProvinceCity = Boolean(naFields.provinceCity);
 
-    if (!watchClient) {
+    if (!selectedClient) {
       if (!naClientType) setValue("clientType", "", { shouldDirty: true });
       if (!naProvinceCity) setValue("provinceCity", "", { shouldDirty: true });
       return;
     }
-    const selected =
-      clients.find(
-        (c) =>
-          String(c.id) === String(watchClient) ||
-          String(c.email) === String(watchClient) ||
-          String(c.identificador) === String(watchClient),
-      ) || null;
 
-    const provinceCity = [selected?.shipping_city, selected?.shipping_province]
+    const provinceCity = [selectedClient?.shipping_city, selectedClient?.shipping_province]
       .filter(Boolean)
       .join(", ");
 
     if (!naClientType) {
-      setValue("clientType", selected?.client_type || "", { shouldDirty: true });
+      setValue("clientType", selectedClient?.client_type || "", { shouldDirty: true });
     }
     if (!naProvinceCity) {
       setValue("provinceCity", provinceCity || "", { shouldDirty: true });
     }
-  }, [watchClient, clients, setValue, naFields.clientType, naFields.provinceCity]);
-
-  const formatClientLabel = (client) =>
-    client?.nombre ||
-    client?.commercial_name ||
-    client?.name ||
-    client?.display_name ||
-    client?.email ||
-    client?.identificador ||
-    client?.id ||
-    "Cliente";
+  }, [selectedClient, setValue, naFields.clientType, naFields.provinceCity]);
 
   const handleSave = async (formData) => {
     if (!bcId) {
@@ -318,14 +353,8 @@ const ClientDataSection = ({
       return;
     }
 
-    const selected = clients.find(
-      (c) =>
-        String(c.id) === String(formData.client) ||
-        String(c.email) === String(formData.client) ||
-        String(c.identificador) === String(formData.client),
-    );
-
-    const client_name = selected ? formatClientLabel(selected) : formData.client;
+    const selected = selectedClient || findClientByInput(formData.client);
+    const client_name = selected ? getClientLabel(selected) : String(formData.client || "").trim();
     const client_id = selected?.id && Number.isFinite(Number(selected.id)) ? Number(selected.id) : undefined;
 
     const metadata = {
@@ -377,8 +406,8 @@ const ClientDataSection = ({
 
   // Check permissions based on role
   const canEdit = () => {
-    const role = permissions?.userRole || 'comercial';
-    return ['comercial', 'acp_comercial', 'jefe_tecnico', 'jefe_operaciones'].includes(role);
+    const role = permissions?.userRole || "comercial";
+    return ["comercial", "acp_comercial", "jefe_tecnico", "jefe_operaciones"].includes(role);
   };
 
   if (loading) {
@@ -446,31 +475,55 @@ const ClientDataSection = ({
           <span className="text-sm font-bold text-gray-700 flex items-center gap-2">
             <FiUsers className="text-gray-400" /> Cliente
           </span>
-          <select
-            className={`w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900`}
-            {...register("client", { required: "El cliente es obligatorio" })}
-            disabled={!canEdit()}
-          >
-            <option value="">Selecciona un cliente</option>
-            {Array.isArray(clients) &&
-              clients.map((client) => {
-                const value =
-                  client.id || client.email || client.identificador || client.nombre || client.name;
-                const label =
-                  client.nombre ||
-                  client.commercial_name ||
-                  client.name ||
-                  client.display_name ||
-                  client.email ||
-                  client.identificador ||
-                  client.id;
-                return (
-                  <option key={`${value}-${label}`} value={value}>
-                    {label}
-                  </option>
-                );
-              })}
-          </select>
+          <div className="relative">
+            <input
+              type="text"
+              className={`w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 ${
+                selectedClient ? "bg-emerald-50" : isNewClient ? "bg-blue-50" : ""
+              }`}
+              placeholder={loadingClients ? "Cargando clientes..." : "Escribe o selecciona un cliente"}
+              disabled={!canEdit()}
+              {...register("client", { required: "El cliente es obligatorio" })}
+              onChange={(event) => {
+                setValue("client", event.target.value, { shouldDirty: true, shouldValidate: true });
+              }}
+              onFocus={() => {
+                if (filteredClients.length > 0) setShowClientDropdown(true);
+              }}
+              onBlur={() => setTimeout(() => setShowClientDropdown(false), 120)}
+            />
+            {selectedClient && (
+              <span className="absolute right-2 top-2 rounded bg-emerald-100 px-2 py-1 text-[11px] font-semibold text-emerald-800">
+                Registrado
+              </span>
+            )}
+            {isNewClient && !selectedClient && (
+              <span className="absolute right-2 top-2 rounded bg-blue-100 px-2 py-1 text-[11px] font-semibold text-blue-800">
+                Nuevo
+              </span>
+            )}
+            {showClientDropdown && filteredClients.length > 0 && (
+              <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                {filteredClients.map((client) => (
+                  <button
+                    key={client.id}
+                    type="button"
+                    className="w-full border-b border-slate-100 px-3 py-2 text-left hover:bg-slate-50"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => {
+                      const label = getClientLabel(client);
+                      setValue("client", label, { shouldDirty: true, shouldValidate: true });
+                      setSelectedClient(client);
+                      setIsNewClient(false);
+                      setShowClientDropdown(false);
+                    }}
+                  >
+                    <p className="text-sm font-medium text-slate-900">{getClientLabel(client)}</p>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {loadingClients && <p className="text-xs text-blue-500 font-medium ml-1">Cargando clientes...</p>}
           {errors.client && <p className="text-xs text-rose-500 font-medium ml-1">{errors.client.message}</p>}
         </label>
@@ -483,7 +536,7 @@ const ClientDataSection = ({
           <input
             type="text"
             className={naInputClass("clientType")}
-            readOnly={Boolean(watchClient) || isNA("clientType")}
+            readOnly={Boolean(selectedClient) || isNA("clientType")}
             {...register("clientType")}
             disabled={!canEdit()}
           />
@@ -510,7 +563,7 @@ const ClientDataSection = ({
           <input
             type="text"
             className={naInputClass("provinceCity")}
-            readOnly={Boolean(watchClient) || isNA("provinceCity")}
+            readOnly={Boolean(selectedClient) || isNA("provinceCity")}
             {...register("provinceCity")}
             disabled={!canEdit()}
           />

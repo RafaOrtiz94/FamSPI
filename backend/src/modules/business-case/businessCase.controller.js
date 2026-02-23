@@ -72,6 +72,7 @@ const equipmentDetailsV2Schema = Joi.object({
     .items(
       Joi.object({
         primary_id: Joi.number().integer().required(),
+        primary_type: Joi.string().trim().valid("new_available", "new_import", "cu", "installed_client").default("new_available"),
         backup_id: Joi.number().integer().allow(null),
         backup_install_simultaneous: Joi.boolean().default(false),
         requires_backup: Joi.boolean().default(false),
@@ -1203,6 +1204,7 @@ async function saveEquipmentDetailsV2(req, res) {
         id: index + 1,
         requires_backup: pair.requires_backup,
         primary_id: pair.primary_id,
+        primary_type: pair.primary_type || "new_available",
         backup_id: pair.requires_backup ? pair.backup_id : null,
         backup_install_simultaneous: pair.backup_install_simultaneous || false,
       })),

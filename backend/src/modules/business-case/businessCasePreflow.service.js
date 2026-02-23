@@ -101,26 +101,44 @@ function mapBusinessCaseEquipmentToRequestList(businessCase) {
   source.forEach((pair) => {
     const primary = pair?.primary || (pair?.primary_id ? { id: pair.primary_id } : null);
     const backup = pair?.backup || (pair?.backup_id ? { id: pair.backup_id } : null);
-    if (primary?.id) items.push(primary);
-    if (backup?.id) items.push(backup);
+    const primaryType = normalizeBcEquipmentType(pair?.primary_type || primary?.type);
+    const backupType = normalizeBcEquipmentType(pair?.backup_type || backup?.type);
+
+    if (primary?.id) {
+      items.push({ ...primary, _bc_type: primaryType });
+    }
+    if (backup?.id) {
+      items.push({ ...backup, _bc_type: backupType });
+    }
   });
 
   const byKey = new Map();
   items.forEach((item, index) => {
     const id = item?.id || null;
     const name = item?.name || item?.modelo || item?.description || (id ? `Equipo ${id}` : `Equipo ${index + 1}`);
-    const key = `${id || "x"}-${name}`;
+    const type = normalizeBcEquipmentType(item?._bc_type || item?.type);
+    const key = `${id || "x"}-${name}-${type}`;
     if (!byKey.has(key)) {
       byKey.set(key, {
         id,
         name,
         sku: item?.code || item?.sku || null,
-        type: "new_available",
+        type,
       });
     }
   });
 
   return Array.from(byKey.values()).filter((item) => item?.name);
+}
+
+function normalizeBcEquipmentType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "cu") return "cu";
+  if (normalized === "new_import") return "new_import";
+  if (["installed_client", "instalado_cliente", "installed", "instalado_en_cliente"].includes(normalized)) {
+    return "installed_client";
+  }
+  return "new_available";
 }
 
 async function getDefaultAcpUser() {
