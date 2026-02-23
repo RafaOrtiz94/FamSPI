@@ -144,6 +144,15 @@ function hasTextValue(value) {
   return String(value).trim().length > 0;
 }
 
+function hasGeneralPayloadChanges(payload = {}) {
+  if (!payload || typeof payload !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(payload, "client_name")) return true;
+  if (Object.prototype.hasOwnProperty.call(payload, "process_code")) return true;
+  if (Object.prototype.hasOwnProperty.call(payload, "contract_object")) return true;
+  if (Object.prototype.hasOwnProperty.call(payload, "modern_bc_metadata")) return true;
+  return false;
+}
+
 function isTruthyFlag(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -550,6 +559,12 @@ async function update(req, res) {
     await assertSectionEditable(req.params.id, "general", req.user);
 
     const bc = await businessCaseService.updateBusinessCase(req.params.id, value);
+    if (preflowService.isPreflowCase(bc) && hasGeneralPayloadChanges(value)) {
+      const metadata = preflowService.toObject(bc?.modern_bc_metadata);
+      if (!metadata?.preflow_started_at) {
+        await preflowService.ensurePreflowStarted(req.params.id, PRE_BC_DURATION_HOURS);
+      }
+    }
     if ((req.user?.role || "").toLowerCase() === "comercial") {
       await notifySectionReview({
         businessCaseId: req.params.id,
@@ -557,7 +572,8 @@ async function update(req, res) {
         actor: req.user?.email || "system",
       });
     }
-    res.json({ ok: true, data: bc });
+    const refreshed = await businessCaseService.getBusinessCaseById(req.params.id);
+    res.json({ ok: true, data: refreshed });
   } catch (err) {
     logger.error(err);
     res.status(err.status || 500).json({ ok: false, message: err.message || "Error actualizando Business Case" });
@@ -1820,7 +1836,15 @@ async function getUIGuidance(req, res) {
     const ownershipUserIds = Object.values(ownershipInfo || {})
       .map((entry) => entry?.completedBy)
       .filter(Boolean);
-    const uniqueOwnershipUserIds = [...new Set(ownershipUserIds)];
+    const numericOwnershipUserIds = ownershipUserIds
+      .map((value) => {
+        const normalized = String(value || "").trim();
+        if (!normalized) return null;
+        if (!/^\d+$/.test(normalized)) return null;
+        return Number(normalized);
+      })
+      .filter((value) => Number.isInteger(value) && value > 0);
+    const uniqueOwnershipUserIds = [...new Set(numericOwnershipUserIds)];
     const ownershipUserMap = {};
     if (uniqueOwnershipUserIds.length) {
       const { rows } = await db.query(
@@ -1828,7 +1852,7 @@ async function getUIGuidance(req, res) {
         [uniqueOwnershipUserIds],
       );
       rows.forEach((row) => {
-        ownershipUserMap[row.id] = row.email || row.fullname || "system";
+        ownershipUserMap[String(row.id)] = row.email || row.fullname || "system";
       });
     }
 
@@ -1840,7 +1864,12 @@ async function getUIGuidance(req, res) {
     const getOwnershipEmail = (sectionKey) => {
       const entry = getOwnershipEntry(sectionKey);
       if (!entry?.completedBy) return null;
-      return ownershipUserMap[entry.completedBy] || null;
+      const key = String(entry.completedBy);
+      return (
+        ownershipUserMap[key] ||
+        entry?.metadata?.actor_email ||
+        null
+      );
     };
 
     const completionRule = (completed, inProgress, sectionKey) => {
