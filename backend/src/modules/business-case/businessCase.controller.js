@@ -27,6 +27,16 @@ const preflowService = require("./businessCasePreflow.service");
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
   client_id: Joi.number().integer().optional(),
+  bc_purchase_type: Joi.string()
+    .valid("public", "private_comodato", "private_sale", "comodato_publico", "comodato_privado")
+    .default("public"),
+  bc_duration_years: Joi.number().min(0).allow(null).optional(),
+  bc_equipment_cost: Joi.number().min(0).allow(null).optional(),
+  bc_target_margin_percentage: Joi.number().allow(null).optional(),
+  bc_amortization_months: Joi.number().integer().min(0).allow(null).optional(),
+  bc_calculation_mode: Joi.string().trim().valid("monthly", "annual").default("monthly"),
+  bc_show_roi: Joi.boolean().default(false),
+  bc_show_margin: Joi.boolean().default(false),
   status: Joi.string().default("draft"),
   bc_stage: Joi.string().optional(),
   bc_progress: Joi.object().default({}),
