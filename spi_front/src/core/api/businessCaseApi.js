@@ -493,6 +493,20 @@ export const saveBusinessCaseOperationsDispatchControl = async (businessCaseId, 
   return data.data || data;
 };
 
+export const getDeterminationsStatDocumentInfo = async (businessCaseId) => {
+  const { data } = await api.get(`/business-case/${businessCaseId}/determinations/stat-document`);
+  return data.data || data;
+};
+
+export const uploadDeterminationsStatDocument = async (businessCaseId, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const { data } = await api.post(`/business-case/${businessCaseId}/determinations/stat-document`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data.data || data;
+};
+
 export const getBusinessCaseObservabilityDashboard = async () => {
   const { data } = await api.get("/business-case/observability/dashboard");
   return data.data || data;

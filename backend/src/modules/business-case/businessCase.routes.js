@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const {
@@ -23,6 +24,7 @@ const determinationsCatalogWriteRoles = [
 ];
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 router.use((req, res, next) => {
   const startedAt = Date.now();
@@ -77,6 +79,14 @@ router.delete("/:id", verifyToken, requireRole(["gerencia", "admin"]), ctrl.remo
 
 router.post("/:id/equipment", verifyToken, requireRole(businessCaseRoles), ctrl.selectEquipment);
 router.get("/:id/determinations", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminations);
+router.get("/:id/determinations/stat-document", verifyToken, requireRole(businessCaseRoles), ctrl.getDeterminationsGateInfo);
+router.post(
+  "/:id/determinations/stat-document",
+  verifyToken,
+  requireRole(businessCaseRoles),
+  upload.single("file"),
+  ctrl.uploadDeterminationsStatDocument,
+);
 router.post(
   "/:id/determinations",
   verifyToken,

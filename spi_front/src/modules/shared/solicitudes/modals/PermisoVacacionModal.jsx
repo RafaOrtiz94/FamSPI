@@ -487,7 +487,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 {isAdvanceRequest && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-xs text-blue-700">
-                            Aun no cumples un ano de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
+                            Aun no cumples un año de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
                             acreditara/descontara cuando cumplas el ano ({vacationSummary?.eligible_from || "fecha de aniversario"}).
                         </p>
                     </div>

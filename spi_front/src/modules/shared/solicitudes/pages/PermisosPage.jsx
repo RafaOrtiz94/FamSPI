@@ -208,7 +208,7 @@ const PermisosPage = () => {
                 !vacationSummary.missing_hire_date && (
                 <Card className="border border-blue-200 bg-blue-50">
                     <div className="p-4 text-sm text-blue-700">
-                        Aun no cumples un ano de trabajo. Tus dias de vacaciones se acreditaran desde{" "}
+                        Aun no cumples un año de trabajo. Tus dias de vacaciones se acreditaran desde{" "}
                         <strong>{vacationSummary.eligible_from || "la fecha de aniversario"}</strong>. Puedes solicitar
                         vacaciones adelantadas; saldo actual: <strong>{remainingDays}</strong> dias.
                     </div>

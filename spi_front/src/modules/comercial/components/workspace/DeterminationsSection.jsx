@@ -1,10 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiActivity, FiAlertTriangle, FiCheck, FiEdit2, FiTrash2, FiX } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiCheck, FiEdit2, FiTrash2, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { recordBusinessCaseTelemetry } from "../../../../core/utils/businessCaseTelemetry";
+import {
+  getDeterminationsStatDocumentInfo,
+  uploadDeterminationsStatDocument,
+} from "../../../../core/api/businessCaseApi";
 
 const ITEM_TYPES = [
   { value: "reactivo", label: "Reactivo" },
@@ -35,6 +39,10 @@ const DeterminationsSection = ({
   const { user } = useAuth();
   const [catalogDeterminations, setCatalogDeterminations] = useState([]);
   const [catalogConsumables, setCatalogConsumables] = useState([]);
+  const [gateInfo, setGateInfo] = useState(null);
+  const [gateLoading, setGateLoading] = useState(false);
+  const [uploadingDocument, setUploadingDocument] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState(null);
   const [savedItems, setSavedItems] = useState([]);
   const [excludedKeys, setExcludedKeys] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -66,9 +74,14 @@ const DeterminationsSection = ({
   const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
   const currentRole = user?.role;
   const autosaveEnabled = false;
+  const gateActive = gateInfo?.enabledForBusinessCase === true;
+  const canUploadDocument = gateInfo?.permissions?.canUploadDocument === true;
+  const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
+  const canEditFinal = gateActive ? (canEditBase && canEditByGate) : canEditBase;
 
   const canEditType = (type) => {
-    if (!canEditBase) return false;
+    if (!canEditFinal) return false;
+    if (gateActive) return true;
     if (ADMIN_ROLES.has(currentRole)) return true;
     if (REACTIVO_TYPES.has(type)) return REACTIVO_ROLES.has(currentRole);
     if (TECNICO_TYPES.has(type)) return TECNICO_ROLES.has(currentRole);
@@ -293,6 +306,20 @@ const DeterminationsSection = ({
     }
   }, [bcId, businessCase?.modern_bc_metadata?.consumption_excluded, businessCase?.modern_bc_metadata?.consumption_items]);
 
+  const loadGateInfo = useCallback(async () => {
+    if (!bcId) return;
+    setGateLoading(true);
+    try {
+      const data = await getDeterminationsStatDocumentInfo(bcId);
+      setGateInfo(data || null);
+    } catch (err) {
+      console.warn("No se pudo cargar informacion del documento estadistico", err?.message || err);
+      setGateInfo(null);
+    } finally {
+      setGateLoading(false);
+    }
+  }, [bcId]);
+
   useEffect(() => {
     loadEquipmentData();
   }, [loadEquipmentData]);
@@ -306,6 +333,10 @@ const DeterminationsSection = ({
   useEffect(() => {
     loadExisting();
   }, [loadExisting]);
+
+  useEffect(() => {
+    loadGateInfo();
+  }, [loadGateInfo]);
 
   useEffect(() => {
     savedItemsRef.current = savedItems;
@@ -719,6 +750,85 @@ const DeterminationsSection = ({
     flushPendingQtyChanges({ force: true });
   };
 
+  const handleUploadStatDocument = async () => {
+    if (!bcId) {
+      showToast("No se encontro el Business Case", "error");
+      return;
+    }
+    if (!selectedDocument) {
+      showToast("Selecciona un archivo para cargar", "warning");
+      return;
+    }
+    const allowedMimeTypes = new Set([
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/csv",
+      "image/png",
+      "image/jpeg",
+    ]);
+    const maxBytes = 15 * 1024 * 1024;
+    if (selectedDocument.size > maxBytes) {
+      showToast("El archivo supera 15MB.", "error");
+      return;
+    }
+    if (selectedDocument.type && !allowedMimeTypes.has(selectedDocument.type)) {
+      showToast("Tipo de archivo no permitido. Usa PDF, Word, Excel, CSV o imagen.", "error");
+      return;
+    }
+    try {
+      setUploadingDocument(true);
+      await uploadDeterminationsStatDocument(bcId, selectedDocument);
+      showToast("Documento estadistico cargado correctamente", "success");
+      setSelectedDocument(null);
+      await loadGateInfo();
+      onSave({ refresh: true });
+    } catch (err) {
+      showToast(err?.response?.data?.message || "No se pudo cargar el documento", "error");
+    } finally {
+      setUploadingDocument(false);
+    }
+  };
+
+  const formatGateDateTime = (value) => {
+    if (!value) return "No definido";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "No definido";
+    return parsed.toLocaleString("es-EC", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  };
+
+  const gateSteps = useMemo(() => {
+    const hasDoc = Boolean(gateInfo?.documentUploaded);
+    const canEdit = Boolean(gateInfo?.permissions?.canEditDeterminations);
+    const expired = Boolean(gateInfo?.isExpired);
+    return [
+      {
+        id: "doc",
+        label: "Documento estadistico",
+        status: hasDoc ? "done" : "pending",
+      },
+      {
+        id: "role",
+        label: "Responsable habilitado",
+        status: hasDoc && canEdit ? "done" : hasDoc ? "active" : "pending",
+      },
+      {
+        id: "window",
+        label: "Ventana 48h",
+        status: expired ? "blocked" : hasDoc ? "active" : "pending",
+      },
+    ];
+  }, [gateInfo]);
+
   const handleAddCustom = (groupKey, equipmentName, equipmentId) => {
     const draft = newItemByEquipment[groupKey] || { id: "", name: "", type: "reactivo" };
     if (!canEditType(draft.type)) {
@@ -811,6 +921,100 @@ const DeterminationsSection = ({
             Registre el consumo anual informado por el laboratorio para cada item segun los equipos seleccionados.
           </p>
         </div>
+      </div>
+
+      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 space-y-3">
+        <div className="flex flex-col gap-1">
+          <h3 className="text-sm font-semibold text-gray-900">Documento estadistico para determinaciones</h3>
+          <p className="text-xs text-gray-500">
+            El comercial debe cargar este documento para habilitar la edicion de determinaciones y activar la ventana de 48 horas.
+          </p>
+        </div>
+        {gateLoading ? (
+          <div className="text-xs text-gray-500">Cargando estado del documento...</div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+              {gateSteps.map((step) => (
+                <div
+                  key={step.id}
+                  className={`rounded-lg border px-3 py-2 text-xs ${
+                    step.status === "done"
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                      : step.status === "active"
+                        ? "border-sky-200 bg-sky-50 text-sky-700"
+                        : step.status === "blocked"
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-gray-200 bg-gray-50 text-gray-600"
+                  }`}
+                >
+                  <div className="font-semibold">{step.label}</div>
+                </div>
+              ))}
+            </div>
+            {gateInfo?.documentUploaded ? (
+              <div className="text-xs text-gray-700 space-y-1">
+                <div>
+                  <span className="font-semibold">Documento:</span>{" "}
+                  {gateInfo?.document?.driveLink ? (
+                    <a
+                      href={gateInfo.document.driveLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-700 hover:underline"
+                    >
+                      {gateInfo?.document?.name || "Ver archivo"}
+                    </a>
+                  ) : (
+                    <span>{gateInfo?.document?.name || "Cargado"}</span>
+                  )}
+                </div>
+                <div>
+                  <span className="font-semibold">Subido por:</span> {gateInfo?.document?.uploadedByEmail || "N/A"}
+                </div>
+                <div>
+                  <span className="font-semibold">Habilitado:</span> {formatGateDateTime(gateInfo?.enabledAt)}
+                </div>
+                <div>
+                  <span className="font-semibold">Vence:</span> {formatGateDateTime(gateInfo?.deadlineAt)}
+                </div>
+                <div>
+                  <span className="font-semibold">Responsables:</span> {(gateInfo?.editors || []).join(", ") || "N/A"}
+                </div>
+              </div>
+            ) : (
+              <div className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
+                Aun no se ha cargado el documento estadistico. La seccion de determinaciones permanece bloqueada.
+              </div>
+            )}
+
+            {canUploadDocument && (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <input
+                  type="file"
+                  accept=".pdf,.doc,.docx,.xlsx,.xls,.csv,.png,.jpg,.jpeg"
+                  onChange={(e) => setSelectedDocument(e.target.files?.[0] || null)}
+                  className="text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={handleUploadStatDocument}
+                  disabled={!selectedDocument || uploadingDocument}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold disabled:opacity-50"
+                >
+                  <FiUpload size={14} />
+                  {uploadingDocument ? "Cargando..." : "Subir documento"}
+                </button>
+              </div>
+            )}
+
+            {!canEditFinal && (
+              <div className="text-xs text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-3 py-2">
+                No tienes habilitada la edicion de determinaciones para este flujo o la ventana de 48 horas ya expiro.
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -1189,7 +1393,7 @@ const DeterminationsSection = ({
           <button
             type="button"
             onClick={handleSaveNow}
-            disabled={saving}
+            disabled={saving || !canEditFinal}
             className="px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Guardar ahora
@@ -1206,6 +1410,7 @@ const DeterminationsSection = ({
       <div className="flex flex-col sm:flex-row sm:justify-end pt-4 border-t border-gray-100">
         <button
           onClick={handleSaveNow}
+          disabled={!canEditFinal || saving}
           className="bg-blue-600 text-white w-full sm:w-auto px-6 py-2.5 rounded-full font-semibold hover:bg-blue-700 active:scale-95 transition-all shadow-sm hover:shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Guardar informacion

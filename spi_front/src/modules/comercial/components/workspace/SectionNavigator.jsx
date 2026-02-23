@@ -1,66 +1,10 @@
 import React from "react";
-import { FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare, FiTarget } from "react-icons/fi";
-import Card from "../../../../core/ui/components/Card";
+import { FiCheckCircle, FiClock, FiLock, FiAlertTriangle, FiUser, FiMessageSquare } from "react-icons/fi";
 import { useAuth } from "../../../../core/auth/AuthContext";
-
-/**
- * Role-based section visibility configuration
- * Defines which sections each role can see and edit
- */
-const ROLE_SECTION_CONFIG = {
-  // Comercial roles - operational data
-  comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-  },
-  asesor_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-  },
-  acp_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
-    canEdit: ["general", "lab", "equipment", "lis", "requirement", "investments", "consumption_export"],
-  },
-  backoffice_comercial: {
-    visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "calculations"],
-    canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments"],
-  },
-  // Manager roles - full access
-  jefe_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
-  },
-  gerencia: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
-    canEdit: [],
-  },
-  gerencia_general: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "dispatch_workspace"],
-    canEdit: [],
-  },
-  // Technical roles - equipment/determinations focus
-  operaciones: {
-    visible: ["equipment", "determinations", "dispatch_workspace"],
-    canEdit: ["equipment", "determinations", "dispatch_workspace"],
-  },
-  jefe_operaciones: {
-    visible: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace"],
-    canEdit: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace"],
-  },
-  servicio_tecnico: {
-    visible: ["equipment", "determinations"],
-    canEdit: [],
-  },
-  jefe_tecnico: {
-    visible: ["equipment", "determinations", "requirement", "investments"],
-    canEdit: ["equipment", "investments"],
-  },
-  // Admin - full access
-  admin: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
-  },
-};
+import {
+  canRoleEditSection,
+  resolveRoleSectionConfig,
+} from "./roleSectionConfig";
 
 const SectionNavigator = ({
   selectedSection,
@@ -69,6 +13,7 @@ const SectionNavigator = ({
   observationData
 }) => {
   const { user } = useAuth();
+  const [, setNowTick] = React.useState(Date.now());
   const userRole = (user?.role || "").toLowerCase();
 
   const { sectionOwnership } = uiGuidance;
@@ -77,7 +22,8 @@ const SectionNavigator = ({
   const preflowRequired = new Set(preflow?.requiredSections || []);
 
   // Get role config, default to showing all if role not found
-  const roleConfig = ROLE_SECTION_CONFIG[userRole] || { visible: "all", canEdit: [] };
+  const roleConfig = resolveRoleSectionConfig(userRole);
+  const determinationsGate = uiGuidance?.workspaceData?.determinations_gate || null;
 
   // Full section list
   const allSections = [
@@ -165,8 +111,25 @@ const SectionNavigator = ({
 
   // Check if section is editable by current role
   const canEditSection = (sectionId) => {
-    if (roleConfig.canEdit === "all") return true;
-    return roleConfig.canEdit.includes(sectionId);
+    return canRoleEditSection(roleConfig, sectionId);
+  };
+
+  React.useEffect(() => {
+    const timer = setInterval(() => {
+      setNowTick(Date.now());
+    }, 60 * 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const getDeterminationsCountdown = () => {
+    if (!determinationsGate?.deadlineAt) return null;
+    const deadline = new Date(determinationsGate.deadlineAt);
+    if (Number.isNaN(deadline.getTime())) return null;
+    const ms = deadline.getTime() - Date.now();
+    if (ms <= 0) return "Vencido";
+    const hours = Math.floor(ms / (1000 * 60 * 60));
+    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours}h ${minutes}m`;
   };
 
   const getSectionStatus = (sectionId) => {
@@ -234,7 +197,11 @@ const SectionNavigator = ({
         {visibleSections.map((section) => {
           const status = getSectionStatus(section.id);
           const isSelected = selectedSection === section.id;
-          const isReadOnly = !canEditSection(section.id);
+          const isDeterminations = section.id === "determinations";
+          const countdown = isDeterminations ? getDeterminationsCountdown() : null;
+          const needsStatDoc = isDeterminations && determinationsGate?.requiresDocument;
+          const statDocReady = isDeterminations && determinationsGate?.documentUploaded;
+          const isExpired = isDeterminations && determinationsGate?.isExpired;
 
           return (
             <button
@@ -299,6 +266,29 @@ const SectionNavigator = ({
                   <p className="text-xs text-gray-500 mb-2 line-clamp-2 leading-relaxed">
                     {section.description}
                   </p>
+
+                  {isDeterminations && (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {needsStatDoc && (
+                        <span
+                          className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full ${
+                            statDocReady ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          {statDocReady ? "Documento cargado" : "Documento pendiente"}
+                        </span>
+                      )}
+                      {countdown && (
+                        <span
+                          className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full ${
+                            isExpired ? "bg-rose-100 text-rose-700" : "bg-sky-100 text-sky-700"
+                          }`}
+                        >
+                          {isExpired ? "Ventana vencida" : `Tiempo ${countdown}`}
+                        </span>
+                      )}
+                    </div>
+                  )}
 
                   {/* Ownership info */}
                   {status.completedBy && (

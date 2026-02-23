@@ -27,6 +27,7 @@ const logger = require("./config/logger");
 const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
 const { startExpiredReservationsJob } = require("./jobs/checkExpiredReservations");
 const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflowExpiryScheduler");
+const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -45,6 +46,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     startReminderScheduler();
     startExpiredReservationsJob();
     startBusinessCasePreflowExpiryJob();
+    startBusinessCaseDeterminationsGateExpiryJob();
   } else {
     logger.info("⏸️ Jobs deshabilitados (usar Cloud Scheduler)");
   }

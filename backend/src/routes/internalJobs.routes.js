@@ -6,6 +6,7 @@ const { runOnce: processAttendanceOvertime } = require('../jobs/attendanceOverti
 const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContractReminderEmails');
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
 const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCasePreflowExpiryScheduler');
+const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -93,6 +94,23 @@ router.post('/business-case/preflow/expiry', async (_req, res) => {
         console.error('Error en job de expiracion preflujo BC:', error);
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion preflujo BC',
+            details: error.message
+        });
+    }
+});
+
+router.post('/business-case/determinations-gate/expiry', async (_req, res) => {
+    try {
+        const result = await runBusinessCaseDeterminationsGateExpiry();
+        res.json({
+            success: true,
+            message: 'Expiraciones de ventana de determinaciones procesadas',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de expiracion determinaciones:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de expiracion de determinaciones',
             details: error.message
         });
     }

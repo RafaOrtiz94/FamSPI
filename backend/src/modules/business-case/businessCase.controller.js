@@ -1,4 +1,5 @@
 const Joi = require("joi");
+const crypto = require("crypto");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const businessCaseService = require("./businessCase.service");
@@ -23,6 +24,8 @@ const notificationManager = require("../notifications/notificationManager");
 const BusinessCaseStateMachine = require("./businessCaseStateMachine");
 const { STATES } = require("./businessCaseStates.constants");
 const preflowService = require("./businessCasePreflow.service");
+const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const determinationsGateService = require("./businessCaseDeterminationsGate.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -257,6 +260,51 @@ async function notifyPhase1Completed({ businessCaseId, actor }) {
   );
 }
 
+async function notifyDeterminationsGateEnabled({
+  businessCase,
+  gate,
+  actor,
+}) {
+  const recipients = await getUsersByRoles(gate?.notificationsTargetRoles || []);
+  if (!recipients.length) return;
+  const deadlineText = gate?.deadlineAt
+    ? new Date(gate.deadlineAt).toLocaleString("es-EC", {
+      timeZone: process.env.APP_TIMEZONE || "America/Guayaquil",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    : "sin fecha";
+
+  await Promise.all(
+    recipients.map((targetUser) =>
+      notificationManager.sendNotification({
+        userId: targetUser.id,
+        template: "custom_html",
+        customTitle: "Documento estadistico cargado para determinaciones",
+        customMessage:
+          `El comercial subio el documento estadistico del BC ${businessCase?.id || businessCase?.business_case_id}. ` +
+          `Debes completar determinaciones antes de ${deadlineText}.`,
+        type: "alert",
+        priority: 2,
+        source: "business_case.determinations_gate_enabled",
+        email: true,
+        chat: false,
+        meta: {
+          businessCaseId: businessCase?.id || businessCase?.business_case_id,
+          bc_purchase_type: businessCase?.bc_purchase_type || null,
+          determinations_deadline_at: gate?.deadlineAt || null,
+          notified_role: targetUser.role || null,
+          actor: actor || null,
+        },
+      }).catch(() => null),
+    ),
+  );
+}
+
 async function assertSectionEditable(businessCaseId, section, user) {
   if (section === "investments") return;
   const lockMap = await BusinessCaseDataOwnership.getLockStatus(businessCaseId);
@@ -267,6 +315,7 @@ async function assertSectionEditable(businessCaseId, section, user) {
     throw error;
   }
 }
+
 
 
 async function list(req, res) {
@@ -368,6 +417,14 @@ async function selectEquipment(req, res) {
 
 async function addDetermination(req, res) {
   try {
+    const bc = await businessCaseService.getBusinessCaseById(req.params.id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: bc,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(req.params.id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
+
     const { error, value } = determinationSchema.validate(req.body);
     if (error) return res.status(400).json({ ok: false, message: error.message });
 
@@ -389,6 +446,14 @@ async function addDetermination(req, res) {
 
 async function updateDetermination(req, res) {
   try {
+    const bc = await businessCaseService.getBusinessCaseById(req.params.id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: bc,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(req.params.id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
+
     const { error, value } = Joi.object({
       monthlyQty: Joi.number().integer().positive(),
       annualQty: Joi.number().integer().positive(),
@@ -414,6 +479,13 @@ async function updateDetermination(req, res) {
 
 async function removeDetermination(req, res) {
   try {
+    const bc = await businessCaseService.getBusinessCaseById(req.params.id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: bc,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(req.params.id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
     await determinationsService.removeDetermination(req.params.id, req.params.detId);
     res.status(204).send();
   } catch (err) {
@@ -796,6 +868,13 @@ async function saveConsumptionItems(req, res) {
   try {
     const { id } = req.params;
     await assertSectionEditable(id, "determinations", req.user);
+    const currentBusinessCase = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: currentBusinessCase,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
     const silent = isTruthyFlag(req.query?.silent) || isTruthyFlag(req.body?.silent);
     const expectedVersion = getExpectedVersion(req);
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -882,6 +961,13 @@ async function patchConsumptionItem(req, res) {
   try {
     const { id, itemKey } = req.params;
     await assertSectionEditable(id, "determinations", req.user);
+    const currentBusinessCase = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: currentBusinessCase,
+      role: resolveRequestRole(req),
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    determinationsGateService.assertCanEditDeterminationsOrThrow(gate);
     const silent = isTruthyFlag(req.query?.silent) || isTruthyFlag(req.body?.silent);
     const expectedVersion = getExpectedVersion(req);
     const annualQty = req.body?.annualQty;
@@ -1690,7 +1776,13 @@ async function getUIGuidance(req, res) {
     const investmentSelections = await investmentsService.getInvestmentSelections(id);
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
 
+    const userRole = (req.user?.role || req.user?.scope || req.user?.role_name || 'comercial').toLowerCase();
     const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
+    const determinationsGate = determinationsGateService.buildGateInfo({
+      businessCase: bc,
+      role: userRole,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
     const ownershipRules = {
       general: completionRule(generalComplete, hasGeneralData, "general"),
       lab: completionRule(hasLabData, hasLabData, "lab"),
@@ -1720,6 +1812,18 @@ async function getUIGuidance(req, res) {
       ownershipRules[section].lockedAt = lockInfo.lockedAt || null;
     });
 
+    ownershipRules.determinations.canUserEdit = Boolean(
+      ownershipRules.determinations.canUserEdit && determinationsGate.permissions.canEditDeterminations,
+    );
+    ownershipRules.determinations.metadata = {
+      ...(ownershipRules.determinations.metadata || {}),
+      requires_stat_document: true,
+      stat_document_uploaded: determinationsGate.documentUploaded,
+      stat_document_deadline_at: determinationsGate.deadlineAt,
+      stat_document_expired: determinationsGate.isExpired,
+      determinations_editor_roles: determinationsGate.editors,
+    };
+
     const ruleEntries = Object.values(ownershipRules);
     const completionSummary = {
       totalSections: ruleEntries.length,
@@ -1738,7 +1842,6 @@ async function getUIGuidance(req, res) {
     const preflow = preflowService.buildPreflowInfo(bc, ownershipRules);
 
     // Get permissions based on user role
-    const userRole = (req.user?.role || req.user?.scope || req.user?.role_name || 'comercial').toLowerCase();
     const permissions = {
       userRole: userRole,
       canEdit: true, // Default to true for all roles
@@ -1761,7 +1864,8 @@ async function getUIGuidance(req, res) {
       workspaceData: {
         lab_environment: labEnvironment,
         requirements: requirementData,
-        deliveries: deliveryData
+        deliveries: deliveryData,
+        determinations_gate: determinationsGate,
       },
       observationData: null, // No observations for now
       workflowState: {
@@ -1777,6 +1881,149 @@ async function getUIGuidance(req, res) {
     res.status(error.status || 500).json({
       ok: false,
       message: error.message || "Error obteniendo datos de UI guidance"
+    });
+  }
+}
+
+async function getDeterminationsGateInfo(req, res) {
+  try {
+    const { id } = req.params;
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    const role = resolveRequestRole(req) || "comercial";
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: bc,
+      role,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    res.json({ ok: true, data: gate });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error getting determinations gate info");
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "No se pudo obtener informacion del documento estadistico",
+    });
+  }
+}
+
+async function uploadDeterminationsStatDocument(req, res) {
+  let idempotencySession = null;
+  try {
+    const { id } = req.params;
+    const file = req.file;
+    const role = resolveRequestRole(req);
+    if (!determinationsGateService.isUploadRole(role)) {
+      return res.status(403).json({
+        ok: false,
+        message: "Solo el usuario comercial puede subir el documento estadistico.",
+      });
+    }
+    if (!file || !file.buffer) {
+      return res.status(400).json({ ok: false, message: "Debe adjuntar un archivo valido." });
+    }
+    if (Number(file.size || 0) > 15 * 1024 * 1024) {
+      return res.status(400).json({ ok: false, message: "El archivo supera el limite de 15MB." });
+    }
+    const fileHash = crypto.createHash("sha256").update(file.buffer).digest("hex");
+    idempotencySession = await startIdempotentWrite({
+      req,
+      operationScope: "bc.determinations.upload_document",
+      businessCaseId: id,
+      payload: {
+        file_name: file.originalname || null,
+        file_mime: file.mimetype || null,
+        file_size: Number(file.size || 0),
+        file_hash: fileHash,
+      },
+    });
+    if (idempotencySession.replay) {
+      applyResponseHeadersFromBody(res, idempotencySession.replayPayload);
+      return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
+    }
+
+    const bc = await businessCaseService.getBusinessCaseById(id);
+    const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
+      ? { ...bc.modern_bc_metadata }
+      : {};
+    const previousGate = metadata?.determinations_gate && typeof metadata.determinations_gate === "object"
+      ? { ...metadata.determinations_gate }
+      : {};
+
+    const rootFolderId = bc?.drive_folder_id || process.env.BUSINESS_CASE_ROOT_FOLDER_ID || null;
+    const bcFolderId = bc?.drive_folder_id || null;
+    const safeBcFolderName = `BC-${bc?.id || id}`.replace(/[^\w.-]+/g, "_");
+    const bcFolder = bcFolderId
+      ? { id: bcFolderId }
+      : (rootFolderId ? await ensureFolder(safeBcFolderName, rootFolderId) : null);
+    const determinationsFolder = await ensureFolder("Determinaciones", bcFolder?.id || rootFolderId || undefined);
+    const uploaded = await uploadBase64File(
+      file.originalname || `documento-estadistico-${id}.pdf`,
+      Buffer.from(file.buffer).toString("base64"),
+      file.mimetype || "application/octet-stream",
+      determinationsFolder?.id,
+    );
+
+    const now = new Date();
+    const deadlineAt = new Date(
+      now.getTime() + determinationsGateService.DETERMINATIONS_DEADLINE_HOURS * 60 * 60 * 1000,
+    );
+    const driveLink =
+      uploaded?.webViewLink ||
+      uploaded?.webContentLink ||
+      (uploaded?.id ? `https://drive.google.com/file/d/${uploaded.id}/view` : null);
+    metadata.determinations_gate = {
+      ...previousGate,
+      enabled: true,
+      enabled_at: now.toISOString(),
+      deadline_at: deadlineAt.toISOString(),
+      is_expired: false,
+      expired_at: null,
+      expired_notified_at: null,
+      document: {
+        name: file.originalname || uploaded?.name || "documento-estadistico",
+        mime_type: file.mimetype || null,
+        drive_file_id: uploaded?.id || null,
+        drive_link: driveLink,
+        uploaded_at: now.toISOString(),
+        uploaded_by_id: req.user?.id || null,
+        uploaded_by_email: req.user?.email || null,
+      },
+    };
+    await determinationsGateService.saveCurrentDocument({
+      businessCaseId: id,
+      fileName: file.originalname || uploaded?.name || "documento-estadistico",
+      mimeType: file.mimetype || null,
+      fileSizeBytes: Number(file.size || 0),
+      driveFileId: uploaded?.id || null,
+      driveLink,
+      documentHashSha256: fileHash,
+      uploadedByUserId: req.user?.id || null,
+      uploadedByEmail: req.user?.email || null,
+      metadata: { source: "business_case_determinations_gate" },
+    });
+
+    await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    const refreshed = await businessCaseService.getBusinessCaseById(id);
+    const gate = determinationsGateService.buildGateInfo({
+      businessCase: refreshed,
+      role,
+      now,
+      currentDocument: await determinationsGateService.getCurrentDocument(id),
+    });
+    await notifyDeterminationsGateEnabled({
+      businessCase: refreshed,
+      gate,
+      actor: req.user?.email || null,
+    });
+
+    const responseBody = { ok: true, data: gate };
+    await completeIdempotentWrite(idempotencySession, responseBody, 200);
+    res.json(responseBody);
+  } catch (error) {
+    await failIdempotentWrite(idempotencySession, error);
+    logger.error({ error: error.message }, "Error uploading determinations stat document");
+    res.status(error.status || 500).json({
+      ok: false,
+      message: error.message || "No se pudo cargar el documento estadistico",
     });
   }
 }
@@ -2124,6 +2371,8 @@ module.exports = {
   upsertAutosaveFeatureFlags,
   // UI Guidance endpoints (Workspace)
   getUIGuidance,
+  getDeterminationsGateInfo,
+  uploadDeterminationsStatDocument,
   getDataOwnership,
   recordSectionCompletion,
   lockSection,
