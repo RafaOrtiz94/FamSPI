@@ -21,6 +21,18 @@ const normalizeUuid = (value) => {
   return isUuid(normalized) ? normalized : null;
 };
 
+const deterministicUuidFromLegacyId = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const hash = crypto.createHash("sha256").update(`legacy-user:${raw}`).digest("hex");
+  const base = hash.slice(0, 32);
+  return `${base.slice(0, 8)}-${base.slice(8, 12)}-${base.slice(12, 16)}-${base.slice(16, 20)}-${base.slice(20, 32)}`;
+};
+
+const resolveActorUuid = (user) =>
+  normalizeUuid(user?.uuid || user?.sub || user?.user_uuid || user?.id || user?.user_id) ||
+  deterministicUuidFromLegacyId(user?.id || user?.user_id || user?.sub || user?.email || "system");
+
 function toObject(value, fallback = {}) {
   if (!value) return { ...fallback };
   if (typeof value === "object" && !Array.isArray(value)) return { ...value };
@@ -321,7 +333,7 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
         businessCaseId,
         "preflow",
         "preflow_process_created",
-        normalizeUuid(actorUser?.uuid || actorUser?.id),
+        resolveActorUuid(actorUser),
         actorUser?.role || null,
         String(bc?.canonical_state || bc?.bc_stage || "draft"),
         JSON.stringify({ processId, processType, source: "workspace_preflow" }),

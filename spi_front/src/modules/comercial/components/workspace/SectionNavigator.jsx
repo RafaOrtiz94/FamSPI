@@ -41,7 +41,7 @@ const SectionNavigator = ({
     },
     {
       id: "requirement",
-      title: "Requerimiento del BC",
+      title: "Condiciones del BC",
       description: "Plazos, entregas y observaciones clave",
       icon: "BC"
     },

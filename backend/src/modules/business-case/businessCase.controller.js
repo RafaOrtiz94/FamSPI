@@ -2144,6 +2144,27 @@ async function uploadDeterminationsStatDocument(req, res) {
           `Debes completar las secciones previas hasta LIS antes de subir el documento estadístico. Pendientes: ${missingRequired.join(", ")}.`,
       });
     }
+    let preflowProcessResult = null;
+    try {
+      if (preflowService.isPreflowCase(bc)) {
+        await preflowService.ensurePreflowStarted(id, PRE_BC_DURATION_HOURS);
+      }
+      preflowProcessResult = await preflowService.ensurePreflowWorkspaceProcess({
+        businessCaseId: id,
+        actorUser: req.user,
+        durationHours: PRE_BC_DURATION_HOURS,
+      });
+    } catch (preflowError) {
+      logger.warn(
+        { error: preflowError.message, businessCaseId: id },
+        "No se pudo iniciar automaticamente el proceso de compras tras carga de estadistica",
+      );
+      preflowProcessResult = {
+        skipped: true,
+        reason: "auto_process_start_failed",
+        message: preflowError.message,
+      };
+    }
     const currentDocument = await determinationsGateService.getCurrentDocument(id);
     const isSameCurrentHash = String(currentDocument?.document_hash_sha256 || "").toLowerCase() === String(fileHash || "").toLowerCase();
     if (isSameCurrentHash) {
@@ -2158,6 +2179,7 @@ async function uploadDeterminationsStatDocument(req, res) {
         meta: {
           reused_existing_document: true,
           reason: "same_sha256_hash",
+          process_result: preflowProcessResult,
         },
       };
       await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -2237,7 +2259,13 @@ async function uploadDeterminationsStatDocument(req, res) {
       actorUser: req.user,
     });
 
-    const responseBody = { ok: true, data: gate };
+    const responseBody = {
+      ok: true,
+      data: gate,
+      meta: {
+        process_result: preflowProcessResult,
+      },
+    };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
     res.json(responseBody);
   } catch (error) {
@@ -2397,17 +2425,19 @@ async function recordSectionCompletion(req, res) {
     const businessCase = await businessCaseService.getBusinessCaseById(id);
     const currentState = String(businessCase?.canonical_state || businessCase?.bc_stage || "draft").toUpperCase();
     const userRole = resolveRequestRole(req) || user?.role || user?.role_name || "comercial";
+    const actorId = user?.id ?? user?.sub ?? user?.user_id ?? user?.uuid ?? null;
 
     await BusinessCaseDataOwnership.recordSectionCompletion(
       id,
       canonicalSection,
-      user?.id || null,
+      actorId,
       userRole,
       currentState,
       {
         source: "workspace",
         reason: reason || null,
         actor_email: user?.email || null,
+        actor_id_raw: actorId,
       },
     );
 

@@ -15,6 +15,7 @@
  */
 
 const db = require("../../config/db");
+const crypto = require("crypto");
 const { STATES } = require('./businessCaseStates.constants');
 
 const isUuid = (value) =>
@@ -28,6 +29,18 @@ const normalizeUuid = (value) => {
   const normalized = String(value).trim();
   return isUuid(normalized) ? normalized : null;
 };
+const SYSTEM_ACTOR_UUID = "00000000-0000-0000-0000-000000000001";
+
+const deterministicUuidFromLegacyId = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const hash = crypto.createHash("sha256").update(`legacy-user:${raw}`).digest("hex");
+  const base = hash.slice(0, 32);
+  return `${base.slice(0, 8)}-${base.slice(8, 12)}-${base.slice(12, 16)}-${base.slice(16, 20)}-${base.slice(20, 32)}`;
+};
+
+const resolveActorUuid = (value) =>
+  normalizeUuid(value) || deterministicUuidFromLegacyId(value) || SYSTEM_ACTOR_UUID;
 
 // Canonical section definitions
 const SECTIONS = {
@@ -156,7 +169,7 @@ class BusinessCaseDataOwnership {
    */
   static async lockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
-    const actorUserId = normalizeUuid(user?.uuid || user?.id);
+    const actorUserId = resolveActorUuid(user?.uuid || user?.sub || user?.id || user?.user_id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -199,7 +212,7 @@ class BusinessCaseDataOwnership {
    */
   static async unlockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
-    const actorUserId = normalizeUuid(user?.uuid || user?.id);
+    const actorUserId = resolveActorUuid(user?.uuid || user?.sub || user?.id || user?.user_id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -247,7 +260,7 @@ class BusinessCaseDataOwnership {
    */
   static async recordSectionCompletion(businessCaseId, section, userId, userRole, canonicalState, metadata = {}) {
     const client = await db.getClient();
-    const actorUserId = normalizeUuid(userId);
+    const actorUserId = resolveActorUuid(userId);
     const mergedMetadata = {
       ...metadata,
       actor_user_id: userId ?? null,

@@ -3,6 +3,7 @@ const logger = require("../config/logger");
 const notificationManager = require("../modules/notifications/notificationManager");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.BC_PREFLOW_EXPIRY_INTERVAL_MINUTES || 60);
+const SYSTEM_ACTOR_UUID = "00000000-0000-0000-0000-000000000001";
 
 async function runOnce() {
   const { rows } = await db.query(
@@ -43,8 +44,8 @@ async function runOnce() {
     await db.query(
       `INSERT INTO business_case_section_ownership_audit
          (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
-       VALUES ($1,'preflow','preflow_expired',NULL,'system','draft',$2,now())`,
-      [row.id, JSON.stringify({ deadline_at: deadlineRaw })],
+       VALUES ($1,'preflow','preflow_expired',$2,'system','draft',$3,now())`,
+      [row.id, SYSTEM_ACTOR_UUID, JSON.stringify({ deadline_at: deadlineRaw })],
     );
 
     const { rows: recipients } = await db.query(
