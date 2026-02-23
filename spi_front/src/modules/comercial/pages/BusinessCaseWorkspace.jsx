@@ -1,5 +1,6 @@
-import React, { useCallback, useState, useEffect, useRef } from "react";
+﻿import React, { useCallback, useState, useEffect, useRef } from "react";
 import { useParams } from "react-router-dom";
+import { FiAlertTriangle } from "react-icons/fi";
 import {
   getBusinessCase,
   getUIGuidance,
@@ -16,6 +17,39 @@ import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
 import { BusinessCaseWorkspaceContext } from "../components/workspace/BusinessCaseWorkspaceContext";
+import Modal from "../../../core/ui/components/Modal";
+import Button from "../../../core/ui/components/Button";
+import { resolveRoleSectionConfig } from "../components/workspace/roleSectionConfig";
+
+const WORKSPACE_SECTION_ORDER = [
+  "general",
+  "lab",
+  "requirement",
+  "equipment",
+  "lis",
+  "determinations",
+  "investments",
+  "prices",
+  "calculations",
+  "rentability",
+  "consumption_export",
+  "dispatch_workspace",
+];
+
+const getVisibleSectionsByRole = (role = "") => {
+  const config = resolveRoleSectionConfig(String(role || "").toLowerCase());
+  if (config?.visible === "all") return WORKSPACE_SECTION_ORDER;
+  if (Array.isArray(config?.visible) && config.visible.length) return config.visible;
+  return WORKSPACE_SECTION_ORDER;
+};
+
+const getNextSectionId = (currentSection, role = "") => {
+  const visible = getVisibleSectionsByRole(role);
+  const currentIndex = visible.indexOf(currentSection);
+  if (currentIndex < 0) return null;
+  if (currentIndex >= visible.length - 1) return null;
+  return visible[currentIndex + 1] || null;
+};
 
 const BusinessCaseWorkspace = () => {
   const { id: bcId } = useParams();
@@ -25,13 +59,34 @@ const BusinessCaseWorkspace = () => {
   const [uiGuidance, setUiGuidance] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [confirmState, setConfirmState] = useState({
+    open: false,
+    sectionLabel: "",
+  });
 
   // Autosave manager ref
   const autosaveManagerRef = useRef(null);
+  const confirmResolverRef = useRef(null);
 
   const handleSectionSelect = (sectionId) => {
     setSelectedSection(sectionId);
   };
+
+  const requestSectionConfirm = useCallback((section) => {
+    const sectionLabel = String(section || "seccion").replace(/_/g, " ");
+    setConfirmState({ open: true, sectionLabel });
+    return new Promise((resolve) => {
+      confirmResolverRef.current = resolve;
+    });
+  }, []);
+
+  const resolveSectionConfirm = useCallback((accepted) => {
+    if (typeof confirmResolverRef.current === "function") {
+      confirmResolverRef.current(Boolean(accepted));
+      confirmResolverRef.current = null;
+    }
+    setConfirmState({ open: false, sectionLabel: "" });
+  }, []);
 
   const handleSectionSave = useCallback(async (options = {}) => {
     if (!uiGuidance) return;
@@ -39,16 +94,13 @@ const BusinessCaseWorkspace = () => {
 
     const startedAt = Date.now();
     try {
+      let sectionCompleted = false;
       const shouldMarkComplete = options?.markComplete !== false;
       if (bcId && options?.section && shouldMarkComplete) {
-        const sectionLabel = String(options.section || "seccion").replace(/_/g, " ");
-        const confirmMessage =
-          `Vas a confirmar y cerrar la seccion "${sectionLabel}".\n\n` +
-          "Si continuas, se bloqueara y avanzara al siguiente paso.\n\n" +
-          "¿Deseas continuar?";
-        const confirmed = window.confirm(confirmMessage);
+        const confirmed = await requestSectionConfirm(options.section);
         if (confirmed) {
           await recordSectionCompletion(bcId, options.section, options?.reason || null);
+          sectionCompleted = true;
         } else {
           showToast("Puedes seguir editando esta seccion antes de continuar.", "info");
         }
@@ -58,8 +110,16 @@ const BusinessCaseWorkspace = () => {
         getUIGuidance(bcId),
         getBusinessCase(bcId)
       ]);
-      setUiGuidance(normalizeUIGuidanceResponse(data));
+      const normalizedUIGuidance = normalizeUIGuidanceResponse(data);
+      setUiGuidance(normalizedUIGuidance);
       setBusinessCase(businessCaseData);
+      if (sectionCompleted && options?.section) {
+        const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
+        const nextSection = getNextSectionId(options.section, userRole);
+        if (nextSection) {
+          setSelectedSection(nextSection);
+        }
+      }
       showToast("Seccion guardada y datos actualizados", "success");
       recordBusinessCaseTelemetry({
         section: "workspace",
@@ -77,7 +137,7 @@ const BusinessCaseWorkspace = () => {
         success: false,
       });
     }
-  }, [bcId, showToast, uiGuidance]);
+  }, [bcId, requestSectionConfirm, showToast, uiGuidance]);
 
 
   // Initialize autosave manager and fetch data on mount and when bcId changes
@@ -184,7 +244,7 @@ const BusinessCaseWorkspace = () => {
             </p>
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
             <p className="text-sm text-gray-600">
-              Gestión colaborativa de casos de negocio por secciones
+              GestiÃ³n colaborativa de casos de negocio por secciones
             </p>
           </div>
         </div>
@@ -209,7 +269,7 @@ const BusinessCaseWorkspace = () => {
             </p>
             <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
             <p className="text-sm text-gray-600">
-              Gestión colaborativa de casos de negocio por secciones
+              GestiÃ³n colaborativa de casos de negocio por secciones
             </p>
           </div>
         </div>
@@ -243,7 +303,7 @@ const BusinessCaseWorkspace = () => {
             </p>
             <h1 className="text-2xl font-bold text-gray-900">Workspace Moderno</h1>
             <p className="text-sm text-gray-600">
-              Gestión colaborativa de casos de negocio por secciones
+              GestiÃ³n colaborativa de casos de negocio por secciones
             </p>
           </div>
         </div>
@@ -275,7 +335,7 @@ const BusinessCaseWorkspace = () => {
           </p>
           <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Workspace Moderno</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Gestión colaborativa de casos de negocio por secciones
+            GestiÃ³n colaborativa de casos de negocio por secciones
           </p>
           {(businessCase?.modern_bc_metadata?.source_module === "equipment_purchases" ||
             businessCase?.modern_bc_metadata?.auto_created === true) && (
@@ -307,6 +367,41 @@ const BusinessCaseWorkspace = () => {
           selectedSection={selectedSection}
         />
       </ErrorBoundary>
+
+      <Modal
+        open={confirmState.open}
+        onClose={() => resolveSectionConfirm(false)}
+        title="Confirmar cierre de seccion"
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <div className="mt-0.5 rounded-lg bg-amber-100 p-2 text-amber-700">
+              <FiAlertTriangle size={18} />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-amber-900">
+                Verifica la informacion antes de continuar
+              </p>
+              <p className="mt-1 text-sm text-amber-800">
+                Seccion: <span className="font-semibold">{confirmState.sectionLabel}</span>
+              </p>
+              <p className="mt-2 text-sm text-amber-800">
+                Si continuas, la seccion quedara marcada como completada y el flujo avanzara al siguiente paso.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={() => resolveSectionConfirm(false)}>
+              Seguir editando
+            </Button>
+            <Button variant="primary" onClick={() => resolveSectionConfirm(true)}>
+              Continuar y bloquear
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
     </BusinessCaseWorkspaceContext.Provider>
   );
