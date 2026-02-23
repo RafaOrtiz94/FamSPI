@@ -17,6 +17,18 @@
 const db = require("../../config/db");
 const { STATES } = require('./businessCaseStates.constants');
 
+const isUuid = (value) =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
+
+const normalizeUuid = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return isUuid(normalized) ? normalized : null;
+};
+
 // Canonical section definitions
 const SECTIONS = {
   GENERAL: 'general',
@@ -144,6 +156,7 @@ class BusinessCaseDataOwnership {
    */
   static async lockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
+    const actorUserId = normalizeUuid(user?.uuid || user?.id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -155,7 +168,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        user?.id || null,
+        actorUserId,
         user?.role || null,
         now,
         canonicalState || null,
@@ -172,7 +185,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        user?.id || null,
+        actorUserId,
         user?.role || null,
         canonicalState || null,
         JSON.stringify(metadata || {}),
@@ -186,6 +199,7 @@ class BusinessCaseDataOwnership {
    */
   static async unlockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
+    const actorUserId = normalizeUuid(user?.uuid || user?.id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -197,7 +211,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        user?.id || null,
+        actorUserId,
         user?.role || null,
         null,
         canonicalState || null,
@@ -214,7 +228,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        user?.id || null,
+        actorUserId,
         user?.role || null,
         canonicalState || null,
         JSON.stringify(metadata || {}),
@@ -233,6 +247,12 @@ class BusinessCaseDataOwnership {
    */
   static async recordSectionCompletion(businessCaseId, section, userId, userRole, canonicalState, metadata = {}) {
     const client = await db.getClient();
+    const actorUserId = normalizeUuid(userId);
+    const mergedMetadata = {
+      ...metadata,
+      actor_user_id: userId ?? null,
+      actor_user_id_uuid: actorUserId,
+    };
 
     try {
       await client.query('BEGIN');
@@ -249,11 +269,11 @@ class BusinessCaseDataOwnership {
       const completionData = {
         business_case_id: businessCaseId,
         section_name: section,
-        completed_by: userId,
+        completed_by: actorUserId,
         completed_by_role: userRole,
         completed_at: now,
         canonical_state: canonicalState,
-        metadata: JSON.stringify(metadata),
+        metadata: JSON.stringify(mergedMetadata),
         updated_at: now
       };
 
@@ -271,10 +291,10 @@ class BusinessCaseDataOwnership {
                completion_count = completion_count + 1
            WHERE business_case_id = $7 AND section_name = $8`,
           [
-            userId, userRole, now, canonicalState,
+            actorUserId, userRole, now, canonicalState,
             JSON.stringify({
               ...JSON.parse(existingRecord.metadata || '{}'),
-              ...metadata,
+              ...mergedMetadata,
               last_modified: now
             }),
             now, businessCaseId, section
@@ -283,7 +303,7 @@ class BusinessCaseDataOwnership {
       } else {
         // Insert new record
         completionData.first_completed_at = now;
-        completionData.first_completed_by = userId;
+        completionData.first_completed_by = actorUserId;
         completionData.completion_count = 1;
 
         await client.query(
@@ -317,8 +337,8 @@ class BusinessCaseDataOwnership {
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
           businessCaseId, section, 'completed',
-          userId, userRole, canonicalState,
-          JSON.stringify(metadata), now
+          actorUserId, userRole, canonicalState,
+          JSON.stringify(mergedMetadata), now
         ]
       );
 

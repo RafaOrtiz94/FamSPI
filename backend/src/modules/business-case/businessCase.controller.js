@@ -121,6 +121,14 @@ const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
 const LOCK_ROLES = ["acp_comercial", "backoffice_comercial"];
 const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
 const PRE_BC_DURATION_HOURS = 48;
+const DETERMINATIONS_UPLOAD_MAIL_ROLES = [
+  "acp_comercial",
+  "backoffice_comercial",
+  "jefe_comercial",
+  "jefe_tecnico",
+  "tecnico",
+  "jefe_operaciones",
+];
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
   "administrador",
@@ -304,6 +312,93 @@ async function notifyDeterminationsGateEnabled({
       }).catch(() => null),
     ),
   );
+}
+
+function buildOwnershipCompletionRules(ownershipInfo = {}) {
+  const getSection = (key) => ownershipInfo?.[key] || {};
+  return {
+    general: { isCompleted: Boolean(getSection("general")?.completedAt) },
+    lab: { isCompleted: Boolean(getSection("laboratory_environment")?.completedAt || getSection("lab")?.completedAt) },
+    requirement: { isCompleted: Boolean(getSection("requirement")?.completedAt) },
+    equipment: { isCompleted: Boolean(getSection("equipment")?.completedAt) },
+    lis: { isCompleted: Boolean(getSection("lis")?.completedAt) },
+  };
+}
+
+function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail }) {
+  const clientName = String(businessCase?.client_name || "Cliente sin nombre").trim();
+  const processNumber = String(
+    businessCase?.process_code ||
+      businessCase?.bc_number ||
+      businessCase?.business_case_id ||
+      businessCase?.id ||
+      "N/A",
+  ).trim();
+  const deadlineText = gate?.deadlineAt
+    ? new Date(gate.deadlineAt).toLocaleString("es-EC", {
+      timeZone: process.env.APP_TIMEZONE || "America/Guayaquil",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    })
+    : "sin fecha";
+
+  return {
+    subject: `${clientName} - Proceso ${processNumber}`,
+    message:
+      `El comercial cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
+      `Desde esta carga aplica la ventana de 48 horas y vence el ${deadlineText}.`,
+    metadata: {
+      businessCaseId: businessCase?.id || businessCase?.business_case_id,
+      clientName,
+      processNumber,
+      actor: actorEmail || null,
+      deadlineAt: gate?.deadlineAt || null,
+    },
+  };
+}
+
+async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }) {
+  const recipients = await getUsersByRoles(DETERMINATIONS_UPLOAD_MAIL_ROLES);
+  const emails = [...new Set(
+    (recipients || [])
+      .map((user) => String(user?.email || "").trim().toLowerCase())
+      .filter(Boolean),
+  )];
+  if (!emails.length) return;
+
+  const [primaryTo, ...ccEmails] = emails;
+  const payload = buildGroupedDeterminationsEmailPayload({
+    businessCase,
+    gate,
+    actorEmail: actorUser?.email || null,
+  });
+
+  await notificationManager.sendNotification({
+    userId: actorUser?.id || recipients?.[0]?.id,
+    template: "custom_html",
+    customTitle: payload.subject,
+    customMessage: payload.message,
+    type: "alert",
+    priority: 2,
+    source: "business_case.determinations_gate_grouped_mail",
+    email: true,
+    chat: false,
+    data: {
+      email_to: primaryTo,
+      email_cc: ccEmails,
+    },
+    meta: {
+      ...payload.metadata,
+      email_to: primaryTo,
+      email_cc: ccEmails,
+      notified_roles: DETERMINATIONS_UPLOAD_MAIL_ROLES,
+      process_key: `business_case.determinations_gate_grouped_mail:${payload.metadata.businessCaseId}`,
+    },
+  });
 }
 
 async function assertSectionEditable(businessCaseId, section, user) {
@@ -1943,6 +2038,25 @@ async function uploadDeterminationsStatDocument(req, res) {
     }
 
     const bc = await businessCaseService.getBusinessCaseById(id);
+    const ownershipInfo = await BusinessCaseDataOwnership.getOwnershipInfo(id);
+    const ownershipRules = buildOwnershipCompletionRules(ownershipInfo);
+    const preflowInfo = preflowService.buildPreflowInfo(bc, ownershipRules);
+    if (preflowInfo?.isActive && preflowInfo?.isExpired) {
+      return res.status(409).json({
+        ok: false,
+        message:
+          "La ventana de 48 horas del comercial expiró. No se puede subir el documento de estadística fuera del plazo.",
+      });
+    }
+    const requiredBeforeUpload = ["general", "lab", "requirement", "equipment", "lis"];
+    const missingRequired = requiredBeforeUpload.filter((sectionKey) => !ownershipRules?.[sectionKey]?.isCompleted);
+    if (missingRequired.length) {
+      return res.status(409).json({
+        ok: false,
+        message:
+          `Debes completar las secciones previas hasta LIS antes de subir el documento estadístico. Pendientes: ${missingRequired.join(", ")}.`,
+      });
+    }
     const metadata = bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object"
       ? { ...bc.modern_bc_metadata }
       : {};
@@ -2011,10 +2125,10 @@ async function uploadDeterminationsStatDocument(req, res) {
       now,
       currentDocument: await determinationsGateService.getCurrentDocument(id),
     });
-    await notifyDeterminationsGateEnabled({
+    await notifyDeterminationsGroupedMail({
       businessCase: refreshed,
       gate,
-      actor: req.user?.email || null,
+      actorUser: req.user,
     });
 
     const responseBody = { ok: true, data: gate };

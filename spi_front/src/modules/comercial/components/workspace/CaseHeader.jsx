@@ -83,6 +83,27 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
     return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
   }, [deadlineMs, nowMs, serverNowOffsetMs]);
 
+  const countdownLabelDetailed = useMemo(() => {
+    if (!deadlineMs) return null;
+    const effectiveNow = nowMs + serverNowOffsetMs;
+    const diff = Math.max(0, deadlineMs - effectiveNow);
+    const totalSeconds = Math.floor(diff / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }, [deadlineMs, nowMs, serverNowOffsetMs]);
+
+  const countdownUrgency = useMemo(() => {
+    if (!deadlineMs) return "normal";
+    const effectiveNow = nowMs + serverNowOffsetMs;
+    const diffMs = Math.max(0, deadlineMs - effectiveNow);
+    const diffHours = diffMs / (1000 * 60 * 60);
+    if (diffHours <= 6) return "critical";
+    if (diffHours <= 24) return "warning";
+    return "normal";
+  }, [deadlineMs, nowMs, serverNowOffsetMs]);
+
   const preflowProgressPercent = useMemo(() => {
     const required = preflow?.requiredSections?.length || 0;
     const completed = preflow?.completedRequiredSections?.length || 0;
@@ -164,6 +185,26 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
               </div>
             )}
           </div>
+
+          {preflow?.isActive && (
+            <div
+              className={`mt-3 inline-flex items-center gap-2 rounded-xl border px-3 py-2 ${
+                preflow?.isExpired
+                  ? "border-rose-300 bg-rose-50 text-rose-700"
+                  : countdownUrgency === "critical"
+                    ? "border-rose-300 bg-rose-50 text-rose-700"
+                    : countdownUrgency === "warning"
+                      ? "border-amber-300 bg-amber-50 text-amber-700"
+                      : "border-indigo-300 bg-indigo-50 text-indigo-700"
+              }`}
+            >
+              <FiClock />
+              <span className="text-xs font-semibold uppercase tracking-wide">Cuenta regresiva 48h</span>
+              <span className="font-mono text-base font-bold">
+                {preflow?.isExpired ? "00:00:00" : countdownLabelDetailed || "00:00:00"}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Right side: Global actions */}

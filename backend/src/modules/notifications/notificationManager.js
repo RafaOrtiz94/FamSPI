@@ -421,9 +421,21 @@ class NotificationManager {
   async sendEmailNotification(notification, data = {}, options = {}) {
     const strict = options?.strict === true;
     try {
-      const userEmail = await this.getUserEmail(notification.user_id);
-      if (!userEmail) {
-        if (strict) throw new Error("No se pudo determinar email del usuario para notificación");
+      const explicitTo =
+        data?.email_to ||
+        data?.to ||
+        notification?.meta?.email_to ||
+        notification?.meta?.to ||
+        null;
+      const explicitCc =
+        data?.email_cc ||
+        data?.cc ||
+        notification?.meta?.email_cc ||
+        notification?.meta?.cc ||
+        null;
+      const to = explicitTo || (await this.getUserEmail(notification.user_id));
+      if (!to) {
+        if (strict) throw new Error("No se pudo determinar email del usuario para notificacion");
         return;
       }
 
@@ -431,21 +443,21 @@ class NotificationManager {
       const html = this.generateEmailHTML(notification, data);
 
       await sendMail({
-        to: userEmail,
+        to,
+        cc: explicitCc || null,
         subject,
         html,
         from: process.env.SMTP_FROM,
-        senderName: 'FamSPI Sistema',
+        senderName: "FamSPI Sistema",
         source: notification.source,
       });
 
-      logger.info({ userEmail, subject, notificationId: notification.id }, "[NOTIFICATIONS] Email enviado");
+      logger.info({ to, cc: explicitCc || null, subject, notificationId: notification.id }, "[NOTIFICATIONS] Email enviado");
     } catch (error) {
       logger.error({ error: error.message, notificationId: notification?.id }, "Error enviando email");
       if (strict) throw error;
     }
   }
-
   /**
    * Envía notificación a Google Chat (reutiliza sendChatMessage)
    */

@@ -9,6 +9,18 @@ const { BusinessCaseDataOwnership } = require("./businessCaseDataOwnership");
 const REQUIRED_SECTIONS = ["general", "lab", "requirement", "equipment", "lis"];
 const DEFAULT_DURATION_HOURS = 48;
 
+const isUuid = (value) =>
+  typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value.trim(),
+  );
+
+const normalizeUuid = (value) => {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim();
+  return isUuid(normalized) ? normalized : null;
+};
+
 function toObject(value, fallback = {}) {
   if (!value) return { ...fallback };
   if (typeof value === "object" && !Array.isArray(value)) return { ...value };
@@ -309,7 +321,7 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
         businessCaseId,
         "preflow",
         "preflow_process_created",
-        actorUser?.id || null,
+        normalizeUuid(actorUser?.uuid || actorUser?.id),
         actorUser?.role || null,
         String(bc?.canonical_state || bc?.bc_stage || "draft"),
         JSON.stringify({ processId, processType, source: "workspace_preflow" }),
