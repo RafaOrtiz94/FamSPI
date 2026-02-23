@@ -1,10 +1,9 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiCheckCircle, FiEdit3 } from "react-icons/fi";
+import { FiCheckCircle } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
-import Modal from "../../../../../core/ui/components/Modal";
 
 const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {} }) => {
   const { id: bcId } = useParams();
@@ -23,7 +22,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
   const [newNotes, setNewNotes] = useState("");
   const [newPrice, setNewPrice] = useState("");
   const [creating, setCreating] = useState(false);
-  const [catalogOpen, setCatalogOpen] = useState(false);
 
   const loadCatalog = async () => {
     if (!bcId) return;
@@ -72,7 +70,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
             : row
         )
       );
-      if (onSave) onSave();
+      onSave?.();
     } catch (err) {
       console.error("Error saving investment selection", err);
       showToast(err.response?.data?.message || "No se pudo guardar", "error");
@@ -85,8 +83,8 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
     setItems((prev) => prev.map((row) => (row.id === id ? { ...row, notes: value } : row)));
   };
 
-  const handleNotesSave = async (item) => {
-    if (!canEdit) return;
+  const handleItemSave = async (item) => {
+    if (!canEdit || !item.selected) return;
     try {
       setSavingId(item.id);
       await api.post(`/business-case/${bcId}/investments/selections`, {
@@ -97,10 +95,10 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
         characteristics: item.characteristics || null,
         unit_price: canEditPrice ? (item.unit_price ?? null) : undefined,
       });
-      if (onSave) onSave();
+      onSave?.();
     } catch (err) {
-      console.error("Error saving notes", err);
-      showToast(err.response?.data?.message || "No se pudo guardar la nota", "error");
+      console.error("Error saving investment data", err);
+      showToast(err.response?.data?.message || "No se pudo guardar la inversion", "error");
     } finally {
       setSavingId(null);
     }
@@ -135,7 +133,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
         setNewCategory("");
         setNewNotes("");
         setNewPrice("");
-        if (onSave) onSave();
+        onSave?.();
       }
     } catch (err) {
       console.error("Error creating custom investment", err);
@@ -148,13 +146,22 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
   const normalizedSearch = searchTerm.trim().toLowerCase();
   const filteredItems = useMemo(() => {
     if (!normalizedSearch) return items;
-    return items.filter((item) => item.name?.toLowerCase().includes(normalizedSearch));
+    return items.filter((item) => {
+      const name = String(item.name || "").toLowerCase();
+      const category = String(item.category || "").toLowerCase();
+      const notes = String(item.notes || "").toLowerCase();
+      return (
+        name.includes(normalizedSearch) ||
+        category.includes(normalizedSearch) ||
+        notes.includes(normalizedSearch)
+      );
+    });
   }, [items, normalizedSearch]);
-  const selectedItems = useMemo(() => items.filter((i) => i.selected), [items]);
-  const selectedCount = selectedItems.length;
 
-  const renderSelectedItemCard = (item) => (
-    <div key={item.id} className="p-4 flex flex-col gap-3">
+  const selectedCount = useMemo(() => items.filter((i) => i.selected).length, [items]);
+
+  const renderInvestmentCard = (item) => (
+    <div key={item.id} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
       <div className="flex items-start justify-between gap-3">
         <label className="flex items-start gap-3 cursor-pointer">
           <input
@@ -166,6 +173,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
           />
           <div>
             <div className="text-sm font-semibold text-gray-900">{item.name}</div>
+            <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
             {item.updated_by_role && (
               <div className="text-xs text-gray-500">
                 Actualizado por: {item.updated_by_role}
@@ -174,12 +182,21 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
             )}
           </div>
         </label>
-        {item.selected && (
-          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full">
-            <FiCheckCircle size={12} />
-            Seleccionado
-          </span>
-        )}
+
+        <span
+          className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${
+            item.selected ? "text-emerald-700 bg-emerald-50" : "text-gray-600 bg-gray-100"
+          }`}
+        >
+          {item.selected ? (
+            <>
+              <FiCheckCircle size={12} />
+              Seleccionado
+            </>
+          ) : (
+            "No seleccionado"
+          )}
+        </span>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -198,9 +215,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
                 )
               )
             }
-            disabled={!canEdit}
+            disabled={!canEdit || !item.selected}
             placeholder="0"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
           />
         </div>
 
@@ -221,9 +238,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
                   )
                 )
               }
-              disabled={!canEditPrice}
+              disabled={!canEditPrice || !item.selected}
               placeholder="0.00"
-              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
             />
           </div>
         )}
@@ -237,9 +254,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
                 prev.map((row) => (row.id === item.id ? { ...row, characteristics: e.target.value } : row))
               )
             }
-            disabled={!canEdit}
+            disabled={!canEdit || !item.selected}
             placeholder="Especificaciones solicitadas"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
           />
         </div>
 
@@ -249,14 +266,14 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
             <input
               value={item.notes || ""}
               onChange={(e) => handleNotesChange(item.id, e.target.value)}
-              disabled={!canEdit}
+              disabled={!canEdit || !item.selected}
               placeholder="Detalles adicionales"
-              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 flex-1"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 flex-1 disabled:bg-gray-50"
             />
             <button
               type="button"
-              onClick={() => handleNotesSave(item)}
-              disabled={!canEdit || savingId === item.id}
+              onClick={() => handleItemSave(item)}
+              disabled={!canEdit || !item.selected || savingId === item.id}
               className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
             >
               Guardar
@@ -264,26 +281,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
           </div>
         </div>
       </div>
-    </div>
-  );
-
-  const renderSearchCard = (item) => (
-    <div key={`search-${item.id}`} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-sm font-semibold text-gray-900">{item.name}</div>
-          <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
-        </div>
-        <button
-          type="button"
-          onClick={() => handleToggle(item)}
-          disabled={!canEdit || savingId === item.id}
-          className="px-3 py-1.5 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
-        >
-          {item.selected ? "Quitar" : "Agregar"}
-        </button>
-      </div>
-      <p className="text-xs text-gray-500">{item.notes || "Pulsa para agregar al listado"}</p>
     </div>
   );
 
@@ -306,19 +303,12 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Inversiones adicionales</h2>
-          <p className="text-sm text-gray-500">Selecciona una o varias inversiones requeridas por el laboratorio</p>
+          <p className="text-sm text-gray-500">
+            Todas las inversiones se listan aqui. Selecciona y completa cantidades y detalles desde la misma lista.
+          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full w-fit">
-            {selectedCount} seleccionadas
-          </div>
-          <button
-            type="button"
-            onClick={() => setCatalogOpen(true)}
-            className="px-4 py-2 rounded-xl bg-white border border-gray-200 text-xs sm:text-sm font-semibold text-gray-700 hover:bg-gray-50"
-          >
-            Ver catalogo completo
-          </button>
+        <div className="text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full w-fit">
+          {selectedCount} seleccionadas
         </div>
       </div>
 
@@ -328,117 +318,96 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
         </div>
       )}
 
-      <Modal
-        open={catalogOpen}
-        onClose={() => setCatalogOpen(false)}
-        title="Catalogo de inversiones adicionales"
-        maxWidth="max-w-4xl"
-      >
-        <div className="space-y-5">
+      <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">Agregar inversion no listada</h3>
+          <p className="text-xs text-gray-500">Si no aparece en el catalogo, puedes crearla y quedara disponible para futuros casos.</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Buscar inversiones</label>
+            <label className="text-xs font-semibold text-gray-500">Nombre</label>
             <input
-              type="search"
-              placeholder="Nombre, categoria o palabra clave"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="border border-gray-200 rounded-2xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder="Ej: Control externo de tercera opinion"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              disabled={!canEdit}
             />
           </div>
-
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <div>
-              <h3 className="text-sm font-semibold text-gray-900">Agregar inversion no listada</h3>
-              <p className="text-xs text-gray-500">Si no aparece en el catalogo, puedes crearla y quedara disponible para futuros casos.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-500">Nombre</label>
-                <input
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ej: Control externo de tercera opinion"
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                  disabled={!canEdit}
-                />
-              </div>
-              <div className="flex flex-col gap-2">
-                <label className="text-xs font-semibold text-gray-500">Categoria</label>
-                <input
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                  placeholder="Ej: Tecnologia / Laboratorio"
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                  disabled={!canEdit}
-                />
-              </div>
-              <div className="flex flex-col gap-2 md:col-span-1">
-                <label className="text-xs font-semibold text-gray-500">Observaciones</label>
-                <input
-                  value={newNotes}
-                  onChange={(e) => setNewNotes(e.target.value)}
-                  placeholder="Detalles opcionales"
-                  className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                  disabled={!canEdit}
-                />
-              </div>
-              {canSeePrice && (
-                <div className="flex flex-col gap-2">
-                  <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={newPrice}
-                    onChange={(e) => setNewPrice(e.target.value)}
-                    placeholder="0.00"
-                    className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                    disabled={!canEditPrice}
-                  />
-                </div>
-              )}
-            </div>
-            <div>
-              <button
-                type="button"
-                onClick={handleCreateCustomInvestment}
-                disabled={!canEdit || creating}
-                className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
-              >
-                {creating ? "Agregando..." : "Agregar inversion"}
-              </button>
-            </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-gray-500">Categoria</label>
+            <input
+              value={newCategory}
+              onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="Ej: Tecnologia / Laboratorio"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              disabled={!canEdit}
+            />
           </div>
-
-          <div className="bg-white border border-gray-100 rounded-2xl shadow-sm">
-            {!items.length && !loading && (
-              <div className="p-6 text-center text-gray-500 text-sm">El catalogo no contiene inversiones adicionales por el momento.</div>
-            )}
-            {items.length > 0 && (
-              <>
-                {filteredItems.length ? (
-                  filteredItems.map(renderSearchCard)
-                ) : (
-                  <div className="p-6 text-center text-gray-500 text-sm">
-                    No se encontraron coincidencias. Intenta con otra palabra clave.
-                  </div>
-                )}
-              </>
-            )}
+          <div className="flex flex-col gap-2 md:col-span-1">
+            <label className="text-xs font-semibold text-gray-500">Observaciones</label>
+            <input
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              placeholder="Detalles opcionales"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              disabled={!canEdit}
+            />
           </div>
+          {canSeePrice && (
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={newPrice}
+                onChange={(e) => setNewPrice(e.target.value)}
+                placeholder="0.00"
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+                disabled={!canEditPrice}
+              />
+            </div>
+          )}
         </div>
-      </Modal>
+        <div>
+          <button
+            type="button"
+            onClick={handleCreateCustomInvestment}
+            disabled={!canEdit || creating}
+            className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
+          >
+            {creating ? "Agregando..." : "Agregar inversion"}
+          </button>
+        </div>
+      </div>
 
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-gray-900">Inversiones anadidas</h3>
-        {selectedItems.length ? (
-          selectedItems.map((item) => (
-            <div key={`selected-${item.id}`} className="bg-white border border-gray-100 rounded-2xl shadow-sm">
-              {renderSelectedItemCard(item)}
-            </div>
-          ))
-        ) : (
-          <div className="p-6 text-gray-500 text-sm">Aun no has seleccionado ninguna inversion.</div>
+      <div className="bg-white border border-gray-100 rounded-2xl p-4">
+        <div className="flex flex-col gap-2 mb-3">
+          <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Buscar inversiones</label>
+          <input
+            type="search"
+            placeholder="Nombre, categoria o palabra clave"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="border border-gray-200 rounded-2xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+          />
+        </div>
+
+        {!items.length && !loading && (
+          <div className="p-6 text-center text-gray-500 text-sm">El catalogo no contiene inversiones adicionales por el momento.</div>
+        )}
+
+        {items.length > 0 && (
+          <>
+            {filteredItems.length ? (
+              filteredItems.map(renderInvestmentCard)
+            ) : (
+              <div className="p-6 text-center text-gray-500 text-sm">
+                No se encontraron coincidencias. Intenta con otra palabra clave.
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>
