@@ -591,7 +591,7 @@ const Step1GeneralData = ({ onNext }) => {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">D�as/semana</span>
+                <span className="text-xs font-semibold text-gray-700">Días/semana</span>
                 <input
                   type="number"
                   min="0"
@@ -600,7 +600,7 @@ const Step1GeneralData = ({ onNext }) => {
                 />
               </label>
               <label className="flex flex-col gap-1">
-                <span className="text-xs font-semibold text-gray-700">Turnos/d�a</span>
+                <span className="text-xs font-semibold text-gray-700">Turnos/día</span>
                 <input
                   type="number"
                   min="0"
@@ -663,7 +663,7 @@ const Step1GeneralData = ({ onNext }) => {
                 />
               </label>
             </div>
-            
+          </div>
         </AccordionSection>
         <AccordionSection
           id="lis"

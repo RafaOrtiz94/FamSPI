@@ -90,7 +90,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
         const badges = {
             pending: { label: "Pendiente", color: "bg-yellow-100 text-yellow-800" },
             partially_approved: { label: "Aprobado Parcialmente", color: "bg-blue-100 text-blue-800" },
-            pending_final: { label: "Esperando Aprobaci�n Final", color: "bg-purple-100 text-purple-800" },
+            pending_final: { label: "Esperando Aprobación Final", color: "bg-purple-100 text-purple-800" },
             approved: { label: "Aprobado", color: "bg-green-100 text-green-800" },
             rejected: { label: "Rechazado", color: "bg-red-100 text-red-800" },
         };
