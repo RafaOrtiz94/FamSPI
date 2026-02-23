@@ -754,7 +754,7 @@ const DesinfeccionStepper = () => {
                 Certificación y Evidencia
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Firma electrónica avanzada y evidencia fotográfica del proceso
+                Fam Sign y evidencia fotográfica del proceso
               </p>
             </div>
 
@@ -768,7 +768,7 @@ const DesinfeccionStepper = () => {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="font-medium text-yellow-900 mb-1">Firma Electrónica Avanzada</h4>
+                  <h4 className="font-medium text-yellow-900 mb-1">Fam Sign</h4>
                   <p className="text-sm text-yellow-800">
                     Este documento será firmado digitalmente con sello institucional y código QR verificable,
                     cumpliendo con la Ley de Comercio Electrónico del Ecuador.
@@ -822,7 +822,7 @@ const DesinfeccionStepper = () => {
 
             {/* Información sobre la firma avanzada */}
             <Card className="p-4 bg-green-50 border-green-200">
-              <h4 className="font-medium text-green-900 mb-2">¿Qué incluye la firma avanzada?</h4>
+              <h4 className="font-medium text-green-900 mb-2">¿Qué incluye Fam Sign?</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>

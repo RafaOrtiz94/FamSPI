@@ -260,6 +260,18 @@ exports.startAvailability = async (req, res, next) => {
 };
 
 /**
+ * Iniciar/asegurar Business Case de comodato (idempotente)
+ */
+exports.startBusinessCase = async (req, res, next) => {
+  try {
+    const result = await service.startBusinessCaseForComodato(req.params.id, req.user);
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
  * Solicitar registro de cliente
  */
 exports.requestClientRegistration = async (req, res, next) => {

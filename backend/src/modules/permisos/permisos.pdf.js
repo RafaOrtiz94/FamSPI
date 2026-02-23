@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
-const { PDFDocument, StandardFonts, rgb } = require("pdf-lib");
+const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray } = require("pdf-lib");
+const QRCode = require("qrcode");
 const { uploadJustificante } = require("./permisos.drive");
 
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/F.RH-10_V01_SOLICITUD DE PERMISO.pdf");
@@ -30,6 +31,12 @@ async function generateFRH10(solicitud) {
     // Llenar datos comunes
     fillCommonFields(form, solicitud);
 
+    // Adjuntar pagina de constancia legal Fam Sign
+    const validationPage = await appendAdvancedSignaturePage(pdfDoc, solicitud);
+
+    // Firma visual tipo rubrica y enlace a hoja de validacion
+    await applySignatureVisualDesign(pdfDoc, form, solicitud, validationPage);
+
     // Guardar PDF
     const pdfBytes = await pdfDoc.save();
 
@@ -53,6 +60,252 @@ async function generateFRH10(solicitud) {
   } catch (error) {
     console.error("Error generando PDF F.RH-10:", error);
     return null;
+  }
+}
+
+function formatDateTime(value) {
+  if (!value) return "No disponible";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "No disponible";
+  return `${date.toLocaleString("es-EC")} | ${date.toISOString()}`;
+}
+
+function extractSignerName(signatureText, fallback = "No disponible") {
+  const raw = String(signatureText || "").trim();
+  if (!raw) return fallback;
+  const cleaned = raw.replace(/^\/s\/\s*/i, "");
+  const idx = cleaned.indexOf(" (");
+  return idx > 0 ? cleaned.slice(0, idx).trim() : cleaned;
+}
+
+function buildSignatureAlias(fullName = "") {
+  const name = String(fullName || "").trim();
+  if (!name) return "S.Firma";
+
+  const cleaned = name.replace(/\s+/g, " ").trim();
+  const tokens = cleaned.split(" ").filter(Boolean);
+  if (tokens.length === 0) return "S.Firma";
+
+  const first = tokens[0];
+  const last = tokens[tokens.length - 1];
+  const initial = (first[0] || "S").toUpperCase();
+  const lastSafe = (last || "Firma").replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñÜü'-]/g, "");
+  const normalizedLast = lastSafe ? `${lastSafe[0].toUpperCase()}${lastSafe.slice(1)}` : "Firma";
+  return `${initial}.${normalizedLast}`;
+}
+
+async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
+  try {
+    const page = pdfDoc.addPage([612, 792]);
+    const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+    const marginX = 44;
+    let y = 748;
+
+    const draw = (text, opts = {}) => {
+      page.drawText(String(text || ""), {
+        x: opts.x ?? marginX,
+        y: opts.y ?? y,
+        size: opts.size || 10,
+        font: opts.bold ? bold : font,
+        color: rgb(0.12, 0.12, 0.12),
+      });
+      if (opts.y === undefined) y -= opts.gap || 15;
+    };
+
+    const summary = solicitud?.workflow_signature_summary || {};
+    const legalUrl = solicitud?.legal_verification_url || "No disponible";
+    const legalToken = solicitud?.legal_verification_token || "No disponible";
+    const solicitudSigner = extractSignerName(
+      solicitud?.firma_solicitante_texto,
+      solicitud?.user_fullname || solicitud?.user_email || "No disponible"
+    );
+    const approverSigner = extractSignerName(
+      solicitud?.firma_aprobador_texto,
+      solicitud?.approver_fullname || solicitud?.aprobacion_final_por || "No disponible"
+    );
+
+    draw("F.RH-10 - Bloque Fam Sign", { size: 15, bold: true, gap: 22 });
+    draw("Este anexo forma parte integral del documento y conserva trazabilidad legal del workflow.");
+    draw(`Solicitud ID: ${solicitud?.id || "N/A"}`);
+    draw(`Estado workflow firma: ${summary?.estado || solicitud?.firma_workflow_estado || "pendiente"}`);
+    draw(`Solicitante firmado: ${solicitudSigner}`);
+    draw(`Aprobador firmado: ${approverSigner}`);
+    draw(`Fecha/hora solicitud: ${formatDateTime(summary?.solicitud?.signed_at || solicitud?.firma_solicitante_at)}`);
+    draw(`Fecha/hora aprobacion: ${formatDateTime(summary?.aprobacion?.signed_at || solicitud?.firma_aprobador_at)}`);
+    draw(`Hash solicitud: ${summary?.solicitud?.signature_hash_sha256 || solicitud?.firma_solicitante_hash || "No disponible"}`);
+    draw(`Hash aprobacion: ${summary?.aprobacion?.signature_hash_sha256 || solicitud?.firma_aprobador_hash || "No disponible"}`);
+    draw(
+      `Hash encadenamiento previo: ${summary?.aprobacion?.previous_signature_hash_sha256 || solicitud?.firma_aprobador_prev_hash || "No disponible"}`
+    );
+    draw(`Token de verificacion: ${legalToken}`);
+
+    const boxY = y - 175;
+    page.drawRectangle({
+      x: marginX,
+      y: boxY,
+      width: 524,
+      height: 165,
+      color: rgb(0.97, 0.98, 1),
+      borderColor: rgb(0.72, 0.78, 0.9),
+      borderWidth: 1,
+    });
+    draw("Verificacion legal Fam Sign (SPI)", {
+      x: marginX + 14,
+      y: boxY + 140,
+      size: 11,
+      bold: true,
+      gap: 0,
+    });
+    draw("Escanee el QR o use la URL para validar autenticidad, integridad y trazabilidad.", {
+      x: marginX + 14,
+      y: boxY + 124,
+      size: 9,
+      gap: 0,
+    });
+    draw("URL de verificacion protegida (no visible en documento)", {
+      x: marginX + 14,
+      y: boxY + 106,
+      size: 8,
+      gap: 0,
+    });
+
+    if (legalUrl && legalUrl !== "No disponible") {
+      const qrDataUrl = await QRCode.toDataURL(legalUrl, {
+        errorCorrectionLevel: "M",
+        margin: 1,
+        width: 220,
+      });
+      const base64 = String(qrDataUrl).split(",")[1];
+      if (base64) {
+        const qrImage = await pdfDoc.embedPng(Buffer.from(base64, "base64"));
+        page.drawImage(qrImage, {
+          x: marginX + 395,
+          y: boxY + 24,
+          width: 110,
+          height: 110,
+        });
+      }
+    }
+
+    draw("Cumple requisitos de evidencia interna: identificacion de firmantes, sello temporal y huella criptografica.", {
+      x: marginX + 14,
+      y: boxY + 24,
+      size: 8,
+      gap: 0,
+    });
+    return page;
+  } catch (error) {
+    console.warn("No se pudo anexar bloque Fam Sign al F.RH-10:", error.message);
+    return null;
+  }
+}
+
+function resolveTextField(form, candidateNames = []) {
+  for (const fieldName of candidateNames) {
+    try {
+      const field = form.getTextField(fieldName);
+      if (field) return field;
+    } catch (_) {
+      // try next alias
+    }
+  }
+  return null;
+}
+
+function addGoToPageLink(pdfDoc, sourcePage, targetPage, rectangle) {
+  if (!sourcePage || !targetPage || !rectangle) return;
+  const context = pdfDoc.context;
+  const annotsKey = PDFName.of("Annots");
+  const destination = context.obj([targetPage.ref, PDFName.of("Fit")]);
+  const action = context.obj({
+    S: PDFName.of("GoTo"),
+    D: destination,
+  });
+  const link = context.obj({
+    Type: PDFName.of("Annot"),
+    Subtype: PDFName.of("Link"),
+    Rect: [rectangle.x, rectangle.y, rectangle.x + rectangle.width, rectangle.y + rectangle.height],
+    Border: [0, 0, 0],
+    A: action,
+  });
+
+  let annotsRefOrArray = sourcePage.node.get(annotsKey);
+  if (!annotsRefOrArray) {
+    const newAnnotsArray = context.obj([]);
+    sourcePage.node.set(annotsKey, newAnnotsArray);
+    annotsRefOrArray = sourcePage.node.get(annotsKey);
+  }
+
+  const annots = context.lookup(annotsRefOrArray, PDFArray);
+  annots.push(link);
+}
+
+async function applySignatureVisualDesign(pdfDoc, form, solicitud, validationPage) {
+  try {
+    const pages = pdfDoc.getPages();
+    const firstPage = pages[0];
+    if (!firstPage) return;
+
+    const italicFont = await pdfDoc.embedFont(StandardFonts.TimesRomanItalic);
+    const regularFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+
+    const signatures = [
+      {
+        names: ["Firma", "firma", "Frima", "frima"],
+        signer: extractSignerName(
+          solicitud?.firma_solicitante_texto,
+          solicitud?.user_fullname || solicitud?.user_email || "Solicitante"
+        ),
+        tiny: "Ver validacion de firma -> hoja 2",
+      },
+      {
+        names: ["Firma_2", "firma_2", "Frima_2", "frima_2"],
+        signer: extractSignerName(
+          solicitud?.firma_aprobador_texto,
+          solicitud?.approver_fullname || solicitud?.aprobacion_final_por || "Aprobador"
+        ),
+        tiny: "Ver validacion de firma -> hoja 2",
+      },
+    ];
+
+    signatures.forEach((item) => {
+      const field = resolveTextField(form, item.names);
+      if (!field) return;
+      const widgets = field.acroField.getWidgets();
+      const widget = widgets?.[0];
+      const rect = widget?.getRectangle?.();
+      if (!rect) return;
+
+      // Limpiar el campo para evitar superposicion con la rubrica visual.
+      field.setText("");
+
+      const alias = buildSignatureAlias(item.signer);
+      firstPage.drawText(alias, {
+        x: rect.x + 2,
+        y: rect.y + Math.max(2, rect.height * 0.45),
+        size: Math.max(10, Math.min(14, rect.height * 0.55)),
+        font: italicFont,
+        color: rgb(0.1, 0.1, 0.1),
+      });
+      firstPage.drawText(item.tiny, {
+        x: rect.x + 2,
+        y: rect.y + 1,
+        size: 5.5,
+        font: regularFont,
+        color: rgb(0.35, 0.35, 0.35),
+      });
+
+      if (validationPage) {
+        try {
+          addGoToPageLink(pdfDoc, firstPage, validationPage, rect);
+        } catch (linkError) {
+          // El documento sigue siendo valido aunque el visor no soporte enlace interno.
+        }
+      }
+    });
+  } catch (error) {
+    console.warn("No se pudo aplicar estilo visual de firma:", error.message);
   }
 }
 
@@ -194,10 +447,6 @@ function fillCommonFields(form, solicitud) {
       setTextField(["Sol_por", "sol_por"], solicitud.user_fullname);
     }
 
-    if (solicitud.firma_solicitante_texto) {
-      setTextField(["Firma", "firma", "Frima", "frima"], solicitud.firma_solicitante_texto);
-    }
-
     if (solicitud.user_document_id) {
       setTextField(["DI", "di"], solicitud.user_document_id);
     }
@@ -214,10 +463,6 @@ function fillCommonFields(form, solicitud) {
       );
     }
 
-    if (solicitud.firma_aprobador_texto) {
-      setTextField(["Firma_2", "firma_2", "Frima_2", "frima_2"], solicitud.firma_aprobador_texto);
-    }
-
     if (solicitud.approver_document_id) {
       setTextField(["DI_2", "di_2"], solicitud.approver_document_id);
     }
@@ -231,10 +476,10 @@ function fillCommonFields(form, solicitud) {
 }
 
 /**
- * Genera constancia legal de validacion de firma avanzada.
+ * Genera constancia legal de validacion de Fam Sign.
  * Este documento sirve como respaldo de autenticidad, integridad y trazabilidad.
  */
-async function generateFirmaLegalValidationPdf({ solicitud, signatures = [] }) {
+async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], verification = null }) {
   try {
     const pdfDoc = await PDFDocument.create();
     let page = pdfDoc.addPage([612, 792]); // Carta
@@ -269,8 +514,9 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [] }) {
     const rechazoSig = timeline.find((item) => item.stage === "rechazo") || null;
     const approvalSig = finalSig || rechazoSig || partialSig || null;
 
-    drawLine("SPI Fam - Constancia de Validacion Legal de Firma Avanzada", { size: 14, bold: true, gap: 20 });
-    drawLine(`Documento generado: ${now.toLocaleString("es-EC")}`);
+    drawLine("SPI Fam - Constancia de Validacion Legal de Fam Sign", { size: 14, bold: true, gap: 20 });
+    drawLine(`Documento generado (local): ${now.toLocaleString("es-EC")}`);
+    drawLine(`Documento generado (UTC): ${now.toISOString()}`);
     drawLine(`Solicitud ID: ${solicitud?.id || "N/A"}`);
     drawLine(`Tipo: ${solicitud?.tipo_solicitud || "N/A"}${solicitud?.tipo_permiso ? ` / ${solicitud.tipo_permiso}` : ""}`);
     drawLine(`Estado final: ${solicitud?.status || "N/A"}`);
@@ -295,6 +541,12 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [] }) {
     drawSection("Workflow y Conservacion");
     drawLine(`Estados de flujo: solicitado -> ${finalSig ? "aprobado" : rechazoSig ? "rechazado" : "en proceso"}`);
     drawLine(`Documento fuente: F.RH-10${solicitud?.pdf_generado_url ? ` (${solicitud.pdf_generado_url})` : ""}`);
+    if (verification?.token) {
+      drawLine(`Token verificacion legal: ${verification.token}`);
+    }
+    if (verification?.url) {
+      drawLine("URL verificacion legal: protegida (acceso solo por QR/token)");
+    }
     drawLine("Este registro forma parte del expediente digital interno y su conservacion depende de la politica documental vigente.");
 
     // Timeline resumido
@@ -305,15 +557,12 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [] }) {
     } else {
       timeline.forEach((event) => {
         if (y < 80) {
-          y = 750;
-          pdfDoc.addPage([612, 792]);
-        }
-        if (y < 80) {
           page = pdfDoc.addPage([612, 792]);
           y = 750;
         }
         const eventDate = event?.signed_at ? new Date(event.signed_at).toLocaleString("es-EC") : "N/A";
-        drawLine(`- ${event.stage} | ${event.signer_name || event.signer_email || "N/A"} | ${eventDate}`);
+        const shortHash = event?.signature_hash_sha256 ? String(event.signature_hash_sha256).slice(0, 16) : "N/A";
+        drawLine(`- ${event.stage} | ${event.signer_name || event.signer_email || "N/A"} | ${eventDate} | ${shortHash}`);
       });
     }
 

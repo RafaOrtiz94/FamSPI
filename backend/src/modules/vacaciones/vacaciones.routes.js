@@ -4,6 +4,9 @@ const { verifyToken } = require("../../middlewares/auth");
 
 const router = express.Router();
 
+// Verificación legal pública por token
+router.get("/legal-verification/:token", controller.verifyLegalToken);
+
 // Aplicar autenticación a todas las rutas
 router.use(verifyToken);
 

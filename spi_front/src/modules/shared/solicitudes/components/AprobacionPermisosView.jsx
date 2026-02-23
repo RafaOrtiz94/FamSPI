@@ -291,6 +291,25 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                 </div>
                             )}
 
+                            {solicitud.pdf_validacion_legal_url && (
+                                <div className={compact ? "mt-2 text-xs text-slate-700" : "mt-3 text-sm text-slate-700"}>
+                                    <p className={compact ? "text-[11px] font-semibold text-slate-700" : "text-sm font-semibold text-slate-700"}>
+                                        Constancia legal de firma
+                                    </p>
+                                    <div className="mt-2">
+                                        <a
+                                            href={solicitud.pdf_validacion_legal_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-medium text-slate-700 shadow-sm border border-slate-200 hover:border-slate-300 transition-colors"
+                                        >
+                                            <FiDownload className="w-3 h-3" />
+                                            Descargar validación legal
+                                        </a>
+                                    </div>
+                                </div>
+                            )}
+
                             <div className={compact ? "flex gap-2 mt-3" : "flex gap-2 mt-4"}>
                                 {stage === "pending" && solicitud.status === "pending" && (
                                     <>

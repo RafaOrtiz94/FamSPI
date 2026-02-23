@@ -515,10 +515,10 @@ const AsistenciaStepper = () => {
                 Certificaci贸n y Firma
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Firma electr贸nica avanzada para validar la lista de asistencia
+                Fam Sign para validar la lista de asistencia
               </p>
             </div>
-            {/* Informaci贸n importante sobre la firma avanzada */}
+            {/* Información importante sobre Fam Sign */}
             <Card className="p-4 bg-yellow-50 border-yellow-200">
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
@@ -528,7 +528,7 @@ const AsistenciaStepper = () => {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="font-medium text-yellow-900 mb-1">Firma Electr贸nica Avanzada</h4>
+                  <h4 className="font-medium text-yellow-900 mb-1">Fam Sign</h4>
                   <p className="text-sm text-yellow-800">
                     Esta lista de asistencia ser谩 firmada digitalmente con sello institucional y c贸digo QR verificable,
                     cumpliendo con la Ley de Comercio Electr贸nico del Ecuador.
@@ -546,9 +546,9 @@ const AsistenciaStepper = () => {
                 Esta certificaci贸n tendr谩 valor legal equivalente a una firma manuscrita seg煤n la legislaci贸n ecuatoriana.
               </p>
             </Card>
-            {/* Informaci贸n sobre la firma avanzada */}
+            {/* Información sobre Fam Sign */}
             <Card className="p-4 bg-green-50 border-green-200">
-              <h4 className="font-medium text-green-900 mb-2">驴Qu茅 incluye la firma avanzada?</h4>
+              <h4 className="font-medium text-green-900 mb-2">¿Qué incluye Fam Sign?</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>

@@ -1,6 +1,7 @@
 const permisosService = require("./permisos.service");
 const { normalizeRow } = require("../../utils/normalizers");
 const { uploadJustificante } = require("./permisos.drive");
+const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
 const multer = require("multer");
 const upload = multer({ 
   storage: multer.diskStorage({
@@ -197,6 +198,80 @@ async function listarResumenColaboradores(req, res) {
   }
 }
 
+async function verifyLegalToken(req, res) {
+  try {
+    const responseAsJson = shouldRespondJson(req);
+    const token = String(req.params?.token || "").trim();
+    if (!token) {
+      if (responseAsJson) return res.status(400).json({ ok: false, message: "Token requerido" });
+      return res.status(400).type("html").send(
+        renderVerificationHtml({
+          title: "Verificación legal inválida",
+          subtitle: "Fam Sign",
+          status: "pending",
+          sourceType: "Permisos/Vacaciones",
+        })
+      );
+    }
+    const result = await permisosService.getLegalVerificationByToken(token);
+    if (!result) {
+      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificación no encontrado" });
+      return res.status(404).type("html").send(
+        renderVerificationHtml({
+          title: "Token no encontrado",
+          subtitle: "Fam Sign",
+          status: "pending",
+          token,
+          sourceType: "Permisos/Vacaciones",
+        })
+      );
+    }
+    if (responseAsJson) return res.json({ ok: true, data: result });
+    return res.type("html").send(
+      renderVerificationHtml({
+        title: "Verificación legal completada",
+        subtitle: "Fam Sign",
+        status: result?.status,
+        id: result?.id,
+        solicitante: result?.solicitante,
+        aprobador: result?.aprobador,
+        aprobacionFinalAt: result?.aprobacion_final_at,
+        token: result?.legal_verification_token || token,
+        workflow: result?.firma_avanzada_resumen || null,
+        sourceType: "Permisos/Vacaciones",
+      })
+    );
+  } catch (error) {
+    console.error("Error verificando token legal:", error);
+    if (shouldRespondJson(req)) {
+      return res.status(500).json({ ok: false, message: error.message || "No se pudo verificar el token legal" });
+    }
+    return res.status(500).type("html").send(
+      renderVerificationHtml({
+        title: "Error de verificación",
+        subtitle: "Fam Sign",
+        status: "pending",
+        sourceType: "Permisos/Vacaciones",
+      })
+    );
+  }
+}
+
+async function getLegalCoverage(req, res) {
+  try {
+    const role = String(req.user?.role || "").toLowerCase();
+    const allowed = new Set(["admin", "administrador", "jefe_ti", "jefe_financiero", "jefe_finanzas", "gerencia_general", "gerente_general"]);
+    if (!allowed.has(role)) {
+      return res.status(403).json({ ok: false, message: "No tienes permisos para este recurso" });
+    }
+    const coverage = await permisosService.getLegalCoverage();
+    return res.json({ ok: true, data: coverage });
+  } catch (error) {
+    console.error("Error obteniendo cobertura legal:", error);
+    return res.status(500).json({ ok: false, message: error.message || "No se pudo obtener cobertura legal" });
+  }
+}
+
 module.exports = {
   create,
   aprobarParcial,
@@ -206,5 +281,7 @@ module.exports = {
   listarPendientes,
   listarMias,
   listarResumenColaboradores,
+  verifyLegalToken,
+  getLegalCoverage,
   upload,
 };

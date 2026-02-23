@@ -89,6 +89,8 @@ const formatDate = (value) => formatDateTimeEC(value, "Sin fecha");
 const OFFER_KIND_LABELS = {
   venta: "Venta directa",
   alquiler: "Alquiler",
+  alquiler_transferencia_dominio: "Alquiler con transferencia de dominio",
+  alquiler_con_transferencia_de_dominio: "Alquiler con transferencia de dominio",
   prestamo: "Alquiler",
   comodato: "Comodato",
 };

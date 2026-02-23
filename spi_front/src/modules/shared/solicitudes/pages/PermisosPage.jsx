@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import PermisosStatusWidget from "../components/PermisosStatusWidget";
 import PermisosColaboradoresWidget from "../components/PermisosColaboradoresWidget";
+import PermisosGlobalRequestsWidget from "../components/PermisosGlobalRequestsWidget";
 import PermisosColaboradoresAlbum from "../components/PermisosColaboradoresAlbum";
 import { FiCalendar } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
@@ -113,6 +114,17 @@ const PermisosPage = () => {
         return candidates.some((role) =>
             ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(role)
         );
+    }, [user]);
+
+    const canViewGlobalRequestsWidget = useMemo(() => {
+        const normalizeRole = (value) =>
+            String(value || "")
+                .trim()
+                .toLowerCase()
+                .replace(/[\s-]+/g, "_");
+
+        const candidates = [user?.role, user?.scope, user?.role_name].map(normalizeRole);
+        return candidates.some((role) => ["jefe_ti", "jefe_financiero"].includes(role));
     }, [user]);
 
     const containerClass = isGerenciaGeneral ? "p-4 max-w-7xl mx-auto space-y-4" : "p-6 max-w-7xl mx-auto space-y-6";
@@ -235,6 +247,7 @@ const PermisosPage = () => {
             )}
 
             {!isGerenciaGeneral && isTalentRole && <PermisosColaboradoresWidget />}
+            {!isGerenciaGeneral && canViewGlobalRequestsWidget && <PermisosGlobalRequestsWidget />}
 
             {!isGerenciaGeneral && (
                 <PermisoVacacionModal

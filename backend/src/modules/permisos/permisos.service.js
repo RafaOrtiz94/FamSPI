@@ -15,6 +15,21 @@ const WORKFLOW_SIGNATURE_STAGES = {
   APROBACION_FINAL: "aprobacion_final",
   RECHAZO: "rechazo",
 };
+const resolveLegalVerificationBaseUrl = () => {
+  if (process.env.LEGAL_VERIFICATION_BASE_URL) return process.env.LEGAL_VERIFICATION_BASE_URL;
+  if (process.env.BACKEND_BASE_URL) return process.env.BACKEND_BASE_URL;
+  if (process.env.API_BASE_URL) return process.env.API_BASE_URL;
+  if (process.env.GOOGLE_REDIRECT_URI) {
+    try {
+      return new URL(process.env.GOOGLE_REDIRECT_URI).origin;
+    } catch (_) {
+      // ignore invalid URL
+    }
+  }
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
+  return "https://spi-backend-983537733948.us-central1.run.app";
+};
+const LEGAL_VERIFICATION_BASE_URL = resolveLegalVerificationBaseUrl();
 
 const ROLE_APPROVER = {
   comercial: "jefe_comercial",
@@ -47,6 +62,10 @@ function getApproverRoleCandidates(approver = {}) {
       .map((value) => String(value || "").trim().toLowerCase())
       .filter(Boolean)
   );
+  if (candidates.has("jefe_finanzas")) candidates.add("jefe_financiero");
+  if (candidates.has("jefe_financiero")) candidates.add("jefe_finanzas");
+  if (candidates.has("finanzas")) candidates.add("financiero");
+  if (candidates.has("financiero")) candidates.add("finanzas");
   if (candidates.has("gerencia_general")) candidates.add("gerente_general");
   if (candidates.has("gerente_general")) candidates.add("gerencia_general");
   return Array.from(candidates);
@@ -205,6 +224,15 @@ function sha256Hex(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
 
+function generateLegalVerificationToken() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+function buildLegalVerificationUrl(token) {
+  if (!token) return null;
+  return `${String(LEGAL_VERIFICATION_BASE_URL).replace(/\/+$/, "")}/api/v1/permisos/legal-verification/${token}`;
+}
+
 function buildSignatureSnapshot(solicitud = {}) {
   return {
     id: solicitud.id,
@@ -256,7 +284,6 @@ function buildWorkflowSignatureSummary(signatures = []) {
 function buildPdfSignatureText(signature, fallbackName = "") {
   const signerName = String(signature?.signer_name || fallbackName || "").trim();
   if (!signerName) return "";
-  // Formato textual tipo e-signature (similar a DocuSign) para campos de formulario.
   return `/s/ ${signerName}`;
 }
 
@@ -266,7 +293,7 @@ async function getSignaturesBySolicitudIds(solicitudIds = []) {
     `SELECT id, solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
             signature_type, auth_method, consent_text, ip_address::text AS ip_address,
             user_agent, session_id, payload_hash_sha256, previous_signature_hash_sha256,
-            signature_hash_sha256, signed_at, created_at
+            signature_hash_sha256, is_current, signed_at, created_at
        FROM permisos_vacaciones_firmas
       WHERE solicitud_id = ANY($1)
       ORDER BY signed_at ASC, id ASC`,
@@ -275,8 +302,9 @@ async function getSignaturesBySolicitudIds(solicitudIds = []) {
 
   const grouped = new Map();
   rows.forEach((row) => {
-    if (!grouped.has(row.solicitud_id)) grouped.set(row.solicitud_id, []);
-    grouped.get(row.solicitud_id).push(row);
+    const key = String(row.solicitud_id);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
   });
   return grouped;
 }
@@ -288,11 +316,24 @@ async function attachWorkflowSignatures(rows = []) {
 
   const signaturesBySolicitud = await getSignaturesBySolicitudIds(ids);
   return rows.map((row) => {
-    const signatures = signaturesBySolicitud.get(row.id) || [];
+    const normalizedStatus = String(row?.status || "").toLowerCase();
+    if (normalizedStatus === "rejected" || normalizedStatus === "rechazado") {
+      return {
+        ...row,
+        firmas_workflow: [],
+        firma_avanzada_resumen: null,
+        pdf_validacion_legal_url: null,
+        legal_verification_token: null,
+        legal_verification_url: null,
+      };
+    }
+
+    const signatures = signaturesBySolicitud.get(String(row.id)) || [];
     return {
       ...row,
       firmas_workflow: signatures,
       firma_avanzada_resumen: buildWorkflowSignatureSummary(signatures),
+      legal_verification_url: buildLegalVerificationUrl(row.legal_verification_token || null),
     };
   });
 }
@@ -335,27 +376,21 @@ async function recordWorkflowSignature({
   const actorRole = String(actor?.role || actor?.scope || actor?.rol || "").toLowerCase() || null;
   const requestMeta = getRequestMeta(meta);
 
+  await db.query(
+    `UPDATE permisos_vacaciones_firmas
+        SET is_current = false, updated_at = NOW()
+      WHERE solicitud_id = $1
+        AND stage = $2
+        AND is_current = true`,
+    [solicitud.id, stage]
+  );
+
   const { rows } = await db.query(
     `INSERT INTO permisos_vacaciones_firmas (
       solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
       signature_type, auth_method, consent_text, ip_address, user_agent, session_id,
-      payload_hash_sha256, previous_signature_hash_sha256, signature_hash_sha256, signed_at
-    ) VALUES ($1,$2,$3,$4,$5,$6,'advanced_electronic','oauth_corporate',$7,$8,$9,$10,$11,$12,$13,$14)
-    ON CONFLICT (solicitud_id, stage)
-    DO UPDATE SET
-      signer_user_id = EXCLUDED.signer_user_id,
-      signer_email = EXCLUDED.signer_email,
-      signer_name = EXCLUDED.signer_name,
-      signer_role = EXCLUDED.signer_role,
-      consent_text = EXCLUDED.consent_text,
-      ip_address = EXCLUDED.ip_address,
-      user_agent = EXCLUDED.user_agent,
-      session_id = EXCLUDED.session_id,
-      payload_hash_sha256 = EXCLUDED.payload_hash_sha256,
-      previous_signature_hash_sha256 = EXCLUDED.previous_signature_hash_sha256,
-      signature_hash_sha256 = EXCLUDED.signature_hash_sha256,
-      signed_at = EXCLUDED.signed_at,
-      updated_at = NOW()
+      payload_hash_sha256, previous_signature_hash_sha256, signature_hash_sha256, is_current, signed_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,'advanced_electronic','oauth_corporate',$7,$8,$9,$10,$11,$12,$13,true,$14)
     RETURNING *`,
     [
       solicitud.id,
@@ -364,7 +399,7 @@ async function recordWorkflowSignature({
       actor.email || null,
       actorName,
       actorRole,
-      consentText || `Firma avanzada ${stage} en permisos/vacaciones SPI`,
+      consentText || `Fam Sign ${stage} en permisos/vacaciones SPI`,
       requestMeta.ipAddress,
       requestMeta.userAgent,
       requestMeta.sessionId,
@@ -433,6 +468,8 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_user_id INTEGER");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_email TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_token TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_created_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_check1");
     await db.query("ALTER TABLE permisos_vacaciones DROP CONSTRAINT IF EXISTS permisos_vacaciones_subtipo_calamidad_check");
     await db.query(
@@ -456,6 +493,7 @@ async function ensureTable() {
         payload_hash_sha256 VARCHAR(64) NOT NULL,
         previous_signature_hash_sha256 VARCHAR(64),
         signature_hash_sha256 VARCHAR(64) NOT NULL,
+        is_current BOOLEAN NOT NULL DEFAULT true,
         signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -466,10 +504,47 @@ async function ensureTable() {
         CONSTRAINT permisos_vacaciones_firmas_signature_hash_check
           CHECK (signature_hash_sha256 ~ '^[a-f0-9]{64}$'),
         CONSTRAINT permisos_vacaciones_firmas_prev_hash_check
-          CHECK (previous_signature_hash_sha256 IS NULL OR previous_signature_hash_sha256 ~ '^[a-f0-9]{64}$'),
-        CONSTRAINT permisos_vacaciones_firmas_unique_stage UNIQUE (solicitud_id, stage)
+          CHECK (previous_signature_hash_sha256 IS NULL OR previous_signature_hash_sha256 ~ '^[a-f0-9]{64}$')
       );
     `);
+    await db.query("ALTER TABLE permisos_vacaciones_firmas ADD COLUMN IF NOT EXISTS is_current BOOLEAN NOT NULL DEFAULT true");
+    await db.query("ALTER TABLE permisos_vacaciones_firmas DROP CONSTRAINT IF EXISTS permisos_vacaciones_firmas_unique_stage");
+    await db.query(`
+      WITH ranked AS (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY solicitud_id, stage
+                 ORDER BY signed_at DESC, id DESC
+               ) AS rn
+          FROM permisos_vacaciones_firmas
+      )
+      UPDATE permisos_vacaciones_firmas f
+         SET is_current = (ranked.rn = 1)
+        FROM ranked
+       WHERE ranked.id = f.id
+    `);
+    await db.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ux_permisos_firmas_current_stage
+       ON permisos_vacaciones_firmas (solicitud_id, stage)
+       WHERE is_current = true`
+    );
+    await db.query(
+      `CREATE INDEX IF NOT EXISTS idx_permisos_firmas_solicitud_signed_at
+       ON permisos_vacaciones_firmas (solicitud_id, signed_at DESC, id DESC)`
+    );
+    await db.query(
+      `CREATE INDEX IF NOT EXISTS idx_permisos_firmas_signer_user
+       ON permisos_vacaciones_firmas (signer_user_id, signed_at DESC)`
+    );
+    await db.query(
+      `CREATE INDEX IF NOT EXISTS idx_permisos_firmas_stage
+       ON permisos_vacaciones_firmas (stage, signed_at DESC)`
+    );
+    await db.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS ux_permisos_legal_verification_token
+       ON permisos_vacaciones (legal_verification_token)
+       WHERE legal_verification_token IS NOT NULL`
+    );
 
     tableReady = true;
   })();
@@ -666,7 +741,7 @@ async function createSolicitud({ body, user, meta }) {
       consentText: "Confirmo la solicitud de permiso/vacaciones en SPI",
     });
   } catch (signatureError) {
-    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar firma avanzada en solicitud");
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en solicitud");
   }
 
   const enriched = await attachWorkflowSignatures([rows[0]]);
@@ -677,7 +752,7 @@ function canApprove({ approverRole, approverUserId, approver }) {
   const roleCandidates = getApproverRoleCandidates(approver);
   if (roleCandidates.length === 0) return false;
   const approverActorId = resolveActorId(approver);
-  if (approverUserId) return approverActorId === approverUserId;
+  if (approverUserId && approverActorId === approverUserId) return true;
   if (!approverRole) return false;
   const expected = String(approverRole || "").toLowerCase();
   if (GERENCIA_GENERAL_ROLES.has(expected)) {
@@ -814,7 +889,7 @@ async function aprobarFinal({ id, approver, meta }) {
         userId: update.rows[0].user_id,
         customTitle: "Solicitud aprobada",
         customMessage:
-          "Tu solicitud fue aprobada de forma definitiva. No necesitas firmar ningun documento adicional; la solicitud ya fue validada legalmente con firma avanzada en SPI.",
+          "Tu solicitud fue aprobada de forma definitiva. No necesitas firmar ningun documento adicional; la solicitud ya fue validada legalmente con Fam Sign en SPI.",
         type: "success",
         source: "permisos_vacaciones",
         priority: 1,
@@ -829,7 +904,7 @@ async function aprobarFinal({ id, approver, meta }) {
   let existingSignatures = [];
   try {
     const signaturesBySolicitud = await getSignaturesBySolicitudIds([update.rows[0].id]);
-    existingSignatures = signaturesBySolicitud.get(update.rows[0].id) || [];
+    existingSignatures = signaturesBySolicitud.get(String(update.rows[0].id)) || [];
   } catch (signatureFetchError) {
     logger.warn({ signatureFetchError, solicitudId: update.rows[0]?.id }, "No se pudieron consultar firmas existentes");
   }
@@ -871,14 +946,27 @@ async function aprobarFinal({ id, approver, meta }) {
 
   let pdfUrl = null;
   let legalPdfUrl = null;
+  let verificationToken = update.rows[0]?.legal_verification_token || null;
+  if (!verificationToken) {
+    verificationToken = generateLegalVerificationToken();
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET legal_verification_token = $2,
+              legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+              updated_at = now()
+        WHERE id = $1`,
+      [id, verificationToken]
+    );
+  }
   try {
     const signaturesBySolicitud = await getSignaturesBySolicitudIds([update.rows[0].id]);
-    const signatures = signaturesBySolicitud.get(update.rows[0].id) || [];
+    const signatures = signaturesBySolicitud.get(String(update.rows[0].id)) || [];
     const solicitudSignature = signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
     const finalSignature =
       approvalSignature ||
       signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL) ||
       null;
+    const workflowSummary = buildWorkflowSignatureSummary(signatures);
 
     const pdfPayload = {
       ...update.rows[0],
@@ -896,6 +984,15 @@ async function aprobarFinal({ id, approver, meta }) {
         finalSignature,
         approverName
       ),
+      firma_workflow_estado: workflowSummary?.estado || "pendiente",
+      firma_solicitante_at: solicitudSignature?.signed_at || null,
+      firma_aprobador_at: finalSignature?.signed_at || null,
+      firma_solicitante_hash: solicitudSignature?.signature_hash_sha256 || null,
+      firma_aprobador_hash: finalSignature?.signature_hash_sha256 || null,
+      firma_aprobador_prev_hash: finalSignature?.previous_signature_hash_sha256 || null,
+      legal_verification_token: verificationToken,
+      legal_verification_url: buildLegalVerificationUrl(verificationToken),
+      workflow_signature_summary: workflowSummary,
     };
 
     pdfUrl = await generateFRH10(pdfPayload);
@@ -906,6 +1003,10 @@ async function aprobarFinal({ id, approver, meta }) {
         approver_fullname: approverName,
       },
       signatures,
+      verification: {
+        token: verificationToken,
+        url: buildLegalVerificationUrl(verificationToken),
+      },
     });
   } catch (pdfError) {
     logger.warn({ pdfError, solicitudId: update.rows[0]?.id }, "No se pudo generar PDF con firmas avanzadas");
@@ -928,7 +1029,74 @@ async function aprobarFinal({ id, approver, meta }) {
     ...responseRow,
     pdf_generado_url: pdfUrl || responseRow.pdf_generado_url || null,
     pdf_validacion_legal_url: legalPdfUrl || responseRow.pdf_validacion_legal_url || null,
+    legal_verification_token: verificationToken || responseRow.legal_verification_token || null,
+    legal_verification_url: buildLegalVerificationUrl(
+      verificationToken || responseRow.legal_verification_token || null
+    ),
   };
+}
+
+async function getLegalVerificationByToken(token) {
+  await ensureTable();
+  if (!token) return null;
+  const { rows } = await db.query(
+    `SELECT *
+       FROM permisos_vacaciones
+      WHERE legal_verification_token = $1
+      LIMIT 1`,
+    [token]
+  );
+  if (!rows[0]) return null;
+  const normalizedStatus = String(rows[0]?.status || "").toLowerCase();
+  if (normalizedStatus === "rejected" || normalizedStatus === "rechazado") return null;
+  const enriched = await attachWorkflowSignatures([rows[0]]);
+  const row = enriched[0] || rows[0];
+  return {
+    id: row.id,
+    tipo_solicitud: row.tipo_solicitud,
+    tipo_permiso: row.tipo_permiso,
+    status: row.status,
+    solicitante: row.user_fullname || row.user_email || null,
+    aprobador: row.aprobacion_final_por || row.approver_email || row.approver_role || null,
+    aprobacion_final_at: row.aprobacion_final_at || null,
+    pdf_generado_url: row.pdf_generado_url || null,
+    pdf_validacion_legal_url: row.pdf_validacion_legal_url || null,
+    legal_verification_token: row.legal_verification_token || token,
+    legal_verification_url: buildLegalVerificationUrl(row.legal_verification_token || token),
+    firmas_workflow: row.firmas_workflow || [],
+    firma_avanzada_resumen: row.firma_avanzada_resumen || null,
+  };
+}
+
+async function getLegalCoverage() {
+  await ensureTable();
+  const { rows } = await db.query(
+    `SELECT
+        COUNT(*) FILTER (WHERE status IN ('approved','rejected')) AS total_closed,
+        COUNT(*) FILTER (WHERE status = 'approved') AS total_approved,
+        COUNT(*) FILTER (
+          WHERE status = 'approved'
+            AND pdf_validacion_legal_url IS NOT NULL
+            AND legal_verification_token IS NOT NULL
+        ) AS approved_with_legal_evidence,
+        COUNT(*) FILTER (
+          WHERE status = 'approved'
+            AND EXISTS (
+              SELECT 1
+                FROM permisos_vacaciones_firmas f
+               WHERE f.solicitud_id = permisos_vacaciones.id
+                 AND f.stage = 'solicitud'
+            )
+            AND EXISTS (
+              SELECT 1
+                FROM permisos_vacaciones_firmas f
+               WHERE f.solicitud_id = permisos_vacaciones.id
+                 AND f.stage = 'aprobacion_final'
+            )
+        ) AS approved_with_complete_chain
+      FROM permisos_vacaciones`
+  );
+  return rows[0] || {};
 }
 
 async function rechazar({ id, approver, observaciones, meta }) {
@@ -953,7 +1121,10 @@ async function rechazar({ id, approver, observaciones, meta }) {
             observaciones = $2,
             updated_at = now(),
             aprobacion_final_por = $3,
-            aprobacion_final_at = now()
+            aprobacion_final_at = now(),
+            pdf_validacion_legal_url = NULL,
+            legal_verification_token = NULL,
+            legal_verification_created_at = NULL
       WHERE id = $1
     RETURNING *`,
     [id, obsArray, approverName]
@@ -1004,8 +1175,7 @@ async function listarPendientes({ stage, approver }) {
       WHERE status = $1
         AND (
           (approver_user_id IS NOT NULL AND approver_user_id = $2)
-          OR
-          (approver_user_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($3))
+          OR LOWER(COALESCE(approver_role, '')) = ANY($3)
         )
       ORDER BY created_at DESC`,
     [statusFilter, approver?.id || null, roleCandidates]
@@ -1303,4 +1473,6 @@ module.exports = {
   listarPorUsuario,
   getSolicitudById,
   listarResumenColaboradores,
+  getLegalVerificationByToken,
+  getLegalCoverage,
 };

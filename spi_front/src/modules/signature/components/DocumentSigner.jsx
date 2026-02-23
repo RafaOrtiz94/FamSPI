@@ -72,13 +72,13 @@ const validateConsentForm = (consent, roleAtSign, authorizedRole) => {
 };
 
 /**
- * DocumentSigner - Componente principal para firma avanzada de documentos
+ * DocumentSigner - Componente principal para Fam Sign de documentos
  * ========================================================
  *
  * Proporciona interfaz completa para:
  * - Cargar documento PDF/DOCX
  * - Verificación de consentimiento expreso
- * - Firma digital avanzada con sello institucional
+ * - Fam Sign con sello institucional
  * - Generación automática de QR verificable
  * - Bloqueo automático del documento
  */

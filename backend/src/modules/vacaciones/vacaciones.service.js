@@ -1,5 +1,6 @@
 ﻿const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const db = require("../../config/db");
 const logger = require("../../config/logger");
@@ -7,12 +8,28 @@ const { logAction } = require("../../utils/audit");
 const { ensureFolder, replaceTags, exportPdf } = require("../../utils/drive");
 const { drive } = require("../../config/google");
 const notificationManager = require("../notifications/notificationManager");
+const { generateFirmaLegalValidationPdf } = require("../permisos/permisos.pdf");
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const resolveLegalVerificationBaseUrl = () => {
+  if (process.env.LEGAL_VERIFICATION_BASE_URL) return process.env.LEGAL_VERIFICATION_BASE_URL;
+  if (process.env.BACKEND_BASE_URL) return process.env.BACKEND_BASE_URL;
+  if (process.env.API_BASE_URL) return process.env.API_BASE_URL;
+  if (process.env.GOOGLE_REDIRECT_URI) {
+    try {
+      return new URL(process.env.GOOGLE_REDIRECT_URI).origin;
+    } catch (_) {
+      // ignore invalid URL
+    }
+  }
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL;
+  return "https://spi-backend-983537733948.us-central1.run.app";
+};
+const LEGAL_VERIFICATION_BASE_URL = resolveLegalVerificationBaseUrl();
 
 async function ensureTable() {
   await db.query(`
@@ -41,6 +58,73 @@ async function ensureTable() {
   `);
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_request BOOLEAN DEFAULT false");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS advance_eligible_from DATE");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS legal_verification_token TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS legal_verification_created_at TIMESTAMPTZ");
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_vacaciones_legal_verification_token
+     ON vacaciones_solicitudes (legal_verification_token)
+     WHERE legal_verification_token IS NOT NULL`
+  );
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS vacaciones_solicitudes_firmas (
+      id BIGSERIAL PRIMARY KEY,
+      solicitud_id BIGINT NOT NULL REFERENCES vacaciones_solicitudes(id) ON DELETE CASCADE,
+      stage TEXT NOT NULL,
+      signer_user_id INTEGER NOT NULL REFERENCES users(id),
+      signer_email TEXT,
+      signer_name TEXT NOT NULL,
+      signer_role TEXT,
+      signature_type TEXT NOT NULL DEFAULT 'advanced_electronic',
+      auth_method TEXT NOT NULL DEFAULT 'oauth_corporate',
+      consent_text TEXT,
+      ip_address INET,
+      user_agent TEXT,
+      session_id TEXT,
+      payload_hash_sha256 VARCHAR(64) NOT NULL,
+      previous_signature_hash_sha256 VARCHAR(64),
+      signature_hash_sha256 VARCHAR(64) NOT NULL,
+      is_current BOOLEAN NOT NULL DEFAULT true,
+      signed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT vacaciones_firmas_stage_check
+        CHECK (stage IN ('solicitud', 'aprobacion_final', 'rechazo')),
+      CONSTRAINT vacaciones_firmas_payload_hash_check
+        CHECK (payload_hash_sha256 ~ '^[a-f0-9]{64}$'),
+      CONSTRAINT vacaciones_firmas_signature_hash_check
+        CHECK (signature_hash_sha256 ~ '^[a-f0-9]{64}$'),
+      CONSTRAINT vacaciones_firmas_prev_hash_check
+        CHECK (previous_signature_hash_sha256 IS NULL OR previous_signature_hash_sha256 ~ '^[a-f0-9]{64}$')
+    );
+  `);
+  await db.query(`
+    WITH ranked AS (
+      SELECT id,
+             ROW_NUMBER() OVER (
+               PARTITION BY solicitud_id, stage
+               ORDER BY signed_at DESC, id DESC
+             ) AS rn
+        FROM vacaciones_solicitudes_firmas
+    )
+    UPDATE vacaciones_solicitudes_firmas f
+       SET is_current = (ranked.rn = 1)
+     FROM ranked
+     WHERE ranked.id = f.id
+  `);
+  await db.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ux_vacaciones_firmas_current_stage
+     ON vacaciones_solicitudes_firmas (solicitud_id, stage)
+     WHERE is_current = true`
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_vacaciones_firmas_solicitud_signed_at
+     ON vacaciones_solicitudes_firmas (solicitud_id, signed_at DESC, id DESC)`
+  );
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_vacaciones_firmas_signer_user
+     ON vacaciones_solicitudes_firmas (signer_user_id, signed_at DESC)`
+  );
 }
 
 const ROLE_APPROVER = {
@@ -80,9 +164,62 @@ function getApproverRoleCandidates(user = {}) {
       .map((value) => String(value || "").trim().toLowerCase())
       .filter(Boolean)
   );
+  if (candidates.has("jefe_finanzas")) candidates.add("jefe_financiero");
+  if (candidates.has("jefe_financiero")) candidates.add("jefe_finanzas");
+  if (candidates.has("finanzas")) candidates.add("financiero");
+  if (candidates.has("financiero")) candidates.add("finanzas");
   if (candidates.has("gerencia_general")) candidates.add("gerente_general");
   if (candidates.has("gerente_general")) candidates.add("gerencia_general");
   return Array.from(candidates);
+}
+
+function getRequestMeta(meta = {}) {
+  return {
+    ipAddress: meta?.ipAddress || null,
+    userAgent: meta?.userAgent || null,
+    sessionId: meta?.sessionId || null,
+  };
+}
+
+function stableStringify(input) {
+  if (input === null || input === undefined) return "";
+  if (Array.isArray(input)) return `[${input.map((item) => stableStringify(item)).join(",")}]`;
+  if (input instanceof Date) return input.toISOString();
+  if (typeof input === "object") {
+    return `{${Object.keys(input)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(input[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(input);
+}
+
+function sha256Hex(value) {
+  return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
+}
+
+function generateLegalVerificationToken() {
+  return crypto.randomBytes(24).toString("hex");
+}
+
+function buildLegalVerificationUrl(token) {
+  if (!token) return null;
+  return `${String(LEGAL_VERIFICATION_BASE_URL).replace(/\/+$/, "")}/api/v1/vacaciones/legal-verification/${token}`;
+}
+
+function buildVacationSignatureSnapshot(solicitud = {}) {
+  return {
+    id: solicitud.id,
+    requester_id: solicitud.requester_id,
+    approver_id: solicitud.approver_id,
+    approver_role: solicitud.approver_role,
+    start_date: solicitud.start_date,
+    end_date: solicitud.end_date,
+    return_date: solicitud.return_date,
+    days: solicitud.days,
+    status: solicitud.status,
+    updated_at: solicitud.updated_at,
+  };
 }
 
 function diffDaysInclusive(start, end) {
@@ -222,6 +359,88 @@ async function findApprover(targetRole) {
   return rows[0]?.id || null;
 }
 
+async function getVacationSignaturesBySolicitudId(solicitudId) {
+  if (!solicitudId) return [];
+  const { rows } = await db.query(
+    `SELECT id, solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
+            signature_type, auth_method, consent_text, ip_address::text AS ip_address,
+            user_agent, session_id, payload_hash_sha256, previous_signature_hash_sha256,
+            signature_hash_sha256, is_current, signed_at, created_at
+       FROM vacaciones_solicitudes_firmas
+      WHERE solicitud_id = $1
+      ORDER BY signed_at ASC, id ASC`,
+    [solicitudId]
+  );
+  return rows.map((row) => ({
+    ...row,
+    legal_verification_url: buildLegalVerificationUrl(row.legal_verification_token || null),
+  }));
+}
+
+async function recordVacationWorkflowSignature({ solicitud, stage, actor, meta = {}, consentText }) {
+  const actorId = Number(actor?.id || actor?.user_id || 0);
+  if (!solicitud?.id || !actorId || !stage) return null;
+
+  const { rows: previousRows } = await db.query(
+    `SELECT signature_hash_sha256
+       FROM vacaciones_solicitudes_firmas
+      WHERE solicitud_id = $1
+      ORDER BY signed_at DESC, id DESC
+      LIMIT 1`,
+    [solicitud.id]
+  );
+  const previousSignatureHash = previousRows[0]?.signature_hash_sha256 || null;
+  const signedAtIso = new Date().toISOString();
+  const payloadHash = sha256Hex(stableStringify(buildVacationSignatureSnapshot(solicitud)));
+  const signatureHash = sha256Hex(
+    stableStringify({
+      solicitud_id: solicitud.id,
+      stage,
+      signer_user_id: actorId,
+      signer_email: actor?.email || null,
+      signed_at: signedAtIso,
+      payload_hash_sha256: payloadHash,
+      previous_signature_hash_sha256: previousSignatureHash,
+    })
+  );
+  const requestMeta = getRequestMeta(meta);
+
+  await db.query(
+    `UPDATE vacaciones_solicitudes_firmas
+        SET is_current = false, updated_at = NOW()
+      WHERE solicitud_id = $1
+        AND stage = $2
+        AND is_current = true`,
+    [solicitud.id, stage]
+  );
+
+  const { rows } = await db.query(
+    `INSERT INTO vacaciones_solicitudes_firmas (
+      solicitud_id, stage, signer_user_id, signer_email, signer_name, signer_role,
+      signature_type, auth_method, consent_text, ip_address, user_agent, session_id,
+      payload_hash_sha256, previous_signature_hash_sha256, signature_hash_sha256, is_current, signed_at
+    ) VALUES ($1,$2,$3,$4,$5,$6,'advanced_electronic','oauth_corporate',$7,$8,$9,$10,$11,$12,$13,true,$14)
+    RETURNING *`,
+    [
+      solicitud.id,
+      stage,
+      actorId,
+      actor?.email || null,
+      actor?.fullname || actor?.name || actor?.email || `Usuario #${actorId}`,
+      String(actor?.role || actor?.scope || actor?.rol || "").toLowerCase() || null,
+      consentText || `Fam Sign ${stage} en vacaciones SPI`,
+      requestMeta.ipAddress,
+      requestMeta.userAgent,
+      requestMeta.sessionId,
+      payloadHash,
+      previousSignatureHash,
+      signatureHash,
+      signedAtIso,
+    ]
+  );
+  return rows[0] || null;
+}
+
 async function computeTakenDays(userId, year) {
   const { rows } = await db.query(
     `SELECT COALESCE(SUM(days),0) as total
@@ -287,7 +506,7 @@ async function createDriveDocument({ user, start_date, end_date, return_date, pe
   };
 }
 
-async function createVacationRequest(payload, userId) {
+async function createVacationRequest(payload, userId, meta = {}) {
   await ensureTable();
   const user = await loadUser(userId);
   if (!user) throw new Error("Usuario no encontrado");
@@ -398,7 +617,20 @@ async function createVacationRequest(payload, userId) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de vacaciones");
   }
 
-  return { ...rows[0], remaining_before: remaining };
+  try {
+    await recordVacationWorkflowSignature({
+      solicitud: rows[0],
+      stage: "solicitud",
+      actor: user,
+      meta,
+      consentText: "Confirmo la solicitud de vacaciones en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en vacaciones (solicitud)");
+  }
+
+  const signatures = await getVacationSignaturesBySolicitudId(rows[0]?.id);
+  return { ...rows[0], remaining_before: remaining, firmas_workflow: signatures };
 }
 
 async function listVacationRequests(params = {}, user) {
@@ -419,7 +651,7 @@ async function listVacationRequests(params = {}, user) {
   if (scope === "pending") {
     const roleCandidates = getApproverRoleCandidates(user);
     where.push(`status = 'pendiente'`);
-    where.push(`(approver_id = $${idx} OR (approver_id IS NULL AND LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1})))`);
+    where.push(`(approver_id = $${idx} OR LOWER(COALESCE(approver_role, '')) = ANY($${idx + 1}))`);
     values.push(user.id, roleCandidates);
     idx += 2;
   } else if (!canSeeAll || scope === "mine") {
@@ -440,7 +672,7 @@ async function listVacationRequests(params = {}, user) {
   return rows;
 }
 
-async function updateVacationStatus(id, status, user) {
+async function updateVacationStatus(id, status, user, meta = {}) {
   await ensureTable();
   const normalized = (status || "").toLowerCase();
   if (!['aprobado', 'rechazado', 'approved', 'rejected'].includes(normalized)) {
@@ -454,8 +686,7 @@ async function updateVacationStatus(id, status, user) {
   const roleCandidates = getApproverRoleCandidates(user);
   const canApprove =
     current.approver_id === user.id ||
-    (current.approver_id == null &&
-      current.approver_role &&
+    (current.approver_role &&
       (
         GERENCIA_GENERAL_ROLES.has(String(current.approver_role).toLowerCase())
           ? roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate))
@@ -500,7 +731,80 @@ async function updateVacationStatus(id, status, user) {
   } catch (notifyError) {
     logger.warn({ notifyError, solicitudId: updated[0]?.id }, "No se pudo notificar estado de vacaciones");
   }
-  return updated[0];
+
+  let verificationToken = updated[0]?.legal_verification_token || null;
+  if (!verificationToken) {
+    verificationToken = generateLegalVerificationToken();
+    await db.query(
+      `UPDATE vacaciones_solicitudes
+          SET legal_verification_token = $2,
+              legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+              updated_at = now()
+        WHERE id = $1`,
+      [id, verificationToken]
+    );
+  }
+
+  const signatureStage = mappedStatus === "aprobado" ? "aprobacion_final" : "rechazo";
+  try {
+    await recordVacationWorkflowSignature({
+      solicitud: updated[0],
+      stage: signatureStage,
+      actor: user,
+      meta,
+      consentText:
+        mappedStatus === "aprobado"
+          ? "Confirmo la aprobacion final de vacaciones en SPI"
+          : "Confirmo el rechazo de vacaciones en SPI",
+    });
+  } catch (signatureError) {
+    logger.warn({ signatureError, solicitudId: updated[0]?.id }, "No se pudo registrar firma en vacaciones");
+  }
+
+  let legalPdfUrl = null;
+  try {
+    const requester = await loadUser(updated[0]?.requester_id);
+    const signatures = await getVacationSignaturesBySolicitudId(updated[0]?.id);
+    legalPdfUrl = await generateFirmaLegalValidationPdf({
+      solicitud: {
+        id: updated[0]?.id,
+        tipo_solicitud: "vacaciones",
+        status: updated[0]?.status,
+        user_id: updated[0]?.requester_id,
+        user_email: requester?.email || null,
+        user_fullname: requester?.fullname || requester?.name || requester?.email || null,
+        approver_fullname: user?.fullname || user?.name || user?.email || null,
+        approver_email: user?.email || null,
+        pdf_generado_url: updated[0]?.drive_pdf_link || updated[0]?.drive_doc_link || null,
+        drive_folder_id: updated[0]?.drive_folder_id || null,
+      },
+      signatures,
+      verification: {
+        token: verificationToken,
+        url: buildLegalVerificationUrl(verificationToken),
+      },
+    });
+  } catch (legalPdfError) {
+    logger.warn({ legalPdfError, solicitudId: updated[0]?.id }, "No se pudo generar constancia legal de vacaciones");
+  }
+
+  if (legalPdfUrl) {
+    await db.query(
+      `UPDATE vacaciones_solicitudes
+          SET pdf_validacion_legal_url = $2, updated_at = now()
+        WHERE id = $1`,
+      [id, legalPdfUrl]
+    );
+  }
+
+  const signatures = await getVacationSignaturesBySolicitudId(updated[0]?.id);
+  return {
+    ...updated[0],
+    firmas_workflow: signatures,
+    pdf_validacion_legal_url: legalPdfUrl || updated[0]?.pdf_validacion_legal_url || null,
+    legal_verification_token: verificationToken || updated[0]?.legal_verification_token || null,
+    legal_verification_url: buildLegalVerificationUrl(verificationToken || updated[0]?.legal_verification_token || null),
+  };
 }
 
 async function summary(user, includeAll = false) {
@@ -585,9 +889,38 @@ async function summary(user, includeAll = false) {
   }));
 }
 
+async function getLegalVerificationByToken(token) {
+  await ensureTable();
+  if (!token) return null;
+  const { rows } = await db.query(
+    `SELECT v.*, u.fullname as requester_name, u.email as requester_email
+       FROM vacaciones_solicitudes v
+       LEFT JOIN users u ON u.id = v.requester_id
+      WHERE v.legal_verification_token = $1
+      LIMIT 1`,
+    [token]
+  );
+  if (!rows[0]) return null;
+  const signatures = await getVacationSignaturesBySolicitudId(rows[0].id);
+  return {
+    id: rows[0].id,
+    tipo_solicitud: "vacaciones",
+    status: rows[0].status,
+    solicitante: rows[0].requester_name || rows[0].requester_email || null,
+    aprobador: rows[0].approver_role || rows[0].approver_id || null,
+    start_date: rows[0].start_date,
+    end_date: rows[0].end_date,
+    pdf_validacion_legal_url: rows[0].pdf_validacion_legal_url || null,
+    legal_verification_token: rows[0].legal_verification_token || token,
+    legal_verification_url: buildLegalVerificationUrl(rows[0].legal_verification_token || token),
+    firmas_workflow: signatures,
+  };
+}
+
 module.exports = {
   createVacationRequest,
   listVacationRequests,
   updateVacationStatus,
   summary,
+  getLegalVerificationByToken,
 };

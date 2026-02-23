@@ -3,6 +3,9 @@ const router = express.Router();
 const controller = require("./permisos.controller");
 const { verifyToken } = require("../../middlewares/auth");
 
+// Verificación legal pública por token
+router.get("/legal-verification/:token", controller.verifyLegalToken);
+
 router.use(verifyToken);
 
 // Crear solicitud (permiso o vacación)
@@ -28,5 +31,8 @@ router.get("/mis-solicitudes", controller.listarMias);
 
 // Resumen por colaborador (talento humano / gerencia)
 router.get("/resumen-colaboradores", controller.listarResumenColaboradores);
+
+// Métrica de cobertura legal de firmas avanzadas
+router.get("/legal-coverage", controller.getLegalCoverage);
 
 module.exports = router;

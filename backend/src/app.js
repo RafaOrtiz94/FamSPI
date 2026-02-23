@@ -203,6 +203,8 @@ app.use((req, res, next) => {
     req.path.startsWith("/api/v1/private-purchases/events") ||
     req.path.startsWith("/api/v1/auth/google") ||
     req.path.startsWith("/api/v1/gmail/auth/callback") ||
+    req.path.startsWith("/api/v1/permisos/legal-verification/") ||
+    req.path.startsWith("/api/v1/vacaciones/legal-verification/") ||
     req.path.startsWith("/health") ||
     req.path.startsWith("/api/verificar")
   ) {

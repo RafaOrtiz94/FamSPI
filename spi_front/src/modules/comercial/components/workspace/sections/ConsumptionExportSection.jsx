@@ -446,6 +446,7 @@ const ConsumptionExportSection = ({ businessCase }) => {
             >
               <option value="venta">Venta directa</option>
               <option value="alquiler">Alquiler</option>
+              <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
             </select>
           </div>
 

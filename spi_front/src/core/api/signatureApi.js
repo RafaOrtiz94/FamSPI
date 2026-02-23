@@ -1,11 +1,11 @@
 import axios from 'axios';
 
 /**
- * API Client para el Sistema de Firma Electrónica Avanzada
+ * API Client para el sistema Fam Sign
  * ========================================================
  *
  * Este módulo proporciona acceso a todas las APIs del sistema de firma digital:
- * - Firma avanzada con sello institucional y QR
+ * - Fam Sign con sello institucional y QR
  * - Verificación pública de documentos
  * - Auditoría y trail de eventos
  * - Dashboard de métricas
@@ -38,7 +38,7 @@ signatureApi.interceptors.request.use(
 );
 
 /**
- * FIRMA AVANZADA
+ * FAM SIGN
  * ===============
  */
 

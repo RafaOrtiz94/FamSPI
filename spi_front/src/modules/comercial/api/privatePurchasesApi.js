@@ -145,8 +145,8 @@ export const privatePurchasesApi = {
 
   // Request ACP availability (for comodato)
   requestAcpAvailability: async (purchaseId) => {
-    console.log('[PURCHASE_FLOW][FASE7][API_CALL]', { purchaseId, action: 'requestAcpAvailability', endpoint: '/request-acp-availability', actorRole: 'backoffice' });
-    const result = await apiCall(`/private-purchases/${purchaseId}/request-acp-availability`, {
+    console.log('[PURCHASE_FLOW][FASE7][API_CALL]', { purchaseId, action: 'requestAcpAvailability', endpoint: '/start-availability', actorRole: 'backoffice' });
+    const result = await apiCall(`/private-purchases/${purchaseId}/start-availability`, {
       method: 'POST',
     });
     console.log('[PURCHASE_FLOW][FASE7][API_SUCCESS]', { purchaseId, action: 'requestAcpAvailability', status: 'ok' });

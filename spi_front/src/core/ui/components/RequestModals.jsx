@@ -1070,7 +1070,9 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-xs uppercase tracking-wide text-slate-500">Tipo oferta</p>
               <p className="mt-1 text-sm font-semibold text-slate-900">
-                {formData.offer_kind || "Pendiente"}
+                {formData.offer_kind === "alquiler_transferencia_dominio"
+                  ? "Alquiler con transferencia de dominio"
+                  : formData.offer_kind || "Pendiente"}
               </p>
             </div>
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -1092,6 +1094,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               >
                 <option value="venta">Venta</option>
                 <option value="alquiler">Alquiler</option>
+                <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
                 <option value="comodato">Comodato</option>
               </select>
 

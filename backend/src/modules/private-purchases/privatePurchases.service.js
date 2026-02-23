@@ -26,9 +26,16 @@ const PRIVATE_OFFER_KIND_CANONICAL_MAP = Object.freeze({
   venta: "venta",
   comodato: "comodato",
   alquiler: "alquiler",
-  prestamo: "alquiler"
+  prestamo: "alquiler",
+  alquiler_transferencia_dominio: "alquiler_transferencia_dominio",
+  alquiler_con_transferencia_de_dominio: "alquiler_transferencia_dominio"
 });
-const PRIVATE_OFFER_KIND_ALLOWED = Object.freeze(["venta", "comodato", "alquiler"]);
+const PRIVATE_OFFER_KIND_ALLOWED = Object.freeze([
+  "venta",
+  "comodato",
+  "alquiler",
+  "alquiler_transferencia_dominio",
+]);
 const PRIVATE_CHECKLIST_ITEM_LABELS = {
   client_data_complete: "Datos del cliente completos",
   equipment_defined: "Equipos definidos",
@@ -89,7 +96,10 @@ class PrivatePurchasesService {
   }
 
   _normalizeOfferKind(rawOfferKind, { allowLegacyAlias = true } = {}) {
-    const normalized = String(rawOfferKind || "").trim().toLowerCase();
+    const normalized = String(rawOfferKind || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[\s-]+/g, "_");
     if (!normalized) return "venta";
     if (allowLegacyAlias && PRIVATE_OFFER_KIND_CANONICAL_MAP[normalized]) {
       return PRIVATE_OFFER_KIND_CANONICAL_MAP[normalized];
@@ -327,6 +337,49 @@ class PrivatePurchasesService {
       logger.error({ bcError, purchaseId }, 'Error creando Business Case automático para comodato');
       return null;
     }
+  }
+
+  async startBusinessCaseForComodato(purchaseId, user) {
+    const { rows } = await db.query(
+      `SELECT id, offer_kind, business_case_id, status
+         FROM private_purchase_requests
+        WHERE id = $1
+        LIMIT 1`,
+      [purchaseId],
+    );
+
+    const row = rows[0];
+    if (!row) {
+      const error = new Error("Solicitud no encontrada");
+      error.status = 404;
+      throw error;
+    }
+
+    if (row.offer_kind !== "comodato") {
+      const error = new Error("El Business Case manual solo aplica para solicitudes de comodato");
+      error.status = 409;
+      error.code = "BUSINESS_CASE_ONLY_FOR_COMODATO";
+      throw error;
+    }
+
+    const existingBcId = row.business_case_id || null;
+    const bcId = await this.ensureBusinessCaseForComodato(purchaseId, user, row);
+
+    const { rows: refreshedRows } = await db.query(
+      `SELECT id, status, business_case_id
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId],
+    );
+    const refreshed = refreshedRows[0] || row;
+
+    return {
+      purchase_id: purchaseId,
+      business_case_id: refreshed.business_case_id || bcId || null,
+      status: refreshed.status,
+      created: !existingBcId && Boolean(refreshed.business_case_id || bcId),
+      already_linked: Boolean(existingBcId),
+    };
   }
 
   /**

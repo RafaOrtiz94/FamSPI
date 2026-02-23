@@ -152,7 +152,7 @@ const lockDocument = async (client, documentId, userId) => {
 
 /**
  * POST /api/documents/:documentId/sign
- * Firma avanzada completa con sello institucional y QR
+ * Fam Sign completo con sello institucional y QR
  */
 exports.signDocument = asyncHandler(async (req, res) => {
   const { documentId } = req.params;
@@ -182,7 +182,7 @@ exports.signDocument = asyncHandler(async (req, res) => {
     const { hashId, hashValue } = await calculateDocumentHash(client, documentId, documentBuffer, req.user.id);
     await updateDocumentWithHash(client, documentId, hashId);
 
-    // 2. Crear firma avanzada
+    // 2. Crear Fam Sign
     const signatureId = await createAdvancedSignature(client, {
       documentId,
       userId: req.user.id,
@@ -211,7 +211,7 @@ exports.signDocument = asyncHandler(async (req, res) => {
 
     res.status(201).json({
       ok: true,
-      message: "Firma avanzada aplicada y documento bloqueado",
+      message: "Fam Sign aplicado y documento bloqueado",
       data: {
         document_id: documentId,
         hash: {
@@ -242,7 +242,7 @@ exports.signDocument = asyncHandler(async (req, res) => {
 
   } catch (err) {
     await client.query("ROLLBACK");
-    logger.error({ err }, "❌ Error en flujo de firma avanzada");
+    logger.error({ err }, "❌ Error en flujo de Fam Sign");
     const status = err.status || 500;
     res.status(status).json({ ok: false, message: err.message });
   } finally {

@@ -78,7 +78,13 @@ const determinationSchema = Joi.object({
 const feasibilityDecisionSchema = Joi.object({
   is_feasible: Joi.boolean().required(),
   notes: Joi.string().allow("").max(2000).optional(),
-  fallback_offer_kind: Joi.string().valid("venta", "alquiler", "prestamo").optional(),
+  fallback_offer_kind: Joi.string().valid(
+    "venta",
+    "alquiler",
+    "prestamo",
+    "alquiler_transferencia_dominio",
+    "alquiler_con_transferencia_de_dominio",
+  ).optional(),
   quantities: Joi.object().optional(),
   prices: Joi.object().optional(),
   calculations: Joi.object().optional(),

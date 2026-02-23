@@ -4,11 +4,11 @@ const { verifyToken } = require("../../middlewares/auth");
 const ctrl = require("./signature.controller");
 
 // =============================================================================
-// FIRMA AVANZADA
+// FAM SIGN
 // =============================================================================
 
 // POST /api/signature/documents/:documentId/sign
-// Firma avanzada completa con sello institucional y QR
+// Fam Sign completo con sello institucional y QR
 router.post("/documents/:documentId/sign", verifyToken, ctrl.signDocument);
 
 // =============================================================================

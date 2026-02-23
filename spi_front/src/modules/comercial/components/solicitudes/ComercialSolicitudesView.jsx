@@ -614,6 +614,7 @@ const ComercialSolicitudesView = () => {
                                 >
                                     <option value="venta">Venta</option>
                                     <option value="alquiler">Alquiler</option>
+                                    <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
                                     <option value="comodato">Comodato</option>
                                 </select>
                             </label>

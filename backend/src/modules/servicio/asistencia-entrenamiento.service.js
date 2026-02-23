@@ -337,7 +337,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             imageCount: driveResult.images?.length || 0
         }, "Archivos de lista de asistencia guardados en Google Drive");
 
-        // Registrar documento en tabla documents para habilitar firma avanzada
+        // Registrar documento en tabla documents para habilitar Fam Sign
         let documentRecord = null;
         try {
             const insert = await db.query(
@@ -347,9 +347,9 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
                 [driveResult.pdfFile?.id || null, driveResult.folderId || null]
             );
             documentRecord = insert.rows?.[0] || null;
-            logger.info({ documentId: documentRecord?.id }, "Documento registrado para firma avanzada");
+            logger.info({ documentId: documentRecord?.id }, "Documento registrado para Fam Sign");
         } catch (docErr) {
-            logger.warn({ docErr }, "No se pudo registrar el documento para firma avanzada");
+            logger.warn({ docErr }, "No se pudo registrar el documento para Fam Sign");
         }
 
         // Return success without downloading PDF

@@ -3,7 +3,7 @@ const logger = require("../../config/logger");
 const crypto = require("crypto");
 const { ensureFolder } = require("../../utils/drive");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
-const PrivatePurchaseStateMachine = require("../private-purchases/privatePurchaseStateMachine");
+const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -98,10 +98,19 @@ function toObject(value) {
 }
 
 function normalizeFallbackOfferKind(value) {
-  const normalized = String(value || "").trim().toLowerCase();
+  const normalized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
   if (normalized === "venta") return "venta";
   if (normalized === "alquiler") return "alquiler";
   if (normalized === "prestamo") return "alquiler";
+  if (
+    normalized === "alquiler_transferencia_dominio" ||
+    normalized === "alquiler_con_transferencia_de_dominio"
+  ) {
+    return "alquiler_transferencia_dominio";
+  }
   return null;
 }
 
@@ -185,7 +194,9 @@ async function saveFeasibilityDecision(
   const nowIso = new Date().toISOString();
   const normalizedFallback = normalizeFallbackOfferKind(fallback_offer_kind);
   if (is_feasible === false && !normalizedFallback) {
-    const error = new Error("Debe seleccionar venta directa o alquiler cuando no es factible");
+    const error = new Error(
+      "Debe seleccionar venta directa, alquiler o alquiler con transferencia de dominio cuando no es factible",
+    );
     error.status = 400;
     error.code = "FALLBACK_OFFER_KIND_REQUIRED";
     throw error;

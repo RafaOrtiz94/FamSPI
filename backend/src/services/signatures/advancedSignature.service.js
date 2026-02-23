@@ -6,13 +6,13 @@ const immutableLogger = require("./immutableSignatureLogger.service");
 /**
  * Servicio: AdvancedSignatureService
  * ----------------------------------------------
- * Gestiona la firma electrónica avanzada sin certificados externos.
+ * Gestiona Fam Sign sin certificados externos.
  * Valida identidad (OAuth corporativo), voluntad (consentimiento expreso)
  * y genera una huella criptográfica del acto de firma.
  */
 class AdvancedSignatureService {
   /**
-   * Ejecuta la firma avanzada para una versión de documento.
+   * Ejecuta Fam Sign para una versión de documento.
    * @param {Object} params
    * @param {Object} params.documentHash
    * @param {Object} params.user
@@ -83,7 +83,7 @@ class AdvancedSignatureService {
         [document.id, documentHash.id]
       );
       if (existingSig.rows.length) {
-        const err = new Error("Ya existe una firma avanzada para esta versión");
+        const err = new Error("Ya existe un Fam Sign para esta versión");
         err.status = 409;
         throw err;
       }
@@ -162,7 +162,7 @@ class AdvancedSignatureService {
       return insertRes.rows[0];
     } catch (error) {
       if (shouldRelease) await pgClient.query("ROLLBACK");
-      logger.error({ error }, "❌ Error en firma avanzada");
+      logger.error({ error }, "❌ Error en Fam Sign");
       throw error;
     } finally {
       if (shouldRelease) pgClient.release();

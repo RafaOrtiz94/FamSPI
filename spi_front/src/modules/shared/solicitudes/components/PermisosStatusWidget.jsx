@@ -28,6 +28,14 @@ import { getActiveException, getTodayAttendance } from "../../../../core/api/att
 import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
+const expandRoleAliases = (roles = []) => {
+  const set = new Set((roles || []).filter(Boolean));
+  if (set.has("jefe_finanzas")) set.add("jefe_financiero");
+  if (set.has("jefe_financiero")) set.add("jefe_finanzas");
+  if (set.has("finanzas")) set.add("financiero");
+  if (set.has("financiero")) set.add("finanzas");
+  return Array.from(set);
+};
 const formatDateTime = (value) => {
   if (!value) return "N/A";
   const parsed = new Date(value);
@@ -44,7 +52,7 @@ const PermisosStatusWidget = () => {
   const userId = user?.id;
   const gerenciaGeneralRoles = new Set(["gerencia_general", "gerente_general"]);
 
-  const roleCandidates = [role, scope].filter(Boolean);
+  const roleCandidates = expandRoleAliases([role, scope].filter(Boolean));
   const isJefe = [
     "jefe_comercial",
     "jefe_financiero",
@@ -64,7 +72,7 @@ const PermisosStatusWidget = () => {
     ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
   );
   const canViewLegalValidationDoc = roleCandidates.some((candidate) =>
-    ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
+    ["jefe_financiero", "jefe_finanzas", "jefe_ti", "gerencia_general", "gerente_general"].includes(candidate)
   );
 
   const [activeTab, setActiveTab] = useState("mine");
@@ -99,8 +107,8 @@ const PermisosStatusWidget = () => {
     const approverRole = (solicitud.approver_role || "").toLowerCase();
     const approverEmail = (solicitud.approver_email || "").toLowerCase();
     const approverUserId = solicitud.approver_user_id;
-    if (approverUserId && userId) return approverUserId === userId;
-    if (approverEmail && userEmail) return approverEmail === userEmail.toLowerCase();
+    if (approverUserId && userId && approverUserId === userId) return true;
+    if (approverEmail && userEmail && approverEmail === userEmail.toLowerCase()) return true;
     if (approverRole) {
       if (gerenciaGeneralRoles.has(approverRole)) {
         return roleCandidates.some((candidate) => gerenciaGeneralRoles.has(candidate));
@@ -373,6 +381,13 @@ const PermisosStatusWidget = () => {
       ? [solicitud.observaciones]
       : [];
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
+    const isRejectedStatus = String(solicitud?.status || "").toLowerCase() === "rejected";
+    const canViewLegalForThis =
+      canViewLegalValidationDoc ||
+      (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+      (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
+      (userEmail && solicitud?.user_email && String(userEmail).toLowerCase() === String(solicitud.user_email).toLowerCase()) ||
+      (userEmail && solicitud?.approver_email && String(userEmail).toLowerCase() === String(solicitud.approver_email).toLowerCase());
     const signatureStatusColor =
       signatureSummary?.estado === "completa"
         ? "text-emerald-700 border-emerald-200 bg-emerald-50"
@@ -531,7 +546,7 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
-        {canViewLegalValidationDoc && solicitud.pdf_validacion_legal_url && (
+        {canViewLegalForThis && !isRejectedStatus && solicitud.pdf_validacion_legal_url && (
           <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2">
             <p className="text-xs font-semibold text-slate-900 mb-1.5">Constancia legal de firma:</p>
             <a
@@ -543,14 +558,19 @@ const PermisosStatusWidget = () => {
               <FiDownload className="w-3 h-3" />
               Descargar validacion legal
             </a>
+            {solicitud.legal_verification_token && (
+              <p className="mt-2 text-[11px] text-slate-600 break-all">
+                Token: {solicitud.legal_verification_token}
+              </p>
+            )}
           </div>
         )}
 
-        {showAdvancedSignatureWidget && signatureSummary && (
+        {showAdvancedSignatureWidget && !isRejectedStatus && signatureSummary && (
           <div className={`rounded-lg border p-2 mt-2 ${signatureStatusColor}`}>
             <p className="text-xs font-semibold mb-1.5 flex items-center gap-1">
               <FiShield className="w-3 h-3" />
-              Firma avanzada workflow ({signatureSummary.estado || "pendiente"})
+              Fam Sign workflow ({signatureSummary.estado || "pendiente"})
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
               <div>

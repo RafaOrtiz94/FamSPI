@@ -49,6 +49,11 @@ router.post('/:id/offer', controller.sendOffer);
 router.post('/:id/offer/signed', controller.uploadSignedOffer);
 router.post('/:id/send-to-acp', controller.forwardToAcp);
 router.post('/:id/start-availability', controller.startAvailability);
+router.post(
+  '/:id/start-business-case',
+  requireRole(['backoffice_comercial', 'acp_comercial', 'jefe_comercial']),
+  controller.startBusinessCase,
+);
 router.post('/:id/provider-response', controller.saveProviderResponse);
 router.post('/:id/submit-contract', controller.uploadContract);
 router.post('/:id/contract/client-signed', controller.uploadClientSignedContract);
