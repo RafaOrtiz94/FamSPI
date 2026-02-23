@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+﻿import React, { useState, useEffect } from "react";
 import { FiX, FiCalendar, FiClock, FiFileText } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
@@ -10,8 +10,8 @@ import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 /**
  * Modal unificado para solicitudes de permisos y vacaciones
  * Flujo multi-paso:
- * 1. Seleccionar tipo (permiso o vacación)
- * 2. Llenar formulario específico
+ * 1. Seleccionar tipo (permiso o vacaciÃ³n)
+ * 2. Llenar formulario especÃ­fico
  * 3. Confirmar y enviar
  */
 const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
@@ -28,7 +28,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
 
     const [formData, setFormData] = useState({
-        // Común
+        // ComÃºn
         fecha_inicio: "",
         fecha_fin: "",
 
@@ -132,7 +132,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         showLoader();
         try {
             const famSignConsentText =
-                "Al enviar esta solicitud acepto el uso de Fam Sign como firma electronica para la firma de solicitud y su aprobacion automatica en SPI.";
+                "Al enviar esta solicitud acepto el uso de FamSign como firma electronica para la firma de solicitud y su aprobacion automatica en SPI.";
             const payload = {
                 tipo_solicitud: tipoSolicitud,
                 ...formData,
@@ -212,7 +212,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const renderStep1 = () => (
         <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">¿Qué deseas solicitar?</h3>
+            <h3 className="text-lg font-semibold text-gray-900">Â¿QuÃ© deseas solicitar?</h3>
             <div className="grid grid-cols-2 gap-4">
                 <button
                     type="button"
@@ -273,7 +273,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Por Estudios</p>
-                        <p className="text-xs text-gray-500 mt-1">Máx 3h recuperables</p>
+                        <p className="text-xs text-gray-500 mt-1">MÃ¡x 3h recuperables</p>
                     </button>
 
                     <button
@@ -285,7 +285,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Asuntos Personales</p>
-                        <p className="text-xs text-gray-500 mt-1">Máx 2h/semana</p>
+                        <p className="text-xs text-gray-500 mt-1">MÃ¡x 2h/semana</p>
                     </button>
 
                     <button
@@ -297,7 +297,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Por Salud</p>
-                        <p className="text-xs text-gray-500 mt-1">Con certificado médico</p>
+                        <p className="text-xs text-gray-500 mt-1">Con certificado mÃ©dico</p>
                     </button>
 
                     <button
@@ -308,7 +308,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             : "border-gray-200 hover:border-indigo-300"
                             }`}
                     >
-                        <p className="font-semibold text-sm">Calamidad Doméstica</p>
+                        <p className="font-semibold text-sm">Calamidad DomÃ©stica</p>
                         <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
                     </button>
                 </div>
@@ -331,13 +331,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <>
                         {isSalud && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">DuraciÃ³n</label>
                                 <select
                                     value={saludDuracionTipo}
                                     onChange={(e) => setSaludDuracionTipo(e.target.value)}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                 >
-                                    <option value="dias">Días</option>
+                                    <option value="dias">DÃ­as</option>
                                     <option value="horas">Horas</option>
                                 </select>
                             </div>
@@ -375,7 +375,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">{usesHoras ? "Horas" : "Días"}</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">{usesHoras ? "Horas" : "DÃ­as"}</label>
                             <input
                                 type="number"
                                 step={usesHoras ? "0.5" : "1"}
@@ -395,14 +395,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                             <p className="text-xs text-blue-700">
-                                <strong>Nota:</strong> Después de la aprobación parcial, deberás subir los documentos
+                                <strong>Nota:</strong> DespuÃ©s de la aprobaciÃ³n parcial, deberÃ¡s subir los documentos
                                 justificantes correspondientes.
                             </p>
                         </div>
 
                         <div className="flex gap-3 pt-4">
                             <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
-                                Atrás
+                                AtrÃ¡s
                             </Button>
                             <Button
                                 type="button"
@@ -478,8 +478,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 {vacationSummary && !allowMissingHireDate && !isAdvanceRequest && remaining <= 3 && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <p className="text-xs text-amber-700">
-                            Estás cerca de completar tus vacaciones. Te quedan{" "}
-                            <strong>{remaining}</strong> días disponibles.
+                            EstÃ¡s cerca de completar tus vacaciones. Te quedan{" "}
+                            <strong>{remaining}</strong> dÃ­as disponibles.
                         </p>
                     </div>
                 )}
@@ -487,7 +487,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 {isAdvanceRequest && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-xs text-blue-700">
-                            Aun no cumples un año de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
+                            Aun no cumples un aÃ±o de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
                             acreditara/descontara cuando cumplas el ano ({vacationSummary?.eligible_from || "fecha de aniversario"}).
                         </p>
                     </div>
@@ -512,7 +512,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         className="h-4 w-4 text-emerald-600 border-gray-300 rounded"
                     />
                     <label htmlFor="vacacion-medio-dia" className="text-sm text-gray-700">
-                        Medio día (4h)
+                        Medio dÃ­a (4h)
                     </label>
                 </div>
 
@@ -550,7 +550,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Período</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">PerÃ­odo</label>
                     <input
                         type="text"
                         value={formData.periodo_vacaciones}
@@ -566,19 +566,19 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className={`text-sm font-medium ${canSubmit ? "text-emerald-900" : "text-red-900"}`}>
-                            Días solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
+                            DÃ­as solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
                         </p>
                         <p className={`text-xs ${canSubmit ? "text-emerald-700" : "text-red-700"}`}>
                             {canSubmit
-                                ? `Quedarían ${remaining - days} días disponibles`
-                                : `No tienes suficientes días. Solo tienes ${remaining} días disponibles.`}
+                                ? `QuedarÃ­an ${remaining - days} dÃ­as disponibles`
+                                : `No tienes suficientes dÃ­as. Solo tienes ${remaining} dÃ­as disponibles.`}
                         </p>
                     </div>
                 )}
 
                 <div className="flex gap-3 pt-4">
                     <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
-                        Atrás
+                        AtrÃ¡s
                     </Button>
                     <Button
                         type="button"
@@ -616,23 +616,23 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     </div>
                 )}
                 <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">Duración:</span>
+                    <span className="text-sm text-gray-600">DuraciÃ³n:</span>
                     <span className="text-sm font-semibold text-gray-900">
                         {tipoSolicitud === "vacaciones"
                             ? vacacionMedioDia
-                                ? "0.5 días (4h)"
-                                : `${calculateDays()} días`
+                                ? "0.5 dÃ­as (4h)"
+                                : `${calculateDays()} dÃ­as`
                             : formData.duracion_horas
                                 ? `${formData.duracion_horas} horas`
-                                : `${formData.duracion_dias} días`}
+                                : `${formData.duracion_dias} dÃ­as`}
                     </span>
                 </div>
             </div>
 
             <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">
                 <p className="text-xs text-indigo-800">
-                    <strong>Consentimiento Fam Sign:</strong> Al enviar esta solicitud aceptas el uso de la firma electronica
-                    Fam Sign para registrar la firma del solicitante y la aprobacion automatica del flujo.
+                    <strong>Consentimiento FamSign:</strong> Al enviar esta solicitud aceptas el uso de la firma electronica
+                    FamSign para registrar la firma del solicitante y la aprobacion automatica del flujo.
                 </p>
                 <p className="text-xs text-indigo-700">
                     Este consentimiento queda registrado en la trazabilidad legal de la solicitud
@@ -642,7 +642,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             <div className="flex gap-3 pt-4">
                 <Button type="button" variant="secondary" onClick={() => setStep(2)} className="flex-1">
-                    Atrás
+                    AtrÃ¡s
                 </Button>
                 <Button
                     type="button"
@@ -709,3 +709,4 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 };
 
 export default PermisoVacacionModal;
+

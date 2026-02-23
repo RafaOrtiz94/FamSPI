@@ -197,6 +197,7 @@ const SectionNavigator = ({
         {visibleSections.map((section) => {
           const status = getSectionStatus(section.id);
           const isSelected = selectedSection === section.id;
+          const isReadOnly = !canEditSection(section.id);
           const isDeterminations = section.id === "determinations";
           const countdown = isDeterminations ? getDeterminationsCountdown() : null;
           const needsStatDoc = isDeterminations && determinationsGate?.requiresDocument;

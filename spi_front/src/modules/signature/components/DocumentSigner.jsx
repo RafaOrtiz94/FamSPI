@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
+﻿import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { signDocument, fileToBase64, SIGNATURE_STATUS } from '../../../core/api';
 import FirmaDigital from '../../servicio/components/FirmaDigital';
 
@@ -11,11 +11,11 @@ const SIGNATURE_STEPS = {
 };
 
 const USER_ROLES = {
-  DELEGADO_PROTECCION_DATOS: 'Delegado de Protección de Datos',
+  DELEGADO_PROTECCION_DATOS: 'Delegado de ProtecciÃ³n de Datos',
   JEFE_TI: 'Jefe de TI',
   GERENTE: 'Gerente',
   JEFE_COMERCIAL: 'Jefe Comercial',
-  TECNICO: 'Técnico'
+  TECNICO: 'TÃ©cnico'
 };
 
 const AUTHORIZED_ROLES = {
@@ -32,10 +32,10 @@ const VALIDATION_RULES = {
 };
 
 /**
- * Funciones helper para validación y procesamiento
+ * Funciones helper para validaciÃ³n y procesamiento
  */
 const validateFile = (file) => {
-  if (!file) return { isValid: false, error: 'No se seleccionó ningún archivo' };
+  if (!file) return { isValid: false, error: 'No se seleccionÃ³ ningÃºn archivo' };
 
   if (!VALIDATION_RULES.ALLOWED_TYPES.includes(file.type)) {
     return { isValid: false, error: 'Solo se permiten archivos PDF o DOCX' };
@@ -49,8 +49,8 @@ const validateFile = (file) => {
 };
 
 const generateConsentText = (documentName) => {
-  return `He leído y comprendido completamente el contenido del documento "${documentName || 'documento'}". ` +
-         `Manifiesto expresamente mi voluntad de firmarlo digitalmente según la Ley de Comercio Electrónico del Ecuador. ` +
+  return `He leÃ­do y comprendido completamente el contenido del documento "${documentName || 'documento'}". ` +
+         `Manifiesto expresamente mi voluntad de firmarlo digitalmente segÃºn la Ley de Comercio ElectrÃ³nico del Ecuador. ` +
          `Acepto que esta firma tiene valor legal y me comprometo a su cumplimiento.`;
 };
 
@@ -72,15 +72,15 @@ const validateConsentForm = (consent, roleAtSign, authorizedRole) => {
 };
 
 /**
- * DocumentSigner - Componente principal para Fam Sign de documentos
+ * DocumentSigner - Componente principal para FamSign de documentos
  * ========================================================
  *
  * Proporciona interfaz completa para:
  * - Cargar documento PDF/DOCX
- * - Verificación de consentimiento expreso
- * - Fam Sign con sello institucional
- * - Generación automática de QR verificable
- * - Bloqueo automático del documento
+ * - VerificaciÃ³n de consentimiento expreso
+ * - FamSign con sello institucional
+ * - GeneraciÃ³n automÃ¡tica de QR verificable
+ * - Bloqueo automÃ¡tico del documento
  */
 const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocument = null }) => {
   const [loading, setLoading] = useState(false);
@@ -112,7 +112,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
     }
   }, [initialDocument]);
 
-  // Manejar selección de archivo
+  // Manejar selecciÃ³n de archivo
   const handleFileSelect = useCallback(async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -167,7 +167,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
 
     const signatureData = signatureRef.current.getBase64();
     if (!signatureData || signatureData.length < 100) {
-      setError('Debe proporcionar una firma válida');
+      setError('Debe proporcionar una firma vÃ¡lida');
       return;
     }
 
@@ -204,7 +204,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl font-bold text-gray-900 mb-2">
-          Firma Electrónica Avanzada
+          Firma ElectrÃ³nica Avanzada
         </h2>
         <p className="text-gray-600">
           Cargue el documento que desea firmar digitalmente
@@ -242,7 +242,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
                 Seleccionar Documento
               </label>
               <p className="mt-2 text-sm text-gray-500">
-                PDF o DOCX (máx. 10MB)
+                PDF o DOCX (mÃ¡x. 10MB)
               </p>
             </div>
           </div>
@@ -257,7 +257,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
                 Documento seleccionado: {document.name}
               </p>
               <p className="text-sm text-green-700">
-                Tamaño: {(document.size / 1024 / 1024).toFixed(2)} MB
+                TamaÃ±o: {(document.size / 1024 / 1024).toFixed(2)} MB
               </p>
             </div>
           </div>
@@ -291,7 +291,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
             </h3>
             <div className="mt-2 text-sm text-yellow-700">
               <p className="mb-2">
-                Según la Ley de Comercio Electrónico del Ecuador, debe manifestar expresamente su voluntad de firmar digitalmente este documento.
+                SegÃºn la Ley de Comercio ElectrÃ³nico del Ecuador, debe manifestar expresamente su voluntad de firmar digitalmente este documento.
               </p>
             </div>
           </div>
@@ -309,11 +309,11 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">Seleccionar rol...</option>
-            <option value="Delegado de Protección de Datos">Delegado de Protección de Datos</option>
+            <option value="Delegado de ProtecciÃ³n de Datos">Delegado de ProtecciÃ³n de Datos</option>
             <option value="Jefe de TI">Jefe de TI</option>
             <option value="Gerente">Gerente</option>
             <option value="Jefe Comercial">Jefe Comercial</option>
-            <option value="Técnico">Técnico</option>
+            <option value="TÃ©cnico">TÃ©cnico</option>
           </select>
         </div>
 
@@ -327,11 +327,11 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
             className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">Seleccionar rol autorizado...</option>
-            <option value="DPD">Delegado de Protección de Datos</option>
+            <option value="DPD">Delegado de ProtecciÃ³n de Datos</option>
             <option value="TI">Jefe de TI</option>
             <option value="GER">Gerente</option>
             <option value="COM">Jefe Comercial</option>
-            <option value="TEC">Técnico</option>
+            <option value="TEC">TÃ©cnico</option>
           </select>
         </div>
 
@@ -363,7 +363,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           onClick={() => setStep(SIGNATURE_STEPS.LOAD_DOCUMENT)}
           className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
         >
-          Atrás
+          AtrÃ¡s
         </button>
         <button
           onClick={handleProceedToSign}
@@ -384,7 +384,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           Firma Digital
         </h2>
         <p className="text-gray-600">
-          Dibuje su firma en el área designada
+          Dibuje su firma en el Ã¡rea designada
         </p>
       </div>
 
@@ -405,13 +405,13 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           </div>
           <div className="ml-3">
             <h3 className="text-sm font-medium text-blue-800">
-              Información de la Firma
+              InformaciÃ³n de la Firma
             </h3>
             <div className="mt-2 text-sm text-blue-700">
-              <p>• <strong>Documento:</strong> {document?.name}</p>
-              <p>• <strong>Rol:</strong> {roleAtSign}</p>
-              <p>• <strong>Sello autorizado por:</strong> {authorizedRole}</p>
-              <p>• <strong>Fecha:</strong> {new Date().toLocaleString()}</p>
+              <p>â€¢ <strong>Documento:</strong> {document?.name}</p>
+              <p>â€¢ <strong>Rol:</strong> {roleAtSign}</p>
+              <p>â€¢ <strong>Sello autorizado por:</strong> {authorizedRole}</p>
+              <p>â€¢ <strong>Fecha:</strong> {new Date().toLocaleString()}</p>
             </div>
           </div>
         </div>
@@ -422,7 +422,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           onClick={() => setStep(SIGNATURE_STEPS.CONSENT)}
           className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
         >
-          Atrás
+          AtrÃ¡s
         </button>
         <button
           onClick={handleSignDocument}
@@ -440,7 +440,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl font-bold text-green-600 mb-2">
-          ✅ Firma Completada
+          âœ… Firma Completada
         </h2>
         <p className="text-gray-600">
           El documento ha sido firmado digitalmente y bloqueado
@@ -452,21 +452,21 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           <div className="bg-green-50 border border-green-200 rounded-md p-4">
             <h3 className="font-medium text-green-800 mb-2">Detalles de la Firma</h3>
             <div className="space-y-1 text-sm text-green-700">
-              <p>• <strong>ID Documento:</strong> {signatureResult.document_id}</p>
-              <p>• <strong>Hash SHA-256:</strong> {signatureResult.hash?.value?.substring(0, 16)}...</p>
-              <p>• <strong>Firmante:</strong> {signatureResult.signature?.signer}</p>
-              <p>• <strong>Rol:</strong> {signatureResult.signature?.role}</p>
-              <p>• <strong>Sello:</strong> {signatureResult.seal?.code}</p>
-              <p>• <strong>QR Token:</strong> {signatureResult.seal?.verification_token?.substring(0, 16)}...</p>
+              <p>â€¢ <strong>ID Documento:</strong> {signatureResult.document_id}</p>
+              <p>â€¢ <strong>Hash SHA-256:</strong> {signatureResult.hash?.value?.substring(0, 16)}...</p>
+              <p>â€¢ <strong>Firmante:</strong> {signatureResult.signature?.signer}</p>
+              <p>â€¢ <strong>Rol:</strong> {signatureResult.signature?.role}</p>
+              <p>â€¢ <strong>Sello:</strong> {signatureResult.seal?.code}</p>
+              <p>â€¢ <strong>QR Token:</strong> {signatureResult.seal?.verification_token?.substring(0, 16)}...</p>
             </div>
           </div>
 
           <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
-            <h3 className="font-medium text-blue-800 mb-2">Código QR de Verificación</h3>
+            <h3 className="font-medium text-blue-800 mb-2">CÃ³digo QR de VerificaciÃ³n</h3>
             <div className="flex justify-center">
               <img
                 src={signatureResult.qr?.image}
-                alt="Código QR de verificación"
+                alt="CÃ³digo QR de verificaciÃ³n"
                 className="border border-gray-300 rounded"
               />
             </div>
@@ -489,7 +489,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
                 <div className="mt-2 text-sm text-yellow-700">
                   <p>
                     El documento ha sido bloqueado y ya no puede ser modificado.
-                    Cualquier cambio requerirá una nueva versión firmada.
+                    Cualquier cambio requerirÃ¡ una nueva versiÃ³n firmada.
                   </p>
                 </div>
               </div>
@@ -566,3 +566,4 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
 };
 
 export default DocumentSigner;
+

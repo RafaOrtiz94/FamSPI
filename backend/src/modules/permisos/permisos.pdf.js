@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const path = require("path");
 const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray } = require("pdf-lib");
 const QRCode = require("qrcode");
@@ -21,7 +21,7 @@ async function generateFRH10(solicitud) {
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
 
-    // Llenar campos según tipo de solicitud
+    // Llenar campos segÃºn tipo de solicitud
     if (solicitud.tipo_solicitud === "permiso") {
       fillPermisoFields(form, solicitud);
     } else if (solicitud.tipo_solicitud === "vacaciones") {
@@ -31,7 +31,7 @@ async function generateFRH10(solicitud) {
     // Llenar datos comunes
     fillCommonFields(form, solicitud);
 
-    // Adjuntar pagina de constancia legal Fam Sign
+    // Adjuntar pagina de constancia legal FamSign
     const validationPage = await appendAdvancedSignaturePage(pdfDoc, solicitud);
 
     // Firma visual tipo rubrica y enlace a hoja de validacion
@@ -89,7 +89,7 @@ function buildSignatureAlias(fullName = "") {
   const first = tokens[0];
   const last = tokens[tokens.length - 1];
   const initial = (first[0] || "S").toUpperCase();
-  const lastSafe = (last || "Firma").replace(/[^A-Za-zÁÉÍÓÚáéíóúÑñÜü'-]/g, "");
+  const lastSafe = (last || "Firma").replace(/[^A-Za-zÃÃ‰ÃÃ“ÃšÃ¡Ã©Ã­Ã³ÃºÃ‘Ã±ÃœÃ¼'-]/g, "");
   const normalizedLast = lastSafe ? `${lastSafe[0].toUpperCase()}${lastSafe.slice(1)}` : "Firma";
   return `${initial}.${normalizedLast}`;
 }
@@ -125,7 +125,7 @@ async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
       solicitud?.approver_fullname || solicitud?.aprobacion_final_por || "No disponible"
     );
 
-    draw("F.RH-10 - Bloque Fam Sign", { size: 15, bold: true, gap: 22 });
+    draw("F.RH-10 - Bloque FamSign", { size: 15, bold: true, gap: 22 });
     draw("Este anexo forma parte integral del documento y conserva trazabilidad legal del workflow.");
     draw(`Solicitud ID: ${solicitud?.id || "N/A"}`);
     draw(`Estado workflow firma: ${summary?.estado || solicitud?.firma_workflow_estado || "pendiente"}`);
@@ -150,7 +150,7 @@ async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
       borderColor: rgb(0.72, 0.78, 0.9),
       borderWidth: 1,
     });
-    draw("Verificacion legal Fam Sign (SPI)", {
+    draw("Verificacion legal FamSign (SPI)", {
       x: marginX + 14,
       y: boxY + 140,
       size: 11,
@@ -196,7 +196,7 @@ async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
     });
     return page;
   } catch (error) {
-    console.warn("No se pudo anexar bloque Fam Sign al F.RH-10:", error.message);
+    console.warn("No se pudo anexar bloque FamSign al F.RH-10:", error.message);
     return null;
   }
 }
@@ -348,7 +348,7 @@ function fillPermisoFields(form, solicitud) {
       }
     }
 
-    // Duración
+    // DuraciÃ³n
     if (solicitud.duracion_dias) {
       try {
         form.getTextField("per_dia").setText(solicitud.duracion_dias.toString());
@@ -476,7 +476,7 @@ function fillCommonFields(form, solicitud) {
 }
 
 /**
- * Genera constancia legal de validacion de Fam Sign.
+ * Genera constancia legal de validacion de FamSign.
  * Este documento sirve como respaldo de autenticidad, integridad y trazabilidad.
  */
 async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], verification = null }) {
@@ -514,7 +514,7 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
     const rechazoSig = timeline.find((item) => item.stage === "rechazo") || null;
     const approvalSig = finalSig || rechazoSig || partialSig || null;
 
-    drawLine("SPI Fam - Constancia de Validacion Legal de Fam Sign", { size: 14, bold: true, gap: 20 });
+    drawLine("SPI Fam - Constancia de Validacion Legal de FamSign", { size: 14, bold: true, gap: 20 });
     drawLine(`Documento generado (local): ${now.toLocaleString("es-EC")}`);
     drawLine(`Documento generado (UTC): ${now.toISOString()}`);
     drawLine(`Solicitud ID: ${solicitud?.id || "N/A"}`);
@@ -603,3 +603,4 @@ module.exports = {
   generateFRH10,
   generateFirmaLegalValidationPdf,
 };
+

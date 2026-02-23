@@ -1,4 +1,4 @@
-const permisosService = require("./permisos.service");
+﻿const permisosService = require("./permisos.service");
 const { normalizeRow } = require("../../utils/normalizers");
 const { uploadJustificante } = require("./permisos.drive");
 const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
@@ -206,8 +206,8 @@ async function verifyLegalToken(req, res) {
       if (responseAsJson) return res.status(400).json({ ok: false, message: "Token requerido" });
       return res.status(400).type("html").send(
         renderVerificationHtml({
-          title: "Verificación legal inválida",
-          subtitle: "Fam Sign",
+          title: "VerificaciÃ³n legal invÃ¡lida",
+          subtitle: "FamSign",
           status: "pending",
           sourceType: "Permisos/Vacaciones",
         })
@@ -215,11 +215,11 @@ async function verifyLegalToken(req, res) {
     }
     const result = await permisosService.getLegalVerificationByToken(token);
     if (!result) {
-      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificación no encontrado" });
+      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificaciÃ³n no encontrado" });
       return res.status(404).type("html").send(
         renderVerificationHtml({
           title: "Token no encontrado",
-          subtitle: "Fam Sign",
+          subtitle: "FamSign",
           status: "pending",
           token,
           sourceType: "Permisos/Vacaciones",
@@ -229,8 +229,8 @@ async function verifyLegalToken(req, res) {
     if (responseAsJson) return res.json({ ok: true, data: result });
     return res.type("html").send(
       renderVerificationHtml({
-        title: "Verificación legal completada",
-        subtitle: "Fam Sign",
+        title: "VerificaciÃ³n legal completada",
+        subtitle: "FamSign",
         status: result?.status,
         id: result?.id,
         solicitante: result?.solicitante,
@@ -248,8 +248,8 @@ async function verifyLegalToken(req, res) {
     }
     return res.status(500).type("html").send(
       renderVerificationHtml({
-        title: "Error de verificación",
-        subtitle: "Fam Sign",
+        title: "Error de verificaciÃ³n",
+        subtitle: "FamSign",
         status: "pending",
         sourceType: "Permisos/Vacaciones",
       })
@@ -285,3 +285,4 @@ module.exports = {
   getLegalCoverage,
   upload,
 };
+

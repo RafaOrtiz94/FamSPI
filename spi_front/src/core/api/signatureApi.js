@@ -1,14 +1,14 @@
-import axios from 'axios';
+﻿import axios from 'axios';
 
 /**
- * API Client para el sistema Fam Sign
+ * API Client para el sistema FamSign
  * ========================================================
  *
- * Este módulo proporciona acceso a todas las APIs del sistema de firma digital:
- * - Fam Sign con sello institucional y QR
- * - Verificación pública de documentos
- * - Auditoría y trail de eventos
- * - Dashboard de métricas
+ * Este mÃ³dulo proporciona acceso a todas las APIs del sistema de firma digital:
+ * - FamSign con sello institucional y QR
+ * - VerificaciÃ³n pÃºblica de documentos
+ * - AuditorÃ­a y trail de eventos
+ * - Dashboard de mÃ©tricas
  */
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001';
@@ -23,7 +23,7 @@ const signatureApi = axios.create({
   },
 });
 
-// Interceptor para agregar token de autenticación
+// Interceptor para agregar token de autenticaciÃ³n
 signatureApi.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("accessToken");
@@ -38,7 +38,7 @@ signatureApi.interceptors.request.use(
 );
 
 /**
- * FAM SIGN
+ * FamSign
  * ===============
  */
 
@@ -51,7 +51,7 @@ signatureApi.interceptors.request.use(
  * @param {string} signatureData.consent_text - Texto del consentimiento
  * @param {string} signatureData.role_at_sign - Rol del firmante
  * @param {string} signatureData.authorized_role - Rol autorizado para sello
- * @param {string} signatureData.session_id - ID de sesión
+ * @param {string} signatureData.session_id - ID de sesiÃ³n
  * @returns {Promise<Object>} Resultado de la firma
  */
 export const signDocument = async (documentId, signatureData) => {
@@ -68,14 +68,14 @@ export const signDocument = async (documentId, signatureData) => {
 };
 
 /**
- * VERIFICACIÓN PÚBLICA
+ * VERIFICACIÃ“N PÃšBLICA
  * ====================
  */
 
 /**
  * Verifica un documento usando su token QR
- * @param {string} token - Token de verificación del QR
- * @returns {Promise<Object>} Información de verificación
+ * @param {string} token - Token de verificaciÃ³n del QR
+ * @returns {Promise<Object>} InformaciÃ³n de verificaciÃ³n
  */
 export const verifyDocument = async (token) => {
   try {
@@ -88,14 +88,14 @@ export const verifyDocument = async (token) => {
 };
 
 /**
- * AUDITORÍA Y REPORTES
+ * AUDITORÃA Y REPORTES
  * =====================
  */
 
 /**
- * Obtiene el trail de auditoría completo de un documento
+ * Obtiene el trail de auditorÃ­a completo de un documento
  * @param {number} documentId - ID del documento
- * @returns {Promise<Object>} Trail de auditoría
+ * @returns {Promise<Object>} Trail de auditorÃ­a
  */
 export const getDocumentAuditTrail = async (documentId) => {
   try {
@@ -110,8 +110,8 @@ export const getDocumentAuditTrail = async (documentId) => {
 };
 
 /**
- * Obtiene el dashboard de métricas de firmas
- * @returns {Promise<Object>} Dashboard de métricas
+ * Obtiene el dashboard de mÃ©tricas de firmas
+ * @returns {Promise<Object>} Dashboard de mÃ©tricas
  */
 export const getSignatureDashboard = async () => {
   try {
@@ -144,9 +144,9 @@ export const getDocumentsForSigning = async (filters = {}) => {
 };
 
 /**
- * Obtiene información detallada de un documento
+ * Obtiene informaciÃ³n detallada de un documento
  * @param {number} documentId - ID del documento
- * @returns {Promise<Object>} Información del documento
+ * @returns {Promise<Object>} InformaciÃ³n del documento
  */
 export const getDocumentDetails = async (documentId) => {
   try {
@@ -253,3 +253,4 @@ const signatureApiExports = {
 };
 
 export default signatureApiExports;
+

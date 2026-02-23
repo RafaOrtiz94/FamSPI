@@ -428,7 +428,7 @@ async function recordVacationWorkflowSignature({ solicitud, stage, actor, meta =
       actor?.email || null,
       actor?.fullname || actor?.name || actor?.email || `Usuario #${actorId}`,
       String(actor?.role || actor?.scope || actor?.rol || "").toLowerCase() || null,
-      consentText || `Fam Sign ${stage} en vacaciones SPI`,
+      consentText || `FamSign ${stage} en vacaciones SPI`,
       requestMeta.ipAddress,
       requestMeta.userAgent,
       requestMeta.sessionId,
@@ -626,7 +626,7 @@ async function createVacationRequest(payload, userId, meta = {}) {
       consentText: "Confirmo la solicitud de vacaciones en SPI",
     });
   } catch (signatureError) {
-    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en vacaciones (solicitud)");
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar FamSign en vacaciones (solicitud)");
   }
 
   const signatures = await getVacationSignaturesBySolicitudId(rows[0]?.id);
@@ -924,3 +924,4 @@ module.exports = {
   summary,
   getLegalVerificationByToken,
 };
+

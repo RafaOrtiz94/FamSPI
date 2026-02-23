@@ -1,4 +1,4 @@
-const crypto = require("crypto");
+﻿const crypto = require("crypto");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
@@ -6,13 +6,13 @@ const immutableLogger = require("./immutableSignatureLogger.service");
 /**
  * Servicio: AdvancedSignatureService
  * ----------------------------------------------
- * Gestiona Fam Sign sin certificados externos.
+ * Gestiona FamSign sin certificados externos.
  * Valida identidad (OAuth corporativo), voluntad (consentimiento expreso)
- * y genera una huella criptográfica del acto de firma.
+ * y genera una huella criptogrÃ¡fica del acto de firma.
  */
 class AdvancedSignatureService {
   /**
-   * Ejecuta Fam Sign para una versión de documento.
+   * Ejecuta FamSign para una versiÃ³n de documento.
    * @param {Object} params
    * @param {Object} params.documentHash
    * @param {Object} params.user
@@ -40,7 +40,7 @@ class AdvancedSignatureService {
     }
 
     if (!consentText || typeof consentText !== "string" || consentText.trim().length === 0) {
-      const err = new Error("Se requiere manifestación expresa de consentimiento");
+      const err = new Error("Se requiere manifestaciÃ³n expresa de consentimiento");
       err.status = 400;
       throw err;
     }
@@ -83,7 +83,7 @@ class AdvancedSignatureService {
         [document.id, documentHash.id]
       );
       if (existingSig.rows.length) {
-        const err = new Error("Ya existe un Fam Sign para esta versión");
+        const err = new Error("Ya existe un FamSign para esta versiÃ³n");
         err.status = 409;
         throw err;
       }
@@ -136,7 +136,7 @@ class AdvancedSignatureService {
         },
       });
 
-      // Bloquear documento para impedir re-firmas; se usa signed o locked según disponibilidad
+      // Bloquear documento para impedir re-firmas; se usa signed o locked segÃºn disponibilidad
       if ("locked" in document) {
         await pgClient.query(`UPDATE documents SET locked = TRUE, updated_at = now() WHERE id = $1`, [
           document.id,
@@ -162,7 +162,7 @@ class AdvancedSignatureService {
       return insertRes.rows[0];
     } catch (error) {
       if (shouldRelease) await pgClient.query("ROLLBACK");
-      logger.error({ error }, "❌ Error en Fam Sign");
+      logger.error({ error }, "âŒ Error en FamSign");
       throw error;
     } finally {
       if (shouldRelease) pgClient.release();
@@ -171,3 +171,4 @@ class AdvancedSignatureService {
 }
 
 module.exports = new AdvancedSignatureService();
+

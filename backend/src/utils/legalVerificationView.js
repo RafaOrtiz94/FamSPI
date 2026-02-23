@@ -1,4 +1,4 @@
-function escapeHtml(value) {
+﻿function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -23,8 +23,8 @@ function shouldRespondJson(req) {
 }
 
 function renderVerificationHtml({
-  title = "Verificación Legal",
-  subtitle = "Fam Sign",
+  title = "VerificaciÃ³n Legal",
+  subtitle = "FamSign",
   status = "pendiente",
   id = null,
   solicitante = "No disponible",
@@ -52,14 +52,14 @@ function renderVerificationHtml({
   const workflowHtml = workflow
     ? `
       <div class="section">
-        <h3>Workflow Fam Sign</h3>
+        <h3>Workflow FamSign</h3>
         <p><strong>Estado:</strong> ${escapeHtml(workflow.estado || "pendiente")}</p>
         <p><strong>Solicitante:</strong> ${
           workflow.solicitud_firmada
             ? `${escapeHtml(workflow?.solicitud?.signer_name || "Firmado")} - ${escapeHtml(formatDateTime(workflow?.solicitud?.signed_at))}`
             : "Pendiente"
         }</p>
-        <p><strong>Aprobación:</strong> ${
+        <p><strong>AprobaciÃ³n:</strong> ${
           workflow.aprobacion_firmada
             ? `${escapeHtml(workflow?.aprobacion?.signer_name || "Firmado")} - ${escapeHtml(formatDateTime(workflow?.aprobacion?.signed_at))}`
             : "Pendiente"
@@ -94,18 +94,18 @@ function renderVerificationHtml({
   <main class="wrap">
     <section class="card">
       <h1>${escapeHtml(title)}</h1>
-      <p class="muted">${escapeHtml(subtitle)} - Consulta pública de verificación legal</p>
+      <p class="muted">${escapeHtml(subtitle)} - Consulta pÃºblica de verificaciÃ³n legal</p>
       <span class="badge">${escapeHtml(statusLabel)}</span>
       <div class="grid">
         <div class="row"><span class="k">Tipo</span><span class="v">${escapeHtml(sourceType)}</span></div>
         <div class="row"><span class="k">Solicitud ID</span><span class="v">${escapeHtml(id || "N/A")}</span></div>
         <div class="row"><span class="k">Solicitante</span><span class="v">${escapeHtml(solicitante)}</span></div>
         <div class="row"><span class="k">Aprobador</span><span class="v">${escapeHtml(aprobador)}</span></div>
-        <div class="row"><span class="k">Fecha aprobación</span><span class="v">${escapeHtml(formatDateTime(aprobacionFinalAt))}</span></div>
+        <div class="row"><span class="k">Fecha aprobaciÃ³n</span><span class="v">${escapeHtml(formatDateTime(aprobacionFinalAt))}</span></div>
         <div class="row"><span class="k">Token</span><span class="v">${escapeHtml(token || "No disponible")}</span></div>
       </div>
       ${workflowHtml}
-      <p class="foot">Documento validado por SPI Fam - Fam Sign</p>
+      <p class="foot">Documento validado por SPI Fam - FamSign</p>
     </section>
   </main>
 </body>
@@ -116,4 +116,5 @@ module.exports = {
   shouldRespondJson,
   renderVerificationHtml,
 };
+
 

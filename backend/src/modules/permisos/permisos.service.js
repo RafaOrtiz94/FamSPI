@@ -1,4 +1,4 @@
-const db = require("../../config/db");
+﻿const db = require("../../config/db");
 const crypto = require("crypto");
 const { logAction } = require("../../utils/audit");
 const { validatePermisoRequest } = require("./permisos.validation");
@@ -399,7 +399,7 @@ async function recordWorkflowSignature({
       actor.email || null,
       actorName,
       actorRole,
-      consentText || `Fam Sign ${stage} en permisos/vacaciones SPI`,
+      consentText || `FamSign ${stage} en permisos/vacaciones SPI`,
       requestMeta.ipAddress,
       requestMeta.userAgent,
       requestMeta.sessionId,
@@ -576,7 +576,7 @@ async function createSolicitud({ body, user, meta }) {
   const consentTextFromUi = String(payload.fam_sign_consent_text || "").trim();
   const famSignConsentText =
     consentTextFromUi ||
-    `Acepto el uso de Fam Sign para firma y aprobacion automatica de esta solicitud (${consentVersion}).`;
+    `Acepto el uso de FamSign para firma y aprobacion automatica de esta solicitud (${consentVersion}).`;
   const approverRole = resolveApproverRole(user?.role || user?.rol || "");
   const approverUser = await findApproverByRole(approverRole);
   payload.approver_role = approverRole;
@@ -589,10 +589,10 @@ async function createSolicitud({ body, user, meta }) {
       approverUser?.fullname ||
       payload.user_fullname ||
       payload.user_email ||
-      "Aprobador automatico Fam Sign",
+      "Aprobador automatico FamSign",
     role: approverRole || user?.role || user?.scope || null,
   };
-  const autoApprovalName = getDisplayName(autoApprovalActor) || "Aprobacion automatica Fam Sign";
+  const autoApprovalName = getDisplayName(autoApprovalActor) || "Aprobacion automatica FamSign";
 
   let driveMeta = {};
   let justificacionRequerida = [];
@@ -616,7 +616,7 @@ async function createSolicitud({ body, user, meta }) {
     justificacionRequerida = validation.justificantes_requeridos || [];
     esRecuperable = Boolean(validation.es_recuperable);
   } else if (payload.tipo_solicitud === "vacaciones") {
-    // Calcular días si no vienen
+    // Calcular dÃ­as si no vienen
     if (!payload.duracion_dias && payload.fecha_inicio && payload.fecha_fin) {
       const start = new Date(payload.fecha_inicio);
       const end = new Date(payload.fecha_fin);
@@ -651,7 +651,7 @@ async function createSolicitud({ body, user, meta }) {
 
     if (allowanceInfo.eligible && !allowanceInfo.missingHireDate) {
       if (Number(payload.duracion_dias || 0) > Math.max(remaining, 0)) {
-        const err = new Error("No tienes días disponibles para enviar esta solicitud de vacaciones.");
+        const err = new Error("No tienes dÃ­as disponibles para enviar esta solicitud de vacaciones.");
         err.status = 400;
         throw err;
       }
@@ -717,7 +717,7 @@ async function createSolicitud({ body, user, meta }) {
       await notificationManager.sendNotification({
         userId: payload.user_id,
         customTitle: "Solicitud aprobada automaticamente",
-        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue aprobada automaticamente mediante Fam Sign.`,
+        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue aprobada automaticamente mediante FamSign.`,
         type: "success",
         source: "permisos_vacaciones",
         priority: 1,
@@ -744,7 +744,7 @@ async function createSolicitud({ body, user, meta }) {
       consentText: famSignConsentText,
     });
   } catch (signatureError) {
-    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en solicitud");
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar FamSign en solicitud");
   }
 
   let verificationToken = rows[0]?.legal_verification_token || null;
@@ -766,10 +766,10 @@ async function createSolicitud({ body, user, meta }) {
       stage: WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL,
       actor: autoApprovalActor,
       meta,
-      consentText: `Aprobacion automatica Fam Sign ejecutada con consentimiento del solicitante (${consentVersion}).`,
+      consentText: `Aprobacion automatica FamSign ejecutada con consentimiento del solicitante (${consentVersion}).`,
     });
   } catch (signatureError) {
-    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar Fam Sign en aprobacion automatica");
+    logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar FamSign en aprobacion automatica");
   }
 
   try {
@@ -884,7 +884,7 @@ async function aprobarParcial({ id, approver, meta }) {
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
         customTitle: "Solicitud aprobada parcialmente",
-        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobación final.",
+        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobaciÃ³n final.",
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,
@@ -932,7 +932,7 @@ async function subirJustificantes({ id, urls, user }) {
       await notificationManager.sendNotification({
         userId: solicitud.approver_user_id,
         customTitle: "Justificantes subidos",
-        customMessage: `${solicitud.user_fullname || solicitud.user_email} subió justificantes. La solicitud está lista para aprobación final.`,
+        customMessage: `${solicitud.user_fullname || solicitud.user_email} subiÃ³ justificantes. La solicitud estÃ¡ lista para aprobaciÃ³n final.`,
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,
@@ -977,7 +977,7 @@ async function aprobarFinal({ id, approver, meta }) {
         userId: update.rows[0].user_id,
         customTitle: "Solicitud aprobada",
         customMessage:
-          "Tu solicitud fue aprobada de forma definitiva. No necesitas firmar ningun documento adicional; la solicitud ya fue validada legalmente con Fam Sign en SPI.",
+          "Tu solicitud fue aprobada de forma definitiva. No necesitas firmar ningun documento adicional; la solicitud ya fue validada legalmente con FamSign en SPI.",
         type: "success",
         source: "permisos_vacaciones",
         priority: 1,
@@ -1564,3 +1564,4 @@ module.exports = {
   getLegalVerificationByToken,
   getLegalCoverage,
 };
+

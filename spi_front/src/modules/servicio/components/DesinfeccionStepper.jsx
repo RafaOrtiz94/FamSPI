@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+﻿import React, { useState, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiDownload, FiUpload } from "react-icons/fi";
@@ -13,28 +13,28 @@ import { signDocument, fileToBase64 } from "../../../core/api";
 const STEPS = [
   {
     id: "identification",
-    title: "Identificación del Servicio",
-    description: "Datos básicos del equipo y responsable",
+    title: "IdentificaciÃ³n del Servicio",
+    description: "Datos bÃ¡sicos del equipo y responsable",
   },
   {
     id: "epp",
     title: "Paso 1 - Seguridad Personal",
-    description: "Colocación de EPP",
+    description: "ColocaciÃ³n de EPP",
   },
   {
     id: "peo_separation",
-    title: "Paso 2 - Partes Eléctricas y Ópticas",
-    description: "Separación de componentes sensibles",
+    title: "Paso 2 - Partes ElÃ©ctricas y Ã“pticas",
+    description: "SeparaciÃ³n de componentes sensibles",
   },
   {
     id: "dry_cleaning",
     title: "Paso 3 - Limpieza en Seco",
-    description: "Eliminación de polvo y residuos",
+    description: "EliminaciÃ³n de polvo y residuos",
   },
   {
     id: "critical_procedures",
-    title: "Pasos 4-7 - Procedimientos Críticos",
-    description: "Enjuague, remoción y limpieza química",
+    title: "Pasos 4-7 - Procedimientos CrÃ­ticos",
+    description: "Enjuague, remociÃ³n y limpieza quÃ­mica",
   },
   {
     id: "drying_transfer",
@@ -43,18 +43,18 @@ const STEPS = [
   },
   {
     id: "electrical_verification",
-    title: "Paso 10 - Verificación Eléctrica",
-    description: "Verificación de conexiones eléctricas",
+    title: "Paso 10 - VerificaciÃ³n ElÃ©ctrica",
+    description: "VerificaciÃ³n de conexiones elÃ©ctricas",
   },
   {
     id: "documentation",
-    title: "Pasos 11-12 - Documentación",
+    title: "Pasos 11-12 - DocumentaciÃ³n",
     description: "Registro del formato y certificados",
   },
   {
     id: "certification",
-    title: "Certificación y Evidencia",
-    description: "Firma digital y adjuntos fotográficos",
+    title: "CertificaciÃ³n y Evidencia",
+    description: "Firma digital y adjuntos fotogrÃ¡ficos",
   },
 ];
 
@@ -111,12 +111,12 @@ const DesinfeccionStepper = () => {
   };
 
   const handleSignatureCapture = (signatureData) => {
-    console.log("📝 DesinfeccionStepper: Signature captured", {
+    console.log("ðŸ“ DesinfeccionStepper: Signature captured", {
       dataLength: signatureData?.length,
       dataPreview: signatureData?.substring(0, 50) + "..."
     });
     setValue("firma_ing_SC", signatureData);
-    console.log("📝 DesinfeccionStepper: Signature stored in form");
+    console.log("ðŸ“ DesinfeccionStepper: Signature stored in form");
   };
 
   const handleFileUpload = async (event) => {
@@ -153,23 +153,23 @@ const DesinfeccionStepper = () => {
         evidenceCount: data.adjunto_evidencia?.length || 0
       });
 
-      // ✅ VALIDACIONES OBLIGATORIAS ANTES DE COMPLETAR
+      // âœ… VALIDACIONES OBLIGATORIAS ANTES DE COMPLETAR
 
-      // 1. Validar que se haya subido evidencia fotográfica
+      // 1. Validar que se haya subido evidencia fotogrÃ¡fica
       if (!data.adjunto_evidencia || data.adjunto_evidencia.length === 0) {
-        showToast("Debe adjuntar al menos una evidencia fotográfica del proceso de desinfección", "error");
+        showToast("Debe adjuntar al menos una evidencia fotogrÃ¡fica del proceso de desinfecciÃ³n", "error");
         setIsGeneratingPDF(false);
         return;
       }
 
-      // 2. Validar que se haya realizado la firma (temporal, será reemplazada por firma avanzada)
+      // 2. Validar que se haya realizado la firma (temporal, serÃ¡ reemplazada por firma avanzada)
       if (!data.firma_ing_SC || data.firma_ing_SC.length < 10) {
         showToast("Debe firmar digitalmente el registro antes de completarlo", "error");
         setIsGeneratingPDF(false);
         return;
       }
 
-      // 3. Validar que todos los pasos críticos estén marcados
+      // 3. Validar que todos los pasos crÃ­ticos estÃ©n marcados
       const criticalSteps = [
         'chk_general', 'chk_PEO', 'chk_PEO_1', 'chk_OP_1',
         'chk_en', 'chk_CP', 'chk_lim', 'chk_cloro',
@@ -179,31 +179,31 @@ const DesinfeccionStepper = () => {
 
       const missingSteps = criticalSteps.filter(step => !data[step]);
       if (missingSteps.length > 0) {
-        showToast(`Faltan completar ${missingSteps.length} paso(s) obligatorio(s) del proceso de desinfección`, "error");
+        showToast(`Faltan completar ${missingSteps.length} paso(s) obligatorio(s) del proceso de desinfecciÃ³n`, "error");
         setIsGeneratingPDF(false);
         return;
       }
 
-      // Prepare data for PDF generation (con firma básica, será reemplazada por firma avanzada)
+      // Prepare data for PDF generation (con firma bÃ¡sica, serÃ¡ reemplazada por firma avanzada)
       const pdfData = {
-        // 1️⃣ DATOS GENERALES
+        // 1ï¸âƒ£ DATOS GENERALES
         fecha: data.fecha,
         equipo: data.equipo,
         parte_repuesto: data.parte_repuesto || "",
         serie: data.serie,
         responsable: data.responsable,
 
-        // 2️⃣ PASO 1 - SEGURIDAD PERSONAL
+        // 2ï¸âƒ£ PASO 1 - SEGURIDAD PERSONAL
         chk_general: data.chk_general || false,
 
-        // 3️⃣ PASO 2 - PARTES ELÉCTRICAS Y ÓPTICAS
+        // 3ï¸âƒ£ PASO 2 - PARTES ELÃ‰CTRICAS Y Ã“PTICAS
         chk_PEO: data.chk_PEO || false,
 
-        // 4️⃣ PASO 3 - LIMPIEZA EN SECO
+        // 4ï¸âƒ£ PASO 3 - LIMPIEZA EN SECO
         chk_PEO_1: data.chk_PEO_1 || false,
         chk_OP_1: data.chk_OP_1 || false,
 
-        // 5️⃣ PASOS 4-7 - PROCEDIMIENTOS CRÍTICOS
+        // 5ï¸âƒ£ PASOS 4-7 - PROCEDIMIENTOS CRÃTICOS
         chk_en: data.chk_en || false,
         chk_en_op: data.chk_en_op || false,
         chk_CP: data.chk_CP || false,
@@ -212,7 +212,7 @@ const DesinfeccionStepper = () => {
         chk_cloro: data.chk_cloro || false,
         chk_OP_cloro: data.chk_OP_cloro || false,
 
-        // 6️⃣ PASOS 8-9 - SECADO Y TRASLADO
+        // 6ï¸âƒ£ PASOS 8-9 - SECADO Y TRASLADO
         chk_PS: data.chk_PS || false,
         chk_PS_peo: data.chk_PS_peo || false,
         chk_PS_op: data.chk_PS_op || false,
@@ -220,10 +220,10 @@ const DesinfeccionStepper = () => {
         chk_tras_peo: data.chk_tras_peo || false,
         chk_tras_op: data.chk_tras_op || false,
 
-        // 7️⃣ PASO 10 - VERIFICACIÓN ELÉCTRICA
+        // 7ï¸âƒ£ PASO 10 - VERIFICACIÃ“N ELÃ‰CTRICA
         chk_CVITE: data.chk_CVITE || false,
 
-        // 8️⃣ PASOS 11-12 - DOCUMENTACIÓN
+        // 8ï¸âƒ£ PASOS 11-12 - DOCUMENTACIÃ“N
         chk_DFD: data.chk_DFD || false,
         chk_DFD_peo: data.chk_DFD_peo || false,
         chk_DFD_o: data.chk_DFD_o || false,
@@ -231,10 +231,10 @@ const DesinfeccionStepper = () => {
         chk_CD_peo: data.chk_CD_peo || false,
         chk_CD_op: data.chk_CD_op || false,
 
-        // 9️⃣ DECLARACIÓN Y FIRMA (temporal, será reemplazada por firma avanzada)
+        // 9ï¸âƒ£ DECLARACIÃ“N Y FIRMA (temporal, serÃ¡ reemplazada por firma avanzada)
         firma_ing_SC: "FIRMA_ELECTRONICA_AVANZADA_PENDIENTE",
 
-        // 🔟 ADJUNTOS
+        // ðŸ”Ÿ ADJUNTOS
         adjunto_evidencia: data.adjunto_evidencia,
       };
 
@@ -248,11 +248,11 @@ const DesinfeccionStepper = () => {
       console.log("PDF Generation API Response:", result);
 
       if (result.ok) {
-        // Crear documento en el sistema de firma electrónica
+        // Crear documento en el sistema de firma electrÃ³nica
         const documentData = {
-          title: `Desinfección - ${data.equipo} - ${data.fecha}`,
+          title: `DesinfecciÃ³n - ${data.equipo} - ${data.fecha}`,
           type: 'DESINFECTION_REPORT',
-          content: `Registro de desinfección de instrumento médico según F.ST-02 V04`,
+          content: `Registro de desinfecciÃ³n de instrumento mÃ©dico segÃºn F.ST-02 V04`,
           metadata: {
             form_type: 'F.ST-02',
             form_version: 'V04',
@@ -265,11 +265,11 @@ const DesinfeccionStepper = () => {
           }
         };
 
-        // Aquí iría la lógica para crear el documento y redirigir a firma avanzada
+        // AquÃ­ irÃ­a la lÃ³gica para crear el documento y redirigir a firma avanzada
         // Por ahora, mostramos el resultado del PDF
         setIsCompleted(true);
         setCompletionData(result);
-        showToast(`PDF generado exitosamente. Próximamente: Firma electrónica avanzada.`, "success");
+        showToast(`PDF generado exitosamente. PrÃ³ximamente: Firma electrÃ³nica avanzada.`, "success");
 
       } else {
         showToast(result.message || "Error al procesar el registro", "error");
@@ -277,7 +277,7 @@ const DesinfeccionStepper = () => {
 
     } catch (error) {
       console.error("Error processing disinfection:", error);
-      showToast(error.response?.data?.message || "Error al procesar la desinfección", "error");
+      showToast(error.response?.data?.message || "Error al procesar la desinfecciÃ³n", "error");
     } finally {
       setIsGeneratingPDF(false);
     }
@@ -320,15 +320,15 @@ const DesinfeccionStepper = () => {
 
   const renderStepContent = () => {
     switch (currentStep) {
-      case 0: // Identificación del Servicio
+      case 0: // IdentificaciÃ³n del Servicio
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Identificación del Servicio
+                IdentificaciÃ³n del Servicio
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Complete los datos básicos del equipo que será desinfectado
+                Complete los datos bÃ¡sicos del equipo que serÃ¡ desinfectado
               </p>
             </div>
 
@@ -353,7 +353,7 @@ const DesinfeccionStepper = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Nombre del técnico responsable"
+                  placeholder="Nombre del tÃ©cnico responsable"
                   {...register("responsable", { required: "El responsable es obligatorio" })}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
@@ -368,7 +368,7 @@ const DesinfeccionStepper = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Nombre o descripción del equipo"
+                  placeholder="Nombre o descripciÃ³n del equipo"
                   {...register("equipo", { required: "El equipo es obligatorio" })}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
@@ -383,7 +383,7 @@ const DesinfeccionStepper = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Parte o repuesto específico (opcional)"
+                  placeholder="Parte o repuesto especÃ­fico (opcional)"
                   {...register("parte_repuesto")}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
@@ -395,7 +395,7 @@ const DesinfeccionStepper = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Número de serie único"
+                  placeholder="NÃºmero de serie Ãºnico"
                   {...register("serie", { required: "La serie es obligatoria" })}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
@@ -415,7 +415,7 @@ const DesinfeccionStepper = () => {
                 Paso 1 - Seguridad Personal
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Colocación de Equipos de Protección Personal (EPP)
+                ColocaciÃ³n de Equipos de ProtecciÃ³n Personal (EPP)
               </p>
             </div>
 
@@ -428,10 +428,10 @@ const DesinfeccionStepper = () => {
                 />
                 <div>
                   <p className="font-medium text-gray-900">
-                    Colóquese una bata de laboratorio, gafas de seguridad y guantes
+                    ColÃ³quese una bata de laboratorio, gafas de seguridad y guantes
                   </p>
                   <p className="text-sm text-gray-600 mt-1">
-                    Confirmación de EPP completo antes de iniciar cualquier procedimiento.
+                    ConfirmaciÃ³n de EPP completo antes de iniciar cualquier procedimiento.
                   </p>
                 </div>
               </div>
@@ -439,15 +439,15 @@ const DesinfeccionStepper = () => {
           </div>
         );
 
-      case 2: // Paso 2 - Partes Eléctricas y Ópticas
+      case 2: // Paso 2 - Partes ElÃ©ctricas y Ã“pticas
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Paso 2 - Partes Eléctricas y Ópticas
+                Paso 2 - Partes ElÃ©ctricas y Ã“pticas
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Separación de componentes sensibles
+                SeparaciÃ³n de componentes sensibles
               </p>
             </div>
 
@@ -460,7 +460,7 @@ const DesinfeccionStepper = () => {
                 />
                 <div>
                   <p className="font-medium text-gray-900">
-                    Seleccione los componentes ópticos, electrónicos o sensibles para tratamiento por separado
+                    Seleccione los componentes Ã³pticos, electrÃ³nicos o sensibles para tratamiento por separado
                   </p>
                   <p className="text-sm text-gray-600 mt-1">
                     <strong>NO aplicarles cloro</strong> - Estos componentes requieren tratamiento especial.
@@ -479,13 +479,13 @@ const DesinfeccionStepper = () => {
                 Paso 3 - Limpieza en Seco
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Eliminación de polvo y residuos secos
+                EliminaciÃ³n de polvo y residuos secos
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Card className="p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Partes Eléctricas/Ópticas</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Partes ElÃ©ctricas/Ã“pticas</h4>
                 <div className="flex items-start gap-3">
                   <input
                     type="checkbox"
@@ -525,23 +525,23 @@ const DesinfeccionStepper = () => {
           </div>
         );
 
-      case 4: // Pasos 4-7 - Procedimientos Críticos
+      case 4: // Pasos 4-7 - Procedimientos CrÃ­ticos
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Pasos 4-7 - Procedimientos Críticos
+                Pasos 4-7 - Procedimientos CrÃ­ticos
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Enjuague, remoción y limpieza química
+                Enjuague, remociÃ³n y limpieza quÃ­mica
               </p>
             </div>
 
             <div className="grid grid-cols-1 gap-4">
               <Card className="p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Paso 4 - Enjuague de ductos hidráulicos</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Paso 4 - Enjuague de ductos hidrÃ¡ulicos</h4>
                 <p className="text-sm text-gray-600 mb-3">
-                  Enjuagar todos los ductos hidráulicos antes de desensamblar, asegurando que no quede líquido en ellos.
+                  Enjuagar todos los ductos hidrÃ¡ulicos antes de desensamblar, asegurando que no quede lÃ­quido en ellos.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-start gap-3">
@@ -575,18 +575,18 @@ const DesinfeccionStepper = () => {
               <Card className="p-4">
                 <h4 className="font-medium text-gray-900 mb-3">Paso 6 - Limpieza con Hipoclorito 5%</h4>
                 <p className="text-sm text-gray-600 mb-3">
-                  Limpiar superficies con paño libre de pelusa y solución de hipoclorito al 5%.
+                  Limpiar superficies con paÃ±o libre de pelusa y soluciÃ³n de hipoclorito al 5%.
                 </p>
                 <div className="flex items-start gap-3">
                   <input type="checkbox" {...register("chk_lim")} className="mt-1" />
-                  <span className="text-sm font-medium">Aplicar solución desinfectante</span>
+                  <span className="text-sm font-medium">Aplicar soluciÃ³n desinfectante</span>
                 </div>
               </Card>
 
               <Card className="p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Paso 7 - Eliminación del cloro</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Paso 7 - EliminaciÃ³n del cloro</h4>
                 <p className="text-sm text-gray-600 mb-3">
-                  Eliminar inmediatamente el cloro con paño sin pelusa humedecido con agua, seguido de un paño seco.
+                  Eliminar inmediatamente el cloro con paÃ±o sin pelusa humedecido con agua, seguido de un paÃ±o seco.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex items-start gap-3">
@@ -619,7 +619,7 @@ const DesinfeccionStepper = () => {
               <Card className="p-4">
                 <h4 className="font-medium text-gray-900 mb-3">Secado completo</h4>
                 <p className="text-sm text-gray-600 mb-3">
-                  Asegurarse de que las piezas estén completamente secas antes de enviar el equipo o encenderlo.
+                  Asegurarse de que las piezas estÃ©n completamente secas antes de enviar el equipo o encenderlo.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-start gap-3">
@@ -638,9 +638,9 @@ const DesinfeccionStepper = () => {
               </Card>
 
               <Card className="p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Traslado al área de revisión</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Traslado al Ã¡rea de revisiÃ³n</h4>
                 <p className="text-sm text-gray-600 mb-3">
-                  Trasladar el instrumento al área de revisión y reparación.
+                  Trasladar el instrumento al Ã¡rea de revisiÃ³n y reparaciÃ³n.
                 </p>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-start gap-3">
@@ -661,15 +661,15 @@ const DesinfeccionStepper = () => {
           </div>
         );
 
-      case 6: // Paso 10 - Verificación Eléctrica
+      case 6: // Paso 10 - VerificaciÃ³n ElÃ©ctrica
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Paso 10 - Verificación Eléctrica
+                Paso 10 - VerificaciÃ³n ElÃ©ctrica
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Verificación de conexiones eléctricas
+                VerificaciÃ³n de conexiones elÃ©ctricas
               </p>
             </div>
 
@@ -682,10 +682,10 @@ const DesinfeccionStepper = () => {
                 />
                 <div>
                   <p className="font-medium text-gray-900">
-                    Verifique conexiones y tarjetas eléctricas y electrónicas
+                    Verifique conexiones y tarjetas elÃ©ctricas y electrÃ³nicas
                   </p>
                   <p className="text-sm text-gray-600 mt-1">
-                    Verificación crítica antes de encendido del equipo.
+                    VerificaciÃ³n crÃ­tica antes de encendido del equipo.
                     <strong>Obligatorio si existen componentes PEO.</strong>
                   </p>
                 </div>
@@ -694,12 +694,12 @@ const DesinfeccionStepper = () => {
           </div>
         );
 
-      case 7: // Pasos 11-12 - Documentación
+      case 7: // Pasos 11-12 - DocumentaciÃ³n
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Pasos 11-12 - Documentación
+                Pasos 11-12 - DocumentaciÃ³n
               </h3>
               <p className="text-sm text-gray-500 mt-1">
                 Registro del formato y certificados
@@ -708,7 +708,7 @@ const DesinfeccionStepper = () => {
 
             <div className="grid grid-cols-1 gap-4">
               <Card className="p-4">
-                <h4 className="font-medium text-gray-900 mb-3">Diligenciar formato de desinfección</h4>
+                <h4 className="font-medium text-gray-900 mb-3">Diligenciar formato de desinfecciÃ³n</h4>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="flex items-start gap-3">
                     <input type="checkbox" {...register("chk_DFD")} className="mt-1" />
@@ -746,19 +746,19 @@ const DesinfeccionStepper = () => {
           </div>
         );
 
-      case 8: // Certificación y Evidencia
+      case 8: // CertificaciÃ³n y Evidencia
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Certificación y Evidencia
+                CertificaciÃ³n y Evidencia
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Fam Sign y evidencia fotográfica del proceso
+                FamSign y evidencia fotogrÃ¡fica del proceso
               </p>
             </div>
 
-            {/* Información importante sobre la firma avanzada */}
+            {/* InformaciÃ³n importante sobre la firma avanzada */}
             <Card className="p-4 bg-yellow-50 border-yellow-200">
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
@@ -768,20 +768,20 @@ const DesinfeccionStepper = () => {
                   </svg>
                 </div>
                 <div>
-                  <h4 className="font-medium text-yellow-900 mb-1">Fam Sign</h4>
+                  <h4 className="font-medium text-yellow-900 mb-1">FamSign</h4>
                   <p className="text-sm text-yellow-800">
-                    Este documento será firmado digitalmente con sello institucional y código QR verificable,
-                    cumpliendo con la Ley de Comercio Electrónico del Ecuador.
+                    Este documento serÃ¡ firmado digitalmente con sello institucional y cÃ³digo QR verificable,
+                    cumpliendo con la Ley de Comercio ElectrÃ³nico del Ecuador.
                   </p>
                 </div>
               </div>
             </Card>
 
             <Card className="p-4">
-              <h4 className="font-medium text-gray-900 mb-4">Evidencia Fotográfica</h4>
+              <h4 className="font-medium text-gray-900 mb-4">Evidencia FotogrÃ¡fica</h4>
               <div className="space-y-3">
                 <p className="text-sm text-gray-600">
-                  Adjunte fotos del proceso de desinfección para evidencia legal
+                  Adjunte fotos del proceso de desinfecciÃ³n para evidencia legal
                 </p>
                 <div className="flex items-center gap-3">
                   <input
@@ -808,25 +808,25 @@ const DesinfeccionStepper = () => {
               </div>
             </Card>
 
-            {/* Certificación legal */}
+            {/* CertificaciÃ³n legal */}
             <Card className="p-4 bg-blue-50 border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">Certificación Legal</h4>
+              <h4 className="font-medium text-blue-900 mb-2">CertificaciÃ³n Legal</h4>
               <p className="text-sm text-blue-800 mb-3">
-                "Con la presente certifico que: He completado los pasos de desinfección para el instrumento en mención.
+                "Con la presente certifico que: He completado los pasos de desinfecciÃ³n para el instrumento en menciÃ³n.
                 El instrumento se encuentra libre de fluidos corporales y material contaminante."
               </p>
               <p className="text-xs text-blue-700">
-                Esta certificación tendrá valor legal equivalente a una firma manuscrita según la legislación ecuatoriana.
+                Esta certificaciÃ³n tendrÃ¡ valor legal equivalente a una firma manuscrita segÃºn la legislaciÃ³n ecuatoriana.
               </p>
             </Card>
 
-            {/* Información sobre la firma avanzada */}
+            {/* InformaciÃ³n sobre la firma avanzada */}
             <Card className="p-4 bg-green-50 border-green-200">
-              <h4 className="font-medium text-green-900 mb-2">¿Qué incluye Fam Sign?</h4>
+              <h4 className="font-medium text-green-900 mb-2">Â¿QuÃ© incluye FamSign?</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-green-800">Hash criptográfico SHA-256</span>
+                  <span className="text-green-800">Hash criptogrÃ¡fico SHA-256</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -834,7 +834,7 @@ const DesinfeccionStepper = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-green-800">Código QR verificable</span>
+                  <span className="text-green-800">CÃ³digo QR verificable</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -868,10 +868,10 @@ const DesinfeccionStepper = () => {
               <FiCheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">
-              ¡Registro Completado!
+              Â¡Registro Completado!
             </h1>
             <p className="text-sm text-gray-500 mt-2">
-              El proceso de desinfección ha sido registrado correctamente
+              El proceso de desinfecciÃ³n ha sido registrado correctamente
             </p>
           </div>
         </div>
@@ -896,12 +896,12 @@ const DesinfeccionStepper = () => {
                   <div className="mt-1 space-y-1">
                     <div className="flex items-center gap-2 text-sm text-gray-600">
                       <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                      PDF de desinfección guardado en Drive
+                      PDF de desinfecciÃ³n guardado en Drive
                     </div>
                     {completionData.imageCount > 0 && (
                       <div className="flex items-center gap-2 text-sm text-gray-600">
                         <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                        {completionData.imageCount} evidencia(s) fotográfica(s) guardada(s)
+                        {completionData.imageCount} evidencia(s) fotogrÃ¡fica(s) guardada(s)
                       </div>
                     )}
                   </div>
@@ -910,9 +910,9 @@ const DesinfeccionStepper = () => {
 
               <div className="space-y-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Ubicación en Drive</label>
+                  <label className="block text-sm font-medium text-gray-700">UbicaciÃ³n en Drive</label>
                   <p className="text-sm text-gray-600 mt-1">
-                    Servicio Técnico / Desinfección / [Equipo]-[Fecha]
+                    Servicio TÃ©cnico / DesinfecciÃ³n / [Equipo]-[Fecha]
                   </p>
                 </div>
 
@@ -939,7 +939,7 @@ const DesinfeccionStepper = () => {
             }}
             icon={FiUpload}
           >
-            Nuevo Registro de Desinfección
+            Nuevo Registro de DesinfecciÃ³n
           </Button>
         </div>
       </div>
@@ -950,10 +950,10 @@ const DesinfeccionStepper = () => {
     <div className="max-w-4xl mx-auto p-6">
       <div className="mb-8">
         <h1 className="text-2xl font-bold text-gray-900 text-center">
-          Desinfección de Instrumentos y Partes
+          DesinfecciÃ³n de Instrumentos y Partes
         </h1>
         <p className="text-sm text-gray-500 text-center mt-2">
-          Formulario F.ST-02 - Registro de desinfección según V04
+          Formulario F.ST-02 - Registro de desinfecciÃ³n segÃºn V04
         </p>
       </div>
 
@@ -1003,3 +1003,4 @@ const DesinfeccionStepper = () => {
 };
 
 export default DesinfeccionStepper;
+

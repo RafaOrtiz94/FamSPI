@@ -1,7 +1,7 @@
-/**
+﻿/**
  * src/modules/servicio/asistencia-entrenamiento.service.js
  * --------------------------------------------
- * 📄 PDF Generation Service for Training Attendance List Records
+ * ðŸ“„ PDF Generation Service for Training Attendance List Records
  * - Fills F.ST-05_V03_LISTA DE ASISTENCIA ENTRENAMIENTOS template
  * - Handles signature embedding and Google Drive storage
  */
@@ -59,7 +59,7 @@ const downloadSignatureFromDrive = async (fileId) => {
  * Generate PDF for training attendance list
  */
 const generateAttendanceListPDF = async (attendanceData) => {
-    console.log("📝 Backend: Starting training attendance list PDF generation", {
+    console.log("ðŸ“ Backend: Starting training attendance list PDF generation", {
         ordenNumero: attendanceData.Num_Orden,
         cliente: attendanceData.ORDCliente,
         equipo: attendanceData.ORDEquipo,
@@ -68,12 +68,12 @@ const generateAttendanceListPDF = async (attendanceData) => {
     });
 
     // Load template
-    console.log("📝 Backend: Loading training attendance list PDF template");
+    console.log("ðŸ“ Backend: Loading training attendance list PDF template");
     const templateBytes = fs.readFileSync(TEMPLATE_PATH);
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
     const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    console.log("📝 Backend: PDF template loaded successfully");
+    console.log("ðŸ“ Backend: PDF template loaded successfully");
 
     // Handle signature - can be base64 data or Google Drive file ID
     let signatureBuffer = null;
@@ -94,7 +94,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
         }
     }
 
-    // 1️⃣ DATOS GENERALES DEL ENTRENAMIENTO
+    // 1ï¸âƒ£ DATOS GENERALES DEL ENTRENAMIENTO
     setFieldText(form, "Num_Orden", attendanceData.Num_Orden || "");
     setFieldText(form, "ORDFecha", attendanceData.ORDFecha || "");
     setFieldText(form, "ORDCliente", attendanceData.ORDCliente || "");
@@ -102,56 +102,56 @@ const generateAttendanceListPDF = async (attendanceData) => {
     setFieldText(form, "ORDSerie", attendanceData.ORDSerie || "");
     setFieldText(form, "ORDResponsable", attendanceData.ORDResponsable || "");
 
-    // 2️⃣ TABLA DE ASISTENCIA (Hasta 7 asistentes)
+    // 2ï¸âƒ£ TABLA DE ASISTENCIA (Hasta 7 asistentes)
     // Nombres y Apellidos
     for (let i = 1; i <= 7; i++) {
         setFieldText(form, `Nombres_Apellidos${i}`, attendanceData[`Nombres_Apellidos${i}`] || "");
         setFieldText(form, `Cargo${i}`, attendanceData[`Cargo${i}`] || "");
-        setFieldText(form, `Correo_Electrónico${i}`, attendanceData[`Correo_Electrónico${i}`] || "");
+        setFieldText(form, `Correo_ElectrÃ³nico${i}`, attendanceData[`Correo_ElectrÃ³nico${i}`] || "");
     }
 
-    // 3️⃣ ASISTENCIA POR DÍA (Hasta 3 días, 7 asistentes cada uno)
+    // 3ï¸âƒ£ ASISTENCIA POR DÃA (Hasta 3 dÃ­as, 7 asistentes cada uno)
     for (let day = 1; day <= 3; day++) {
         for (let attendee = 1; attendee <= 7; attendee++) {
             const fieldName = `Dia_${day}_${attendee}`;
             const value = attendanceData[fieldName];
-            // Set attendance mark (typically "✔️" for present, "" for absent)
+            // Set attendance mark (typically "âœ”ï¸" for present, "" for absent)
             setFieldText(form, fieldName, value || "");
         }
     }
 
-    // 4️⃣ FIRMA DEL ESPECIALISTA
+    // 4ï¸âƒ£ FIRMA DEL ESPECIALISTA
     // Set signature in image field
     if (signatureBuffer) {
         try {
-            console.log("📝 Backend: Attempting to embed attendance specialist signature, buffer size:", signatureBuffer.length);
+            console.log("ðŸ“ Backend: Attempting to embed attendance specialist signature, buffer size:", signatureBuffer.length);
             let signatureImage = await pdfDoc.embedPng(signatureBuffer);
-            console.log("📝 Backend: Attendance specialist signature image embedded in PDF document");
+            console.log("ðŸ“ Backend: Attendance specialist signature image embedded in PDF document");
 
             const signatureField = form.getField("Firma_Especialista");
-            console.log("📝 Backend: Retrieved attendance specialist signature field:", !!signatureField);
+            console.log("ðŸ“ Backend: Retrieved attendance specialist signature field:", !!signatureField);
 
             if (signatureField) {
-                console.log("📝 Backend: Attendance specialist signature field type:", signatureField.constructor.name);
-                console.log("📝 Backend: Field has setImage method:", typeof signatureField.setImage === "function");
+                console.log("ðŸ“ Backend: Attendance specialist signature field type:", signatureField.constructor.name);
+                console.log("ðŸ“ Backend: Field has setImage method:", typeof signatureField.setImage === "function");
 
                 if (typeof signatureField.setImage === "function") {
                     signatureField.setImage(signatureImage);
-                    console.log("📝 Backend: Attendance specialist signature embedded successfully in image field");
+                    console.log("ðŸ“ Backend: Attendance specialist signature embedded successfully in image field");
                 } else {
-                    console.log("📝 Backend: Field doesn't have setImage method, signature not embedded");
+                    console.log("ðŸ“ Backend: Field doesn't have setImage method, signature not embedded");
                 }
             } else {
-                console.log("📝 Backend: Attendance specialist signature field not found");
+                console.log("ðŸ“ Backend: Attendance specialist signature field not found");
             }
         } catch (sigErr) {
-            console.error({ sigErr }, "📝 Backend: Error embedding attendance specialist signature image");
+            console.error({ sigErr }, "ðŸ“ Backend: Error embedding attendance specialist signature image");
         }
     } else {
-        console.log("📝 Backend: No attendance specialist signature buffer available");
+        console.log("ðŸ“ Backend: No attendance specialist signature buffer available");
     }
 
-    // Ajustar tipografía para evitar letras exageradas
+    // Ajustar tipografÃ­a para evitar letras exageradas
     try {
         form.getFields().forEach((field) => {
             if (typeof field.updateAppearances === "function") {
@@ -177,7 +177,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
  */
 const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => {
     try {
-        console.log("📝 Backend: Starting training attendance Google Drive save process", {
+        console.log("ðŸ“ Backend: Starting training attendance Google Drive save process", {
             hasPDF: !!pdfBuffer,
             pdfSize: pdfBuffer?.length,
             ordenNumero: attendanceData.Num_Orden,
@@ -188,20 +188,20 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
         const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 
         if (!DRIVE_ROOT_FOLDER_ID) {
-            console.log("📝 Backend: DRIVE_ROOT_FOLDER_ID not configured");
+            console.log("ðŸ“ Backend: DRIVE_ROOT_FOLDER_ID not configured");
             logger.warn("DRIVE_ROOT_FOLDER_ID no configurado, omitiendo guardado en Drive");
             return null;
         }
 
-        // 1. Create Servicio Técnico folder
-        console.log("📝 Backend: Creating Servicio Técnico folder");
-        const servicioTecnicoFolder = await ensureFolder("Servicio Técnico", DRIVE_ROOT_FOLDER_ID);
-        console.log("📝 Backend: Servicio Técnico folder created", { id: servicioTecnicoFolder.id });
+        // 1. Create Servicio TÃ©cnico folder
+        console.log("ðŸ“ Backend: Creating Servicio TÃ©cnico folder");
+        const servicioTecnicoFolder = await ensureFolder("Servicio TÃ©cnico", DRIVE_ROOT_FOLDER_ID);
+        console.log("ðŸ“ Backend: Servicio TÃ©cnico folder created", { id: servicioTecnicoFolder.id });
 
         // 2. Create Entrenamiento folder
-        console.log("📝 Backend: Creating Entrenamiento folder");
+        console.log("ðŸ“ Backend: Creating Entrenamiento folder");
         const entrenamientoFolder = await ensureFolder("Entrenamiento", servicioTecnicoFolder.id);
-        console.log("📝 Backend: Entrenamiento folder created", { id: entrenamientoFolder.id });
+        console.log("ðŸ“ Backend: Entrenamiento folder created", { id: entrenamientoFolder.id });
 
         // 3. Create identificative folder (order number + client + date + user)
         const timestamp = new Date().toISOString().split('T')[0];
@@ -209,9 +209,9 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
         const safeUserName = userName.replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 30); // Clean and limit length
         const safeClient = (attendanceData.ORDCliente || 'Cliente').replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 30);
         const identificativeName = `${attendanceData.Num_Orden}-${safeClient}-${timestamp}-${safeUserName}`;
-        console.log("📝 Backend: Creating attendance record folder", { name: identificativeName });
+        console.log("ðŸ“ Backend: Creating attendance record folder", { name: identificativeName });
         const recordFolder = await ensureFolder(identificativeName, entrenamientoFolder.id);
-        console.log("📝 Backend: Attendance record folder created", { id: recordFolder.id });
+        console.log("ðŸ“ Backend: Attendance record folder created", { id: recordFolder.id });
 
         // 4. Save PDF
         const pdfBase64 = pdfBuffer.toString('base64');
@@ -246,7 +246,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
         if (!attendanceData.Num_Orden) {
             return res.status(400).json({
                 ok: false,
-                message: "El número de orden (Num_Orden) es obligatorio",
+                message: "El nÃºmero de orden (Num_Orden) es obligatorio",
             });
         }
 
@@ -273,10 +273,10 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
                 hasAttendees = true;
 
                 // If attendee name exists, cargo and email are required
-                if (!attendanceData[`Cargo${i}`] || !attendanceData[`Correo_Electrónico${i}`]) {
+                if (!attendanceData[`Cargo${i}`] || !attendanceData[`Correo_ElectrÃ³nico${i}`]) {
                     return res.status(400).json({
                         ok: false,
-                        message: `Para el asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}), el cargo y correo electrónico son obligatorios`,
+                        message: `Para el asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}), el cargo y correo electrÃ³nico son obligatorios`,
                     });
                 }
 
@@ -305,7 +305,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             });
         }
 
-        // La firma dibujada deja de ser obligatoria; se firmarГЎ con flujo avanzado posteriormente
+        // La firma dibujada deja de ser obligatoria; se firmarÐ“ÐŽ con flujo avanzado posteriormente
 
         const pdfBuffer = await generateAttendanceListPDF(attendanceData);
 
@@ -314,11 +314,11 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             logger.error("Attendance PDF buffer is empty or invalid");
             return res.status(500).json({
                 ok: false,
-                message: "Error: PDF de asistencia generado está vacío",
+                message: "Error: PDF de asistencia generado estÃ¡ vacÃ­o",
             });
         }
 
-        logger.info(`PDF de lista de asistencia generado correctamente, tamaño: ${pdfBuffer.length} bytes`);
+        logger.info(`PDF de lista de asistencia generado correctamente, tamaÃ±o: ${pdfBuffer.length} bytes`);
 
         // Save to Google Drive (required - if this fails, return error)
         const driveResult = await saveAttendanceToDrive(pdfBuffer, attendanceData, req.userInfo);
@@ -337,7 +337,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             imageCount: driveResult.images?.length || 0
         }, "Archivos de lista de asistencia guardados en Google Drive");
 
-        // Registrar documento en tabla documents para habilitar Fam Sign
+        // Registrar documento en tabla documents para habilitar FamSign
         let documentRecord = null;
         try {
             const insert = await db.query(
@@ -347,9 +347,9 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
                 [driveResult.pdfFile?.id || null, driveResult.folderId || null]
             );
             documentRecord = insert.rows?.[0] || null;
-            logger.info({ documentId: documentRecord?.id }, "Documento registrado para Fam Sign");
+            logger.info({ documentId: documentRecord?.id }, "Documento registrado para FamSign");
         } catch (docErr) {
-            logger.warn({ docErr }, "No se pudo registrar el documento para Fam Sign");
+            logger.warn({ docErr }, "No se pudo registrar el documento para FamSign");
         }
 
         // Return success without downloading PDF
@@ -376,3 +376,4 @@ module.exports = {
     generateAttendanceListPDF,
     generateAttendanceListPDFEndpoint,
 };
+

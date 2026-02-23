@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FiClock,
   FiCheck,
@@ -570,14 +570,14 @@ const PermisosStatusWidget = () => {
           <div className={`rounded-lg border p-2 mt-2 ${signatureStatusColor}`}>
             <p className="text-xs font-semibold mb-1.5 flex items-center gap-1">
               <FiShield className="w-3 h-3" />
-              Fam Sign workflow ({signatureSummary.estado || "pendiente"})
+              FamSign workflow ({signatureSummary.estado || "pendiente"})
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
               <div>
                 <p className="font-semibold">Solicitante</p>
                 <p>
                   {signatureSummary.solicitud_firmada
-                    ? `${signatureSummary.solicitud?.signer_name || "Firmado"} · ${formatDateTime(
+                    ? `${signatureSummary.solicitud?.signer_name || "Firmado"} Â· ${formatDateTime(
                         signatureSummary.solicitud?.signed_at
                       )}`
                     : "Pendiente"}
@@ -587,7 +587,7 @@ const PermisosStatusWidget = () => {
                 <p className="font-semibold">Aprobacion</p>
                 <p>
                   {signatureSummary.aprobacion_firmada
-                    ? `${signatureSummary.aprobacion?.signer_name || "Firmado"} · ${formatDateTime(
+                    ? `${signatureSummary.aprobacion?.signer_name || "Firmado"} Â· ${formatDateTime(
                         signatureSummary.aprobacion?.signed_at
                       )}`
                     : "Pendiente"}
@@ -1003,3 +1003,4 @@ const PermisosStatusWidget = () => {
 };
 
 export default PermisosStatusWidget;
+
