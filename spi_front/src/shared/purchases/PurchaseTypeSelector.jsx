@@ -1,165 +1,167 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Dialog } from '@headlessui/react';
-import { FiShoppingCart, FiBriefcase } from 'react-icons/fi';
-import NewPurchaseRequestModal from './NewPurchaseRequestModal';
+import { FiShoppingCart, FiBriefcase, FiArrowLeft, FiCheckCircle } from 'react-icons/fi';
+import {
+  PRIVATE_PURCHASE_OPTIONS,
+  PUBLIC_PURCHASE_OPTIONS,
+  PURCHASE_FAMILY,
+} from './purchaseTypes';
 
 /**
- * PurchaseTypeSelector - Componente unificado para selección de tipo de compra
- *
- * Single source of truth para la selección entre Compras Públicas y Privadas.
- * Usado tanto en Dashboard como en Solicitudes para mantener consistencia.
- *
- * @param {Object} props
- * @param {boolean} props.isOpen - Controla si el modal está abierto
- * @param {function} props.onClose - Función para cerrar el modal
- * @param {string} props.origin - Origen del modal ('dashboard' | 'solicitudes') para analytics
- * @param {function} props.onSelect - Función llamada al seleccionar tipo (type: 'public' | 'private')
+ * Selector unificado: 1) familia (publica/privada) 2) subtipo.
  */
 const PurchaseTypeSelector = ({ isOpen, onClose, origin = 'unknown', onSelect }) => {
-    const [showPublicModal, setShowPublicModal] = useState(false);
-    const [showPrivateModal, setShowPrivateModal] = useState(false);
+  const [family, setFamily] = useState(null);
 
-    const handleSelect = (type) => {
-        console.log('[PurchaseTypeSelector] handleSelect called with type:', type);
+  const privateOptions = useMemo(() => PRIVATE_PURCHASE_OPTIONS, []);
+  const publicOptions = useMemo(() => PUBLIC_PURCHASE_OPTIONS, []);
 
-        // Cerrar modal principal
-        onClose();
+  const closeAll = () => {
+    setFamily(null);
+    onClose?.();
+  };
 
-        // Llamar callback si existe
-        if (onSelect) {
-            console.log('[PurchaseTypeSelector] Calling onSelect callback with:', type);
-            onSelect(type);
-            return;
-        }
-
-        // Modal logic basado en tipo
-        if (type === 'public') {
-            console.log('[PurchaseTypeSelector] Opening public modal');
-            // Compras públicas: modal con ACP requerido
-            setShowPublicModal(true);
-        } else if (type === 'private') {
-            console.log('[PurchaseTypeSelector] Opening private modal');
-            // Compras privadas: modal directo sin ACP
-            setShowPrivateModal(true);
-        }
+  const emitSelection = (option) => {
+    const payload = {
+      purchaseFamily: family,
+      purchaseKind: option.key,
+      startFrom: option.startFrom,
+      origin,
     };
 
-    return (
-        <>
-            <Dialog open={isOpen} onClose={onClose} className="fixed inset-0 z-50">
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden />
-                <div className="fixed inset-0 overflow-y-auto">
-                    <div className="flex min-h-full items-center justify-center px-4 py-8 sm:px-6">
-                        <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
-                            <div className="flex flex-col gap-3 border-b px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div>
-                                    <h2 className="text-lg font-semibold text-gray-900">Nueva Solicitud de Compra</h2>
-                                    <p className="text-sm text-gray-500">Selecciona el tipo de requerimiento</p>
-                                </div>
-                                <button
-                                    onClick={onClose}
-                                    className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                                >
-                                    <span className="sr-only">Cerrar</span>
-                                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                    </svg>
-                                </button>
-                            </div>
+    if (onSelect) {
+      onSelect(payload);
+    }
 
-                            <div className="px-6 py-6">
-                                <div className="text-center mb-6">
-                                    <h3 className="text-base font-semibold text-gray-900 mb-2">
-                                        ¿Qué tipo de compra deseas crear?
-                                    </h3>
-                                    <p className="text-sm text-gray-600">
-                                        Selecciona el tipo de cliente para continuar
-                                    </p>
-                                </div>
+    closeAll();
+  };
 
-                                <div className="grid grid-cols-1 gap-4">
-                                    {/* Opción Compra Pública */}
-                                    <button
-                                        onClick={() => handleSelect('public')}
-                                        className="group relative p-6 border-2 border-gray-200 rounded-xl hover:border-blue-300 hover:bg-blue-50 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-left"
-                                        aria-label="Seleccionar compra pública - Proceso formal vía ACP"
-                                    >
-                                        <div className="flex items-center gap-4">
-                                            <div className="p-3 bg-blue-100 rounded-full group-hover:bg-blue-200 transition-colors">
-                                                <FiShoppingCart className="w-6 h-6 text-blue-600" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-semibold text-gray-900 mb-1">Compra Pública</h4>
-                                                <p className="text-xs text-gray-600 leading-tight mb-2">
-                                                    Proceso formal vía Administración de Contratación Pública (ACP)
-                                                </p>
+  return (
+    <Dialog open={isOpen} onClose={closeAll} className="fixed inset-0 z-50">
+      <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" aria-hidden />
+      <div className="fixed inset-0 overflow-y-auto">
+        <div className="flex min-h-full items-center justify-center px-4 py-8 sm:px-6">
+          <Dialog.Panel className="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-xl">
+            <div className="flex flex-col gap-3 border-b px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Nueva Solicitud de Compra</h2>
+                <p className="text-sm text-gray-500">
+                  {!family ? 'Selecciona el tipo de requerimiento' : 'Selecciona el tipo de compra'}
+                </p>
+              </div>
+              <button
+                onClick={closeAll}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              >
+                <span className="sr-only">Cerrar</span>
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
 
-                                            </div>
-                                        </div>
-                                    </button>
+            <div className="px-6 py-6">
+              {!family ? (
+                <>
+                  <div className="mb-6 text-center">
+                    <h3 className="mb-2 text-base font-semibold text-gray-900">Que tipo de compra deseas crear?</h3>
+                    <p className="text-sm text-gray-600">Selecciona el tipo de cliente para continuar</p>
+                  </div>
 
-                                    {/* Opción Compra Privada */}
-                                    <button
-                                        onClick={() => handleSelect('private')}
-                                        className="group relative p-6 border-2 border-gray-200 rounded-xl hover:border-indigo-300 hover:bg-indigo-50 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-left"
-                                        aria-label="Seleccionar compra privada - Proceso directo"
-                                    >
-                                        <div className="flex items-center gap-4">
-                                            <div className="p-3 bg-indigo-100 rounded-full group-hover:bg-indigo-200 transition-colors">
-                                                <FiBriefcase className="w-6 h-6 text-indigo-600" />
-                                            </div>
-                                            <div className="flex-1">
-                                                <h4 className="font-semibold text-gray-900 mb-1">Compra Privada</h4>
-                                                <p className="text-xs text-gray-600 leading-tight mb-2">
-                                                    Gestión directa con el cliente privado
-                                                </p>
+                  <div className="grid grid-cols-1 gap-4">
+                    <button
+                      onClick={() => setFamily(PURCHASE_FAMILY.PUBLIC)}
+                      className="group relative rounded-xl border-2 border-gray-200 p-6 text-left transition-all duration-200 hover:border-blue-300 hover:bg-blue-50 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      aria-label="Seleccionar compra publica"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="rounded-full bg-blue-100 p-3 transition-colors group-hover:bg-blue-200">
+                          <FiShoppingCart className="h-6 w-6 text-blue-600" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="mb-1 font-semibold text-gray-900">Compra Publica</h4>
+                          <p className="mb-2 text-xs leading-tight text-gray-600">
+                            Flujo con Business Case obligatorio previo al proceso de compra
+                          </p>
+                        </div>
+                      </div>
+                    </button>
 
-                                            </div>
-                                        </div>
-                                    </button>
-                                </div>
+                    <button
+                      onClick={() => setFamily(PURCHASE_FAMILY.PRIVATE)}
+                      className="group relative rounded-xl border-2 border-gray-200 p-6 text-left transition-all duration-200 hover:border-indigo-300 hover:bg-indigo-50 focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                      aria-label="Seleccionar compra privada"
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className="rounded-full bg-indigo-100 p-3 transition-colors group-hover:bg-indigo-200">
+                          <FiBriefcase className="h-6 w-6 text-indigo-600" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="mb-1 font-semibold text-gray-900">Compra Privada</h4>
+                          <p className="mb-2 text-xs leading-tight text-gray-600">
+                            Venta, alquiler, alquiler con transferencia o comodato
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setFamily(null)}
+                      className="inline-flex items-center gap-2 text-sm text-gray-600 hover:text-gray-900"
+                    >
+                      <FiArrowLeft size={14} />
+                      Volver
+                    </button>
+                  </div>
 
-                                <div className="flex justify-end pt-6 border-t border-gray-100">
-                                    <button
-                                        onClick={onClose}
-                                        className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors"
-                                    >
-                                        Cancelar
-                                    </button>
-                                </div>
-                            </div>
-                        </Dialog.Panel>
-                    </div>
-                </div>
-            </Dialog>
+                  <div className="grid grid-cols-1 gap-3">
+                    {(family === PURCHASE_FAMILY.PRIVATE ? privateOptions : publicOptions).length === 0 && (
+                      <div className="space-y-2">
+                        <div className="h-10 animate-pulse rounded-lg bg-gray-100" />
+                        <div className="h-10 animate-pulse rounded-lg bg-gray-100" />
+                      </div>
+                    )}
+                    {(family === PURCHASE_FAMILY.PRIVATE ? privateOptions : publicOptions).map((option) => (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => emitSelection(option)}
+                        className="flex items-center justify-between rounded-xl border border-gray-200 px-4 py-3 text-left hover:border-blue-300 hover:bg-blue-50"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{option.title}</p>
+                          <p className="text-xs text-gray-500">
+                            {option.startFrom === 'existing_modal'
+                              ? 'Continua con formulario de compra privada'
+                              : 'Inicia Business Case con secciones comerciales previas'}
+                          </p>
+                        </div>
+                        <FiCheckCircle className="text-blue-600" />
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
 
-            {/* Modal de Compra Pública */}
-            <NewPurchaseRequestModal
-                isOpen={showPublicModal}
-                onOpenChange={setShowPublicModal}
-                mode="acp_required"
-                source="purchase_type_selector"
-                intent="public_purchase"
-                onSuccess={() => {
-                    setShowPublicModal(false);
-                    // Opcional: mostrar mensaje de éxito o redirigir
-                }}
-            />
-
-            {/* Modal de Compra Privada */}
-            <NewPurchaseRequestModal
-                isOpen={showPrivateModal}
-                onOpenChange={setShowPrivateModal}
-                mode="private_direct"
-                source="purchase_type_selector"
-                intent="private_purchase"
-                onSuccess={() => {
-                    setShowPrivateModal(false);
-                    // Opcional: mostrar mensaje de éxito o redirigir
-                }}
-            />
-        </>
-    );
+              <div className="flex justify-end border-t border-gray-100 pt-6">
+                <button
+                  onClick={closeAll}
+                  className="rounded-lg bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </Dialog.Panel>
+        </div>
+      </div>
+    </Dialog>
+  );
 };
 
 export default PurchaseTypeSelector;

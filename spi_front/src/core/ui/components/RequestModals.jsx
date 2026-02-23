@@ -6,6 +6,8 @@ import ProcessingOverlay from "./ProcessingOverlay";
 import { useUI } from "../useUI";
 import api from "../../api/index";
 import { getEquipmentModels } from "../../api/inventarioApi";
+import { OFFER_KIND_LABELS, normalizeOfferKind } from "../../../shared/purchases/purchaseTypes";
+import { getApiErrorMessage } from "../../utils/apiErrors";
 
 /**
  * Componentes de modales para diferentes tipos de solicitudes
@@ -363,7 +365,13 @@ export const MaintenanceRequestModal = ({ isOpen, onClose, onSuccess }) => {
 // 💼 MODAL DE COMPRA PRIVADA
 // ============================================================================
 
-export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
+export const PrivatePurchaseRequestModal = ({
+  isOpen,
+  onClose,
+  onSuccess,
+  initialOfferKind = "venta",
+  hideOfferKindSelector = false,
+}) => {
   const TYPE_CHIPS = {
     new_available: "bg-emerald-100 text-emerald-800 border-emerald-200",
     new_import: "bg-amber-100 text-amber-800 border-amber-200",
@@ -383,7 +391,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
     },
     equipment: [],
     notes: "",
-    offer_kind: "venta"
+    offer_kind: normalizeOfferKind(initialOfferKind)
   });
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
@@ -550,7 +558,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         setAvailableClients(Array.isArray(clientsData) ? clientsData : []);
       } catch (error) {
         console.error('Error loading clients for private purchase:', error);
-        showToast("Error al cargar clientes", "error");
+        showToast(getApiErrorMessage(error, "Error al cargar clientes"), "error");
       } finally {
         setLoadingClients(false);
       }
@@ -569,7 +577,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         setEquipmentOptions(Array.isArray(equipmentModels) ? equipmentModels : []);
       } catch (error) {
         console.error('Error loading equipment models for private purchase:', error);
-        showToast("Error al cargar modelos de equipos disponibles", "error");
+        showToast(getApiErrorMessage(error, "Error al cargar modelos de equipos disponibles"), "error");
         setEquipmentOptions([]);
       } finally {
         setLoadingEquipment(false);
@@ -593,7 +601,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         },
         equipment: [],
         notes: "",
-        offer_kind: "venta",
+        offer_kind: normalizeOfferKind(initialOfferKind),
       });
       setErrors({});
       setClientSearchTerm("");
@@ -606,7 +614,7 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
       setConfirmOpen(false);
       setProgressStep(null);
     }
-  }, [isOpen]);
+  }, [initialOfferKind, isOpen]);
 
   const submitConfirmed = async () => {
     const identifierType = String(formData.client_snapshot.identifier_type || "ruc");
@@ -655,12 +663,12 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
         },
         equipment: [],
         notes: "",
-        offer_kind: "venta"
+        offer_kind: normalizeOfferKind(initialOfferKind)
       });
 
     } catch (error) {
       console.error('Error creating private purchase:', error);
-      showToast("Error al crear la solicitud de compra privada", "error");
+      showToast(getApiErrorMessage(error, "Error al crear la solicitud de compra privada"), "error");
     } finally {
       setLoading(false);
       setProgressStep(null);
@@ -1086,17 +1094,23 @@ export const PrivatePurchaseRequestModal = ({ isOpen, onClose, onSuccess }) => {
               <label className="mb-1 block text-sm font-medium text-slate-700">
                 Tipo de oferta
               </label>
-              <select
-                name="offer_kind"
-                value={formData.offer_kind}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
-              >
-                <option value="venta">Venta</option>
-                <option value="alquiler">Alquiler</option>
-                <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
-                <option value="comodato">Comodato</option>
-              </select>
+              {hideOfferKindSelector ? (
+                <div className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+                  {OFFER_KIND_LABELS[formData.offer_kind] || formData.offer_kind}
+                </div>
+              ) : (
+                <select
+                  name="offer_kind"
+                  value={formData.offer_kind}
+                  onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-slate-300"
+                >
+                  <option value="venta">Venta</option>
+                  <option value="alquiler">Alquiler</option>
+                  <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
+                  <option value="comodato">Comodato</option>
+                </select>
+              )}
 
               {formData.offer_kind === 'comodato' && (
                 <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3">

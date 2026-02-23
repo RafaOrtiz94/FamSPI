@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   FiClipboard,
@@ -27,13 +28,16 @@ import UserRequestsView from "../components/solicitudes/UserRequestsView";
 import {
   MaintenanceRequestModal,
   PrivatePurchaseRequestModal,
-  EquipmentRequestModal,} from "../../../core/ui/components/RequestModals";
+  EquipmentRequestModal,
+} from "../../../core/ui/components/RequestModals";
 import CreateRequestModal from "../components/CreateRequestModal";
 import PermisoVacacionModal from "../../shared/solicitudes/modals/PermisoVacacionModal";
 import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
 import { createRequest } from "../../../core/api/requestsApi";
 import PurchaseTypeSelector from "../../../shared/purchases/PurchaseTypeSelector";
 import NewPurchaseRequestModal from "../../../shared/purchases/NewPurchaseRequestModal";
+import { usePreflowPurchaseStart } from "../../../shared/purchases/usePreflowPurchaseStart";
+import { PURCHASE_FAMILY, PURCHASE_START_MODE, PURCHASE_KIND } from "../../../shared/purchases/purchaseTypes";
 
 // Importar configuraciones centralizadas
 import { REQUEST_TYPES_CONFIG } from '../config/requestConfig';
@@ -42,6 +46,7 @@ import StatsCard from '../components/shared/StatsCard';
 
 const SolicitudesPage = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { showToast, showLoader, hideLoader } = useUI();
   const [activeTab, setActiveTab] = useState("overview");
 
@@ -66,6 +71,11 @@ const SolicitudesPage = () => {
   const [createClienteModalOpen, setCreateClienteModalOpen] = useState(false);
   const [permisosModalOpen, setPermisosModalOpen] = useState(false);
   const [personnelModalOpen, setPersonnelModalOpen] = useState(false);
+  const [privatePurchasePreset, setPrivatePurchasePreset] = useState({
+    initialOfferKind: "venta",
+    hideOfferKindSelector: false,
+  });
+  const { startPreflow } = usePreflowPurchaseStart({ navigate, showToast, showLoader, hideLoader });
 
   // Determinar configuración basada en el rol
   const roleConfig = useMemo(() => {
@@ -134,25 +144,47 @@ const SolicitudesPage = () => {
   }, []);
 
   // Función para manejar selección de tipo de compra
-  const handlePurchaseTypeSelection = useCallback((type) => {
+  // Funcion para manejar seleccion de tipo de compra
+  const handlePurchaseTypeSelection = useCallback(async (selection) => {
     console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][PURCHASE_TYPE_SELECTED]', {
-      type,
+      selection,
       timestamp: new Date().toISOString()
     });
 
-    if (type === 'private') {
-      // Abrir modal específico para proceso de compra privada/comodato
+    const family = selection?.purchaseFamily || selection;
+    const kind = selection?.purchaseKind || null;
+    const startFrom = selection?.startFrom || null;
+
+    if (startFrom === PURCHASE_START_MODE.EXISTING_MODAL && family === PURCHASE_FAMILY.PRIVATE && kind) {
+      setPrivatePurchasePreset({
+        initialOfferKind: kind,
+        hideOfferKindSelector: true,
+      });
       openModal('PRIVATE_PURCHASE');
-      console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][OPENING_PRIVATE_PURCHASE_PROCESS_MODAL]');
-    } else if (type === 'public') {
-      // Abrir modal de compra pública usando NewPurchaseRequestModal
+      return;
+    }
+
+    if (startFrom === PURCHASE_START_MODE.BUSINESS_CASE_PREFLOW) {
+      await startPreflow({ family, kind, origin: "solicitudes" });
+      return;
+    }
+
+    if (family === PURCHASE_FAMILY.PRIVATE) {
+      setPrivatePurchasePreset({
+        initialOfferKind: PURCHASE_KIND.PRIVATE_SALE,
+        hideOfferKindSelector: false,
+      });
+      openModal('PRIVATE_PURCHASE');
+      return;
+    }
+
+    if (family === PURCHASE_FAMILY.PUBLIC) {
       setNewPurchaseMode('acp_required');
       setNewPurchaseSource('solicitudes_publicas');
       setNewPurchaseIntent('public_purchase');
       setNewPurchaseModalOpen(true);
-      console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][OPENING_PUBLIC_PURCHASE_MODAL]');
     }
-  }, [openModal]);
+  }, [openModal, startPreflow]);
 
   // Componentes de Tabs - Filtrar según rol
   const tabs = [
@@ -695,10 +727,16 @@ const SolicitudesPage = () => {
       {/* ✅ MODALES GLOBALES DETALLADOS */}
       <PrivatePurchaseRequestModal
         isOpen={privatePurchaseModalOpen}
+        initialOfferKind={privatePurchasePreset.initialOfferKind}
+        hideOfferKindSelector={privatePurchasePreset.hideOfferKindSelector}
         onClose={() => {
           console.log('[FLOW_COMERCIAL][FE][SOLICITUDES][MODAL_CLOSE]', {
             modalType: 'PrivatePurchaseRequestModal',
             timestamp: new Date().toISOString()
+          });
+          setPrivatePurchasePreset({
+            initialOfferKind: 'venta',
+            hideOfferKindSelector: false,
           });
           closeModal('PRIVATE_PURCHASE');
         }}
@@ -710,7 +748,8 @@ const SolicitudesPage = () => {
             timestamp: new Date().toISOString()
           });
         }}
-      /><EquipmentRequestModal
+      />
+<EquipmentRequestModal
         isOpen={equipmentModalOpen}
         onClose={() => closeModal('EQUIPMENT')}
       />
@@ -747,5 +786,9 @@ const SolicitudesPage = () => {
 };
 
 export default SolicitudesPage;
+
+
+
+
 
 

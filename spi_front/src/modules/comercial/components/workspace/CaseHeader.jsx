@@ -1,11 +1,17 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTriangle } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
+import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
 
 const CaseHeader = ({ uiGuidance, onRefresh }) => {
-  const { businessCaseId, clientName, workflowState, sectionOwnership } = uiGuidance || {};
+  const workspace = useBusinessCaseWorkspaceOptional();
+  const resolvedGuidance = uiGuidance || workspace?.uiGuidance || null;
+  const resolvedRefresh = onRefresh || workspace?.onRefresh;
+  const { businessCaseId, clientName, workflowState, sectionOwnership } = resolvedGuidance || {};
   const { currentState, availableTransitions } = workflowState || {};
   const { completionSummary } = sectionOwnership || {};
+  const preflow = resolvedGuidance?.preflow || null;
+  const [nowMs, setNowMs] = useState(Date.now());
 
   // Mock state display mapping
   const stateDisplay = {
@@ -17,6 +23,39 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
   };
 
   const currentStateDisplay = stateDisplay[currentState] || stateDisplay['DRAFT_INICIAL'];
+  const serverNowOffsetMs = useMemo(() => {
+    if (!preflow?.serverNow) return 0;
+    const serverMs = new Date(preflow.serverNow).getTime();
+    if (!Number.isFinite(serverMs)) return 0;
+    return serverMs - Date.now();
+  }, [preflow?.serverNow]);
+
+  const deadlineMs = useMemo(
+    () => (preflow?.deadlineAt ? new Date(preflow.deadlineAt).getTime() : null),
+    [preflow?.deadlineAt],
+  );
+
+  useEffect(() => {
+    if (!deadlineMs || preflow?.isExpired) return undefined;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [deadlineMs, preflow?.isExpired]);
+
+  const countdownLabel = useMemo(() => {
+    if (!deadlineMs) return null;
+    const effectiveNow = nowMs + serverNowOffsetMs;
+    const diff = Math.max(0, deadlineMs - effectiveNow);
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
+  }, [deadlineMs, nowMs, serverNowOffsetMs]);
+
+  const preflowProgressPercent = useMemo(() => {
+    const required = preflow?.requiredSections?.length || 0;
+    const completed = preflow?.completedRequiredSections?.length || 0;
+    if (!required) return 0;
+    return Math.min(100, Math.round((completed / required) * 100));
+  }, [preflow?.completedRequiredSections?.length, preflow?.requiredSections?.length]);
 
   return (
     <Card className="p-4 sm:p-6">
@@ -48,6 +87,26 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
               <FiAlertTriangle className="text-gray-600" />
               <span>{completionSummary?.pendingSections ?? 0} pendientes</span>
             </div>
+            {preflow?.isActive && (
+              <div className={`flex items-center gap-2 ${preflow?.isExpired ? "text-rose-700" : "text-indigo-700"}`}>
+                <FiClock className={preflow?.isExpired ? "text-rose-600" : "text-indigo-600"} />
+                <span>
+                  Ventana 48h: {preflow?.isExpired ? "vencida" : countdownLabel || "en curso"}
+                </span>
+              </div>
+            )}
+            {preflow?.isActive && (
+              <div className="flex items-center gap-2 text-xs text-indigo-800">
+                <span>Avance comercial:</span>
+                <div className="h-2 w-24 rounded-full bg-indigo-100">
+                  <div
+                    className="h-2 rounded-full bg-indigo-600 transition-all"
+                    style={{ width: `${preflowProgressPercent}%` }}
+                  />
+                </div>
+                <span>{preflowProgressPercent}%</span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -55,7 +114,7 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
         <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 w-full sm:w-auto">
           <button
             type="button"
-            onClick={onRefresh}
+            onClick={resolvedRefresh}
             className="inline-flex items-center justify-center gap-2 px-3 py-2 text-xs sm:text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 w-full sm:w-auto"
           >
             <FiRefreshCw size={16} />

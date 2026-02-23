@@ -39,6 +39,7 @@ export const normalizeUIGuidanceResponse = (response) => {
       featureFlags: {
         autosave: data.featureFlags?.autosave || {},
       },
+      preflow: data.preflow || null,
       observationData: data.observationData || null,
       workflowState: {
         currentStage: data.workflowState?.currentStage || 'draft',

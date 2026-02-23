@@ -2,6 +2,7 @@ import React from "react";
 import SectionNavigator from "./SectionNavigator";
 import SectionContent from "./SectionContent";
 import ObservedCaseBanner from "./ObservedCaseBanner";
+import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
 
 const WorkspaceContent = ({
   selectedSection,
@@ -10,7 +11,13 @@ const WorkspaceContent = ({
   onSectionSelect,
   onSectionSave
 }) => {
-  const observationData = uiGuidance?.observationData;
+  const workspace = useBusinessCaseWorkspaceOptional();
+  const resolvedSelectedSection = selectedSection ?? workspace?.selectedSection;
+  const resolvedBusinessCase = businessCase ?? workspace?.businessCase;
+  const resolvedGuidance = uiGuidance ?? workspace?.uiGuidance;
+  const resolvedSelect = onSectionSelect ?? workspace?.setSelectedSection;
+  const resolvedSave = onSectionSave ?? workspace?.onSectionSave;
+  const observationData = resolvedGuidance?.observationData;
 
   return (
     <div className="space-y-6">
@@ -21,10 +28,10 @@ const WorkspaceContent = ({
         {/* Section Navigator - Left sidebar on desktop, Top on mobile */}
         <div className="w-full lg:w-80 flex-shrink-0">
           <SectionNavigator
-            selectedSection={selectedSection}
-            uiGuidance={uiGuidance}
+            selectedSection={resolvedSelectedSection}
+            uiGuidance={resolvedGuidance}
             observationData={observationData}
-            onSectionSelect={onSectionSelect}
+            onSectionSelect={resolvedSelect}
           />
         </div>
 
@@ -32,11 +39,11 @@ const WorkspaceContent = ({
         <div className="flex-1 min-w-0">
           <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
              <SectionContent
-                selectedSection={selectedSection}
-                businessCase={businessCase}
-                uiGuidance={uiGuidance}
+                selectedSection={resolvedSelectedSection}
+                businessCase={resolvedBusinessCase}
+                uiGuidance={resolvedGuidance}
                 observationData={observationData}
-                onSectionSave={onSectionSave}
+                onSectionSave={resolvedSave}
              />
           </div>
         </div>

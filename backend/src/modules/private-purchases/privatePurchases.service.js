@@ -390,7 +390,8 @@ class PrivatePurchasesService {
     clientData,
     equipment,
     offerKind = 'venta',
-    notes = ''
+    notes = '',
+    businessCaseId = null,
   }) {
     logger.debug('[FLOW_PRIVADA][BE][CREATE][INPUT]', {
       userId: user?.id,
@@ -465,8 +466,8 @@ class PrivatePurchasesService {
       const insertQuery = `
         INSERT INTO private_purchase_requests (
           created_by, created_by_email, client_snapshot,
-          equipment, status, offer_kind, notes, created_at, updated_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+          equipment, status, offer_kind, notes, business_case_id, created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
         RETURNING id, status
       `;
 
@@ -485,8 +486,9 @@ class PrivatePurchasesService {
         JSON.stringify(clientData),
         JSON.stringify(normalizedEquipment),
         PRIVATE_PURCHASE_STATES.PENDING_BACKOFFICE,
-          normalizedOfferKind,
-        notes
+        normalizedOfferKind,
+        notes,
+        businessCaseId
       ];
 
       const result = await client.query(insertQuery, values);
@@ -539,7 +541,7 @@ class PrivatePurchasesService {
         logger.warn({ error, purchaseId }, 'No se pudo notificar a backoffice de nueva solicitud');
       }
 
-      if (normalizedOfferKind === 'comodato') {
+      if (normalizedOfferKind === 'comodato' && !businessCaseId) {
         await this.ensureBusinessCaseForComodato(purchaseId, user, {
           business_case_id: null,
           offer_kind: normalizedOfferKind,

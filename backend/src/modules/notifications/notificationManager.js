@@ -112,6 +112,48 @@ class NotificationManager {
     this.defaultBatchLimit = Number(process.env.NOTIFICATION_DISPATCH_BATCH_LIMIT || 50);
   }
 
+  normalizeProcessRef(value) {
+    if (value === null || value === undefined) return null;
+    const normalized = String(value).trim();
+    return normalized || null;
+  }
+
+  resolveProcessKey({ source, template, userId, meta = {}, data = {} }) {
+    const processSource = this.normalizeProcessRef(source || template || "general");
+    const explicit = this.normalizeProcessRef(meta?.process_key || meta?.workflow_key);
+    if (explicit) return explicit;
+
+    const referenceCandidates = [
+      meta?.process_id,
+      meta?.workflow_id,
+      meta?.business_case_id,
+      meta?.businessCaseId,
+      meta?.solicitud_id,
+      meta?.request_id,
+      meta?.purchase_id,
+      meta?.purchaseId,
+      meta?.private_purchase_id,
+      meta?.public_purchase_id,
+      meta?.ticket_id,
+      meta?.client_request_id,
+      meta?.inspection_id,
+      meta?.id,
+      data?.business_case_id,
+      data?.request_id,
+      data?.purchase_id,
+      data?.ticket_id,
+      data?.client_request_id,
+      data?.id,
+    ];
+
+    for (const ref of referenceCandidates) {
+      const normalizedRef = this.normalizeProcessRef(ref);
+      if (normalizedRef) return `${processSource}:${normalizedRef}`;
+    }
+
+    return `${processSource}:user:${userId}`;
+  }
+
   /**
    * Envía notificación completa (BD + Email + Chat)
    */
@@ -144,6 +186,13 @@ class NotificationManager {
         priority: priority || templateData?.priority || 0,
         meta: { ...meta, template, data, sent_at: new Date().toISOString() }
       };
+      const processKey = this.resolveProcessKey({
+        source: notificationData.source,
+        template,
+        userId,
+        meta: notificationData.meta,
+        data,
+      });
 
       // 2. Crear notificación en BD
       const notification = await loadNotificationService().createNotification(notificationData);
@@ -153,10 +202,10 @@ class NotificationManager {
         try {
           const queueOps = [];
           if (email) {
-            queueOps.push(this.enqueueDispatch(notification.id, "email", { data }));
+            queueOps.push(this.enqueueDispatch(notification.id, "email", { data, processKey }));
           }
           if (chat) {
-            queueOps.push(this.enqueueDispatch(notification.id, "chat", { data }));
+            queueOps.push(this.enqueueDispatch(notification.id, "chat", { data, processKey }));
           }
           await Promise.all(queueOps);
         } catch (queueError) {
@@ -190,11 +239,13 @@ class NotificationManager {
   async enqueueDispatch(notificationId, channel, payload = {}) {
     if (!notificationId || !channel) return null;
     const maxAttempts = Number.isFinite(this.defaultMaxAttempts) ? this.defaultMaxAttempts : 5;
+    const processKey = this.normalizeProcessRef(payload?.processKey);
     const { rows } = await db.query(
       `
       INSERT INTO notification_dispatch_queue (
         notification_id,
         channel,
+        process_key,
         payload,
         status,
         attempts,
@@ -203,16 +254,17 @@ class NotificationManager {
         created_at,
         updated_at
       )
-      VALUES ($1, $2, $3::jsonb, 'pending', 0, $4, NOW(), NOW(), NOW())
+      VALUES ($1, $2, $3, $4::jsonb, 'pending', 0, $5, NOW(), NOW(), NOW())
       ON CONFLICT (notification_id, channel)
       DO UPDATE SET
+        process_key = COALESCE(EXCLUDED.process_key, notification_dispatch_queue.process_key),
         payload = EXCLUDED.payload,
         status = 'pending',
         next_retry_at = NOW(),
         updated_at = NOW()
       RETURNING id
       `,
-      [notificationId, channel, JSON.stringify(payload || {}), maxAttempts],
+      [notificationId, channel, processKey, JSON.stringify(payload || {}), maxAttempts],
     );
     return rows[0] || null;
   }
@@ -229,6 +281,7 @@ class NotificationManager {
           q.id,
           q.notification_id,
           q.channel,
+          q.process_key,
           q.payload,
           q.attempts,
           q.max_attempts,
@@ -243,6 +296,16 @@ class NotificationManager {
         WHERE q.status IN ('pending', 'failed')
           AND q.next_retry_at <= NOW()
           AND q.attempts < q.max_attempts
+          AND (
+            q.process_key IS NULL
+            OR NOT EXISTS (
+              SELECT 1
+              FROM notification_dispatch_queue q_prev
+              WHERE q_prev.process_key = q.process_key
+                AND q_prev.id < q.id
+                AND q_prev.status IN ('pending', 'processing', 'failed')
+            )
+          )
         ORDER BY q.created_at ASC
         LIMIT $1
         FOR UPDATE SKIP LOCKED

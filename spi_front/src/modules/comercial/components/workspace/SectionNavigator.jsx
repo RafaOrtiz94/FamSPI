@@ -73,6 +73,8 @@ const SectionNavigator = ({
 
   const { sectionOwnership } = uiGuidance;
   const { rules } = sectionOwnership;
+  const preflow = uiGuidance?.preflow || null;
+  const preflowRequired = new Set(preflow?.requiredSections || []);
 
   // Get role config, default to showing all if role not found
   const roleConfig = ROLE_SECTION_CONFIG[userRole] || { visible: "all", canEdit: [] };
@@ -278,6 +280,18 @@ const SectionNavigator = ({
                     {(status.isLocked || isReadOnly) && (
                       <span className="text-xs text-gray-400 font-normal ml-auto">
                         {status.isLocked ? "(Bloqueado)" : "(Solo lectura)"}
+                      </span>
+                    )}
+                    {preflowRequired.has(section.id) && (
+                      <span
+                        className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full ${
+                          preflow?.isExpired
+                            ? "bg-rose-100 text-rose-700"
+                            : "bg-indigo-100 text-indigo-700"
+                        }`}
+                        title="Seccion requerida para iniciar flujo de compras"
+                      >
+                        Preflow
                       </span>
                     )}
                   </div>

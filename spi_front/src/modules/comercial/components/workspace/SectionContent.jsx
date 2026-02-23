@@ -28,6 +28,9 @@ const SectionContent = ({
   const canLock = permissions.canBlockSections && !sectionRule.isLocked && !isInvestments;
   const canUnlock = permissions.canUnblockSections && sectionRule.isLocked && !isInvestments;
   const businessCaseId = businessCase?.id || uiGuidance?.businessCase?.id;
+  const forwardSave = (options = {}) => {
+    onSectionSave?.({ ...options, section: selectedSection });
+  };
 
   const handleLock = async () => {
     if (!businessCaseId) return;
@@ -35,7 +38,7 @@ const SectionContent = ({
     try {
       await lockSection(businessCaseId, selectedSection);
       showToast("Seccion bloqueada para edicion", "success");
-      onSectionSave?.();
+      forwardSave();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo bloquear la seccion", "error");
     } finally {
@@ -49,7 +52,7 @@ const SectionContent = ({
     try {
       await unlockSection(businessCaseId, selectedSection);
       showToast("Seccion desbloqueada", "success");
-      onSectionSave?.();
+      forwardSave();
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo desbloquear la seccion", "error");
     } finally {
@@ -69,7 +72,7 @@ const SectionContent = ({
       icon: "LAB"
     },
     requirement: {
-      title: "Requerimiento del BC",
+      title: "Condiciones del BC",
       description: "Plazos y entregas clave antes del calculo",
       icon: "BC"
     },
@@ -130,7 +133,7 @@ const SectionContent = ({
           uiGuidance={uiGuidance}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.general || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -142,7 +145,7 @@ const SectionContent = ({
           uiGuidance={uiGuidance}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.lab || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -153,7 +156,7 @@ const SectionContent = ({
           businessCase={businessCase}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.requirement || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -164,7 +167,7 @@ const SectionContent = ({
           businessCase={businessCase}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.equipment || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -175,7 +178,7 @@ const SectionContent = ({
           businessCase={businessCase}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.lis || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -187,7 +190,7 @@ const SectionContent = ({
           permissions={permissions}
           featureFlags={uiGuidance?.featureFlags || {}}
           ownership={uiGuidance?.sectionOwnership?.rules?.determinations || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -198,7 +201,7 @@ const SectionContent = ({
           businessCase={businessCase}
           permissions={permissions}
           ownership={uiGuidance?.sectionOwnership?.rules?.investments || {}}
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }
@@ -250,7 +253,7 @@ const SectionContent = ({
     if (selectedSection === "dispatch_workspace") {
       return (
         <DispatchWorkspaceSection
-          onSave={onSectionSave}
+          onSave={forwardSave}
         />
       );
     }

@@ -5,6 +5,7 @@ const { runOnce: runExpiredReservations } = require('../jobs/checkExpiredReserva
 const { runOnce: processAttendanceOvertime } = require('../jobs/attendanceOvertimeScheduler');
 const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContractReminderEmails');
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
+const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCasePreflowExpiryScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -75,6 +76,23 @@ router.post('/notifications/dispatch', async (req, res) => {
         console.error('Error en job de cola de notificaciones:', error);
         res.status(500).json({
             error: 'Falló el procesamiento de cola de notificaciones',
+            details: error.message
+        });
+    }
+});
+
+router.post('/business-case/preflow/expiry', async (_req, res) => {
+    try {
+        const result = await runBusinessCasePreflowExpiry();
+        res.json({
+            success: true,
+            message: 'Expiraciones de preflujo de Business Case procesadas',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de expiracion preflujo BC:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de expiracion preflujo BC',
             details: error.message
         });
     }

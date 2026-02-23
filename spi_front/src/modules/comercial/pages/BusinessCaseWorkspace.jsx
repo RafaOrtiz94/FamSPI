@@ -4,15 +4,18 @@ import {
   getBusinessCase,
   getUIGuidance,
   normalizeUIGuidanceResponse,
-  createAutosaveManager
+  createAutosaveManager,
+  recordSectionCompletion,
 } from "../../../core/api/businessCaseApi";
 import { useUI } from "../../../core/ui/UIContext";
 import { recordBusinessCaseTelemetry } from "../../../core/utils/businessCaseTelemetry";
+import { getApiErrorMessage } from "../../../core/utils/apiErrors";
 import CaseHeader from "../components/workspace/CaseHeader";
 import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
+import { BusinessCaseWorkspaceContext } from "../components/workspace/BusinessCaseWorkspaceContext";
 
 const BusinessCaseWorkspace = () => {
   const { id: bcId } = useParams();
@@ -36,6 +39,9 @@ const BusinessCaseWorkspace = () => {
 
     const startedAt = Date.now();
     try {
+      if (bcId && options?.section) {
+        await recordSectionCompletion(bcId, options.section, options?.reason || null);
+      }
       // Refresh UI guidance and business case to rehydrate saved fields
       const [data, businessCaseData] = await Promise.all([
         getUIGuidance(bcId),
@@ -52,7 +58,7 @@ const BusinessCaseWorkspace = () => {
       });
     } catch (err) {
       console.error("Failed to refresh UI guidance after save:", err);
-      showToast("Error actualizando datos después del guardado", "error");
+      showToast(getApiErrorMessage(err, "Error actualizando datos despues del guardado"), "error");
       recordBusinessCaseTelemetry({
         section: "workspace",
         type: "refresh_after_save_error",
@@ -98,8 +104,8 @@ const BusinessCaseWorkspace = () => {
       });
     } catch (err) {
       console.error("Failed to fetch workspace data:", err);
-      setError(err.message || "Failed to load workspace data");
-      showToast("Error cargando datos del workspace", "error");
+      setError(getApiErrorMessage(err, "Failed to load workspace data"));
+      showToast(getApiErrorMessage(err, "Error cargando datos del workspace"), "error");
       recordBusinessCaseTelemetry({
         section: "workspace",
         type: "initial_load_error",
@@ -123,6 +129,21 @@ const BusinessCaseWorkspace = () => {
     };
   }, [fetchWorkspaceData]);
 
+  useEffect(() => {
+    const preflow = uiGuidance?.preflow;
+    const shouldWarn = Boolean(preflow?.isActive && !preflow?.readyToStartProcess && !preflow?.processCreated);
+    if (!shouldWarn) return undefined;
+
+    const handler = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+      return "";
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [uiGuidance?.preflow]);
+
   const handleRefresh = async () => {
     if (!bcId) return;
 
@@ -132,7 +153,7 @@ const BusinessCaseWorkspace = () => {
       showToast("Datos actualizados", "success");
     } catch (err) {
       console.error("Failed to refresh UI guidance:", err);
-      showToast("Error actualizando datos", "error");
+      showToast(getApiErrorMessage(err, "Error actualizando datos"), "error");
     }
   };
 
@@ -222,7 +243,18 @@ const BusinessCaseWorkspace = () => {
     );
   }
 
+  const workspaceContextValue = {
+    bcId,
+    selectedSection,
+    setSelectedSection: handleSectionSelect,
+    businessCase,
+    uiGuidance,
+    onSectionSave: handleSectionSave,
+    onRefresh: handleRefresh,
+  };
+
   return (
+    <BusinessCaseWorkspaceContext.Provider value={workspaceContextValue}>
     <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
       {/* Header Area */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -265,7 +297,10 @@ const BusinessCaseWorkspace = () => {
         />
       </ErrorBoundary>
     </div>
+    </BusinessCaseWorkspaceContext.Provider>
   );
 };
 
 export default BusinessCaseWorkspace;
+
+

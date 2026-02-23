@@ -60,7 +60,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
 
   const handleSave = async () => {
     if (!bcId) {
-      showToast("No se encontr? el Business Case", "error");
+      showToast("No se encontó el Business Case", "error");
       return;
     }
 
@@ -110,8 +110,8 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
         <div className="flex items-center gap-3">
           
           <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Requerimiento del BC</h2>
-            <p className="text-sm text-gray-500">Plazos, entregas y observaciones antes del c?lculo</p>
+            <h2 className="text-xl sm:text-2xl font-bold text-gray-900 tracking-tight">Condiciones del BC</h2>
+            <p className="text-sm text-gray-500">Plazos, entregas y observaciones antes del cálculo</p>
           </div>
         </div>
         {canEdit && (

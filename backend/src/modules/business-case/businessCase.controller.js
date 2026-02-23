@@ -22,6 +22,7 @@ const { BusinessCaseDataOwnership } = require("./businessCaseDataOwnership");
 const notificationManager = require("../notifications/notificationManager");
 const BusinessCaseStateMachine = require("./businessCaseStateMachine");
 const { STATES } = require("./businessCaseStates.constants");
+const preflowService = require("./businessCasePreflow.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -105,6 +106,7 @@ const SECTION_ALIASES = {
 const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
 const LOCK_ROLES = ["acp_comercial", "backoffice_comercial"];
 const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
+const PRE_BC_DURATION_HOURS = 48;
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
   "administrador",
@@ -255,6 +257,7 @@ async function assertSectionEditable(businessCaseId, section, user) {
     throw error;
   }
 }
+
 
 async function list(req, res) {
   try {
@@ -1722,6 +1725,7 @@ async function getUIGuidance(req, res) {
       rules: ownershipRules,
       completionSummary,
     };
+    const preflow = preflowService.buildPreflowInfo(bc, ownershipRules);
 
     // Get permissions based on user role
     const userRole = (req.user?.role || req.user?.scope || req.user?.role_name || 'comercial').toLowerCase();
@@ -1753,7 +1757,8 @@ async function getUIGuidance(req, res) {
       workflowState: {
         currentStage: bc.bc_stage || bc.current_stage || 'draft',
         availableTransitions: ['promote', 'observe']
-      }
+      },
+      preflow,
     };
 
     res.json({ ok: true, data: uiGuidance });
@@ -1904,28 +1909,55 @@ async function recordSectionCompletion(req, res) {
     const user = req.user;
 
     // Validate section exists
-    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'investments', 'prices', 'calculations', 'dispatch_workspace', 'rentability'];
+    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'requirement', 'investments', 'prices', 'calculations', 'dispatch_workspace', 'rentability'];
     if (!validSections.includes(section)) {
       return res.status(400).json({ ok: false, message: "Invalid section name" });
     }
 
-    // Record completion (simplified - in production would update ownership table)
-    logger.info({
-      businessCaseId: id,
-      section,
-      reason,
-      user: user?.email
-    }, 'Section completion recorded');
+    const canonicalSection = SECTION_ALIASES[section] || section;
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const currentState = String(businessCase?.canonical_state || businessCase?.bc_stage || "draft").toUpperCase();
+    const userRole = resolveRequestRole(req) || user?.role || user?.role_name || "comercial";
 
-    // For now, just return success
+    await BusinessCaseDataOwnership.recordSectionCompletion(
+      id,
+      canonicalSection,
+      user?.id || null,
+      userRole,
+      currentState,
+      {
+        source: "workspace",
+        reason: reason || null,
+        actor_email: user?.email || null,
+      },
+    );
+
+    let metadataAfter = preflowService.toObject(businessCase?.modern_bc_metadata);
+    if (preflowService.isPreflowCase(businessCase) && canonicalSection === "general" && !metadataAfter.preflow_started_at) {
+      metadataAfter = await preflowService.ensurePreflowStarted(id, PRE_BC_DURATION_HOURS);
+    }
+
+    const processResult = await preflowService.ensurePreflowWorkspaceProcess({ businessCaseId: id, actorUser: user, durationHours: PRE_BC_DURATION_HOURS });
+    const latestBusinessCase = await businessCaseService.getBusinessCaseById(id);
+    const latestOwnership = await BusinessCaseDataOwnership.getOwnershipInfo(id);
+    const ownershipRules = {};
+    Object.entries(latestOwnership || {}).forEach(([key, value]) => {
+      ownershipRules[key] = {
+        isCompleted: Boolean(value?.completedAt),
+      };
+    });
+    const preflow = preflowService.buildPreflowInfo(latestBusinessCase, ownershipRules);
+
     res.json({
       ok: true,
       data: {
-        section,
+        section: canonicalSection,
         completed: true,
         completedAt: new Date(),
         completedBy: user?.email || 'system',
-        reason
+        reason,
+        processResult,
+        preflow,
       }
     });
   } catch (error) {
