@@ -70,27 +70,6 @@ const SectionNavigator = ({
       icon: "INV"
     },
     {
-      id: "prices",
-      title: "Precios",
-      description: "Definicion de precios y margenes",
-      icon: "PR",
-      dev: true
-    },
-    {
-      id: "calculations",
-      title: "Calculos",
-      description: "Analisis tecnico y viabilidad",
-      icon: "CAL",
-      dev: true
-    },
-    {
-      id: "rentability",
-      title: "Rentabilidad",
-      description: "ROI y analisis financiero",
-      icon: "ROI",
-      dev: true
-    },
-    {
       id: "consumption_export",
       title: "Exportacion Reactivos",
       description: "Salida ordenada para Excel/Sheets",
@@ -233,11 +212,6 @@ const SectionNavigator = ({
                     }`}>
                     {section.title}
                   </h4>
-                  {section.dev && (
-                    <span className="text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                      En desarrollo
-                    </span>
-                  )}
                     {status.hasComment && (
                       <FiMessageSquare
                         size={12}

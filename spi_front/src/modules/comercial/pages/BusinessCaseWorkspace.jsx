@@ -29,17 +29,17 @@ const WORKSPACE_SECTION_ORDER = [
   "lis",
   "determinations",
   "investments",
-  "prices",
-  "calculations",
-  "rentability",
   "consumption_export",
   "dispatch_workspace",
 ];
+const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
 
 const getVisibleSectionsByRole = (role = "") => {
   const config = resolveRoleSectionConfig(String(role || "").toLowerCase());
   if (config?.visible === "all") return WORKSPACE_SECTION_ORDER;
-  if (Array.isArray(config?.visible) && config.visible.length) return config.visible;
+  if (Array.isArray(config?.visible) && config.visible.length) {
+    return config.visible.filter((section) => WORKSPACE_SECTION_ORDER.includes(section));
+  }
   return WORKSPACE_SECTION_ORDER;
 };
 
@@ -69,6 +69,10 @@ const BusinessCaseWorkspace = () => {
   const confirmResolverRef = useRef(null);
 
   const handleSectionSelect = (sectionId) => {
+    if (LEGACY_DEV_SECTIONS.has(sectionId)) {
+      setSelectedSection("consumption_export");
+      return;
+    }
     setSelectedSection(sectionId);
   };
 
@@ -164,6 +168,11 @@ const BusinessCaseWorkspace = () => {
 
       // Normalize UI guidance response
       const normalizedUIGuidance = normalizeUIGuidanceResponse(uiGuidanceData);
+      const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
+      const visibleSections = getVisibleSectionsByRole(userRole);
+      if (!visibleSections.includes(selectedSection)) {
+        setSelectedSection(visibleSections[0] || "general");
+      }
 
       setBusinessCase(businessCaseData);
       setUiGuidance(normalizedUIGuidance);
@@ -408,5 +417,4 @@ const BusinessCaseWorkspace = () => {
 };
 
 export default BusinessCaseWorkspace;
-
 

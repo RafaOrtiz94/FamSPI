@@ -96,21 +96,6 @@ const SectionContent = ({
       description: "Costos adicionales y presupuesto de inversiones",
       icon: "INV"
     },
-    prices: {
-      title: "Definicion de Precios",
-      description: "Establecimiento de precios y margenes",
-      icon: "PR"
-    },
-    calculations: {
-      title: "Calculos Tecnicos",
-      description: "Analisis de viabilidad tecnica y operativa",
-      icon: "CAL"
-    },
-    rentability: {
-      title: "Analisis de Rentabilidad",
-      description: "ROI, payback y analisis financiero",
-      icon: "ROI"
-    },
     consumption_export: {
       title: "Exportacion Reactivos",
       description: "Salida ordenada para Excel/Sheets",
@@ -203,42 +188,6 @@ const SectionContent = ({
           ownership={uiGuidance?.sectionOwnership?.rules?.investments || {}}
           onSave={forwardSave}
         />
-      );
-    }
-
-    if (selectedSection === "prices") {
-      return (
-        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
-          <h3 className="text-lg font-semibold mb-2">Precios (En desarrollo)</h3>
-          <p className="text-sm">
-            Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el
-            calculo manual de factibilidad.
-          </p>
-        </Card>
-      );
-    }
-
-    if (selectedSection === "calculations") {
-      return (
-        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
-          <h3 className="text-lg font-semibold mb-2">Calculos (En desarrollo)</h3>
-          <p className="text-sm">
-            Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el
-            calculo manual de factibilidad.
-          </p>
-        </Card>
-      );
-    }
-
-    if (selectedSection === "rentability") {
-      return (
-        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
-          <h3 className="text-lg font-semibold mb-2">Rentabilidad (En desarrollo)</h3>
-          <p className="text-sm">
-            Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el
-            calculo manual de factibilidad.
-          </p>
-        </Card>
       );
     }
 

@@ -1,30 +1,30 @@
 export const ROLE_SECTION_CONFIG = {
   comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
   },
   asesor_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
-    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
+    canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export"],
   },
   acp_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
     canEdit: ["general", "lab", "equipment", "lis", "requirement", "investments", "consumption_export"],
   },
   backoffice_comercial: {
-    visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "calculations"],
-    canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments"],
+    visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export"],
+    canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export"],
   },
   jefe_comercial: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "consumption_export", "dispatch_workspace"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
     canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
   },
   gerencia: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
     canEdit: [],
   },
   gerencia_general: {
-    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "prices", "calculations", "rentability", "dispatch_workspace"],
+    visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace"],
     canEdit: [],
   },
   operaciones: {
