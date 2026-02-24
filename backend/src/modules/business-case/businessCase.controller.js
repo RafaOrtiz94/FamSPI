@@ -73,6 +73,7 @@ const equipmentDetailsV2Schema = Joi.object({
       Joi.object({
         primary_id: Joi.number().integer().required(),
         primary_type: Joi.string().trim().valid("new_available", "new_import", "cu", "installed_client").default("new_available"),
+        backup_type: Joi.string().trim().valid("new_available", "new_import", "cu", "installed_client").allow(null).optional(),
         backup_id: Joi.number().integer().allow(null),
         backup_install_simultaneous: Joi.boolean().default(false),
         requires_backup: Joi.boolean().default(false),
@@ -80,7 +81,32 @@ const equipmentDetailsV2Schema = Joi.object({
     )
     .min(1)
     .required(),
-});
+}).custom((value, helpers) => {
+  const pairs = Array.isArray(value?.equipment_pairs) ? value.equipment_pairs : [];
+  for (let index = 0; index < pairs.length; index += 1) {
+    const pair = pairs[index] || {};
+    const requiresBackup = Boolean(pair.requires_backup);
+    const hasBackupId = pair.backup_id !== null && pair.backup_id !== undefined;
+    const hasBackupType = typeof pair.backup_type === "string" && pair.backup_type.trim().length > 0;
+
+    if (requiresBackup && !hasBackupId) {
+      return helpers.message(`equipment_pairs[${index}]: backup_id es obligatorio cuando requires_backup=true`);
+    }
+    if (requiresBackup && !hasBackupType) {
+      return helpers.message(`equipment_pairs[${index}]: backup_type es obligatorio cuando requires_backup=true`);
+    }
+    if (!requiresBackup && hasBackupId) {
+      return helpers.message(`equipment_pairs[${index}]: backup_id debe ser null cuando requires_backup=false`);
+    }
+    if (!requiresBackup && hasBackupType) {
+      return helpers.message(`equipment_pairs[${index}]: backup_type debe ser null cuando requires_backup=false`);
+    }
+    if (hasBackupId && Number(pair.primary_id) === Number(pair.backup_id)) {
+      return helpers.message(`equipment_pairs[${index}]: primary_id y backup_id no pueden ser iguales`);
+    }
+  }
+  return value;
+}, "equipment pairs business rules");
 
 const determinationSchema = Joi.object({
   determinationId: Joi.number().integer().required(),
@@ -1397,6 +1423,7 @@ async function saveEquipmentDetailsV2(req, res) {
         requires_backup: pair.requires_backup,
         primary_id: pair.primary_id,
         primary_type: pair.primary_type || "new_available",
+        backup_type: pair.requires_backup ? (pair.backup_type || "new_available") : null,
         backup_id: pair.requires_backup ? pair.backup_id : null,
         backup_install_simultaneous: pair.backup_install_simultaneous || false,
       })),

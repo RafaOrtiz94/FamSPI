@@ -102,7 +102,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
     const inputClasses = "w-full border rounded-xl px-4 py-2.5 transition-all outline-none bg-gray-50 border-gray-200 focus:bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-400 text-gray-900 placeholder-gray-400 disabled:bg-gray-100 disabled:text-gray-500";
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             {/* Section Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-4">
@@ -117,7 +117,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                         type="submit"
                         disabled={saving}
                         onClick={handleSubmit(handleSave)}
-                        className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
                     >
                         <FiSave size={18} />
                         {saving ? "Guardando..." : "Guardar"}
@@ -126,16 +126,16 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
             </div>
 
             {/* Form */}
-            <form onSubmit={handleSubmit(handleSave)} className="space-y-6">
-                <Card className="p-6 rounded-2xl shadow-sm border border-gray-100 bg-white">
-                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-6">
+            <form onSubmit={handleSubmit(handleSave)} className="space-y-5">
+                <Card className="p-4 sm:p-5 rounded-2xl shadow-sm border border-gray-100 bg-white">
+                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-5">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
                             <FiActivity size={20} />
                         </div>
                         <h3 className="text-lg font-bold text-gray-900 tracking-tight">Datos Operativos del Laboratorio</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
                         {/* Work Days */}
                         <div className="space-y-1.5">
                             <label className="text-sm font-bold text-gray-700">
@@ -282,7 +282,7 @@ const LabSection = ({ businessCase, uiGuidance, permissions = {}, ownership = {}
                         <button
                             type="submit"
                             disabled={saving}
-                            className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
+                            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 disabled:scale-100 w-full sm:w-auto"
                         >
                             <FiSave size={18} />
                             {saving ? "Guardando..." : "Guardar"}

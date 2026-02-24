@@ -3,13 +3,13 @@ const { normalizeRow } = require("../../utils/normalizers");
 const { uploadJustificante } = require("./permisos.drive");
 const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
 const multer = require("multer");
-const upload = multer({ 
-  storage: multer.diskStorage({
-    destination: '/tmp',
-    filename: (req, file, cb) => {
-      cb(null, `permiso_${Date.now()}_${file.originalname}`);
-    }
-  })
+const fs = require("fs");
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB por archivo
+    files: 10,
+  },
 });
 
 const normalizeDateOnly = (value) => {
@@ -88,11 +88,19 @@ async function uploadJustificantes(req, res) {
 
     const urls = [];
     for (const file of files) {
+      // Con memoryStorage llega en file.buffer; con diskStorage de legado podría llegar en file.path.
+      const fileBuffer = file?.buffer || (file?.path ? fs.readFileSync(file.path) : null);
+      if (!fileBuffer) {
+        const err = new Error(`No se pudo leer el contenido del archivo: ${file?.originalname || "sin nombre"}`);
+        err.status = 400;
+        throw err;
+      }
+
       const uploaded = await uploadJustificante({
         user: req.user,
         solicitudId: id,
         fecha_inicio: solicitud.fecha_inicio,
-        fileBuffer: file.buffer,
+        fileBuffer,
         fileName: file.originalname,
         mimeType: file.mimetype,
         existingFolderId: solicitud.drive_folder_id, // Usar la misma carpeta del acta

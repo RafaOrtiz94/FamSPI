@@ -92,8 +92,8 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="p-6 bg-white border border-gray-100 rounded-2xl shadow-sm">
+      <div className="space-y-4">
+        <div className="p-4 sm:p-5 bg-white border border-gray-100 rounded-2xl shadow-sm">
           <div className="animate-pulse space-y-3">
             <div className="h-4 bg-gray-100 rounded w-3/4"></div>
             <div className="h-3 bg-gray-100 rounded w-1/2"></div>
@@ -105,7 +105,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div className="flex items-center gap-3">
           
@@ -118,7 +118,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
           <button
             onClick={handleSave}
             disabled={saving}
-            className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-indigo-600 text-white font-semibold rounded-full hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-50 w-full sm:w-auto"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 active:scale-[0.99] transition-all disabled:opacity-50 w-full sm:w-auto"
           >
             <FiSave size={18} />
             {saving ? "Guardando..." : "Guardar"}
@@ -126,7 +126,7 @@ const RequirementsSection = ({ permissions = {}, ownership = {}, onSave }) => {
         )}
       </div>
 
-      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-6 space-y-4">
+      <div className="bg-white border border-gray-100 rounded-2xl shadow-sm p-4 sm:p-5 space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-gray-700">Plazo (meses)</label>

@@ -145,7 +145,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
     const canEdit = permissions.canEdit !== false && ownership.canUserEdit !== false;
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             {/* Section Header */}
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div className="flex items-center gap-4">
@@ -159,7 +159,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                     <button
                         onClick={handleSave}
                         disabled={saving}
-                        className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 bg-blue-600 text-white font-semibold rounded-full hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-50 w-full sm:w-auto"
+                        className="inline-flex items-center justify-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-xl hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-50 w-full sm:w-auto"
                     >
                         <FiSave size={18} />
                         {saving ? "Guardando..." : "Guardar"}
@@ -168,12 +168,12 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
             </div>
 
             {/* LIS Toggle */}
-            <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300">
+            <div className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                     <div>
                         <h3 className="text-lg font-semibold text-gray-900">¿Incluye LIS?</h3>
                         <p className="text-sm text-gray-500 mt-1">
-                            Active esta opci?n si el contrato incluye un Sistema de Información de Laboratorio
+                            Active esta opción si el contrato incluye un Sistema de Información de Laboratorio
                         </p>
                     </div>
                     <label className="relative inline-flex items-center cursor-pointer">
@@ -191,15 +191,15 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
 
             {/* LIS Configuration */}
             {formData.lisIncludes && (
-                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
-                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-6">
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
+                    <div className="flex items-center gap-3 border-b border-gray-100 pb-4 mb-5">
                         <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
                             <FiLink size={20} />
                         </div>
                         <h3 className="text-lg font-semibold text-gray-900">Configuración del LIS</h3>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5">
                         {/* Provider */}
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700 ml-1">
@@ -325,13 +325,13 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
 
             {/* Equipment Interfaces */}
             {formData.lisIncludes && (
-                <div className="bg-white rounded-2xl border border-gray-100 p-6 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-4 mb-6">
+                <div className="bg-white rounded-2xl border border-gray-100 p-4 sm:p-5 shadow-sm hover:shadow-md transition-all duration-300 animate-fadeIn">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-gray-100 pb-4 mb-5">
                         <h3 className="text-lg font-semibold text-gray-900">Interfaces de equipos</h3>
                         {canEdit && (
                             <button
                                 onClick={handleAddInterface}
-                                className="flex items-center justify-center gap-2 px-4 py-2 text-sm bg-green-50 text-green-700 font-medium rounded-full hover:bg-green-100 active:scale-95 transition-all w-full sm:w-auto"
+                                className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm bg-green-50 text-green-700 font-semibold rounded-xl hover:bg-green-100 active:scale-[0.99] transition-all w-full sm:w-auto"
                             >
                                 <FiPlus size={16} />
                                 Agregar interfaz
@@ -356,7 +356,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                             {interfaces.map((iface, idx) => (
                                 <div
                                     key={iface.id}
-                                    className="flex flex-col md:flex-row gap-4 items-start p-5 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-100 transition-all group"
+                                    className="flex flex-col md:flex-row gap-4 items-start p-4 bg-gray-50 rounded-xl border border-gray-100 hover:border-blue-100 transition-all group"
                                 >
                                     <span className="text-sm font-bold text-gray-400 mt-3 md:w-8">
                                         #{idx + 1}
@@ -412,7 +412,7 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
                     <div>
                         <h4 className="font-semibold text-blue-900 text-sm">Información Importante</h4>
                         <p className="text-sm text-blue-700/80 mt-1 leading-relaxed">
-                            La integraci?n LIS afecta los costos de inversión y la complejidad del proyecto.
+                            La integración LIS afecta los costos de inversión y la complejidad del proyecto.
                             Configure correctamente las interfaces para una estimación precisa.
                         </p>
                     </div>

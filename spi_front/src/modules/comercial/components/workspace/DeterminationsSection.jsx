@@ -910,7 +910,7 @@ const DeterminationsSection = ({
   };
 
   return (
-    <div className="space-y-6 animate-fadeIn">
+    <div className="space-y-5 animate-fadeIn">
       <div className="flex flex-col sm:flex-row sm:items-center gap-3">
         <div className="p-3 bg-blue-50 rounded-xl text-blue-600">
           <FiActivity size={24} />
@@ -1022,7 +1022,7 @@ const DeterminationsSection = ({
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-5">
           {groupedByEquipment.map((group) => {
             const reactivosLimit = getWindowLimit(group.key, "reactivos");
             const tecnicosLimit = getWindowLimit(group.key, "tecnicos");
@@ -1411,7 +1411,7 @@ const DeterminationsSection = ({
         <button
           onClick={handleSaveNow}
           disabled={!canEditFinal || saving}
-          className="bg-blue-600 text-white w-full sm:w-auto px-6 py-2.5 rounded-full font-semibold hover:bg-blue-700 active:scale-95 transition-all shadow-sm hover:shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center bg-blue-600 text-white w-full sm:w-auto px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Guardar informacion
         </button>

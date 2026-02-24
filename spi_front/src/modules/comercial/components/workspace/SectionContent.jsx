@@ -208,7 +208,7 @@ const SectionContent = ({
 
     if (selectedSection === "prices") {
       return (
-        <Card className="p-6 border border-amber-100 bg-amber-50 text-amber-900">
+        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
           <h3 className="text-lg font-semibold mb-2">Precios (En desarrollo)</h3>
           <p className="text-sm">
             Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el
@@ -220,7 +220,7 @@ const SectionContent = ({
 
     if (selectedSection === "calculations") {
       return (
-        <Card className="p-6 border border-amber-100 bg-amber-50 text-amber-900">
+        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
           <h3 className="text-lg font-semibold mb-2">Calculos (En desarrollo)</h3>
           <p className="text-sm">
             Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el
@@ -232,7 +232,7 @@ const SectionContent = ({
 
     if (selectedSection === "rentability") {
       return (
-        <Card className="p-6 border border-amber-100 bg-amber-50 text-amber-900">
+        <Card className="p-4 sm:p-5 border border-amber-100 bg-amber-50 text-amber-900">
           <h3 className="text-lg font-semibold mb-2">Rentabilidad (En desarrollo)</h3>
           <p className="text-sm">
             Esta seccion esta deshabilitada. Actualmente se usara la exportacion de reactivos para el

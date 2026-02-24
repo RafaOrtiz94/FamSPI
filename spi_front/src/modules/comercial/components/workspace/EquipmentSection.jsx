@@ -1,18 +1,66 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { FiChevronDown, FiCpu, FiTrash2, FiPlus } from "react-icons/fi";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  FiAlertCircle,
+  FiCheckCircle,
+  FiChevronDown,
+  FiCpu,
+  FiPlus,
+  FiTrash2,
+  FiX
+} from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
 
-const DEFAULT_EQUIPMENT_PAIRS = [
-  { id: Date.now(), primary: null, primary_type: "new_available", backup: null, requiresBackup: false } // Start with one empty pair
-];
+const generateLocalId = () => {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return `eq-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+};
+
+const DEFAULT_EQUIPMENT_PAIR = () => ({
+  id: generateLocalId(),
+  primary: null,
+  primary_type: "new_available",
+  backup: null,
+  backup_type: "new_available",
+  requiresBackup: false,
+});
 
 const EQUIPMENT_TYPE_OPTIONS = [
   { value: "new_available", label: "Nuevo" },
   { value: "cu", label: "CU" },
   { value: "installed_client", label: "Instalado en cliente" },
 ];
+
+const ACTION_CLASS_BY_COLOR = {
+  blue: "bg-blue-600 hover:bg-blue-700",
+  slate: "bg-slate-700 hover:bg-slate-800",
+};
+const UI = {
+  card: "rounded-xl border border-slate-200 bg-white shadow-sm",
+  cardSelected: "rounded-xl border border-blue-300 bg-blue-50/40 ring-1 ring-blue-200 shadow-sm",
+  input: "w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all bg-white disabled:bg-slate-100 disabled:text-slate-500",
+  title: "text-base font-semibold text-slate-900 tracking-tight",
+  subtitle: "text-xs text-slate-600",
+  actionPrimary: "inline-flex items-center justify-center bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:opacity-50 disabled:cursor-not-allowed",
+  actionSecondary: "inline-flex items-center justify-center px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 disabled:opacity-50 disabled:cursor-not-allowed",
+  chip: "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
+};
+const INPUT_CLASS = UI.input;
+const SAVE_BUTTON_CLASS = UI.actionPrimary;
+const INITIAL_VISIBLE_COUNT = 10;
+const LOAD_MORE_STEP = 10;
+const TOAST_MESSAGES = {
+  catalog_load_error: "No se pudo cargar el catalogo de equipos.",
+  primary_selected: "Equipo principal seleccionado correctamente.",
+  backup_selected: "Equipo backup seleccionado correctamente.",
+  save_success: "Equipamiento guardado exitosamente.",
+  save_error: "No se pudo guardar el equipamiento.",
+  no_permissions: "No tienes permisos para editar esta seccion.",
+  invalid_data: "Revisa los datos ingresados antes de guardar.",
+};
 
 const normalizeEquipmentType = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -24,54 +72,138 @@ const normalizeEquipmentType = (value) => {
   return "new_available";
 };
 
-const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => (
-  <div
-    className={`border rounded-xl p-4 text-left space-y-2 transition hover:shadow ${disabled ? "opacity-60 pointer-events-none border-gray-200" : selected ? "border-blue-500 ring-2 ring-blue-200" : "border-gray-200"}`}
-  >
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
-        <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
-          <FiCpu />
+const getOpenPairsStorageKey = (businessCaseId) => `bc_equipment_open_pairs_${businessCaseId || "default"}`;
+
+const toNullableNumber = (value) => {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const firstText = (...values) => {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+  return "";
+};
+
+const resolveEquipmentCapacity = (raw = {}) => {
+  const perHour = toNullableNumber(raw.capacity_per_hour ?? raw.capacityPerHour ?? raw.capacity);
+  const perDay = toNullableNumber(raw.max_daily_capacity ?? raw.maxDailyCapacity);
+
+  if (perHour !== null) return perHour;
+  if (perDay !== null) return perDay;
+
+  const specs = raw.technical_specs || raw.technicalSpecs || {};
+  const specsCapacity = toNullableNumber(specs.capacity ?? specs.capacidad ?? specs.capacity_per_hour);
+  return specsCapacity;
+};
+
+const resolveEquipmentPrice = (raw = {}) => {
+  const basePrice = toNullableNumber(raw.base_price ?? raw.basePrice ?? raw.price);
+  if (basePrice !== null) return basePrice;
+
+  const leasePrice = toNullableNumber(raw.lease_price ?? raw.leasePrice);
+  if (leasePrice !== null) return leasePrice;
+
+  const metadata = raw.metadata || {};
+  return toNullableNumber(metadata.base_price ?? metadata.price);
+};
+
+const resolveEquipmentDescription = (raw = {}) => {
+  const technicalSpecs = raw.technical_specs || raw.technicalSpecs || {};
+  const metadata = raw.metadata || {};
+
+  return firstText(
+    raw.description,
+    raw.equipment_description,
+    technicalSpecs.description,
+    technicalSpecs.descripcion,
+    metadata.description,
+    metadata.descripcion,
+  );
+};
+
+const normalizeCatalogItem = (item = {}) => {
+  const id = item.id ?? item.equipment_id ?? item.equipmentId ?? item.code;
+  const name = firstText(item.name, item.equipment_name, item.nombre) || "Equipo";
+  const code = firstText(item.code, item.equipment_code, item.codigo);
+  const description = resolveEquipmentDescription(item);
+  const categories = Array.isArray(item.categories)
+    ? item.categories
+    : [item.category || item.categoria || item.category_type].filter(Boolean);
+  const manufacturer = firstText(item.manufacturer, item.fabricante);
+  const model = firstText(item.model, item.modelo);
+  const totalDeterminations = toNullableNumber(item.total_determinations);
+  const totalConsumables = toNullableNumber(item.total_consumables);
+
+  return {
+    id,
+    name,
+    code,
+    manufacturer,
+    model,
+    capacity: resolveEquipmentCapacity(item),
+    price: resolveEquipmentPrice(item),
+    description,
+    categories,
+    totalDeterminations,
+    totalConsumables,
+    raw: item,
+  };
+};
+
+const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, actionColor = "blue" }) => {
+  const actionColorClass = ACTION_CLASS_BY_COLOR[actionColor] || ACTION_CLASS_BY_COLOR.blue;
+  const hasCapacity = item.capacity !== null && item.capacity !== undefined;
+  const hasPrice = item.price !== null && item.price !== undefined;
+
+  return (
+    <div
+      className={`p-3 text-left space-y-2 transition ${disabled ? "opacity-60 pointer-events-none" : ""} ${selected ? UI.cardSelected : `${UI.card} hover:border-slate-300`}`}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <div className="p-2 rounded-lg bg-blue-50 text-blue-600">
+            <FiCpu />
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-900">{item.name}</p>
+            <p className="text-xs text-slate-600">{item.code || "Sin codigo"}</p>
+            {(item.manufacturer || item.model) && (
+              <p className="text-[11px] text-slate-600">
+                {[item.manufacturer, item.model].filter(Boolean).join(" - ")}
+              </p>
+            )}
+          </div>
         </div>
-        <div>
-          <p className="text-sm font-semibold text-gray-900">{item.name}</p>
-          <p className="text-xs text-gray-500">{item.code || "Sin código"}</p>
+        <div className="text-right text-[11px] text-slate-600">
+          {hasCapacity ? <p>Cap: {item.capacity}</p> : null}
+          {hasPrice ? <p>${item.price}</p> : null}
         </div>
       </div>
-      <div className="text-right">
-        <p className="text-sm text-gray-700">Capacidad: {item.capacity || "-"}</p>
-        <p className="text-sm text-gray-700">Precio: ${item.price ?? "-"}</p>
-      </div>
-    </div>
-    <p className="text-xs text-gray-600">{item.description || "Sin descripción"}</p>
-    <div className="flex flex-wrap gap-1">
-      {(item.categories || []).map((cat) => (
-        <span
-          key={cat}
-          className="text-[10px] px-2 py-1 rounded-full bg-gray-100 text-gray-700 border border-gray-200"
+      {onSelect && (
+        <button
+          type="button"
+          onClick={() => onSelect(item)}
+          className={`w-full rounded-lg px-3 py-2 text-xs font-semibold text-white transition ${actionColorClass}`}
+          disabled={disabled}
         >
-          {cat}
-        </span>
-      ))}
+          {actionLabel}
+        </button>
+      )}
     </div>
-    {onSelect && (
-      <button
-        type="button"
-        onClick={() => onSelect(item)}
-        className={`w-full rounded-lg bg-${actionColor}-500 px-3 py-2 text-xs font-semibold text-white hover:bg-${actionColor}-600 mt-2`}
-      >
-        {actionLabel}
-      </button>
-    )}
-  </div>
-);
+  );
+};
 
 const AccordionSection = ({ title, description, isOpen, onToggle, statusBadge, children }) => (
   <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm mb-4">
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full items-center justify-between gap-2 px-6 py-4 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 focus:outline-none"
+      className="flex w-full items-center justify-between gap-2 px-4 sm:px-5 py-3.5 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 focus:outline-none"
     >
       <div>
         <p>{title}</p>
@@ -83,19 +215,20 @@ const AccordionSection = ({ title, description, isOpen, onToggle, statusBadge, c
       </div>
     </button>
     <div className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
-      <div className="px-6 pb-6 pt-0">{children}</div>
+      <div className="px-4 sm:px-5 pb-5 pt-0">{children}</div>
     </div>
   </div>
 );
 
-const SwitchField = ({ label, checked, onChange }) => (
-  <div className="flex items-center justify-between">
+const SwitchField = ({ label, checked, onChange, disabled = false }) => (
+  <div className="flex items-center justify-between gap-3">
     <span className="text-sm font-semibold text-gray-700">{label}</span>
     <button
       type="button"
       role="switch"
       aria-checked={checked}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-gray-200"}`}
+      disabled={disabled}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-gray-200"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       onClick={() => onChange(!checked)}
     >
       <span
@@ -113,104 +246,159 @@ const EquipmentSection = ({
 }) => {
   const { id: bcId } = useParams();
   const { showToast, showLoader, hideLoader } = useUI();
-  const [items, setItems] = useState([]);
-  const [filters, setFilters] = useState({ search: "", category: "" });
-  const [loading, setLoading] = useState(false);
+  const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
 
-  // ONE-TIME HYDRATION GUARD
+  const [items, setItems] = useState([]);
+  const [loadingCatalog, setLoadingCatalog] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [groupSearchByPair, setGroupSearchByPair] = useState({});
+  const [debouncedGroupSearchByPair, setDebouncedGroupSearchByPair] = useState({});
+  const [openPairs, setOpenPairs] = useState({});
+  const [compatibilityByPair, setCompatibilityByPair] = useState({});
+  const [compatibilityLoadingByPair, setCompatibilityLoadingByPair] = useState({});
+  const [visibleRowsByPair, setVisibleRowsByPair] = useState({});
+  const [pendingDeletePairId, setPendingDeletePairId] = useState(null);
+
   const hydratedRef = useRef(false);
+  const pairRefs = useRef({});
 
   const sectionData = useMemo(() => {
     const equipmentDetails =
       businessCase?.equipment_details ||
       businessCase?.extra?.equipment_details ||
       null;
-    if (!equipmentDetails) return { equipmentPairs: DEFAULT_EQUIPMENT_PAIRS };
 
-    return {
-      equipmentPairs: equipmentDetails.map((detail, index) => ({
-        id: detail.id || Date.now() + index,
-        primary_type: normalizeEquipmentType(
-          detail.primary_type ||
-          detail.primary?.type
-        ),
-        requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
-        primary: detail.primary ? {
-          id: detail.primary.id,
-          name: detail.primary.name,
-          code: detail.primary.code,
-          capacity: detail.primary.capacity,
-          price: detail.primary.price,
-          description: detail.primary.description,
-          categories: detail.primary.categories || []
-        } : detail.primary_id ? { id: detail.primary_id } : null,
-        backup: detail.backup ? {
-          id: detail.backup.id,
-          name: detail.backup.name,
-          code: detail.backup.code,
-          capacity: detail.backup.capacity,
-          price: detail.backup.price,
-          description: detail.backup.description,
-          categories: detail.backup.categories || [],
-          condition: detail.backup.condition || "Nuevo",
-          install_with_primary: detail.backup.install_with_primary || false
-        } : detail.backup_id ? { id: detail.backup_id } : null
-      })) || DEFAULT_EQUIPMENT_PAIRS
-    };
+    if (!equipmentDetails) {
+      return { equipmentPairs: [DEFAULT_EQUIPMENT_PAIR()] };
+    }
+
+    const mapped = equipmentDetails.map((detail, index) => ({
+      id: detail.id || generateLocalId() || String(index + 1),
+      primary_type: normalizeEquipmentType(detail.primary_type || detail.primary?.type),
+      requiresBackup: detail.requires_backup ?? detail.requiresBackup ?? Boolean(detail.backup),
+      primary: detail.primary
+        ? {
+            id: detail.primary.id,
+            name: detail.primary.name,
+            code: detail.primary.code,
+            capacity: detail.primary.capacity,
+            price: detail.primary.price,
+            description: detail.primary.description,
+            categories: detail.primary.categories || [],
+          }
+        : detail.primary_id
+          ? { id: detail.primary_id }
+          : null,
+      backup_type: normalizeEquipmentType(detail.backup_type || detail.backup?.type),
+      backup: detail.backup
+        ? {
+            id: detail.backup.id,
+            name: detail.backup.name,
+            code: detail.backup.code,
+            capacity: detail.backup.capacity,
+            price: detail.backup.price,
+            description: detail.backup.description,
+            categories: detail.backup.categories || [],
+            condition: detail.backup.condition || "Nuevo",
+            install_with_primary: detail.backup.install_with_primary || false,
+          }
+        : detail.backup_id
+          ? { id: detail.backup_id }
+          : null,
+    }));
+
+    return { equipmentPairs: mapped.length ? mapped : [DEFAULT_EQUIPMENT_PAIR()] };
   }, [businessCase]);
 
-  // Pairs state: Array of { id, primary: {}, primary_type, backup: {}, requiresBackup }
   const [equipmentPairs, setEquipmentPairs] = useState(() => sectionData.equipmentPairs);
 
   useEffect(() => {
     if (!sectionData.equipmentPairs || hydratedRef.current) return;
     setEquipmentPairs(sectionData.equipmentPairs);
+    const nextOpenState = {};
+    const nextVisibleRows = {};
+    const storageKey = getOpenPairsStorageKey(bcId);
+    let persistedOpenPairs = null;
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      persistedOpenPairs = raw ? JSON.parse(raw) : null;
+    } catch (_error) {
+      persistedOpenPairs = null;
+    }
+    sectionData.equipmentPairs.forEach((pair, idx) => {
+      nextOpenState[pair.id] = typeof persistedOpenPairs?.[pair.id] === "boolean"
+        ? persistedOpenPairs[pair.id]
+        : idx === 0;
+      nextVisibleRows[pair.id] = {
+        primary: INITIAL_VISIBLE_COUNT,
+        backup: INITIAL_VISIBLE_COUNT,
+      };
+    });
+    setOpenPairs(nextOpenState);
+    setVisibleRowsByPair(nextVisibleRows);
     hydratedRef.current = true;
-  }, [sectionData.equipmentPairs]);
+  }, [sectionData.equipmentPairs, bcId]);
 
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const timeoutId = setTimeout(() => {
+      setDebouncedGroupSearchByPair(groupSearchByPair);
+    }, 250);
+    return () => clearTimeout(timeoutId);
+  }, [groupSearchByPair]);
 
-  const [openPairs, setOpenPairs] = useState({}); // { [pairId]: boolean }
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      sessionStorage.setItem(getOpenPairsStorageKey(bcId), JSON.stringify(openPairs));
+    } catch (_error) {}
+  }, [openPairs, bcId]);
 
   const togglePair = (pairId) => {
-    setOpenPairs(prev => ({ ...prev, [pairId]: !prev[pairId] }));
+    setOpenPairs((prev) => ({ ...prev, [pairId]: !prev[pairId] }));
   };
 
-  const loadEquipment = async () => {
-    setLoading(true);
+  const markDirty = () => setDirty(true);
+  const notify = useCallback((type, key, overrideMessage = "") => {
+    showToast(overrideMessage || TOAST_MESSAGES[key], type);
+  }, [showToast]);
+
+  const increaseVisibleRows = (pairId, section = "primary") => {
+    setVisibleRowsByPair((prev) => ({
+      ...prev,
+      [pairId]: {
+        primary: prev[pairId]?.primary || INITIAL_VISIBLE_COUNT,
+        backup: prev[pairId]?.backup || INITIAL_VISIBLE_COUNT,
+        [section]: (prev[pairId]?.[section] || INITIAL_VISIBLE_COUNT) + LOAD_MORE_STEP,
+      },
+    }));
+  };
+
+  const updatePair = (pairId, updates) => {
+    setEquipmentPairs((prev) => prev.map((pair) => (pair.id === pairId ? { ...pair, ...updates } : pair)));
+    markDirty();
+  };
+
+  const loadEquipment = useCallback(async () => {
+    setLoadingCatalog(true);
     try {
-      const res = await api.get("/equipment-catalog", {
-        params: {
-          search: filters.search || undefined,
-          category: filters.category || undefined,
-        },
-      });
+      const res = await api.get("/equipment-catalog");
       const payload = res.data?.data ?? res.data;
       const parsedItems = Array.isArray(payload?.items) ? payload.items : (Array.isArray(payload) ? payload : []);
 
-      const normalized = parsedItems.map((item) => {
-        const id = item.id ?? item.equipment_id ?? item.equipmentId ?? item.code;
-        return {
-          id,
-          name: item.name ?? item.equipment_name ?? "Equipo",
-          code: item.code,
-          capacity: item.capacity,
-          price: item.price,
-          description: item.description,
-          categories: item.categories ?? [item.category || item.categoria || item.category_type].filter(Boolean),
-          raw: item,
-        };
-      }).filter((i) => i.id);
+      const normalized = parsedItems.map(normalizeCatalogItem).filter((item) => item.id);
+
       setItems(normalized);
-    } catch (err) {
-      showToast("No se pudo cargar el catálogo", "error");
+    } catch (error) {
+      showToast(TOAST_MESSAGES.catalog_load_error, "error");
     } finally {
-      setLoading(false);
+      setLoadingCatalog(false);
     }
-  };
+  }, [showToast]);
 
   useEffect(() => {
     loadEquipment();
-  }, []);
+  }, [loadEquipment]);
 
   useEffect(() => {
     if (!items.length) return;
@@ -219,348 +407,725 @@ const EquipmentSection = ({
       const next = prev.map((pair) => {
         let primary = pair.primary;
         let backup = pair.backup;
-        if (primary && !primary.name) {
-          const found = items.find((item) => item.id === primary.id);
+
+        const primaryNeedsEnrichment = primary && (!primary.name || primary.capacity === null || primary.capacity === undefined || primary.price === null || primary.price === undefined || !primary.description);
+        if (primaryNeedsEnrichment) {
+          const found = items.find((item) => String(item.id) === String(primary.id));
           if (found) {
-            primary = { ...found };
+            primary = { ...found, ...primary, type: normalizeEquipmentType(pair.primary_type) };
             changed = true;
           }
         }
-        if (backup && !backup.name) {
-          const found = items.find((item) => item.id === backup.id);
+
+        const backupNeedsEnrichment = backup && (!backup.name || backup.capacity === null || backup.capacity === undefined || backup.price === null || backup.price === undefined || !backup.description);
+        if (backupNeedsEnrichment) {
+          const found = items.find((item) => String(item.id) === String(backup.id));
           if (found) {
             backup = {
               ...found,
+              ...backup,
+              type: normalizeEquipmentType(pair.backup_type),
               condition: backup.condition || "Nuevo",
-              install_with_primary: backup.install_with_primary || false
+              install_with_primary: backup.install_with_primary || false,
             };
             changed = true;
           }
         }
+
         return primary !== pair.primary || backup !== pair.backup ? { ...pair, primary, backup } : pair;
       });
+
       return changed ? next : prev;
     });
   }, [items]);
 
-  // Update a specific pair
-  const updatePair = (pairId, updates) => {
-    const newPairs = equipmentPairs.map(p => p.id === pairId ? { ...p, ...updates } : p);
-    setEquipmentPairs(newPairs);
-  };
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const loadCompatibility = async (pair) => {
+      if (!pair?.primary?.id || !pair.requiresBackup) return;
+      const pairId = pair.id;
+      setCompatibilityLoadingByPair((prev) => ({ ...prev, [pairId]: true }));
+      try {
+        const res = await api.get(
+          `/business-case/equipment/${pair.primary.id}/compatibility/backups`,
+          { signal: controller.signal },
+        );
+        const candidates = Array.isArray(res?.data?.data) ? res.data.data : [];
+        const normalized = candidates.map((item) => {
+          const base = normalizeCatalogItem({
+            ...item,
+            categories: item.categories || [item.category_type].filter(Boolean),
+            price: item.base_price ?? item.price,
+            capacity: item.capacity_per_hour ?? item.capacity,
+          });
+          return {
+            ...base,
+            compatibilityScore: item?.compatibility_metadata?.final_score ?? null,
+            matchType: item?.compatibility_metadata?.match_type || item?.match_type || null,
+          };
+        });
+        setCompatibilityByPair((prev) => ({ ...prev, [pairId]: normalized }));
+      } catch (_error) {
+        setCompatibilityByPair((prev) => ({ ...prev, [pairId]: [] }));
+      } finally {
+        setCompatibilityLoadingByPair((prev) => ({ ...prev, [pairId]: false }));
+      }
+    };
+
+    equipmentPairs.forEach((pair) => {
+      if (pair?.primary?.id && pair.requiresBackup && compatibilityByPair[pair.id] === undefined) {
+        loadCompatibility(pair);
+      }
+    });
+
+    return () => controller.abort();
+  }, [equipmentPairs, compatibilityByPair]);
 
   const addPair = () => {
-    // Generate deterministic ID based on existing pairs to ensure consistency
-    const maxId = equipmentPairs.length > 0 ? Math.max(...equipmentPairs.map(p => p.id)) : 0;
-    const newPair = { id: maxId + 1, primary: null, primary_type: "new_available", backup: null, requiresBackup: false };
-    const newPairs = [...equipmentPairs, newPair];
-    setEquipmentPairs(newPairs);
-    setOpenPairs(prev => ({ ...prev, [newPair.id]: true }));
+    const newPair = DEFAULT_EQUIPMENT_PAIR();
+    setEquipmentPairs((prev) => [...prev, newPair]);
+    setOpenPairs((prev) => ({ ...prev, [newPair.id]: true }));
+    setGroupSearchByPair((prev) => ({ ...prev, [newPair.id]: "" }));
+    setVisibleRowsByPair((prev) => ({
+      ...prev,
+      [newPair.id]: { primary: INITIAL_VISIBLE_COUNT, backup: INITIAL_VISIBLE_COUNT },
+    }));
+    markDirty();
   };
 
-  const removePair = (pairId) => {
+  const removePair = (pairId, forceDelete = false) => {
     if (equipmentPairs.length <= 1) {
-      showToast("Debe haber al menos un grupo de equipos", "warning");
+      notify("warning", "invalid_data", "Debe haber al menos un grupo de equipos.");
       return;
     }
-    const newPairs = equipmentPairs.filter(p => p.id !== pairId);
-    setEquipmentPairs(newPairs);
+    const pair = equipmentPairs.find((entry) => entry.id === pairId);
+    const hasData = Boolean(pair?.primary || pair?.backup || pair?.requiresBackup);
+    if (!forceDelete && hasData) {
+      setPendingDeletePairId(pairId);
+      return;
+    }
+    setEquipmentPairs((prev) => prev.filter((pair) => pair.id !== pairId));
+    setOpenPairs((prev) => {
+      const next = { ...prev };
+      delete next[pairId];
+      return next;
+    });
+    setVisibleRowsByPair((prev) => {
+      const next = { ...prev };
+      delete next[pairId];
+      return next;
+    });
+    setGroupSearchByPair((prev) => {
+      const next = { ...prev };
+      delete next[pairId];
+      return next;
+    });
+    setDebouncedGroupSearchByPair((prev) => {
+      const next = { ...prev };
+      delete next[pairId];
+      return next;
+    });
+    delete pairRefs.current[pairId];
+    markDirty();
   };
 
   const selectPrimary = (pairId, item) => {
-    console.info("[BC][EQUIPMENT][SELECT_PRIMARY]", {
-      pairId,
-      id: item?.id,
-      code: item?.code,
-      name: item?.name,
-      id_fabricante: item?.raw?.technical_specs?.id_fabricante ?? item?.raw?.metadata?.id_fabricante ?? null,
-      raw: item?.raw,
-    });
+    const pair = equipmentPairs.find((entry) => entry.id === pairId);
+    const nextType = normalizeEquipmentType(pair?.primary_type);
     updatePair(pairId, {
-      primary: {
-        ...item,
-        type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type),
-      },
-      primary_type: normalizeEquipmentType(equipmentPairs.find((pair) => pair.id === pairId)?.primary_type),
+      primary: { ...item, type: nextType },
+      primary_type: nextType,
       backup: null,
+      backup_type: "new_available",
       requiresBackup: false,
     });
-    showToast("Equipo principal seleccionado", "success");
+    setCompatibilityByPair((prev) => {
+      const next = { ...prev };
+      delete next[pairId];
+      return next;
+    });
+    notify("success", "primary_selected");
   };
 
   const selectBackup = (pairId, item) => {
-    console.info("[BC][EQUIPMENT][SELECT_BACKUP]", {
-      pairId,
-      id: item?.id,
-      code: item?.code,
-      name: item?.name,
-      id_fabricante: item?.raw?.technical_specs?.id_fabricante ?? item?.raw?.metadata?.id_fabricante ?? null,
-      raw: item?.raw,
-    });
+    const pair = equipmentPairs.find((entry) => entry.id === pairId);
+    const nextType = normalizeEquipmentType(pair?.backup_type);
     updatePair(pairId, {
       requiresBackup: true,
-      backup: { ...item, condition: "Nuevo", install_with_primary: false }
+      backup: {
+        ...item,
+        type: nextType,
+        condition: "Nuevo",
+        install_with_primary: false,
+      },
+      backup_type: nextType,
     });
-    showToast("Backup seleccionado", "success");
+    notify("success", "backup_selected");
   };
 
-  const getBackupCandidates = (primaryItem) => {
-    if (!primaryItem || !primaryItem.categories) return [];
-    // Filter by similar categories and sort deterministically by name, then by ID
-    return items
-      .filter(i => i.id !== primaryItem.id && i.categories.some(cat => primaryItem.categories.includes(cat)))
-      .sort((a, b) => {
-        // Sort by name first (case-insensitive)
-        const nameCompare = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-        if (nameCompare !== 0) return nameCompare;
-        // If names are equal, sort by ID for deterministic ordering
-        return String(a.id).localeCompare(String(b.id));
-      });
-  };
-
-  // Sort equipment items deterministically for consistent display
   const sortedEquipmentItems = useMemo(() => {
     return [...items].sort((a, b) => {
-      // Sort by name first (case-insensitive)
-      const nameCompare = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
-      if (nameCompare !== 0) return nameCompare;
-      // If names are equal, sort by ID for deterministic ordering
+      const byName = a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+      if (byName !== 0) return byName;
       return String(a.id).localeCompare(String(b.id));
     });
   }, [items]);
 
-  const handleSave = async () => {
-    if (equipmentPairs.some(p => !p.primary)) {
-      showToast("Todos los grupos deben tener un equipo principal seleccionado", "warning");
+  const getBackupCandidates = (pair) => {
+    if (!pair?.primary) return [];
+
+    const compatibilityCandidates = compatibilityByPair[pair.id] || [];
+    if (compatibilityCandidates.length) {
+      return compatibilityCandidates.filter((candidate) => String(candidate.id) !== String(pair.primary.id));
+    }
+
+    const primaryModel = String(pair.primary?.model || "").trim().toLowerCase();
+    const primaryCategories = Array.isArray(pair.primary?.categories) ? pair.primary.categories : [];
+
+    const ranked = sortedEquipmentItems
+      .filter((item) => String(item.id) !== String(pair.primary.id))
+      .map((item) => {
+        const itemModel = String(item?.model || "").trim().toLowerCase();
+        const sameModel = Boolean(primaryModel && itemModel && primaryModel === itemModel);
+        const sameCategory = Boolean(
+          primaryCategories.length &&
+          Array.isArray(item?.categories) &&
+          item.categories.some((category) => primaryCategories.includes(category))
+        );
+
+        // Rank fallback compatibility: same model first, then same category, then the rest.
+        let rank = 3;
+        if (sameModel) rank = 1;
+        else if (sameCategory) rank = 2;
+
+        return { ...item, _fallbackRank: rank };
+      })
+      .filter((item) => item._fallbackRank <= 2)
+      .sort((a, b) => a._fallbackRank - b._fallbackRank);
+
+    return ranked;
+  };
+
+  const validationIssues = useMemo(() => {
+    const issues = [];
+
+    equipmentPairs.forEach((pair, index) => {
+      const label = `Grupo ${index + 1}`;
+      if (!pair.primary?.id) {
+        issues.push({ pairId: pair.id, message: `${label}: falta equipo principal.` });
+      }
+      if (pair.requiresBackup && !pair.backup?.id) {
+        issues.push({ pairId: pair.id, message: `${label}: requiere backup pero no tiene equipo de respaldo.` });
+      }
+      if (pair.requiresBackup && pair.backup?.id && String(pair.primary?.id) === String(pair.backup?.id)) {
+        issues.push({ pairId: pair.id, message: `${label}: principal y backup no pueden ser el mismo equipo.` });
+      }
+      if (pair.requiresBackup && !pair.backup_type) {
+        issues.push({ pairId: pair.id, message: `${label}: falta estado del backup.` });
+      }
+    });
+
+    return issues;
+  }, [equipmentPairs]);
+
+  const pairsValidation = useMemo(() => validationIssues.map((issue) => issue.message), [validationIssues]);
+
+  const summary = useMemo(() => {
+    const total = equipmentPairs.length;
+    const withPrimary = equipmentPairs.filter((pair) => Boolean(pair.primary?.id)).length;
+    const withBackup = equipmentPairs.filter((pair) => Boolean(pair.requiresBackup && pair.backup?.id)).length;
+    const backupRequired = equipmentPairs.filter((pair) => Boolean(pair.requiresBackup)).length;
+
+    return {
+      total,
+      withPrimary,
+      withBackup,
+      backupRequired,
+    };
+  }, [equipmentPairs]);
+
+  const confirmDeletePair = () => {
+    if (!pendingDeletePairId) return;
+    removePair(pendingDeletePairId, true);
+    setPendingDeletePairId(null);
+  };
+
+  const cancelDeletePair = () => {
+    setPendingDeletePairId(null);
+  };
+
+  const handleSave = useCallback(async () => {
+    if (!canEdit) {
+      notify("warning", "no_permissions");
       return;
     }
-    if (equipmentPairs.some(p => p.requiresBackup && !p.backup)) {
-      showToast("Si el cliente solicita backup, seleccione uno o desactive el backup", "warning");
+
+    if (pairsValidation.length) {
+      notify("warning", "invalid_data", pairsValidation[0]);
+      const firstIssue = validationIssues[0];
+      if (firstIssue?.pairId) {
+        setOpenPairs((prev) => ({ ...prev, [firstIssue.pairId]: true }));
+        const node = pairRefs.current[firstIssue.pairId];
+        if (node && typeof node.scrollIntoView === "function") {
+          node.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
       return;
     }
+
     if (!bcId) {
-      showToast("ID del caso de negocio no disponible", "error");
+      notify("error", "save_error", "ID del caso de negocio no disponible.");
       return;
     }
 
     try {
       showLoader();
 
-      // Prepare payload with list of pairs
       const payload = {
-        equipment_pairs: equipmentPairs.map(p => ({
-          primary_id: p.primary.id,
-          primary_type: normalizeEquipmentType(p.primary_type),
-          requires_backup: Boolean(p.requiresBackup),
-          backup_id: p.requiresBackup ? (p.backup?.id || null) : null,
-          backup_install_simultaneous: p.requiresBackup && p.backup ? Boolean(p.backup.install_with_primary) : false,
+        equipment_pairs: equipmentPairs.map((pair) => ({
+          primary_id: Number(pair.primary.id),
+          primary_type: normalizeEquipmentType(pair.primary_type),
+          backup_type: pair.requiresBackup ? normalizeEquipmentType(pair.backup_type || pair.backup?.type) : null,
+          requires_backup: Boolean(pair.requiresBackup),
+          backup_id: pair.requiresBackup ? Number(pair.backup?.id || null) : null,
+          backup_install_simultaneous: pair.requiresBackup && pair.backup ? Boolean(pair.backup.install_with_primary) : false,
         })),
       };
 
-      // Use existing API endpoint for equipment details
       await api.post(`/business-case/${bcId}/equipment-details-v2`, payload);
 
-      showToast("Equipamiento guardado exitosamente", "success");
-
-      // Call onSave callback to refresh UI guidance and update completion indicators
+      notify("success", "save_success");
+      setDirty(false);
       onSave();
-    } catch (err) {
-      showToast("Error guardando equipos", "error");
-      console.error(err);
+    } catch (error) {
+      notify("error", "save_error", error?.response?.data?.message || TOAST_MESSAGES.save_error);
     } finally {
       hideLoader();
+    }
+  }, [
+    canEdit,
+    pairsValidation,
+    validationIssues,
+    bcId,
+    showLoader,
+    hideLoader,
+    equipmentPairs,
+    onSave,
+    notify
+  ]);
+
+  const jumpToFirstIssue = () => {
+    const firstIssue = validationIssues[0];
+    if (!firstIssue?.pairId) return;
+    setOpenPairs((prev) => ({ ...prev, [firstIssue.pairId]: true }));
+    const node = pairRefs.current[firstIssue.pairId];
+    if (node && typeof node.scrollIntoView === "function") {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center border-b pb-4">
-        <h2 className="text-lg font-semibold text-gray-800">Selección de Equipos</h2>
-        <button
-          onClick={addPair}
-          className="flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700"
-        >
-          <FiPlus /> Agregar Grupo de Equipos
-        </button>
+    <div className="space-y-4 sm:space-y-5">
+      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4">
+        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
+          <div>
+            <h2 className={UI.title}>Seleccion de equipos</h2>
+            <p className={UI.subtitle}>Define principal y backup por grupo.</p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+            <button
+              onClick={addPair}
+              disabled={!canEdit}
+              className={`${UI.actionPrimary} gap-2 w-full sm:w-auto`}
+            >
+              <FiPlus /> Agregar grupo
+            </button>
+          </div>
+        </div>
       </div>
 
+      <div className={`${UI.card} px-3 py-2 text-xs text-slate-700 flex flex-wrap gap-3 items-center`}>
+        <span>Total grupos: <strong>{summary.total}</strong></span>
+        <span>Con principal: <strong>{summary.withPrimary}</strong></span>
+        <span>Backup requerido: <strong>{summary.backupRequired}</strong></span>
+        <span>Backup completo: <strong>{summary.withBackup}</strong></span>
+        {dirty && <span className="inline-flex items-center gap-1 text-amber-700"><FiAlertCircle /> Cambios sin guardar</span>}
+        {loadingCatalog && <span className="text-blue-700">Cargando catalogo...</span>}
+      </div>
+
+      {!canEdit && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-700">
+          Esta seccion esta en modo solo lectura para tu rol.
+        </div>
+      )}
+
+      {pairsValidation.length > 0 && (
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-700 space-y-1">
+          <div>{pairsValidation[0]}</div>
+          {pairsValidation.length > 1 && <div>y {pairsValidation.length - 1} validaciones mas...</div>}
+          <div className="pt-2">
+            <button type="button" onClick={jumpToFirstIssue} className="text-xs font-semibold text-rose-700 underline underline-offset-2">
+              Ir al primer error
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-4">
-        {equipmentPairs.map((pair, index) => (
-          <AccordionSection
-            key={pair.id}
-            title={`Grupo de Equipos #${index + 1}`}
-            description={pair.primary ? `${pair.primary.name} ${pair.requiresBackup ? "+ Backup" : ""}` : "Seleccione equipos..."}
-            isOpen={openPairs[pair.id]}
-            onToggle={() => togglePair(pair.id)}
-            statusBadge={pair.primary ? <span className="text-green-600 text-xs font-bold">Listo</span> : <span className="text-amber-600 text-xs">Pendiente</span>}
-          >
-            <div className="space-y-6">
-              {/* Primary Selection */}
-              <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-gray-700">Equipo Principal</h4>
-                <div className="w-full sm:max-w-sm">
-                  <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
-                    Tipo de equipo
-                  </label>
-                  <select
-                    value={normalizeEquipmentType(pair.primary_type)}
-                    onChange={(e) =>
-                      updatePair(pair.id, {
-                        primary_type: normalizeEquipmentType(e.target.value),
-                        primary: pair.primary
-                          ? { ...pair.primary, type: normalizeEquipmentType(e.target.value) }
-                          : pair.primary,
-                      })
-                    }
-                    className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all bg-white"
-                  >
-                    {EQUIPMENT_TYPE_OPTIONS.map((option) => (
-                      <option key={option.value} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {/* Simple Search for this pair (uses global items but could filter locally) */}
-                <div className="flex gap-2 mb-2">
-                  <input
-                    placeholder="Filtrar..."
-                    className="border rounded px-2 py-1 text-sm w-full"
-                    onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))} // Global search for simplicity
-                  />
-                </div>
+        {equipmentPairs.map((pair, index) => {
+          const groupSearch = String(debouncedGroupSearchByPair[pair.id] || "").toLowerCase();
+          const compatibleCandidates = getBackupCandidates(pair);
+          const visiblePrimaryRows = visibleRowsByPair[pair.id]?.primary || INITIAL_VISIBLE_COUNT;
+          const visibleBackupRows = visibleRowsByPair[pair.id]?.backup || INITIAL_VISIBLE_COUNT;
+          const filteredPrimaryItems = sortedEquipmentItems.filter((item) =>
+            item.name.toLowerCase().includes(groupSearch) ||
+            String(item.code || "").toLowerCase().includes(groupSearch),
+          );
+          const visiblePrimaryItems = filteredPrimaryItems.slice(0, visiblePrimaryRows);
+          const visibleBackupCandidates = compatibleCandidates.slice(0, visibleBackupRows);
+          const hasMorePrimary = filteredPrimaryItems.length > visiblePrimaryItems.length;
+          const hasMoreBackup = compatibleCandidates.length > visibleBackupCandidates.length;
 
-                {!pair.primary ? (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                    {sortedEquipmentItems.filter(i => i.name.toLowerCase().includes(filters.search.toLowerCase())).map(item => (
-                      <EquipmentCard
-                        key={item.id}
-                        item={item}
-                        actionLabel="Seleccionar Principal"
-                        onSelect={(i) => selectPrimary(pair.id, i)}
-                      />
-                    ))}
-                  </div>
-                ) : (
+          return (
+            <div key={pair.id} ref={(node) => { pairRefs.current[pair.id] = node; }}>
+            <AccordionSection
+              title={`Grupo de equipos #${index + 1}`}
+              description={pair.primary ? `${pair.primary.name}${pair.requiresBackup ? " + backup" : ""}` : "Seleccione equipos"}
+              isOpen={Boolean(openPairs[pair.id])}
+              onToggle={() => togglePair(pair.id)}
+              statusBadge={
+                <div className="flex items-center gap-2 flex-wrap justify-end">
+                  {pair.primary_type && pair.primary && (
+                    <span className={`${UI.chip} bg-blue-50 text-blue-700`}>
+                      P: {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
+                    </span>
+                  )}
+                  {pair.requiresBackup && pair.backup && (
+                    <span className={`${UI.chip} bg-slate-100 text-slate-700`}>
+                      B: {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.backup_type))?.label || "Nuevo"}
+                    </span>
+                  )}
+                  {pair.primary
+                    ? <span className="inline-flex items-center gap-1 text-emerald-700 text-xs font-semibold"><FiCheckCircle size={12} /> Listo</span>
+                    : <span className="text-amber-600 text-xs">Pendiente</span>}
+                </div>
+              }
+            >
+              <div className="space-y-5">
+                <div className="space-y-3">
+                  <h4 className="text-sm font-semibold text-gray-700">Equipo principal</h4>
+
                   <div className="relative">
-                    <EquipmentCard item={pair.primary} selected />
-                    <div className="mt-2">
-                      <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
-                        {EQUIPMENT_TYPE_OPTIONS.find((option) => option.value === normalizeEquipmentType(pair.primary_type))?.label || "Nuevo"}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => updatePair(pair.id, { primary: null, backup: null, requiresBackup: false })}
-                      className="absolute top-2 right-2 text-red-500 hover:text-red-700"
-                    >
-                      <FiTrash2 /> Cambiar
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Backup Selection (Only if Primary is set) */}
-              {pair.primary && (
-                <div className="space-y-3 border-t pt-4">
-                  <div className="flex justify-between items-center">
-                    <h4 className="text-sm font-semibold text-gray-700">Equipo de Respaldo (Backup)</h4>
-                    {pair.backup && pair.requiresBackup && (
+                    <input
+                      placeholder="Buscar equipo en este grupo..."
+                      className={`${INPUT_CLASS} pr-10`}
+                      value={groupSearchByPair[pair.id] || ""}
+                      onChange={(event) => setGroupSearchByPair((prev) => ({ ...prev, [pair.id]: event.target.value }))}
+                      disabled={!canEdit}
+                    />
+                    {!!groupSearchByPair[pair.id] && (
                       <button
-                        onClick={() => updatePair(pair.id, { backup: null, requiresBackup: false })}
-                        className="text-xs text-red-500 hover:text-red-700"
+                        type="button"
+                        onClick={() => setGroupSearchByPair((prev) => ({ ...prev, [pair.id]: "" }))}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700"
+                        aria-label="Limpiar busqueda"
                       >
-                        Eliminar Backup
+                        <FiX />
                       </button>
                     )}
                   </div>
-                  <div className="flex items-start justify-between gap-4 rounded-lg border border-amber-100 bg-amber-50 px-4 py-3">
-                    <div>
-                      <p className="text-sm font-semibold text-amber-900">Backup opcional</p>
-                      <p className="text-xs text-amber-700">
-                        No es obligatorio elegir equipo backup. Solo si el cliente lo solicita.
-                      </p>
-                    </div>
-                    <SwitchField
-                      label="Requiere backup"
-                      checked={Boolean(pair.requiresBackup)}
-                      onChange={(nextValue) => updatePair(pair.id, { requiresBackup: nextValue, backup: nextValue ? pair.backup : null })}
-                    />
-                  </div>
-                  {pair.requiresBackup && (
-                    <>
-                      <p className="text-xs text-gray-500">
-                        Mostrando equipos con caracteristicas similares (mismas categorias).
-                      </p>
 
-                      {!pair.backup ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
-                          {getBackupCandidates(pair.primary).map(item => (
-                            <EquipmentCard
-                              key={item.id}
-                              item={item}
-                              actionLabel="Agregar como Backup"
-                              actionColor="amber"
-                              onSelect={(i) => selectBackup(pair.id, i)}
-                            />
-                          ))}
-                          {getBackupCandidates(pair.primary).length === 0 && (
-                            <p className="text-sm text-gray-500 italic">No se encontraron equipos similares.</p>
-                          )}
+                  {!pair.primary ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+                      {loadingCatalog && Array.from({ length: 4 }).map((_, skeletonIndex) => (
+                        <div key={`primary-skeleton-${pair.id}-${skeletonIndex}`} className="border rounded-xl p-4 animate-pulse space-y-2">
+                          <div className="h-4 bg-gray-200 rounded w-2/3" />
+                          <div className="h-3 bg-gray-100 rounded w-1/2" />
+                          <div className="h-3 bg-gray-100 rounded w-full" />
                         </div>
-                      ) : (
-                        <div className="bg-amber-50 p-3 rounded-lg border border-amber-100">
-                          <h5 className="font-semibold text-sm text-amber-900">{pair.backup.name}</h5>
-                          <div className="mt-2 text-xs space-y-2">
-                            <label className="block">
-                              Condicion:
-                              <input
-                                value={pair.backup.condition}
-                                onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, condition: e.target.value } })}
-                                className="ml-2 border rounded px-1"
-                              />
-                            </label>
-                            <label className="flex items-center gap-2">
-                              <input
-                                type="checkbox"
-                                checked={pair.backup.install_with_primary}
-                                onChange={(e) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: e.target.checked } })}
-                              />
-                              Instalar simultaneamente
-                            </label>
-                          </div>
-                        </div>
+                      ))}
+                      {!loadingCatalog && visiblePrimaryItems.map((item) => (
+                        <EquipmentCard
+                          key={item.id}
+                          item={item}
+                          actionLabel="Seleccionar principal"
+                          onSelect={(selected) => selectPrimary(pair.id, selected)}
+                          disabled={!canEdit}
+                        />
+                      ))}
+                      {!loadingCatalog && !filteredPrimaryItems.length && (
+                        <div className="text-sm text-gray-500 italic">No hay equipos con ese filtro.</div>
                       )}
-                    </>
+                    </div>
+                  ) : (
+                    <div className="relative space-y-2 border border-blue-100 rounded-xl p-2 sm:p-3">
+                      <EquipmentCard item={pair.primary} selected />
+
+                      <div className="w-full sm:max-w-sm">
+                        <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                          Estado del equipo principal
+                        </label>
+                        <select
+                          value={normalizeEquipmentType(pair.primary_type)}
+                          onChange={(event) =>
+                            updatePair(pair.id, {
+                              primary_type: normalizeEquipmentType(event.target.value),
+                              primary: pair.primary
+                                ? { ...pair.primary, type: normalizeEquipmentType(event.target.value) }
+                                : pair.primary,
+                            })
+                          }
+                          disabled={!canEdit}
+                          className={INPUT_CLASS}
+                        >
+                          {EQUIPMENT_TYPE_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <button
+                        type="button"
+                        aria-label="Cambiar equipo principal"
+                        onClick={() =>
+                          updatePair(pair.id, {
+                            primary: null,
+                            backup: null,
+                            primary_type: "new_available",
+                            backup_type: "new_available",
+                            requiresBackup: false,
+                          })
+                        }
+                        disabled={!canEdit}
+                        className="absolute top-2 right-2 text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <FiTrash2 />
+                      </button>
+                    </div>
                   )}
                 </div>
-              )}
 
-{/* Remove Pair Button */}
-              <div className="pt-4 flex justify-end">
+                {pair.primary && (
+                  <div className="space-y-3 border-t pt-4">
+                    <div className="flex justify-between items-center">
+                      <h4 className="text-sm font-semibold text-gray-700">Equipo de respaldo (backup)</h4>
+                      {pair.backup && pair.requiresBackup && (
+                        <button
+                          type="button"
+                          aria-label="Eliminar backup"
+                          onClick={() => updatePair(pair.id, { backup: null, backup_type: "new_available", requiresBackup: false })}
+                          disabled={!canEdit}
+                          className="text-xs text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Eliminar backup
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex items-start justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">Backup opcional</p>
+                        <p className="text-xs text-slate-600">Activalo solo si el cliente lo solicita.</p>
+                      </div>
+                      <SwitchField
+                        label="Requiere backup"
+                        checked={Boolean(pair.requiresBackup)}
+                        onChange={(nextValue) =>
+                          updatePair(pair.id, {
+                            requiresBackup: nextValue,
+                            backup: nextValue ? pair.backup : null,
+                            backup_type: nextValue ? normalizeEquipmentType(pair.backup_type) : "new_available",
+                          })
+                        }
+                        disabled={!canEdit}
+                      />
+                    </div>
+
+                    {pair.requiresBackup && (
+                      <>
+                        {compatibilityLoadingByPair[pair.id] && (
+                          <p className="text-xs text-blue-600">Buscando candidatos compatibles...</p>
+                        )}
+
+                        {!pair.backup ? (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-64 overflow-y-auto pr-1">
+                            {compatibilityLoadingByPair[pair.id] && Array.from({ length: 2 }).map((_, skeletonIndex) => (
+                              <div key={`backup-skeleton-${pair.id}-${skeletonIndex}`} className="border rounded-xl p-4 animate-pulse space-y-2">
+                                <div className="h-4 bg-gray-200 rounded w-2/3" />
+                                <div className="h-3 bg-gray-100 rounded w-1/2" />
+                              </div>
+                            ))}
+                            {!compatibilityLoadingByPair[pair.id] && visibleBackupCandidates.map((item) => (
+                              <EquipmentCard
+                                key={`${pair.id}-${item.id}`}
+                                item={item}
+                                actionLabel="Seleccionar backup"
+                                actionColor="slate"
+                                onSelect={(selected) => selectBackup(pair.id, selected)}
+                                disabled={!canEdit}
+                              />
+                            ))}
+                            {!compatibilityLoadingByPair[pair.id] && !compatibleCandidates.length && (
+                              <p className="text-sm text-gray-500 italic">No se encontraron equipos compatibles.</p>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-3">
+                            <h5 className="font-semibold text-sm text-slate-900">{pair.backup.name}</h5>
+                            <div className="rounded-lg bg-white border border-slate-200 px-3 py-2 text-xs text-slate-700 space-y-1">
+                              <p>Principal: {pair.primary?.name || "-"}</p>
+                              <p>Backup: {pair.backup?.name || "-"}</p>
+                              {(() => {
+                                const match = (compatibilityByPair[pair.id] || []).find((candidate) => String(candidate.id) === String(pair.backup?.id));
+                                if (!match) return null;
+                                return (
+                                  <>
+                                    <p>Score: {match?.compatibilityScore ? Number(match.compatibilityScore).toFixed(2) : "N/A"}</p>
+                                    <p>Tipo: {match?.matchType || "fallback"}</p>
+                                  </>
+                                );
+                              })()}
+                            </div>
+
+                            <div className="w-full sm:max-w-sm">
+                              <label className="mb-1 block text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                                Estado del equipo backup
+                              </label>
+                              <select
+                                value={normalizeEquipmentType(pair.backup_type)}
+                                onChange={(event) =>
+                                  updatePair(pair.id, {
+                                    backup_type: normalizeEquipmentType(event.target.value),
+                                    backup: pair.backup
+                                      ? { ...pair.backup, type: normalizeEquipmentType(event.target.value) }
+                                      : pair.backup,
+                                  })
+                                }
+                                disabled={!canEdit}
+                                className={INPUT_CLASS}
+                              >
+                                {EQUIPMENT_TYPE_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="mt-2 text-xs space-y-2">
+                              <label className="block">
+                                Condicion:
+                                <input
+                                  value={pair.backup.condition}
+                                  onChange={(event) => updatePair(pair.id, { backup: { ...pair.backup, condition: event.target.value } })}
+                                  disabled={!canEdit}
+                                  className="ml-2 border rounded px-1 disabled:bg-gray-100 disabled:text-gray-500"
+                                />
+                              </label>
+                              <label className="flex items-center gap-2">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(pair.backup.install_with_primary)}
+                                  onChange={(event) => updatePair(pair.id, { backup: { ...pair.backup, install_with_primary: event.target.checked } })}
+                                  disabled={!canEdit}
+                                />
+                                Instalar simultaneamente
+                              </label>
+                            </div>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <div className="pt-4 flex justify-end">
+                  <button
+                    type="button"
+                    aria-label="Eliminar grupo de equipos"
+                    onClick={() => removePair(pair.id)}
+                    disabled={!canEdit}
+                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <FiTrash2 /> Eliminar grupo
+                  </button>
+                </div>
+              </div>
+            </AccordionSection>
+            {!pair.primary && hasMorePrimary && (
+              <div className="px-2 pb-2">
                 <button
-                  onClick={() => removePair(pair.id)}
-                  className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700"
+                  type="button"
+                  className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                  onClick={() => increaseVisibleRows(pair.id, "primary")}
                 >
-                  <FiTrash2 /> Eliminar Grupo
+                  Mostrar mas equipos ({filteredPrimaryItems.length - visiblePrimaryItems.length} restantes)
                 </button>
               </div>
+            )}
+            {pair.primary && pair.requiresBackup && !pair.backup && hasMoreBackup && (
+              <div className="px-2 pb-2">
+                <button
+                  type="button"
+                  className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                  onClick={() => increaseVisibleRows(pair.id, "backup")}
+                >
+                  Mostrar mas backups ({compatibleCandidates.length - visibleBackupCandidates.length} restantes)
+                </button>
+              </div>
+            )}
             </div>
-          </AccordionSection>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Section Actions */}
-      <div className="flex justify-end pt-4 border-t">
-        <button
-          onClick={handleSave}
-          className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          disabled={equipmentPairs.some(p => !p.primary) || equipmentPairs.some(p => p.requiresBackup && !p.backup)}
-        >
-          Guardar Equipamiento
-        </button>
+      <div className="sticky bottom-2 z-20">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-3 border-t border-slate-200 bg-white/95 backdrop-blur rounded-xl px-3 py-2 shadow-sm">
+          <p className="text-xs text-slate-600">
+            {pairsValidation.length > 0
+              ? `Hay ${pairsValidation.length} validaciones pendientes.`
+              : dirty
+                ? "Cambios listos para guardar."
+                : "Sin cambios pendientes."}
+          </p>
+          <button
+            onClick={handleSave}
+            disabled={!canEdit || pairsValidation.length > 0 || !dirty}
+            className={`${SAVE_BUTTON_CLASS} w-full sm:w-auto`}
+          >
+            Guardar equipamiento
+          </button>
+        </div>
       </div>
+
+      {pendingDeletePairId && (
+        <div className="fixed inset-0 z-[1200] bg-slate-900/45 backdrop-blur-[1px] flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-2xl p-5 space-y-4">
+            <h3 className="text-base font-semibold text-slate-900">Eliminar grupo de equipos</h3>
+            <p className="text-sm text-slate-600">
+              Este grupo ya tiene equipos seleccionados. Si lo eliminas, perderas esta configuracion.
+            </p>
+            <div className="flex flex-col sm:flex-row sm:justify-end gap-2">
+              <button
+                type="button"
+                onClick={cancelDeletePair}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeletePair}
+                className="px-4 py-2 rounded-xl bg-red-600 text-white text-sm font-semibold hover:bg-red-700"
+              >
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default EquipmentSection;
+
