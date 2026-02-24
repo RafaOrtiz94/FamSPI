@@ -20,13 +20,13 @@ const WorkspaceContent = ({
   const observationData = resolvedGuidance?.observationData;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 lg:space-y-6">
       {/* Observed Case Banner - Shows when case is in OBSERVADO state */}
       <ObservedCaseBanner observationData={observationData} />
 
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div className="flex flex-col lg:flex-row gap-5 lg:gap-6">
         {/* Section Navigator - Left sidebar on desktop, Top on mobile */}
-        <div className="w-full lg:w-80 flex-shrink-0">
+        <div className="w-full lg:w-[320px] xl:w-[340px] flex-shrink-0">
           <SectionNavigator
             selectedSection={resolvedSelectedSection}
             uiGuidance={resolvedGuidance}
@@ -37,7 +37,7 @@ const WorkspaceContent = ({
 
         {/* Section Content - Main area */}
         <div className="flex-1 min-w-0">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 lg:p-6">
              <SectionContent
                 selectedSection={resolvedSelectedSection}
                 businessCase={resolvedBusinessCase}

@@ -163,7 +163,7 @@ const SectionNavigator = ({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 lg:p-6 h-auto lg:h-[calc(100vh-200px)] lg:overflow-y-auto custom-scrollbar sticky top-4">
+    <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 sm:p-5 lg:p-6 h-auto lg:max-h-[calc(100vh-160px)] lg:overflow-y-auto custom-scrollbar lg:sticky lg:top-6">
       <div className="space-y-2">
         <div className="flex items-center justify-between mb-4 lg:mb-6">
           <h3 className="text-lg font-bold text-gray-900 tracking-tight">Secciones</h3>

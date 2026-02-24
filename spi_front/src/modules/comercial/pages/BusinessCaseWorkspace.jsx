@@ -63,6 +63,8 @@ const BusinessCaseWorkspace = () => {
     open: false,
     sectionLabel: "",
   });
+  const workspaceShellClass = "min-h-screen bg-gray-50 px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6";
+  const workspaceContainerClass = "mx-auto w-full max-w-[1440px] space-y-5 lg:space-y-6";
 
   // Autosave manager ref
   const autosaveManagerRef = useRef(null);
@@ -245,7 +247,8 @@ const BusinessCaseWorkspace = () => {
   // Loading state
   if (loading) {
     return (
-      <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
+      <div className={workspaceShellClass}>
+        <div className={workspaceContainerClass}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
@@ -263,6 +266,7 @@ const BusinessCaseWorkspace = () => {
             <p className="text-gray-600 font-medium">Cargando workspace...</p>
           </div>
         </div>
+        </div>
       </div>
     );
   }
@@ -270,7 +274,8 @@ const BusinessCaseWorkspace = () => {
   // Error state
   if (error) {
     return (
-      <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
+      <div className={workspaceShellClass}>
+        <div className={workspaceContainerClass}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
@@ -297,6 +302,7 @@ const BusinessCaseWorkspace = () => {
             Reintentar
           </button>
         </div>
+        </div>
       </div>
     );
   }
@@ -304,7 +310,8 @@ const BusinessCaseWorkspace = () => {
   // No data state
   if (!uiGuidance) {
     return (
-      <div className="p-6 space-y-6">
+      <div className={workspaceShellClass}>
+        <div className={workspaceContainerClass}>
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
             <p className="text-sm uppercase tracking-wide text-gray-500 font-semibold">
@@ -318,6 +325,7 @@ const BusinessCaseWorkspace = () => {
         </div>
         <div className="text-center py-12">
           <p className="text-gray-600">No se encontraron datos del workspace.</p>
+        </div>
         </div>
       </div>
     );
@@ -335,7 +343,8 @@ const BusinessCaseWorkspace = () => {
 
   return (
     <BusinessCaseWorkspaceContext.Provider value={workspaceContextValue}>
-    <div className="p-4 lg:p-8 space-y-6 bg-gray-50 min-h-screen">
+    <div className={workspaceShellClass}>
+      <div className={workspaceContainerClass}>
       {/* Header Area */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -411,10 +420,10 @@ const BusinessCaseWorkspace = () => {
           </div>
         </div>
       </Modal>
+      </div>
     </div>
     </BusinessCaseWorkspaceContext.Provider>
   );
 };
 
 export default BusinessCaseWorkspace;
-

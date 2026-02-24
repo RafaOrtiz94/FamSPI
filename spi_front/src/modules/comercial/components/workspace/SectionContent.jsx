@@ -214,9 +214,9 @@ const SectionContent = ({
 
   if (sectionContent) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-5 lg:space-y-6">
         {(canLock || canUnlock) && (
-          <div className="flex items-center justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
             {canLock && (
               <button
                 type="button"
