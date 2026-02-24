@@ -51,6 +51,12 @@ const corsConfig = {
   allowedHeaders: [
     "Content-Type",
     "Authorization",
+    "Cache-Control",
+    "cache-control",
+    "Pragma",
+    "pragma",
+    "Expires",
+    "expires",
     "x-refresh-token",
     "X-Requested-With",
     "Accept",

@@ -65,7 +65,7 @@ const AccordionSection = ({
       onClick={() => onToggle(id)}
       aria-expanded={isOpen}
       aria-controls={`section-panel-${id}`}
-      className="flex w-full items-center justify-between gap-4 px-6 py-5 text-left transition-colors hover:bg-gray-50 focus:outline-none"
+      className="flex w-full items-center justify-between gap-4 px-4 sm:px-5 py-4 text-left transition-colors hover:bg-gray-50 focus:outline-none"
     >
       <div>
         <p className="text-base font-bold text-gray-900 tracking-tight">{title}</p>
@@ -82,7 +82,7 @@ const AccordionSection = ({
       id={`section-panel-${id}`}
       className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}
     >
-      <div className="px-6 pb-6 pt-0">{children}</div>
+      <div className="px-4 sm:px-5 pb-5 pt-0">{children}</div>
     </div>
   </div>
 );
@@ -474,7 +474,7 @@ const ClientDataSection = ({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-start gap-3">
         <div className="p-3 rounded-xl bg-blue-50 text-blue-600 shadow-sm">
           <FiCheckCircle size={24} />
@@ -508,7 +508,7 @@ const ClientDataSection = ({
         observationData={observationData}
       />
 
-      <form className="space-y-6" onSubmit={handleSubmit(handleSave)}>
+      <form className="space-y-5" onSubmit={handleSubmit(handleSave)}>
         <AccordionSection
           id="general"
           title="Datos comerciales"
@@ -518,7 +518,7 @@ const ClientDataSection = ({
           statusBadge={renderStatusBadge("general")}
           onInteraction={handleSectionInteraction}
         >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-5 pt-2">
 
         <label className="flex flex-col gap-1.5">
           <span className="text-sm font-bold text-gray-700 flex items-center gap-2">
@@ -669,11 +669,11 @@ const ClientDataSection = ({
         {/* Section Actions */}
         {canEdit() && (
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-4 border-t border-gray-100">
-            <p className="text-xs text-gray-400 font-medium">Los cambios se guardan autom?ticamente al enviar el formulario.</p>
+            <p className="text-xs text-gray-400 font-medium">Los cambios se guardan automáticamente al enviar el formulario.</p>
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-full bg-blue-600 text-white font-semibold hover:bg-blue-700 active:scale-95 shadow-sm hover:shadow-blue-200 transition-all disabled:opacity-60 disabled:scale-100 disabled:shadow-none w-full sm:w-auto"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700 active:scale-[0.99] shadow-sm transition-all disabled:opacity-60 disabled:scale-100 w-full sm:w-auto"
             >
               {saving ? "Guardando..." : "Guardar Datos del Cliente"}
             </button>

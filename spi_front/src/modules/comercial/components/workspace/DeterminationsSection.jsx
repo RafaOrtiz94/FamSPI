@@ -237,10 +237,6 @@ const DeterminationsSection = ({
     try {
       const res = await api.get(`/business-case/${bcId}/consumption-items`, {
         params: { _t: Date.now() },
-        headers: {
-          "Cache-Control": "no-cache, no-store, max-age=0",
-          Pragma: "no-cache",
-        },
       });
       const data = res?.data?.data || {};
       const items = Array.isArray(data?.items) ? data.items : [];

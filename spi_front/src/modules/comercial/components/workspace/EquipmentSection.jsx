@@ -39,13 +39,13 @@ const ACTION_CLASS_BY_COLOR = {
   slate: "bg-slate-700 hover:bg-slate-800",
 };
 const UI = {
-  card: "rounded-xl border border-slate-200 bg-white shadow-sm",
-  cardSelected: "rounded-xl border border-blue-300 bg-blue-50/40 ring-1 ring-blue-200 shadow-sm",
-  input: "w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all bg-white disabled:bg-slate-100 disabled:text-slate-500",
-  title: "text-base font-semibold text-slate-900 tracking-tight",
-  subtitle: "text-xs text-slate-600",
-  actionPrimary: "inline-flex items-center justify-center bg-blue-600 text-white px-4 py-2 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:opacity-50 disabled:cursor-not-allowed",
-  actionSecondary: "inline-flex items-center justify-center px-3 py-2 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 disabled:opacity-50 disabled:cursor-not-allowed",
+  card: "rounded-2xl border border-slate-200/80 bg-white shadow-sm",
+  cardSelected: "rounded-2xl border border-blue-300 bg-blue-50/40 ring-1 ring-blue-200 shadow-sm",
+  input: "w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-blue-100 focus:border-blue-400 transition-all bg-white disabled:bg-slate-100 disabled:text-slate-500",
+  title: "text-lg sm:text-xl font-semibold text-slate-900 tracking-tight",
+  subtitle: "text-sm text-slate-600",
+  actionPrimary: "inline-flex items-center justify-center bg-blue-600 text-white px-4 py-2.5 rounded-xl text-sm font-semibold hover:bg-blue-700 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-300 disabled:opacity-50 disabled:cursor-not-allowed",
+  actionSecondary: "inline-flex items-center justify-center px-3 py-2.5 rounded-xl border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 disabled:opacity-50 disabled:cursor-not-allowed",
   chip: "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold",
 };
 const INPUT_CLASS = UI.input;
@@ -199,36 +199,36 @@ const EquipmentCard = ({ item, selected, disabled, onSelect, actionLabel, action
 };
 
 const AccordionSection = ({ title, description, isOpen, onToggle, statusBadge, children }) => (
-  <div className="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm mb-4">
+  <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm mb-4">
     <button
       type="button"
       onClick={onToggle}
-      className="flex w-full items-center justify-between gap-2 px-4 sm:px-5 py-3.5 text-left text-sm font-medium text-gray-900 transition-colors hover:bg-gray-50 focus:outline-none"
+      className="flex w-full items-center justify-between gap-2 px-4 sm:px-5 py-4 text-left text-sm font-medium text-slate-900 transition-colors hover:bg-slate-50 focus:outline-none"
     >
       <div>
-        <p>{title}</p>
-        {description && <p className="text-xs text-gray-500">{description}</p>}
+        <p className="font-semibold">{title}</p>
+        {description && <p className="text-xs text-slate-500 mt-0.5">{description}</p>}
       </div>
       <div className="flex items-center gap-3">
         {statusBadge}
-        <FiChevronDown className={`h-4 w-4 text-gray-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
+        <FiChevronDown className={`h-4 w-4 text-slate-500 transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`} />
       </div>
     </button>
     <div className={`transition-all duration-300 ease-in-out ${isOpen ? "max-h-[2000px] opacity-100" : "max-h-0 opacity-0"} overflow-hidden`}>
-      <div className="px-4 sm:px-5 pb-5 pt-0">{children}</div>
+      <div className="px-4 sm:px-5 pb-5 pt-1">{children}</div>
     </div>
   </div>
 );
 
 const SwitchField = ({ label, checked, onChange, disabled = false }) => (
   <div className="flex items-center justify-between gap-3">
-    <span className="text-sm font-semibold text-gray-700">{label}</span>
+    <span className="text-sm font-semibold text-slate-700">{label}</span>
     <button
       type="button"
       role="switch"
       aria-checked={checked}
       disabled={disabled}
-      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-gray-200"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
+      className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${checked ? "bg-blue-600" : "bg-slate-300"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       onClick={() => onChange(!checked)}
     >
       <span
@@ -726,8 +726,10 @@ const EquipmentSection = ({
   };
 
   return (
-    <div className="space-y-4 sm:space-y-5">
-      <div className="flex flex-col gap-3 border-b border-slate-200 pb-4">
+    <div className="space-y-5 sm:space-y-6">
+      {/* Visual header: contexto + accion principal */}
+      <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col gap-3 border-b border-slate-200 pb-4">
         <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2">
           <div>
             <h2 className={UI.title}>Seleccion de equipos</h2>
@@ -744,12 +746,13 @@ const EquipmentSection = ({
           </div>
         </div>
       </div>
+      </div>
 
-      <div className={`${UI.card} px-3 py-2 text-xs text-slate-700 flex flex-wrap gap-3 items-center`}>
-        <span>Total grupos: <strong>{summary.total}</strong></span>
-        <span>Con principal: <strong>{summary.withPrimary}</strong></span>
-        <span>Backup requerido: <strong>{summary.backupRequired}</strong></span>
-        <span>Backup completo: <strong>{summary.withBackup}</strong></span>
+      <div className={`${UI.card} px-3 sm:px-4 py-3 text-xs text-slate-700 flex flex-wrap gap-2 items-center`}>
+        <span className="rounded-full bg-slate-100 text-slate-700 px-2.5 py-1">Total grupos: <strong>{summary.total}</strong></span>
+        <span className="rounded-full bg-blue-50 text-blue-700 px-2.5 py-1">Con principal: <strong>{summary.withPrimary}</strong></span>
+        <span className="rounded-full bg-amber-50 text-amber-700 px-2.5 py-1">Backup requerido: <strong>{summary.backupRequired}</strong></span>
+        <span className="rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-1">Backup completo: <strong>{summary.withBackup}</strong></span>
         {dirty && <span className="inline-flex items-center gap-1 text-amber-700"><FiAlertCircle /> Cambios sin guardar</span>}
         {loadingCatalog && <span className="text-blue-700">Cargando catalogo...</span>}
       </div>
@@ -761,7 +764,7 @@ const EquipmentSection = ({
       )}
 
       {pairsValidation.length > 0 && (
-        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-700 space-y-1">
+        <div className="bg-rose-50 border border-rose-200 rounded-xl p-3 text-xs text-rose-700 space-y-1 shadow-sm">
           <div>{pairsValidation[0]}</div>
           {pairsValidation.length > 1 && <div>y {pairsValidation.length - 1} validaciones mas...</div>}
           <div className="pt-2">
@@ -813,8 +816,12 @@ const EquipmentSection = ({
               }
             >
               <div className="space-y-5">
-                <div className="space-y-3">
-                  <h4 className="text-sm font-semibold text-gray-700">Equipo principal</h4>
+                {/* Bloque visual principal */}
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-sm font-semibold text-slate-800">Equipo principal</h4>
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white border border-slate-200 text-slate-600">Obligatorio</span>
+                  </div>
 
                   <div className="relative">
                     <input
@@ -859,7 +866,7 @@ const EquipmentSection = ({
                       )}
                     </div>
                   ) : (
-                    <div className="relative space-y-2 border border-blue-100 rounded-xl p-2 sm:p-3">
+                    <div className="relative space-y-2 border border-blue-100 bg-white rounded-xl p-2 sm:p-3">
                       <EquipmentCard item={pair.primary} selected />
 
                       <div className="w-full sm:max-w-sm">
@@ -907,9 +914,12 @@ const EquipmentSection = ({
                 </div>
 
                 {pair.primary && (
-                  <div className="space-y-3 border-t pt-4">
+                  <div className="space-y-3 border-t border-slate-200 pt-4 rounded-xl">
                     <div className="flex justify-between items-center">
-                      <h4 className="text-sm font-semibold text-gray-700">Equipo de respaldo (backup)</h4>
+                      <div>
+                        <h4 className="text-sm font-semibold text-slate-800">Equipo de respaldo (backup)</h4>
+                        <p className="text-[11px] text-slate-500">Se habilita solo cuando el cliente lo requiere.</p>
+                      </div>
                       {pair.backup && pair.requiresBackup && (
                         <button
                           type="button"
@@ -1011,7 +1021,7 @@ const EquipmentSection = ({
                               </select>
                             </div>
 
-                            <div className="mt-2 text-xs space-y-2">
+                            <div className="mt-2 text-xs space-y-2 bg-white rounded-lg border border-slate-200 p-2.5">
                               <label className="block">
                                 Condicion:
                                 <input
@@ -1038,13 +1048,13 @@ const EquipmentSection = ({
                   </div>
                 )}
 
-                <div className="pt-4 flex justify-end">
+                <div className="pt-4 flex justify-end border-t border-slate-200">
                   <button
                     type="button"
                     aria-label="Eliminar grupo de equipos"
                     onClick={() => removePair(pair.id)}
                     disabled={!canEdit}
-                    className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1 text-xs text-red-600 hover:text-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <FiTrash2 /> Eliminar grupo
                   </button>

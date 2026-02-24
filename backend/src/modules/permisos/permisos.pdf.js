@@ -89,7 +89,8 @@ function buildSignatureAlias(fullName = "") {
   const first = tokens[0];
   const last = tokens[tokens.length - 1];
   const initial = (first[0] || "S").toUpperCase();
-  const lastSafe = (last || "Firma").replace(/[^A-Za-zÃÃ‰ÃÃ“ÃšÃ¡Ã©Ã­Ã³ÃºÃ‘Ã±ÃœÃ¼'-]/g, "");
+  // Preserve Unicode letters (including ñ/Ñ and accented chars) when rendering signature alias.
+  const lastSafe = (last || "Firma").replace(/[^\p{L}\p{M}'-]/gu, "");
   const normalizedLast = lastSafe ? `${lastSafe[0].toUpperCase()}${lastSafe.slice(1)}` : "Firma";
   return `${initial}.${normalizedLast}`;
 }
