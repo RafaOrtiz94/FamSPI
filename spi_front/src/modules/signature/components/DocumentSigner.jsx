@@ -363,7 +363,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           onClick={() => setStep(SIGNATURE_STEPS.LOAD_DOCUMENT)}
           className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
         >
-          AtrÃ¡s
+          Atrás
         </button>
         <button
           onClick={handleProceedToSign}
@@ -422,7 +422,7 @@ const DocumentSigner = ({ documentId, onSignatureComplete, onCancel, initialDocu
           onClick={() => setStep(SIGNATURE_STEPS.CONSENT)}
           className="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50"
         >
-          AtrÃ¡s
+          Atrás
         </button>
         <button
           onClick={handleSignDocument}

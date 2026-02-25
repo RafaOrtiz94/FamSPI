@@ -1215,6 +1215,61 @@ async function listarPorUsuario({ user }) {
     { total: 0, status: {} }
   );
 
+  const vacationRows = rows.filter((row) => row.tipo_solicitud === "vacaciones");
+  const approvedVacationDays = vacationRows
+    .filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase()))
+    .reduce((acc, row) => acc + calculateVacationDays(row), 0);
+  const pendingVacationDays = vacationRows
+    .filter((row) =>
+      ["pending", "pendiente", "pending_final", "partially_approved"].includes(
+        String(row.status || "").toLowerCase()
+      )
+    )
+    .reduce((acc, row) => acc + calculateVacationDays(row), 0);
+  const rejectedVacationDays = vacationRows
+    .filter((row) => ["rejected", "rechazado"].includes(String(row.status || "").toLowerCase()))
+    .reduce((acc, row) => acc + calculateVacationDays(row), 0);
+  const requestedVacationDays = approvedVacationDays + pendingVacationDays + rejectedVacationDays;
+
+  const requesterUserId = resolveActorId(user);
+  const currentYear = new Date().getFullYear();
+  const hireDate = await getHireDate(requesterUserId);
+  const allowanceInfo = computeVacationAllowance(hireDate, new Date());
+  const historicalBalance = await getHistoricVacationBalance({
+    userId: requesterUserId,
+    userEmail: email,
+    year: currentYear,
+  });
+  const totalAllowance = allowanceInfo.allowance + historicalBalance;
+  const remainingRaw = totalAllowance - approvedVacationDays - pendingVacationDays;
+  const remaining =
+    allowanceInfo.eligible === false && !allowanceInfo.missingHireDate
+      ? remainingRaw
+      : Math.max(remainingRaw, 0);
+
+  summary.vacaciones = {
+    year: currentYear,
+    allowance: totalAllowance,
+    allowance_base: allowanceInfo.allowance,
+    carry_over: historicalBalance,
+    tenure_years: allowanceInfo.tenureYears,
+    eligible: allowanceInfo.eligible,
+    eligible_from: allowanceInfo.eligibleFrom,
+    accrued_this_year: allowanceInfo.accruedThisYear,
+    missing_hire_date: allowanceInfo.missingHireDate,
+    remaining,
+    requested_days: requestedVacationDays,
+    approved_days: approvedVacationDays,
+    pending_days: pendingVacationDays,
+    rejected_days: rejectedVacationDays,
+    requested_count: vacationRows.length,
+    approved_count: vacationRows.filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase())).length,
+    pending_count: vacationRows.filter((row) =>
+      ["pending", "pendiente", "pending_final", "partially_approved"].includes(String(row.status || "").toLowerCase())
+    ).length,
+    rejected_count: vacationRows.filter((row) => ["rejected", "rechazado"].includes(String(row.status || "").toLowerCase())).length,
+  };
+
   const data = await attachWorkflowSignatures(rows);
   return { data, summary };
 }

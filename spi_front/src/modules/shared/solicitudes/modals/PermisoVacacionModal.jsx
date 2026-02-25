@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
-import { createSolicitud, getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
+import { createSolicitud, getMisSolicitudes } from "../../../../core/api/permisosApi";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 
 /**
@@ -22,8 +22,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [tipoPermiso, setTipoPermiso] = useState(""); // 'estudios', 'personal', 'salud', 'calamidad'
     const [subtipoCalamidad, setSubtipoCalamidad] = useState(""); // 'fallecimiento', 'accidente', 'desastre'
     const [vacationSummary, setVacationSummary] = useState(null);
+    const [requestedVacationDays, setRequestedVacationDays] = useState(0);
     const [approvedVacationDays, setApprovedVacationDays] = useState(0);
     const [pendingVacationDays, setPendingVacationDays] = useState(0);
+    const [rejectedVacationDays, setRejectedVacationDays] = useState(0);
     const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
     const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
 
@@ -50,6 +52,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     }, [open, tipoSolicitud]);
 
     useEffect(() => {
+        if (!open) return;
+        if (step === 2 && tipoSolicitud === "vacaciones") {
+            loadVacationSummary();
+        }
+    }, [open, step, tipoSolicitud]);
+
+    useEffect(() => {
         if (tipoPermiso !== "salud") {
             setSaludDuracionTipo("dias");
         }
@@ -74,30 +83,51 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const loadVacationSummary = async () => {
         try {
-            const [summaryResp, mineResp] = await Promise.all([
-                getVacationSummary(),
-                getMisSolicitudes(),
-            ]);
-            if (summaryResp.ok) {
-                setVacationSummary(summaryResp.data);
-            }
-            if (mineResp?.ok) {
-                const vacationRows = mineResp.data || [];
-                const approvedDays = vacationRows
-                    .filter((req) =>
-                        req.tipo_solicitud === "vacaciones" &&
-                        (req.status === "approved" || req.status === "aprobado")
-                    )
-                    .reduce((acc, req) => acc + calculateDays(req), 0);
-                const pendingDays = vacationRows
-                    .filter((req) =>
-                        req.tipo_solicitud === "vacaciones" &&
-                        (req.status === "pending" || req.status === "pendiente" || req.status === "pending_final" || req.status === "partially_approved")
-                    )
-                    .reduce((acc, req) => acc + calculateDays(req), 0);
-                setApprovedVacationDays(approvedDays);
-                setPendingVacationDays(pendingDays);
-            }
+            const mineResp = await getMisSolicitudes();
+            const responseData = Array.isArray(mineResp?.data)
+                ? mineResp.data
+                : Array.isArray(mineResp)
+                    ? mineResp
+                    : [];
+
+            const normalizeType = (row) => String(row?.tipo_solicitud || row?.tipoSolicitud || "").toLowerCase();
+            const isVacationRow = (row) => {
+                const type = normalizeType(row);
+                // Compatibilidad con registros historicos sin tipo_solicitud.
+                return type === "vacaciones" || type === "vacacion" || type === "";
+            };
+            const normalizeStatus = (row) => String(row?.status || "").toLowerCase();
+
+            const vacationRows = responseData.filter(isVacationRow);
+            const approvedDays = vacationRows
+                .filter((req) => ["approved", "aprobado"].includes(normalizeStatus(req)))
+                .reduce((acc, req) => acc + calculateDays(req), 0);
+            const pendingDays = vacationRows
+                .filter((req) => ["pending", "pendiente", "pending_final", "partially_approved"].includes(normalizeStatus(req)))
+                .reduce((acc, req) => acc + calculateDays(req), 0);
+            const rejectedDays = vacationRows
+                .filter((req) => ["rejected", "rechazado"].includes(normalizeStatus(req)))
+                .reduce((acc, req) => acc + calculateDays(req), 0);
+            const requestedDays = approvedDays + pendingDays + rejectedDays;
+
+            setApprovedVacationDays(approvedDays);
+            setPendingVacationDays(pendingDays);
+            setRejectedVacationDays(rejectedDays);
+            setRequestedVacationDays(requestedDays);
+
+            const vacationsSummary = mineResp?.summary?.vacaciones || {};
+            setVacationSummary({
+                allowance: Number(vacationsSummary.allowance ?? 0),
+                remaining: Number(vacationsSummary.remaining ?? 0),
+                taken: Number(vacationsSummary.approved_days ?? approvedDays),
+                pending: Number(vacationsSummary.pending_days ?? pendingDays),
+                approved: Number(vacationsSummary.approved_days ?? approvedDays),
+                rejected: Number(vacationsSummary.rejected_days ?? rejectedDays),
+                requested: Number(vacationsSummary.requested_days ?? requestedDays),
+                eligible: vacationsSummary.eligible,
+                eligible_from: vacationsSummary.eligible_from,
+                missing_hire_date: vacationsSummary.missing_hire_date,
+            });
         } catch (error) {
             console.error("Error loading vacation summary:", error);
         }
@@ -110,6 +140,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setSubtipoCalamidad("");
         setSaludDuracionTipo("dias");
         setVacacionMedioDia(false);
+        setVacationSummary(null);
+        setRequestedVacationDays(0);
+        setApprovedVacationDays(0);
+        setPendingVacationDays(0);
+        setRejectedVacationDays(0);
         setFormData({
             fecha_inicio: "",
             fecha_fin: "",
@@ -212,7 +247,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const renderStep1 = () => (
         <div className="space-y-4">
-            <h3 className="text-lg font-semibold text-gray-900">Â¿QuÃ© deseas solicitar?</h3>
+            <h3 className="text-lg font-semibold text-gray-900">¿Qué deseas solicitar?</h3>
             <div className="grid grid-cols-2 gap-4">
                 <button
                     type="button"
@@ -402,7 +437,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                         <div className="flex gap-3 pt-4">
                             <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
-                                AtrÃ¡s
+                                Atrás
                             </Button>
                             <Button
                                 type="button"
@@ -429,8 +464,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
         const summaryRemaining = vacationSummary?.remaining;
         const summaryAllowance = vacationSummary?.allowance ?? 0;
-        const summaryTaken = vacationSummary?.taken ?? 0;
+        const summaryTaken = vacationSummary?.approved ?? vacationSummary?.taken ?? 0;
         const summaryPending = vacationSummary?.pending ?? 0;
+        const summaryRejected = vacationSummary?.rejected ?? 0;
+        const summaryRequested = vacationSummary?.requested ?? 0;
         const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
             ? toNumber(summaryRemaining)
             : toNumber(summaryAllowance) - toNumber(summaryTaken) - toNumber(summaryPending);
@@ -445,7 +482,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 ? baseRemaining - approvedVacationDays - pendingVacationDays
                 : Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays));
         const usedDisplay = summaryHasUsage ? toNumber(summaryTaken) : approvedVacationDays;
-        const pendingDisplay = summaryHasUsage ? toNumber(summaryPending) : pendingVacationDays;
+        const requestedDisplay = summaryHasUsage ? toNumber(summaryRequested) : requestedVacationDays;
+        const rejectedDisplay = summaryHasUsage ? toNumber(summaryRejected) : rejectedVacationDays;
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
         const allowMissingHireDate = vacationSummary?.missing_hire_date;
         const canSubmit = days > 0 && hasDates && (allowMissingHireDate || isAdvanceRequest || days <= remaining);
@@ -456,21 +494,21 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                 {vacationSummary && (
                     <div className="grid grid-cols-4 gap-3">
-                        <div className="p-3 bg-blue-50 rounded-lg text-center">
-                            <p className="text-xs text-blue-600 font-medium">Asignados</p>
-                            <p className="text-xl font-bold text-blue-700">{summaryAllowance}</p>
-                        </div>
                         <div className="p-3 bg-green-50 rounded-lg text-center">
                             <p className="text-xs text-green-600 font-medium">Disponibles</p>
                             <p className="text-xl font-bold text-green-700">{remaining}</p>
                         </div>
+                        <div className="p-3 bg-blue-50 rounded-lg text-center">
+                            <p className="text-xs text-blue-600 font-medium">Solicitados</p>
+                            <p className="text-xl font-bold text-blue-700">{requestedDisplay}</p>
+                        </div>
                         <div className="p-3 bg-amber-50 rounded-lg text-center">
-                            <p className="text-xs text-amber-600 font-medium">Usados</p>
+                            <p className="text-xs text-amber-600 font-medium">Aprobados</p>
                             <p className="text-xl font-bold text-amber-700">{usedDisplay}</p>
                         </div>
-                        <div className="p-3 bg-purple-50 rounded-lg text-center">
-                            <p className="text-xs text-purple-600 font-medium">Pendientes</p>
-                            <p className="text-xl font-bold text-purple-700">{pendingDisplay}</p>
+                        <div className="p-3 bg-rose-50 rounded-lg text-center">
+                            <p className="text-xs text-rose-600 font-medium">Rechazados</p>
+                            <p className="text-xl font-bold text-rose-700">{rejectedDisplay}</p>
                         </div>
                     </div>
                 )}
@@ -478,7 +516,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 {vacationSummary && !allowMissingHireDate && !isAdvanceRequest && remaining <= 3 && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <p className="text-xs text-amber-700">
-                            EstÃ¡s cerca de completar tus vacaciones. Te quedan{" "}
+                            Estás cerca de completar tus vacaciones. Te quedan{" "}
                             <strong>{remaining}</strong> dÃ­as disponibles.
                         </p>
                     </div>
@@ -512,7 +550,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         className="h-4 w-4 text-emerald-600 border-gray-300 rounded"
                     />
                     <label htmlFor="vacacion-medio-dia" className="text-sm text-gray-700">
-                        Medio dÃ­a (4h)
+                        Medio di­a (4h)
                     </label>
                 </div>
 
@@ -550,7 +588,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </div>
 
                 <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">PerÃ­odo</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">Período</label>
                     <input
                         type="text"
                         value={formData.periodo_vacaciones}
@@ -578,7 +616,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                 <div className="flex gap-3 pt-4">
                     <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
-                        AtrÃ¡s
+                        Atrás
                     </Button>
                     <Button
                         type="button"
@@ -642,7 +680,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             <div className="flex gap-3 pt-4">
                 <Button type="button" variant="secondary" onClick={() => setStep(2)} className="flex-1">
-                    AtrÃ¡s
+                    Atrás
                 </Button>
                 <Button
                     type="button"

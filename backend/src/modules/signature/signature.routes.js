@@ -35,7 +35,7 @@ router.get("/dashboard", verifyToken, ctrl.getSignatureDashboard);
 // LEGACY ENDPOINTS (para compatibilidad)
 // =============================================================================
 
-// Alias para compatibilidad hacia atrÃ¡s
+// Alias para compatibilidad hacia Atrás
 router.get("/verify/:token", ctrl.verifyDocument);
 
 module.exports = router;

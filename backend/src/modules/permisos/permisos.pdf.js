@@ -5,6 +5,12 @@ const QRCode = require("qrcode");
 const { uploadJustificante } = require("./permisos.drive");
 
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/F.RH-10_V01_SOLICITUD DE PERMISO.pdf");
+const LEGAL_PDF_TIMEZONE =
+  process.env.LEGAL_DOCUMENT_TIMEZONE ||
+  process.env.APP_TIMEZONE ||
+  process.env.GOOGLE_CALENDAR_TZ ||
+  "America/Guayaquil";
+const LEGAL_PDF_LOCALE = "es-EC";
 
 /**
  * Generar PDF F.RH-10 con datos de la solicitud
@@ -67,7 +73,16 @@ function formatDateTime(value) {
   if (!value) return "No disponible";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "No disponible";
-  return `${date.toLocaleString("es-EC")} | ${date.toISOString()}`;
+  return `${date.toLocaleString(LEGAL_PDF_LOCALE, {
+    timeZone: LEGAL_PDF_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  })} (${LEGAL_PDF_TIMEZONE})`;
 }
 
 function extractSignerName(signatureText, fallback = "No disponible") {
@@ -516,7 +531,18 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
     const approvalSig = finalSig || rechazoSig || partialSig || null;
 
     drawLine("SPI Fam - Constancia de Validacion Legal de FamSign", { size: 14, bold: true, gap: 20 });
-    drawLine(`Documento generado (local): ${now.toLocaleString("es-EC")}`);
+    drawLine(
+      `Documento generado (Ecuador): ${now.toLocaleString(LEGAL_PDF_LOCALE, {
+        timeZone: LEGAL_PDF_TIMEZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      })} (${LEGAL_PDF_TIMEZONE})`
+    );
     drawLine(`Documento generado (UTC): ${now.toISOString()}`);
     drawLine(`Solicitud ID: ${solicitud?.id || "N/A"}`);
     drawLine(`Tipo: ${solicitud?.tipo_solicitud || "N/A"}${solicitud?.tipo_permiso ? ` / ${solicitud.tipo_permiso}` : ""}`);
@@ -532,8 +558,8 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
     drawLine(`Encadenamiento previo: ${approvalSig?.previous_signature_hash_sha256 || "No disponible"}`);
 
     drawSection("Trazabilidad");
-    drawLine(`Fecha/hora solicitud: ${solicitudSig?.signed_at ? new Date(solicitudSig.signed_at).toLocaleString("es-EC") : "No disponible"}`);
-    drawLine(`Fecha/hora aprobacion: ${approvalSig?.signed_at ? new Date(approvalSig.signed_at).toLocaleString("es-EC") : "No disponible"}`);
+    drawLine(`Fecha/hora solicitud: ${formatDateTime(solicitudSig?.signed_at)}`);
+    drawLine(`Fecha/hora aprobacion: ${formatDateTime(approvalSig?.signed_at)}`);
     drawLine(`Usuario solicitante: ${solicitudSig?.signer_email || solicitud?.user_email || "No disponible"}`);
     drawLine(`Usuario aprobador: ${approvalSig?.signer_email || solicitud?.approver_email || "No disponible"}`);
     drawLine(`IP solicitud: ${solicitudSig?.ip_address || "No disponible"}`);
@@ -561,7 +587,7 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
           page = pdfDoc.addPage([612, 792]);
           y = 750;
         }
-        const eventDate = event?.signed_at ? new Date(event.signed_at).toLocaleString("es-EC") : "N/A";
+        const eventDate = event?.signed_at ? formatDateTime(event.signed_at) : "N/A";
         const shortHash = event?.signature_hash_sha256 ? String(event.signature_hash_sha256).slice(0, 16) : "N/A";
         drawLine(`- ${event.stage} | ${event.signer_name || event.signer_email || "N/A"} | ${eventDate} | ${shortHash}`);
       });
@@ -597,7 +623,8 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
 function formatDate(date) {
   if (!date) return "";
   const d = new Date(date);
-  return d.toLocaleDateString("es-EC");
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(LEGAL_PDF_LOCALE, { timeZone: LEGAL_PDF_TIMEZONE });
 }
 
 module.exports = {

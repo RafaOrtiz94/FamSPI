@@ -6,12 +6,9 @@ const ctrl = require("./userProfile.controller");
 const { verifyToken } = require("../../middlewares/auth");
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: '/tmp',
-    filename: (req, file, cb) => {
-      cb(null, `avatar_${Date.now()}_${file.originalname}`);
-    }
-  }),
+  // memoryStorage es requerido porque userProfile.service consume file.buffer
+  // para subir el binario a Drive y/o construir fallback data URI.
+  storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ["image/png", "image/jpeg", "image/webp"];

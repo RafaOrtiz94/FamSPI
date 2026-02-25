@@ -1,4 +1,5 @@
 const { Readable } = require("stream");
+const fs = require("fs");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
@@ -337,8 +338,21 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
     throw err;
   }
 
+  const avatarBuffer =
+    Buffer.isBuffer(file?.buffer)
+      ? file.buffer
+      : file?.path
+        ? fs.readFileSync(file.path)
+        : null;
+
+  if (!avatarBuffer || avatarBuffer.length === 0) {
+    const err = new Error("El archivo de imagen está vacío o no se pudo leer");
+    err.status = 400;
+    throw err;
+  }
+
   const buildDataUri = () =>
-    `data:${file.mimetype};base64,${file.buffer.toString("base64")}`;
+    `data:${file.mimetype};base64,${avatarBuffer.toString("base64")}`;
 
   const actor = identity || (await getIdentity(userId));
 
@@ -356,7 +370,7 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
 
     const stream = new Readable();
     stream._read = () => { };
-    stream.push(file.buffer);
+    stream.push(avatarBuffer);
     stream.push(null);
 
     const { data } = await drive.files.create({
