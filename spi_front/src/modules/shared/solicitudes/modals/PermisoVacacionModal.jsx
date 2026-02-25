@@ -366,7 +366,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <>
                         {isSalud && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">DuraciÃ³n</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Duracion</label>
                                 <select
                                     value={saludDuracionTipo}
                                     onChange={(e) => setSaludDuracionTipo(e.target.value)}
@@ -430,7 +430,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                         <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                             <p className="text-xs text-blue-700">
-                                <strong>Nota:</strong> DespuÃ©s de la aprobaciÃ³n parcial, deberÃ¡s subir los documentos
+                                <strong>Nota:</strong> Después de la aprobación parcial, deberás subir los documentos
                                 justificantes correspondientes.
                             </p>
                         </div>

@@ -808,7 +808,7 @@ async function aprobarParcial({ id, approver, meta }) {
       await notificationManager.sendNotification({
         userId: rows[0].user_id,
         customTitle: "Solicitud aprobada parcialmente",
-        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobaciÃ³n final.",
+        customMessage: "Tu solicitud fue aprobada parcialmente. Debes subir los justificantes para la aprobación final.",
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,
@@ -817,7 +817,7 @@ async function aprobarParcial({ id, approver, meta }) {
       });
     }
   } catch (notifyError) {
-    logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar aprobaci?n parcial");
+    logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo notificar aprobación parcial");
   }
 
   try {
@@ -856,7 +856,7 @@ async function subirJustificantes({ id, urls, user }) {
       await notificationManager.sendNotification({
         userId: solicitud.approver_user_id,
         customTitle: "Justificantes subidos",
-        customMessage: `${solicitud.user_fullname || solicitud.user_email} subiÃ³ justificantes. La solicitud estÃ¡ lista para aprobaciÃ³n final.`,
+        customMessage: `${solicitud.user_fullname || solicitud.user_email} subir los justificantes. La solicitud está lista para aprobación final.`,
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,

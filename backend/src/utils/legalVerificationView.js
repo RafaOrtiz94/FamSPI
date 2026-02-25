@@ -23,7 +23,7 @@ function shouldRespondJson(req) {
 }
 
 function renderVerificationHtml({
-  title = "VerificaciÃ³n Legal",
+  title = "Verificación Legal",
   subtitle = "FamSign",
   status = "pendiente",
   id = null,
@@ -59,7 +59,7 @@ function renderVerificationHtml({
             ? `${escapeHtml(workflow?.solicitud?.signer_name || "Firmado")} - ${escapeHtml(formatDateTime(workflow?.solicitud?.signed_at))}`
             : "Pendiente"
         }</p>
-        <p><strong>AprobaciÃ³n:</strong> ${
+        <p><strong>Aprobación:</strong> ${
           workflow.aprobacion_firmada
             ? `${escapeHtml(workflow?.aprobacion?.signer_name || "Firmado")} - ${escapeHtml(formatDateTime(workflow?.aprobacion?.signed_at))}`
             : "Pendiente"
@@ -94,14 +94,14 @@ function renderVerificationHtml({
   <main class="wrap">
     <section class="card">
       <h1>${escapeHtml(title)}</h1>
-      <p class="muted">${escapeHtml(subtitle)} - Consulta pÃºblica de verificaciÃ³n legal</p>
+      <p class="muted">${escapeHtml(subtitle)} - Consulta pÃºblica de verificación legal</p>
       <span class="badge">${escapeHtml(statusLabel)}</span>
       <div class="grid">
         <div class="row"><span class="k">Tipo</span><span class="v">${escapeHtml(sourceType)}</span></div>
         <div class="row"><span class="k">Solicitud ID</span><span class="v">${escapeHtml(id || "N/A")}</span></div>
         <div class="row"><span class="k">Solicitante</span><span class="v">${escapeHtml(solicitante)}</span></div>
         <div class="row"><span class="k">Aprobador</span><span class="v">${escapeHtml(aprobador)}</span></div>
-        <div class="row"><span class="k">Fecha aprobaciÃ³n</span><span class="v">${escapeHtml(formatDateTime(aprobacionFinalAt))}</span></div>
+        <div class="row"><span class="k">Fecha aprobación</span><span class="v">${escapeHtml(formatDateTime(aprobacionFinalAt))}</span></div>
         <div class="row"><span class="k">Token</span><span class="v">${escapeHtml(token || "No disponible")}</span></div>
       </div>
       ${workflowHtml}

@@ -471,6 +471,13 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
     const inspectRoles = processType === "public_purchase"
       ? ["jefe_tecnico", "jefe_servicio_tecnico", "acp_comercial", "jefe_comercial"]
       : ["jefe_tecnico", "jefe_servicio_tecnico", "backoffice_comercial", "jefe_comercial"];
+    const flowSubjectPrefix = processType === "public_purchase"
+      ? "Proceso de compra publica"
+      : "Proceso de compra privada";
+    const processCode = String(bc?.process_code || "").trim();
+    const processSubject = processCode
+      ? `${flowSubjectPrefix} - ${clientName} - ${processCode}`
+      : `${flowSubjectPrefix} - ${clientName}`;
     const { rows: recipients } = await db.query(
       `SELECT id FROM users WHERE role = ANY($1) AND active = true`,
       [inspectRoles],
@@ -480,14 +487,22 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
         notificationManager
           .sendNotification({
             userId: recipient.id,
-            customTitle: "Coordinar solicitud de inspeccion de ambiente",
+            customTitle: processSubject,
             customMessage: `Business Case ${businessCaseId} listo para coordinacion de inspeccion.`,
             type: "task",
             source: "business_case.preflow.inspection",
             priority: 2,
             email: true,
             chat: false,
-            meta: { businessCaseId, processId, processType },
+            data: {
+              email_subject: processSubject,
+            },
+            meta: {
+              businessCaseId,
+              processId,
+              processType,
+              process_key: `business_case:${businessCaseId}`,
+            },
           })
           .catch(() => null),
       ),

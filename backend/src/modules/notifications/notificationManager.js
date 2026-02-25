@@ -123,26 +123,39 @@ class NotificationManager {
     const explicit = this.normalizeProcessRef(meta?.process_key || meta?.workflow_key);
     if (explicit) return explicit;
 
+    const businessCaseRef = this.normalizeProcessRef(
+      meta?.business_case_id || meta?.businessCaseId || data?.business_case_id || data?.businessCaseId
+    );
+    if (businessCaseRef) return `business_case:${businessCaseRef}`;
+
+    const purchaseRef = this.normalizeProcessRef(
+      meta?.purchase_id ||
+      meta?.purchaseId ||
+      meta?.private_purchase_id ||
+      meta?.public_purchase_id ||
+      data?.purchase_id ||
+      data?.purchaseId ||
+      data?.private_purchase_id ||
+      data?.public_purchase_id
+    );
+    if (purchaseRef) return `purchase:${purchaseRef}`;
+
+    const requestRef = this.normalizeProcessRef(
+      meta?.solicitud_id ||
+      meta?.request_id ||
+      meta?.client_request_id ||
+      data?.request_id ||
+      data?.client_request_id
+    );
+    if (requestRef) return `request:${requestRef}`;
+
     const referenceCandidates = [
       meta?.process_id,
       meta?.workflow_id,
-      meta?.business_case_id,
-      meta?.businessCaseId,
-      meta?.solicitud_id,
-      meta?.request_id,
-      meta?.purchase_id,
-      meta?.purchaseId,
-      meta?.private_purchase_id,
-      meta?.public_purchase_id,
       meta?.ticket_id,
-      meta?.client_request_id,
       meta?.inspection_id,
       meta?.id,
-      data?.business_case_id,
-      data?.request_id,
-      data?.purchase_id,
       data?.ticket_id,
-      data?.client_request_id,
       data?.id,
     ];
 
@@ -439,7 +452,12 @@ class NotificationManager {
         return;
       }
 
-      const subject = notification.title;
+      const subject =
+        data?.email_subject ||
+        data?.subject ||
+        notification?.meta?.email_subject ||
+        notification?.meta?.subject ||
+        notification.title;
       const html = this.generateEmailHTML(notification, data);
 
       await sendMail({

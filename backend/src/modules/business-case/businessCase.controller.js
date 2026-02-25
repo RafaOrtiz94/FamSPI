@@ -155,6 +155,15 @@ const DETERMINATIONS_UPLOAD_MAIL_ROLES = [
   "tecnico",
   "jefe_operaciones",
 ];
+const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
+  "comercial",
+  "acp_comercial",
+  "backoffice_comercial",
+  "jefe_comercial",
+  "jefe_tecnico",
+  "tecnico",
+  "jefe_operaciones",
+];
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
   "administrador",
@@ -267,6 +276,64 @@ async function getUsersByRoles(roles = []) {
   return rows;
 }
 
+function buildBusinessCaseProcessKey(businessCaseId) {
+  return `business_case:${businessCaseId}`;
+}
+
+function normalizeBusinessCaseFlowLabel(bcPurchaseType) {
+  const normalized = String(bcPurchaseType || "").toLowerCase();
+  const isPublic = normalized.includes("public");
+  return isPublic ? "Proceso de compra publica" : "Proceso de compra privada";
+}
+
+function resolveBusinessCaseClientDisplayName(businessCase = {}) {
+  const metadata = businessCase?.modern_bc_metadata && typeof businessCase.modern_bc_metadata === "object"
+    ? businessCase.modern_bc_metadata
+    : {};
+  const generalData = metadata?.general_data && typeof metadata.general_data === "object"
+    ? metadata.general_data
+    : {};
+
+  const candidates = [
+    businessCase?.client_name,
+    generalData?.client_name,
+    generalData?.razon_social,
+    generalData?.business_name,
+    generalData?.nombre_comercial,
+    generalData?.commercial_name,
+    generalData?.client_commercial_name,
+  ];
+
+  for (const value of candidates) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+
+  return "Cliente sin nombre";
+}
+
+function buildBusinessCaseProcessSubject(businessCase = {}) {
+  const flowLabel = normalizeBusinessCaseFlowLabel(businessCase?.bc_purchase_type);
+  const clientName = resolveBusinessCaseClientDisplayName(businessCase);
+  const processCode = String(businessCase?.process_code || "").trim();
+  return processCode
+    ? `${flowLabel} - ${clientName} - ${processCode}`
+    : `${flowLabel} - ${clientName}`;
+}
+
+async function resolveBusinessCaseMailingList({ businessCase, actorUser }) {
+  const recipients = await getUsersByRoles(BUSINESS_CASE_PROCESS_MAIL_ROLES);
+  const emails = [...new Set(
+    [
+      String(actorUser?.email || "").trim().toLowerCase(),
+      String(businessCase?.created_by_email || "").trim().toLowerCase(),
+      ...recipients.map((user) => String(user?.email || "").trim().toLowerCase()),
+    ].filter(Boolean),
+  )];
+  const [primaryTo, ...ccEmails] = emails;
+  return { primaryTo: primaryTo || null, ccEmails, recipients };
+}
+
 async function notifySectionReview({ businessCaseId, section, actor }) {
   const recipients = await getUsersByRoles(REVIEW_ROLES);
   await Promise.all(
@@ -278,7 +345,12 @@ async function notifySectionReview({ businessCaseId, section, actor }) {
         email: true,
         chat: false,
         source: "business_case.section_review",
-        meta: { businessCaseId, section, actor }
+        meta: {
+          businessCaseId,
+          section,
+          actor,
+          process_key: buildBusinessCaseProcessKey(businessCaseId),
+        }
       }).catch(() => null)
     )
   );
@@ -295,7 +367,12 @@ async function notifySectionLocked({ businessCaseId, section, actor }) {
         email: true,
         chat: false,
         source: "business_case.section_locked",
-        meta: { businessCaseId, section, actor }
+        meta: {
+          businessCaseId,
+          section,
+          actor,
+          process_key: buildBusinessCaseProcessKey(businessCaseId),
+        }
       }).catch(() => null)
     )
   );
@@ -312,7 +389,11 @@ async function notifyPhase1Completed({ businessCaseId, actor }) {
         email: true,
         chat: false,
         source: "business_case.phase1_completed",
-        meta: { businessCaseId, actor }
+        meta: {
+          businessCaseId,
+          actor,
+          process_key: buildBusinessCaseProcessKey(businessCaseId),
+        }
       }).catch(() => null)
     )
   );
@@ -357,6 +438,7 @@ async function notifyDeterminationsGateEnabled({
           determinations_deadline_at: gate?.deadlineAt || null,
           notified_role: targetUser.role || null,
           actor: actor || null,
+          process_key: buildBusinessCaseProcessKey(businessCase?.id || businessCase?.business_case_id),
         },
       }).catch(() => null),
     ),
@@ -375,7 +457,7 @@ function buildOwnershipCompletionRules(ownershipInfo = {}) {
 }
 
 function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail }) {
-  const clientName = String(businessCase?.client_name || "Cliente sin nombre").trim();
+  const clientName = resolveBusinessCaseClientDisplayName(businessCase);
   const processNumber = String(businessCase?.process_code || "").trim();
   if (!processNumber) {
     const error = new Error("Debe existir numero de proceso (process_code) para enviar notificaciones.");
@@ -393,13 +475,11 @@ function buildGroupedDeterminationsEmailPayload({ businessCase, gate, actorEmail
       hour12: false,
     })
     : "sin fecha";
-  const purchaseType = String(businessCase?.bc_purchase_type || "").toLowerCase();
-  const isPublic = purchaseType.includes("public");
-  const flowLabel = isPublic ? "Compra Publica (Comodato)" : "Compra Privada (Comodato)";
+  const flowLabel = normalizeBusinessCaseFlowLabel(businessCase?.bc_purchase_type);
   const actorLabel = actorEmail || "usuario comercial";
 
   return {
-    subject: `${clientName} - Proceso ${processNumber}`,
+    subject: `${flowLabel} - ${clientName} - ${processNumber}`,
     message:
       `Flujo: ${flowLabel}. ` +
       `${actorLabel} cargó el documento de estadística del Business Case ${businessCase?.id || businessCase?.business_case_id}. ` +
@@ -475,15 +555,12 @@ async function registerDeterminationsGroupedNotificationAudit({
 }
 
 async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }) {
-  const recipients = await getUsersByRoles(DETERMINATIONS_UPLOAD_MAIL_ROLES);
-  const emails = [...new Set(
-    (recipients || [])
-      .map((user) => String(user?.email || "").trim().toLowerCase())
-      .filter(Boolean),
-  )];
-  if (!emails.length) return;
+  const mailingList = await resolveBusinessCaseMailingList({ businessCase, actorUser });
+  const recipients = mailingList.recipients || [];
+  const primaryTo = mailingList.primaryTo;
+  const ccEmails = mailingList.ccEmails || [];
+  if (!primaryTo) return;
 
-  const [primaryTo, ...ccEmails] = emails;
   const payload = buildGroupedDeterminationsEmailPayload({
     businessCase,
     gate,
@@ -509,7 +586,7 @@ async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }
       email_to: primaryTo,
       email_cc: ccEmails,
       notified_roles: DETERMINATIONS_UPLOAD_MAIL_ROLES,
-      process_key: `business_case.determinations_gate_grouped_mail:${payload.metadata.businessCaseId}`,
+      process_key: buildBusinessCaseProcessKey(payload.metadata.businessCaseId),
     },
   });
 
@@ -524,6 +601,65 @@ async function notifyDeterminationsGroupedMail({ businessCase, gate, actorUser }
     emailCc: ccEmails,
     deadlineAt: payload.metadata.deadlineAt || null,
   });
+}
+
+async function notifyBusinessCaseFirstProcessEmail({ businessCaseId, actorUser }) {
+  const businessCase = await businessCaseService.getBusinessCaseById(businessCaseId);
+  const metadata = preflowService.toObject(businessCase?.modern_bc_metadata);
+  if (metadata?.preflow_first_email_sent_at) {
+    return { skipped: true, reason: "already_sent" };
+  }
+
+  const mailingList = await resolveBusinessCaseMailingList({ businessCase, actorUser });
+  if (!mailingList.primaryTo) {
+    return { skipped: true, reason: "missing_recipients" };
+  }
+
+  const subject = buildBusinessCaseProcessSubject(businessCase);
+  const flowLabel = normalizeBusinessCaseFlowLabel(businessCase?.bc_purchase_type);
+  const clientName = resolveBusinessCaseClientDisplayName(businessCase);
+  const processCode = String(businessCase?.process_code || "").trim() || "No aplica";
+
+  await notificationManager.sendNotification({
+    userId: actorUser?.id || mailingList.recipients?.[0]?.id,
+    template: "custom_html",
+    customTitle: subject,
+    customMessage:
+      `${flowLabel} activado para ${clientName}. ` +
+      `El usuario comercial completo Datos Generales y se inicia la trazabilidad del proceso. ` +
+      `Codigo de proceso: ${processCode}.`,
+    type: "alert",
+    priority: 2,
+    source: "business_case.process.first_email",
+    email: true,
+    chat: false,
+    data: {
+      email_to: mailingList.primaryTo,
+      email_cc: mailingList.ccEmails,
+      email_subject: subject,
+    },
+    meta: {
+      businessCaseId,
+      process_key: buildBusinessCaseProcessKey(businessCaseId),
+      flow_label: flowLabel,
+      client_name: clientName,
+      process_code: String(businessCase?.process_code || "").trim() || null,
+      email_to: mailingList.primaryTo,
+      email_cc: mailingList.ccEmails,
+      triggered_by: actorUser?.email || null,
+    },
+  });
+
+  await businessCaseService.updateBusinessCase(businessCaseId, {
+    modern_bc_metadata: {
+      ...metadata,
+      preflow_first_email_sent_at: new Date().toISOString(),
+      preflow_first_email_sent_by: actorUser?.email || null,
+      preflow_first_email_subject: subject,
+    },
+  });
+
+  return { sent: true, subject };
 }
 
 async function assertSectionEditable(businessCaseId, section, user) {
@@ -599,13 +735,6 @@ async function update(req, res) {
       if (!metadata?.preflow_started_at) {
         await preflowService.ensurePreflowStarted(req.params.id, PRE_BC_DURATION_HOURS);
       }
-    }
-    if ((req.user?.role || "").toLowerCase() === "comercial") {
-      await notifySectionReview({
-        businessCaseId: req.params.id,
-        section: "general",
-        actor: req.user?.email || "system",
-      });
     }
     const refreshed = await businessCaseService.getBusinessCaseById(req.params.id);
     res.json({ ok: true, data: refreshed });
@@ -2580,6 +2709,21 @@ async function recordSectionCompletion(req, res) {
 
     const processResult = await preflowService.ensurePreflowWorkspaceProcess({ businessCaseId: id, actorUser: user, durationHours: PRE_BC_DURATION_HOURS });
     const latestBusinessCase = await businessCaseService.getBusinessCaseById(id);
+    const isCommercialActor = String(userRole || "").toLowerCase().includes("comercial");
+    if (canonicalSection === "general" && isCommercialActor) {
+      try {
+        await notifyBusinessCaseFirstProcessEmail({
+          businessCaseId: id,
+          actorUser: user,
+        });
+      } catch (mailError) {
+        logger.warn(
+          { error: mailError.message, businessCaseId: id },
+          "No se pudo enviar el primer correo por proceso al completar datos generales",
+        );
+      }
+    }
+
     const latestOwnership = await BusinessCaseDataOwnership.getOwnershipInfo(id);
     const ownershipRules = {};
     Object.entries(latestOwnership || {}).forEach(([key, value]) => {
