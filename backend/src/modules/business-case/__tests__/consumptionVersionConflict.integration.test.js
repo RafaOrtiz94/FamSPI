@@ -30,8 +30,59 @@ describe("Business Case consumption version conflicts (integration)", () => {
   beforeEach(() => {
     jest.clearAllMocks();
 
-    db.getClient.mockImplementation(() => {
-      throw new Error("getClient no debe ser llamado en tests de conflicto de versión");
+    db.getClient.mockResolvedValue({
+      query: jest.fn(async (text, params = []) => {
+        const sql = String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
+
+        if (sql === "begin" || sql === "commit" || sql === "rollback") {
+          return { rows: [] };
+        }
+
+        if (sql.includes("insert into bc_consumption_items")) {
+          let payload = [];
+          try {
+            payload = JSON.parse(params?.[1] || "[]");
+          } catch (_) {
+            payload = [];
+          }
+          state.items = payload.map((item) => ({
+            item_key: item.item_key,
+            item_id: item.item_id,
+            name: item.name,
+            item_type: item.item_type,
+            source: item.source,
+            catalog_id: item.catalog_id,
+            annual_qty: item.annual_qty,
+            equipment_id: item.equipment_id,
+            equipment_name: item.equipment_name,
+          }));
+          return { rows: [] };
+        }
+
+        if (sql.includes("delete from bc_consumption_items where business_case_id")) {
+          state.items = [];
+          return { rows: [] };
+        }
+
+        if (sql.includes("insert into bc_consumption_excluded")) {
+          let payload = [];
+          try {
+            payload = JSON.parse(params?.[1] || "[]");
+          } catch (_) {
+            payload = [];
+          }
+          state.excluded = payload.map((item) => item.item_key);
+          return { rows: [] };
+        }
+
+        if (sql.includes("delete from bc_consumption_excluded where business_case_id")) {
+          state.excluded = [];
+          return { rows: [] };
+        }
+
+        return { rows: [] };
+      }),
+      release: jest.fn(),
     });
 
     db.query.mockImplementation(async (text) => {
@@ -108,5 +159,35 @@ describe("Business Case consumption version conflicts (integration)", () => {
       status: 409,
       code: "CONSUMPTION_VERSION_CONFLICT",
     });
+  });
+
+  it("patchConsumptionItem retorna snapshot consistente con item guardado", async () => {
+    const current = await businessCaseService.getConsumptionItems(BUSINESS_CASE_ID);
+
+    const patched = await businessCaseService.patchConsumptionItem(
+      BUSINESS_CASE_ID,
+      "cons:10:500",
+      {
+        annualQty: 200,
+        row: {
+          key: "cons:10:500",
+          itemId: "500",
+          name: "Reactivo Demo",
+          type: "reactivo",
+          source: "catalog",
+          catalogId: 500,
+          equipmentId: 10,
+          equipmentName: "Cobas X",
+        },
+        exclude: false,
+      },
+      { expectedVersion: current.version },
+    );
+
+    expect(Array.isArray(patched.items)).toBe(true);
+    expect(patched.items.length).toBeGreaterThan(0);
+    const savedItem = patched.items.find((item) => item.key === "cons:10:500");
+    expect(savedItem).toBeTruthy();
+    expect(Number(savedItem.annualQty)).toBe(200);
   });
 });

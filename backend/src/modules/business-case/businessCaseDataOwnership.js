@@ -42,6 +42,15 @@ const deterministicUuidFromLegacyId = (value) => {
 const resolveActorUuid = (value) =>
   normalizeUuid(value) || deterministicUuidFromLegacyId(value) || SYSTEM_ACTOR_UUID;
 
+const resolveActorIntegerId = (...values) => {
+  for (const value of values) {
+    if (value === null || value === undefined) continue;
+    const parsed = Number.parseInt(String(value).trim(), 10);
+    if (Number.isInteger(parsed) && parsed > 0) return parsed;
+  }
+  return null;
+};
+
 const parseJsonbSafe = (value, fallback = {}) => {
   if (value === null || value === undefined) return { ...fallback };
   if (typeof value === "object" && !Array.isArray(value)) return value;
@@ -184,6 +193,7 @@ class BusinessCaseDataOwnership {
   static async lockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
     const actorUserId = resolveActorUuid(user?.uuid || user?.sub || user?.id || user?.user_id);
+    const actorNumericId = resolveActorIntegerId(user?.id, user?.user_id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -195,7 +205,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        actorUserId,
+        actorNumericId,
         user?.role || null,
         now,
         canonicalState || null,
@@ -227,6 +237,7 @@ class BusinessCaseDataOwnership {
   static async unlockSection(businessCaseId, section, user, canonicalState, metadata = {}) {
     const now = new Date();
     const actorUserId = resolveActorUuid(user?.uuid || user?.sub || user?.id || user?.user_id);
+    const actorNumericId = resolveActorIntegerId(user?.id, user?.user_id);
     await db.query(
       `INSERT INTO business_case_section_ownership
         (business_case_id, section_name, is_locked, locked_by, locked_by_role, locked_at, canonical_state, metadata, created_at, updated_at)
@@ -238,7 +249,7 @@ class BusinessCaseDataOwnership {
       [
         businessCaseId,
         section,
-        actorUserId,
+        actorNumericId,
         user?.role || null,
         null,
         canonicalState || null,

@@ -771,7 +771,10 @@ async function loadConsumptionData(businessCaseId) {
       equipmentId: row.equipment_id,
       equipmentName: row.equipment_name,
     }));
-    const mappedExcluded = excluded.map((row) => row.item_key);
+    const mappedExcluded = normalizeExcludedForItems(
+      mappedItems,
+      excluded.map((row) => row.item_key),
+    );
     const version = buildConsumptionVersion(mappedItems, mappedExcluded);
 
     return {
@@ -838,6 +841,71 @@ function normalizeExcludedKeysForComparison(excluded = []) {
         .filter(Boolean),
     ),
   ).sort();
+}
+
+function deriveLegacyConsumptionKey(itemKey) {
+  const normalized = String(itemKey || "").trim();
+  if (!normalized) return null;
+  const parts = normalized.split(":");
+  if (parts.length === 3 && (parts[0] === "cons" || parts[0] === "det")) {
+    return `${parts[0]}:${parts[2]}`;
+  }
+  return null;
+}
+
+function normalizeExcludedForItems(items = [], excluded = []) {
+  const safeExcluded = normalizeExcludedKeysForComparison(excluded);
+  if (!Array.isArray(items) || !items.length || !safeExcluded.length) return safeExcluded;
+
+  const protectedKeys = new Set();
+  items.forEach((item) => {
+    const key = String(item?.key || "").trim();
+    if (key) protectedKeys.add(key);
+    const legacy = deriveLegacyConsumptionKey(key);
+    if (legacy) protectedKeys.add(legacy);
+    if (item?.catalogId != null && item?.equipmentId != null) {
+      const prefix = String(item?.type || "").toLowerCase() === "determinacion" ? "det" : "cons";
+      protectedKeys.add(`${prefix}:${item.equipmentId}:${item.catalogId}`);
+      protectedKeys.add(`${prefix}:${item.catalogId}`);
+    }
+  });
+
+  return safeExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
+}
+
+function matchesConsumptionItem(item = {}, candidate = {}) {
+  const itemKey = String(item?.key || "").trim();
+  const candidateKey = String(candidate?.key || "").trim();
+  if (itemKey && candidateKey && itemKey === candidateKey) return true;
+
+  const itemCatalogId = item?.catalogId ?? null;
+  const candidateCatalogId = candidate?.catalogId ?? null;
+  const itemEquipmentId = item?.equipmentId ?? null;
+  const candidateEquipmentId = candidate?.equipmentId ?? null;
+  if (
+    itemCatalogId !== null &&
+    candidateCatalogId !== null &&
+    String(itemCatalogId) === String(candidateCatalogId) &&
+    String(itemEquipmentId || "") === String(candidateEquipmentId || "")
+  ) {
+    return true;
+  }
+
+  const itemId = String(item?.itemId || "").trim();
+  const candidateItemId = String(candidate?.itemId || "").trim();
+  const itemType = String(item?.type || "").trim().toLowerCase();
+  const candidateType = String(candidate?.type || "").trim().toLowerCase();
+  if (
+    itemId &&
+    candidateItemId &&
+    itemId === candidateItemId &&
+    itemType === candidateType &&
+    String(itemEquipmentId || "") === String(candidateEquipmentId || "")
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isSameConsumptionPayload(current = {}, nextItems = [], nextExcluded = []) {
@@ -1011,7 +1079,18 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
   await assertModernBusinessCase(businessCaseId);
   const expectedVersion = options?.expectedVersion || null;
   const nextItems = Array.isArray(items) ? items : [];
-  const nextExcluded = Array.isArray(excluded) ? excluded : [];
+  let nextExcluded = Array.isArray(excluded) ? excluded : [];
+  if (nextItems.length && nextExcluded.length) {
+    const protectedKeys = new Set();
+    nextItems.forEach((item) => {
+      const key = String(item?.key || "").trim();
+      if (!key) return;
+      protectedKeys.add(key);
+      const legacy = deriveLegacyConsumptionKey(key);
+      if (legacy) protectedKeys.add(legacy);
+    });
+    nextExcluded = nextExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
+  }
   const current = await loadConsumptionData(businessCaseId);
   assertConsumptionVersion(expectedVersion, current?.version || null);
 
@@ -1044,9 +1123,13 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
   const annualQtyRaw = patch?.annualQty;
   const annualQtyNumber = Number(annualQtyRaw);
   const annualQty = Number.isFinite(annualQtyNumber) ? Math.max(0, annualQtyNumber) : 0;
+  const legacyItemKey = deriveLegacyConsumptionKey(normalizedKey);
+  const keyVariants = new Set([normalizedKey]);
+  if (legacyItemKey) keyVariants.add(legacyItemKey);
 
   let nextItems = (current?.items || []).filter((item) => item.key !== normalizedKey);
-  let nextExcluded = (current?.excluded || []).filter((key) => key !== normalizedKey);
+  let nextExcluded = (current?.excluded || []).filter((key) => !keyVariants.has(String(key || "").trim()));
+  let expectedPatchedItem = null;
 
   if (annualQty > 0) {
     const name = String(row.name || existingItem?.name || "").trim();
@@ -1058,7 +1141,7 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
 
     nextItems = [
       ...nextItems,
-      {
+      (expectedPatchedItem = {
         key: normalizedKey,
         itemId: row.itemId ?? existingItem?.itemId ?? null,
         name,
@@ -1068,12 +1151,13 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
         annualQty,
         equipmentId: row.equipmentId ?? existingItem?.equipmentId ?? null,
         equipmentName: row.equipmentName ?? existingItem?.equipmentName ?? null,
-      },
+      }),
     ];
   } else {
     const source = String(row.source || existingItem?.source || "").trim().toLowerCase();
     if (source === "catalog" || patch?.exclude === true) {
-      nextExcluded = Array.from(new Set([...nextExcluded, normalizedKey]));
+      const exclusionKeys = legacyItemKey ? [normalizedKey, legacyItemKey] : [normalizedKey];
+      nextExcluded = Array.from(new Set([...nextExcluded, ...exclusionKeys]));
     }
   }
 
@@ -1086,7 +1170,29 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
     consumption_excluded: nextExcluded,
   });
 
-  return loadConsumptionData(businessCaseId);
+  let result = await loadConsumptionData(businessCaseId);
+
+  if (annualQty > 0 && expectedPatchedItem) {
+    const existsInResult = Array.isArray(result?.items)
+      ? result.items.some((item) => matchesConsumptionItem(item, expectedPatchedItem))
+      : false;
+    if (!existsInResult) {
+      const repairedItems = [
+        ...((result?.items || []).filter((item) => !matchesConsumptionItem(item, expectedPatchedItem))),
+        expectedPatchedItem,
+      ];
+      const repairedExcluded = Array.isArray(result?.excluded)
+        ? result.excluded.filter((key) => !keyVariants.has(String(key || "").trim()))
+        : [];
+      await syncConsumptionData(businessCaseId, {
+        consumption_items: repairedItems,
+        consumption_excluded: repairedExcluded,
+      });
+      result = await loadConsumptionData(businessCaseId);
+    }
+  }
+
+  return result;
 }
 
 async function deleteBusinessCase(id) {

@@ -36,6 +36,22 @@ const resolveInitiator = (guidance = {}) => {
   return name || email || (id ? `Usuario ${id}` : "No disponible");
 };
 
+const roleToLabel = (role) => {
+  const normalized = String(role || "").toLowerCase();
+  if (normalized === "acp_comercial") return "ACP Comercial";
+  if (normalized === "backoffice_comercial") return "Backoffice Comercial";
+  if (normalized === "comercial") return "Comercial";
+  return normalized || "N/D";
+};
+
+const formatDuration = (seconds) => {
+  const safe = Number(seconds);
+  if (!Number.isFinite(safe) || safe < 0) return null;
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
+};
+
 const CaseHeader = ({ uiGuidance, onRefresh }) => {
   const workspace = useBusinessCaseWorkspaceOptional();
   const resolvedGuidance = uiGuidance || workspace?.uiGuidance || null;
@@ -140,6 +156,15 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
       ? "Compra privada"
       : "Origen no definido";
   const initiatorLabel = useMemo(() => resolveInitiator(resolvedGuidance), [resolvedGuidance]);
+  const preflowActiveRoleLabel = useMemo(
+    () => roleToLabel(preflow?.activeRole),
+    [preflow?.activeRole],
+  );
+  const preflowPhaseLabel = preflow?.activePhase === "review" ? "Revision" : "Comercial";
+  const commercialElapsedLabel = useMemo(
+    () => formatDuration(preflow?.commercial?.elapsedSeconds),
+    [preflow?.commercial?.elapsedSeconds],
+  );
 
   return (
     <Card className="p-4 sm:p-6">
@@ -182,7 +207,7 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
               <div className={`flex items-center gap-2 ${preflow?.isExpired ? "text-rose-700" : "text-indigo-700"}`}>
                 <FiClock className={preflow?.isExpired ? "text-rose-600" : "text-indigo-600"} />
                 <span>
-                  Ventana 48h: {preflow?.isExpired ? "vencida" : countdownLabel || "en curso"}
+                  Ventana {preflowPhaseLabel} ({preflowActiveRoleLabel}): {preflow?.isExpired ? "vencida" : countdownLabel || "en curso"}
                 </span>
               </div>
             )}
@@ -204,6 +229,12 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
                 <span>{preflowProgressPercent}%</span>
               </div>
             )}
+            {commercialElapsedLabel && (
+              <div className="flex items-center gap-2 text-xs text-slate-700">
+                <FiCheckCircle className="text-emerald-600" />
+                <span>Tiempo comercial registrado: {commercialElapsedLabel}</span>
+              </div>
+            )}
           </div>
 
           {preflow?.isActive && (
@@ -219,7 +250,9 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
               }`}
             >
               <FiClock />
-              <span className="text-xs font-semibold uppercase tracking-wide">Cuenta regresiva 48h</span>
+              <span className="text-xs font-semibold uppercase tracking-wide">
+                Cuenta regresiva {preflowPhaseLabel} 48h
+              </span>
               <span className="font-mono text-base font-bold">
                 {preflow?.isExpired ? "00:00:00" : countdownLabelDetailed || "00:00:00"}
               </span>

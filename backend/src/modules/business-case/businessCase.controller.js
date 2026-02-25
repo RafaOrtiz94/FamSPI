@@ -164,6 +164,15 @@ const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "jefe_tecnico",
   "jefe_operaciones",
 ]);
+const BC_CONSUMPTION_DEBUG = (() => {
+  const raw = String(process.env.BC_CONSUMPTION_DEBUG || "").trim().toLowerCase();
+  return raw === "1" || raw === "true" || raw === "yes" || raw === "on";
+})();
+
+function logConsumptionDebug(payload, message) {
+  if (!BC_CONSUMPTION_DEBUG) return;
+  logger.info(payload, message);
+}
 
 function hasTextValue(value) {
   if (value === null || value === undefined) return false;
@@ -532,19 +541,19 @@ async function assertSectionEditable(businessCaseId, section, user) {
 
 async function list(req, res) {
   try {
-    logger.info('[WORKSPACE_DEBUG] business-case list handler hit', { versionTag: 'TOISO_V1', ts: new Date().toISOString() });
+    logConsumptionDebug({ versionTag: 'TOISO_V1', ts: new Date().toISOString() }, '[WORKSPACE_DEBUG] business-case list handler hit');
 
     const { page, pageSize, status, client_name, q } = req.query;
     const result = await businessCaseService.listBusinessCases({ page, pageSize, status, client_name, q });
 
     // Log sample data transformation
     if (result.items && result.items.length > 0) {
-      logger.info('[WORKSPACE_DEBUG] sample created_at before/after', {
+      logConsumptionDebug({
         raw: result.items[0].created_at,
         rawType: typeof result.items[0].created_at,
         mapped: result.items[0].created_at,
         mappedType: typeof result.items[0].created_at
-      });
+      }, '[WORKSPACE_DEBUG] sample created_at before/after');
     }
 
     res.json({ ok: true, ...result });
@@ -1056,7 +1065,7 @@ async function getConsumptionItems(req, res) {
     const { id } = req.params;
     const data = await businessCaseService.getConsumptionItems(id);
     const debugItem = (data?.items || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
-    logger.info(
+    logConsumptionDebug(
       {
         businessCaseId: id,
         itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
@@ -1099,7 +1108,7 @@ async function saveConsumptionItems(req, res) {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
     const excluded = Array.isArray(req.body?.excluded) ? req.body.excluded : [];
     const requestDebugItem = items.find((item) => String(item?.itemId || "").trim() === "3321193001");
-    logger.info(
+    logConsumptionDebug(
       {
         businessCaseId: id,
         itemsCount: items.length,
@@ -1133,7 +1142,7 @@ async function saveConsumptionItems(req, res) {
 
     const data = await businessCaseService.saveConsumptionItems(id, items, excluded, { expectedVersion });
     const responseDebugItem = (data?.items || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
-    logger.info(
+    logConsumptionDebug(
       {
         businessCaseId: id,
         itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
@@ -1193,6 +1202,24 @@ async function patchConsumptionItem(req, res) {
     const row = req.body?.row && typeof req.body.row === "object" ? req.body.row : {};
     const exclude = isTruthyFlag(req.body?.exclude);
     const normalizedItemKey = decodeURIComponent(itemKey);
+    logConsumptionDebug(
+      {
+        businessCaseId: id,
+        itemKey: normalizedItemKey,
+        annualQty,
+        exclude,
+        expectedVersion,
+        rowPreview: {
+          key: row?.key || null,
+          itemId: row?.itemId || null,
+          type: row?.type || null,
+          source: row?.source || null,
+          catalogId: row?.catalogId ?? null,
+          equipmentId: row?.equipmentId ?? null,
+        },
+      },
+      "[BC_CONSUMPTION][PATCH][REQUEST]",
+    );
 
     idempotencySession = await startIdempotentWrite({
       req,
@@ -1217,6 +1244,16 @@ async function patchConsumptionItem(req, res) {
       normalizedItemKey,
       { annualQty, row, exclude },
       { expectedVersion },
+    );
+    logConsumptionDebug(
+      {
+        businessCaseId: id,
+        itemKey: normalizedItemKey,
+        itemsCount: Array.isArray(data?.items) ? data.items.length : 0,
+        excludedCount: Array.isArray(data?.excluded) ? data.excluded.length : 0,
+        version: data?.version || null,
+      },
+      "[BC_CONSUMPTION][PATCH][RESPONSE]",
     );
     try {
       await dispatchWorkspaceService.syncDispatchWorkspaceFromConsumption(id);
@@ -2201,6 +2238,7 @@ async function uploadDeterminationsStatDocument(req, res) {
       });
     }
     let preflowProcessResult = null;
+    let preflowHandoffResult = null;
     try {
       if (preflowService.isPreflowCase(bc)) {
         await preflowService.ensurePreflowStarted(id, PRE_BC_DURATION_HOURS);
@@ -2224,6 +2262,24 @@ async function uploadDeterminationsStatDocument(req, res) {
     const currentDocument = await determinationsGateService.getCurrentDocument(id);
     const isSameCurrentHash = String(currentDocument?.document_hash_sha256 || "").toLowerCase() === String(fileHash || "").toLowerCase();
     if (isSameCurrentHash) {
+      try {
+        preflowHandoffResult = await preflowService.completeCommercialStageAndStartReview({
+          businessCaseId: id,
+          actorUser: req.user,
+          durationHours: PRE_BC_DURATION_HOURS,
+          reason: "stat_document_reused_same_hash",
+        });
+      } catch (handoffError) {
+        logger.warn(
+          { error: handoffError.message, businessCaseId: id },
+          "No se pudo cerrar etapa comercial al reutilizar documento de estadistica",
+        );
+        preflowHandoffResult = {
+          skipped: true,
+          reason: "handoff_failed",
+          message: handoffError.message,
+        };
+      }
       const gate = determinationsGateService.buildGateInfo({
         businessCase: bc,
         role,
@@ -2236,6 +2292,7 @@ async function uploadDeterminationsStatDocument(req, res) {
           reused_existing_document: true,
           reason: "same_sha256_hash",
           process_result: preflowProcessResult,
+          preflow_handoff: preflowHandoffResult,
         },
       };
       await completeIdempotentWrite(idempotencySession, responseBody, 200);
@@ -2302,6 +2359,24 @@ async function uploadDeterminationsStatDocument(req, res) {
     });
 
     await businessCaseService.updateBusinessCase(id, { modern_bc_metadata: metadata });
+    try {
+      preflowHandoffResult = await preflowService.completeCommercialStageAndStartReview({
+        businessCaseId: id,
+        actorUser: req.user,
+        durationHours: PRE_BC_DURATION_HOURS,
+        reason: "stat_document_uploaded",
+      });
+    } catch (handoffError) {
+      logger.warn(
+        { error: handoffError.message, businessCaseId: id },
+        "No se pudo cerrar etapa comercial tras carga del documento de estadistica",
+      );
+      preflowHandoffResult = {
+        skipped: true,
+        reason: "handoff_failed",
+        message: handoffError.message,
+      };
+    }
     const refreshed = await businessCaseService.getBusinessCaseById(id);
     const gate = determinationsGateService.buildGateInfo({
       businessCase: refreshed,
@@ -2320,6 +2395,7 @@ async function uploadDeterminationsStatDocument(req, res) {
       data: gate,
       meta: {
         process_result: preflowProcessResult,
+        preflow_handoff: preflowHandoffResult,
       },
     };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);

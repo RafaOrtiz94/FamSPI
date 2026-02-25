@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FiActivity, FiAlertTriangle, FiCheck, FiEdit2, FiTrash2, FiUpload, FiX } from "react-icons/fi";
+import { FiActivity, FiAlertTriangle, FiCheck, FiChevronDown, FiEdit2, FiTrash2, FiUpload, FiX } from "react-icons/fi";
 import api from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useParams } from "react-router-dom";
@@ -26,6 +26,59 @@ const TECNICO_ROLES = new Set(["jefe_tecnico", "tecnico"]);
 const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
 const ROW_WINDOW_STEP = 24;
 const IDEMPOTENCY_TTL_MS = 60 * 1000;
+const DET_DEBUG_VERSION = "2026-02-24-det-save-v4";
+const DET_DEBUG_ENABLED = String(process.env.REACT_APP_BC_CONSUMPTION_DEBUG || "").trim().toLowerCase() === "true";
+
+const debugInfo = (...args) => {
+  if (!DET_DEBUG_ENABLED) return;
+  console.info(...args);
+};
+
+const debugWarn = (...args) => {
+  if (!DET_DEBUG_ENABLED) return;
+  console.warn(...args);
+};
+
+const debugError = (...args) => {
+  if (!DET_DEBUG_ENABLED) return;
+  console.error(...args);
+};
+
+const deriveLegacyConsumptionKey = (key) => {
+  const normalized = String(key || "").trim();
+  if (!normalized) return null;
+  const parts = normalized.split(":");
+  if (parts.length === 3 && (parts[0] === "cons" || parts[0] === "det")) {
+    return `${parts[0]}:${parts[2]}`;
+  }
+  return null;
+};
+const DETERMINATION_CATEGORY_CONFIG = [
+  {
+    key: "reactivos",
+    title: "Reactivos",
+    description: "Edita esta seccion con rol comercial / acp comercial / backoffice.",
+    types: new Set(["reactivo", "determinacion"]),
+  },
+  {
+    key: "controles",
+    title: "Controles",
+    description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+    types: new Set(["control"]),
+  },
+  {
+    key: "calibradores",
+    title: "Calibradores",
+    description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+    types: new Set(["calibrador"]),
+  },
+  {
+    key: "consumibles",
+    title: "Consumibles",
+    description: "Edita esta seccion con rol jefe tecnico / tecnico.",
+    types: new Set(["consumible", "material"]),
+  },
+];
 
 const DeterminationsSection = ({
   businessCase,
@@ -55,6 +108,7 @@ const DeterminationsSection = ({
   const [quantityDrafts, setQuantityDrafts] = useState({});
   const quantityDraftsRef = useRef({});
   const [rowWindowByGroup, setRowWindowByGroup] = useState({});
+  const [collapsedSections, setCollapsedSections] = useState({});
   const savedItemsRef = useRef([]);
   const excludedKeysRef = useRef([]);
   const consumptionVersionRef = useRef(null);
@@ -70,6 +124,8 @@ const DeterminationsSection = ({
     type: "reactivo",
   });
   const idempotencyCacheRef = useRef(new Map());
+  const lastSavedKeysRef = useRef([]);
+  const lastEditedRowRef = useRef(null);
 
   const canEditBase = permissions.canEdit !== false && ownership?.canUserEdit !== false;
   const currentRole = user?.role;
@@ -156,7 +212,7 @@ const DeterminationsSection = ({
         }
       }
     } catch (err) {
-      console.warn("No se pudieron cargar datos de equipo", err.message);
+      debugWarn("No se pudieron cargar datos de equipo", err.message);
     }
   }, [bcId, businessCase?.extra?.equipment_details]);
 
@@ -240,7 +296,8 @@ const DeterminationsSection = ({
       });
       const data = res?.data?.data || {};
       const items = Array.isArray(data?.items) ? data.items : [];
-      const excluded = Array.isArray(data?.excluded) ? data.excluded : [];
+      const excludedRaw = Array.isArray(data?.excluded) ? data.excluded : [];
+      const excluded = normalizeExcludedAgainstItems(items, excludedRaw);
       const version = data?.version || null;
       pendingQtyChangesRef.current = {};
       editedRowsRef.current = {};
@@ -262,6 +319,13 @@ const DeterminationsSection = ({
         return next;
       });
       setHasStructureChanges(false);
+      debugInfo("[DET_DEBUG] loadExisting:success", {
+        bcId,
+        items: items.length,
+        excluded: excluded.length,
+        loadedKeysSample: items.slice(0, 10).map((item) => item?.key),
+        lastSavedKeysSample: lastSavedKeysRef.current.slice(0, 10),
+      });
       recordBusinessCaseTelemetry({
         section: "determinations",
         type: "load_existing_success",
@@ -278,12 +342,16 @@ const DeterminationsSection = ({
       const stored = businessCase?.modern_bc_metadata?.consumption_items;
       const excluded = businessCase?.modern_bc_metadata?.consumption_excluded;
       const safeStored = Array.isArray(stored) ? stored : [];
+      const safeExcluded = normalizeExcludedAgainstItems(
+        safeStored,
+        Array.isArray(excluded) ? excluded : [],
+      );
       pendingQtyChangesRef.current = {};
       editedRowsRef.current = {};
       setPendingChangesCount(0);
       consumptionVersionRef.current = null;
       setSavedItems(safeStored);
-      setExcludedKeys(Array.isArray(excluded) ? excluded : []);
+      setExcludedKeys(safeExcluded);
       setQuantityDrafts(() => {
         const next = {};
         safeStored.forEach((item) => {
@@ -294,13 +362,24 @@ const DeterminationsSection = ({
         return next;
       });
       setHasStructureChanges(false);
+      debugInfo("[DET_DEBUG] loadExisting:fallback", {
+        bcId,
+        items: safeStored.length,
+        excluded: safeExcluded.length,
+        loadedKeysSample: safeStored.slice(0, 10).map((item) => item?.key),
+        lastSavedKeysSample: lastSavedKeysRef.current.slice(0, 10),
+      });
       recordBusinessCaseTelemetry({
         section: "determinations",
         type: "load_existing_fallback",
         success: false,
       });
     }
-  }, [bcId, businessCase?.modern_bc_metadata?.consumption_excluded, businessCase?.modern_bc_metadata?.consumption_items]);
+  }, [
+    bcId,
+    businessCase?.modern_bc_metadata?.consumption_excluded,
+    businessCase?.modern_bc_metadata?.consumption_items,
+  ]);
 
   const loadGateInfo = useCallback(async () => {
     if (!bcId) return;
@@ -309,11 +388,15 @@ const DeterminationsSection = ({
       const data = await getDeterminationsStatDocumentInfo(bcId);
       setGateInfo(data || null);
     } catch (err) {
-      console.warn("No se pudo cargar informacion del documento estadistico", err?.message || err);
+      debugWarn("No se pudo cargar informacion del documento estadistico", err?.message || err);
       setGateInfo(null);
     } finally {
       setGateLoading(false);
     }
+  }, [bcId]);
+
+  useEffect(() => {
+    debugInfo("[DET_DEBUG_VERSION]", DET_DEBUG_VERSION, { bcId });
   }, [bcId]);
 
   useEffect(() => {
@@ -414,18 +497,23 @@ const DeterminationsSection = ({
     mergedRows.forEach((row) => {
       const groupKey = row.equipmentId ? `eq:${row.equipmentId}` : `manual:${row.equipmentName || row.name}`;
       if (!groups[groupKey]) {
+        const categories = {};
+        DETERMINATION_CATEGORY_CONFIG.forEach((section) => {
+          categories[section.key] = [];
+        });
         groups[groupKey] = {
           key: groupKey,
           name: row.equipmentName || "Manual",
           equipmentId: row.equipmentId || null,
-          reactivos: [],
-          tecnicos: [],
+          categories,
         };
       }
-      if (REACTIVO_TYPES.has(row.type)) {
-        groups[groupKey].reactivos.push(row);
-      } else if (TECNICO_TYPES.has(row.type)) {
-        groups[groupKey].tecnicos.push(row);
+      const normalizedType = String(row.type || "").toLowerCase();
+      const targetSection = DETERMINATION_CATEGORY_CONFIG.find((section) =>
+        section.types.has(normalizedType),
+      );
+      if (targetSection) {
+        groups[groupKey].categories[targetSection.key].push(row);
       }
     });
 
@@ -433,12 +521,15 @@ const DeterminationsSection = ({
     equipmentIds.forEach((id) => {
       const groupKey = `eq:${id}`;
       if (!groups[groupKey]) {
+        const categories = {};
+        DETERMINATION_CATEGORY_CONFIG.forEach((section) => {
+          categories[section.key] = [];
+        });
         groups[groupKey] = {
           key: groupKey,
           name: equipmentMeta[id] || `Equipo ${id}`,
           equipmentId: id,
-          reactivos: [],
-          tecnicos: [],
+          categories,
         };
       }
     });
@@ -446,10 +537,52 @@ const DeterminationsSection = ({
     return Object.values(groups).sort((a, b) => a.name.localeCompare(b.name));
   }, [mergedRows, equipmentIds, equipmentMeta]);
 
-  const getSavedRow = (row) => {
+  const getSavedRow = useCallback((row) => {
     if (!row) return null;
-    return savedMap[row.key] || (row.legacyKey ? savedMap[row.legacyKey] : null);
-  };
+    const direct = savedMap[row.key] || (row.legacyKey ? savedMap[row.legacyKey] : null);
+    if (direct) return direct;
+
+    const normalizedType = String(row.type || "").trim().toLowerCase();
+    const normalizedItemId = String(row.itemId || "").trim();
+    const normalizedName = String(row.name || "").trim().toLowerCase();
+    const rowCatalogId = row.catalogId ?? null;
+    const rowEquipmentId = row.equipmentId ?? null;
+
+    return (savedItemsRef.current || []).find((item) => {
+      if (!item) return false;
+      const itemType = String(item.type || "").trim().toLowerCase();
+      const itemId = String(item.itemId || "").trim();
+      const itemName = String(item.name || "").trim().toLowerCase();
+      const itemCatalogId = item.catalogId ?? null;
+      const itemEquipmentId = item.equipmentId ?? null;
+
+      if (
+        rowCatalogId !== null &&
+        itemCatalogId !== null &&
+        String(rowCatalogId) === String(itemCatalogId) &&
+        String(rowEquipmentId || "") === String(itemEquipmentId || "")
+      ) {
+        return true;
+      }
+
+      if (
+        normalizedItemId &&
+        itemId &&
+        normalizedItemId === itemId &&
+        normalizedType === itemType &&
+        String(rowEquipmentId || "") === String(itemEquipmentId || "")
+      ) {
+        return true;
+      }
+
+      return (
+        normalizedName &&
+        normalizedName === itemName &&
+        normalizedType === itemType &&
+        String(rowEquipmentId || "") === String(itemEquipmentId || "")
+      );
+    }) || null;
+  }, [savedMap]);
 
   const getManufacturerId = (row) => {
     const saved = getSavedRow(row);
@@ -479,6 +612,26 @@ const DeterminationsSection = ({
     return parsed > 0 ? parsed : 0;
   };
 
+  const normalizeExcludedAgainstItems = useCallback((items = [], excluded = []) => {
+    const safeItems = Array.isArray(items) ? items : [];
+    const safeExcluded = Array.isArray(excluded) ? excluded : [];
+    if (!safeItems.length || !safeExcluded.length) return safeExcluded;
+
+    const protectedKeys = new Set();
+    safeItems.forEach((item) => {
+      const key = String(item?.key || "").trim();
+      if (key) protectedKeys.add(key);
+      const legacy = deriveLegacyConsumptionKey(key);
+      if (legacy) protectedKeys.add(legacy);
+      if (item?.catalogId != null && item?.equipmentId != null) {
+        const prefix = String(item?.type || "").toLowerCase() === "determinacion" ? "det" : "cons";
+        protectedKeys.add(`${prefix}:${item.equipmentId}:${item.catalogId}`);
+        protectedKeys.add(`${prefix}:${item.catalogId}`);
+      }
+    });
+    return safeExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
+  }, []);
+
   const syncQuantityDrafts = useCallback((items = []) => {
     const next = {};
     (Array.isArray(items) ? items : []).forEach((item) => {
@@ -489,8 +642,37 @@ const DeterminationsSection = ({
     setQuantityDrafts(next);
   }, []);
 
+  const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallbackExcluded = []) => {
+    const persistedItems = Array.isArray(persisted?.items) ? persisted.items : fallbackItems;
+    const rawExcluded = Array.isArray(persisted?.excluded) ? persisted.excluded : fallbackExcluded;
+    const persistedExcluded = normalizeExcludedAgainstItems(persistedItems, rawExcluded);
+    consumptionVersionRef.current = persisted?.version || consumptionVersionRef.current;
+    lastSavedKeysRef.current = persistedItems.map((item) => item?.key).filter(Boolean);
+    savedItemsRef.current = persistedItems;
+    excludedKeysRef.current = persistedExcluded;
+    setSavedItems(persistedItems);
+    setExcludedKeys(persistedExcluded);
+    syncQuantityDrafts(persistedItems);
+    pendingQtyChangesRef.current = {};
+    editedRowsRef.current = {};
+    setPendingChangesCount(0);
+    setHasStructureChanges(false);
+    return { persistedItems, persistedExcluded };
+  }, [normalizeExcludedAgainstItems, syncQuantityDrafts]);
+
   const getWindowLimit = (groupKey, tableType) =>
     rowWindowByGroup[`${groupKey}:${tableType}`] || ROW_WINDOW_STEP;
+
+  const isSectionCollapsed = (groupKey, sectionKey) =>
+    Boolean(collapsedSections[`${groupKey}:${sectionKey}`]);
+
+  const toggleSectionCollapsed = (groupKey, sectionKey) => {
+    const stateKey = `${groupKey}:${sectionKey}`;
+    setCollapsedSections((prev) => ({
+      ...prev,
+      [stateKey]: !prev[stateKey],
+    }));
+  };
 
   const expandRowWindow = (groupKey, tableType) => {
     setRowWindowByGroup((prev) => {
@@ -505,12 +687,22 @@ const DeterminationsSection = ({
       showToast("Primero crea el Business Case", "warning");
       return;
     }
-    const { refresh = true, silent = false, revalidate = true } = options;
+    const { refresh = false, silent = false, revalidate = false, markComplete = false } = options;
+    const effectiveRefresh = markComplete ? Boolean(refresh) : false;
+    const effectiveRevalidate = markComplete ? Boolean(revalidate) : false;
+    debugInfo("[DET_DEBUG] persistItems:start", {
+      bcId,
+      options: { refresh, silent, revalidate, markComplete },
+      effectiveOptions: { refresh: effectiveRefresh, revalidate: effectiveRevalidate },
+      nextItemsCount: Array.isArray(nextItems) ? nextItems.length : 0,
+      nextExcludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
+      version: consumptionVersionRef.current,
+    });
     setSaving(true);
     const startedAt = Date.now();
     try {
       const debugItemPayload = (nextItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
-      console.info("[BC_CONSUMPTION][FE][SAVE][REQUEST]", {
+      debugInfo("[BC_CONSUMPTION][FE][SAVE][REQUEST]", {
         bcId,
         itemsCount: Array.isArray(nextItems) ? nextItems.length : 0,
         excludedCount: Array.isArray(nextExcluded) ? nextExcluded.length : 0,
@@ -535,11 +727,20 @@ const DeterminationsSection = ({
       };
       const querySuffix = silent ? "?silent=true" : "";
       const response = await api.put(`/business-case/${bcId}/consumption-items${querySuffix}`, payload);
+      debugInfo("[DET_DEBUG] persistItems:api_success", {
+        bcId,
+        status: response?.status,
+        hasData: Boolean(response?.data),
+        ms: Date.now() - startedAt,
+      });
       const persisted = response?.data?.data || {};
-      const persistedItems = Array.isArray(persisted.items) ? persisted.items : nextItems;
-      const persistedExcluded = Array.isArray(persisted.excluded) ? persisted.excluded : nextExcluded;
+      const { persistedItems, persistedExcluded } = applyPersistedSnapshot(
+        persisted,
+        nextItems,
+        nextExcluded,
+      );
       const debugItemResponse = (persistedItems || []).find((item) => String(item?.itemId || "").trim() === "3321193001");
-      console.info("[BC_CONSUMPTION][FE][SAVE][RESPONSE]", {
+      debugInfo("[BC_CONSUMPTION][FE][SAVE][RESPONSE]", {
         bcId,
         itemsCount: persistedItems.length,
         excludedCount: persistedExcluded.length,
@@ -552,20 +753,24 @@ const DeterminationsSection = ({
           }
           : null,
       });
-      consumptionVersionRef.current = persisted?.version || consumptionVersionRef.current;
-      savedItemsRef.current = persistedItems;
-      excludedKeysRef.current = persistedExcluded;
-      setSavedItems(persistedItems);
-      setExcludedKeys(persistedExcluded);
-      syncQuantityDrafts(persistedItems);
-      pendingQtyChangesRef.current = {};
-      editedRowsRef.current = {};
-      setPendingChangesCount(0);
-      setHasStructureChanges(false);
-      if (revalidate) {
+      if (effectiveRevalidate) {
+        debugInfo("[DET_DEBUG] persistItems:revalidate_start", { bcId });
         await loadExisting();
+        debugInfo("[DET_DEBUG] persistItems:revalidate_done", { bcId });
       }
-      onSave({ refresh });
+      if (!silent) {
+        showToast("Determinaciones guardadas correctamente.", "success");
+      }
+      if (effectiveRefresh) {
+        debugInfo("[DET_DEBUG] persistItems:onSave", {
+          bcId,
+          refresh: effectiveRefresh,
+          markComplete,
+        });
+        onSave({ refresh: effectiveRefresh, markComplete });
+      } else {
+        debugInfo("[DET_DEBUG] persistItems:onSave:skipped_refresh", { bcId, markComplete });
+      }
       recordBusinessCaseTelemetry({
         section: "determinations",
         type: "save_full_success",
@@ -573,6 +778,13 @@ const DeterminationsSection = ({
         success: true,
       });
     } catch (err) {
+      debugError("[DET_DEBUG] persistItems:error", {
+        bcId,
+        message: err?.response?.data?.message || err?.message,
+        code: err?.response?.data?.code || null,
+        status: err?.response?.status || null,
+        data: err?.response?.data || null,
+      });
       const code = err?.response?.data?.code;
       if (code === "CONSUMPTION_VERSION_CONFLICT") {
         showToast("Otro usuario actualizo esta seccion. Recargando datos...", "warning");
@@ -613,10 +825,7 @@ const DeterminationsSection = ({
     const nextItems = [];
 
     visibleRowMap.forEach((row) => {
-      const saved = savedItemsRef.current.find((item) => item?.key === row.key)
-        || (row.legacyKey
-          ? savedItemsRef.current.find((item) => item?.key === row.legacyKey)
-          : null);
+      const saved = getSavedRow(row);
       const rawQty =
         quantityDraftsRef.current[row.key]
         ?? (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
@@ -657,7 +866,7 @@ const DeterminationsSection = ({
     });
 
     const debugItemFromPayload = nextItems.find((item) => String(item?.itemId || "").trim() === "3321193001");
-    console.info("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
+    debugInfo("[BC_CONSUMPTION][FE][BUILD_PAYLOAD]", {
       bcId,
       rowsVisible: visibleRowMap.size,
       itemsToSave: nextItems.length,
@@ -671,20 +880,43 @@ const DeterminationsSection = ({
         }
         : null,
     });
+    debugInfo("[DET_DEBUG] buildPersistPayloadFromDrafts", {
+      bcId,
+      visibleRows: visibleRowMap.size,
+      nextItems: nextItems.length,
+      nextExcluded: nextExcluded.length,
+      pendingQtyKeys: Object.keys(pendingQtyChangesRef.current || {}),
+      hasStructureChanges,
+      sampleKeys: nextItems.slice(0, 8).map((item) => item?.key),
+    });
     return { nextItems, nextExcluded };
-  }, [bcId, mergedRows]);
+  }, [bcId, getSavedRow, hasStructureChanges, mergedRows]);
 
   const flushPendingQtyChanges = async (options = {}) => {
-    const { force = false } = options;
+    const { force = false, markComplete = false } = options;
     const changedKeys = Object.keys(pendingQtyChangesRef.current || {});
+    debugInfo("[DET_DEBUG] flushPendingQtyChanges:start", {
+      bcId,
+      force,
+      markComplete,
+      changedKeys,
+      hasStructureChanges,
+    });
     if (!force && !changedKeys.length && !hasStructureChanges) return;
     const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
-    await persistItems(nextItems, nextExcluded, { refresh: true, silent: false });
+    debugInfo("[DET_DEBUG] flushPendingQtyChanges:payload_ready", {
+      bcId,
+      nextItems: nextItems.length,
+      nextExcluded: nextExcluded.length,
+    });
+    await persistItems(nextItems, nextExcluded, { refresh: false, silent: false, revalidate: false, markComplete });
+    debugInfo("[DET_DEBUG] flushPendingQtyChanges:done", { bcId });
   };
 
   const handleQtyChange = (rowKey, value) => {
     const row = mergedRows.find((item) => item.key === rowKey);
     if (!row || !canEditType(row.type)) return;
+    lastEditedRowRef.current = row;
     editedRowsRef.current[rowKey] = row;
     const nextDraftsRef = { ...quantityDraftsRef.current, [rowKey]: value };
     if (row.legacyKey) {
@@ -705,7 +937,7 @@ const DeterminationsSection = ({
     }
     setPendingChangesCount(Object.keys(pendingQtyChangesRef.current).length);
     if (String(row?.itemId || "").trim() === "3321193001") {
-      console.info("[BC_CONSUMPTION][FE][QTY_CHANGE]", {
+      debugInfo("[BC_CONSUMPTION][FE][QTY_CHANGE]", {
         bcId,
         rowKey,
         itemId: row.itemId,
@@ -743,7 +975,187 @@ const DeterminationsSection = ({
       clearTimeout(autosaveTimeoutRef.current);
       autosaveTimeoutRef.current = null;
     }
-    flushPendingQtyChanges({ force: true });
+    debugInfo("[DET_DEBUG] handleSaveNow", {
+      bcId,
+      pendingQtyKeys: Object.keys(pendingQtyChangesRef.current || {}),
+      hasStructureChanges,
+    });
+    flushPendingQtyChanges({ force: true, markComplete: false });
+  };
+
+  const getSectionPendingCount = (rows = []) => {
+    let count = 0;
+    rows.forEach((row) => {
+      if (!row?.key) return;
+      const draftValue =
+        quantityDraftsRef.current[row.key] ??
+        (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined);
+      const hasDraft = draftValue !== undefined;
+      if (!hasDraft) return;
+      const draftQty = toPositiveNumber(draftValue);
+      const savedQty = toPositiveNumber(getSavedRow(row)?.annualQty ?? 0);
+      if (draftQty !== savedQty) count += 1;
+    });
+    return count;
+  };
+
+  const handleSaveSection = (rows = []) => {
+    const pending = getSectionPendingCount(rows);
+    debugInfo("[DET_DEBUG] handleSaveSection", {
+      bcId,
+      rows: rows.length,
+      pending,
+      hasStructureChanges,
+      rowKeysSample: rows.slice(0, 10).map((r) => r?.key),
+    });
+    if (!pending && !hasStructureChanges) {
+      showToast("No hay cambios pendientes en esta seccion.", "info");
+      return;
+    }
+    debugInfo("[DET_DEBUG] handleSaveSection:trigger_flush", {
+      bcId,
+      force: true,
+      markComplete: false,
+    });
+    const rowsByKey = new Map();
+    rows.forEach((row) => {
+      if (!row?.key) return;
+      rowsByKey.set(row.key, row);
+      if (row.legacyKey) rowsByKey.set(row.legacyKey, row);
+    });
+    const changedKeys = Object.keys(pendingQtyChangesRef.current || {});
+    const targetRows = changedKeys
+      .map((key) => rowsByKey.get(key))
+      .filter(Boolean)
+      .filter((row, index, arr) => arr.findIndex((candidate) => candidate.key === row.key) === index);
+
+    if (!targetRows.length) {
+      debugInfo("[DET_DEBUG] handleSaveSection:no_target_rows_fallback", { bcId, changedKeys });
+      flushPendingQtyChanges({ force: true, markComplete: false });
+      return;
+    }
+
+    (async () => {
+      setSaving(true);
+      try {
+        let latestData = null;
+        const patchedRows = [];
+        for (const row of targetRows) {
+          const rawValue =
+            quantityDraftsRef.current[row.key]
+            ?? (row.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
+            ?? getSavedRow(row)?.annualQty
+            ?? 0;
+          const annualQty = toPositiveNumber(rawValue);
+          patchedRows.push({ row, annualQty });
+          const payload = {
+            annualQty,
+            row: {
+              key: row.key,
+              itemId: row.itemId ?? null,
+              name: row.name,
+              type: row.type,
+              source: row.source,
+              catalogId: row.catalogId ?? null,
+              equipmentId: row.equipmentId ?? null,
+              equipmentName: row.equipmentName ?? null,
+            },
+            exclude: false,
+            version: consumptionVersionRef.current,
+            idempotency_key: getIdempotencyKey("bc.consumption.patch", {
+              key: row.key,
+              annualQty,
+              version: consumptionVersionRef.current,
+            }),
+          };
+          debugInfo("[DET_DEBUG] handleSaveSection:patch_request", {
+            bcId,
+            key: row.key,
+            annualQty,
+            version: consumptionVersionRef.current,
+          });
+          const response = await api.patch(
+            `/business-case/${bcId}/consumption-items/${encodeURIComponent(row.key)}`,
+            payload,
+          );
+          latestData = response?.data?.data || latestData;
+          if (latestData?.version) {
+            consumptionVersionRef.current = latestData.version;
+          }
+          debugInfo("[DET_DEBUG] handleSaveSection:patch_success", {
+            bcId,
+            key: row.key,
+            status: response?.status,
+            version: latestData?.version || null,
+          });
+        }
+
+        if (latestData) {
+          const baseItems = Array.isArray(latestData.items) ? [...latestData.items] : [];
+          patchedRows.forEach(({ row, annualQty }) => {
+            const idx = baseItems.findIndex((item) => {
+              const itemKey = String(item?.key || "").trim();
+              const rowKey = String(row?.key || "").trim();
+              const rowLegacy = String(row?.legacyKey || "").trim();
+              if (itemKey && (itemKey === rowKey || (rowLegacy && itemKey === rowLegacy))) return true;
+              if (
+                item?.catalogId != null &&
+                row?.catalogId != null &&
+                String(item.catalogId) === String(row.catalogId) &&
+                String(item?.equipmentId || "") === String(row?.equipmentId || "")
+              ) {
+                return true;
+              }
+              return false;
+            });
+
+            const patchedItem = {
+              key: row.key,
+              itemId: row.itemId ?? null,
+              name: row.name,
+              type: row.type,
+              source: row.source,
+              catalogId: row.catalogId ?? null,
+              annualQty,
+              equipmentId: row.equipmentId ?? null,
+              equipmentName: row.equipmentName ?? null,
+            };
+
+            if (idx >= 0) {
+              baseItems[idx] = {
+                ...baseItems[idx],
+                ...patchedItem,
+              };
+            } else {
+              baseItems.push(patchedItem);
+            }
+          });
+
+          const mergedData = {
+            ...latestData,
+            items: baseItems,
+          };
+          debugInfo("[DET_DEBUG] handleSaveSection:apply_snapshot", {
+            bcId,
+            responseItems: Array.isArray(latestData.items) ? latestData.items.length : 0,
+            mergedItems: baseItems.length,
+            patchedRows: patchedRows.map(({ row, annualQty }) => ({ key: row.key, annualQty })),
+          });
+          applyPersistedSnapshot(mergedData, savedItemsRef.current, excludedKeysRef.current);
+        }
+        showToast("Seccion guardada correctamente.", "success");
+      } catch (error) {
+        debugError("[DET_DEBUG] handleSaveSection:patch_error", {
+          bcId,
+          message: error?.response?.data?.message || error?.message,
+          code: error?.response?.data?.code || null,
+          status: error?.response?.status || null,
+        });
+        showToast(error?.response?.data?.message || "No se pudo guardar esta seccion", "error");
+      } finally {
+        setSaving(false);
+      }
+    })();
   };
 
   const handleUploadStatDocument = async () => {
@@ -780,7 +1192,7 @@ const DeterminationsSection = ({
       showToast("Documento estadistico cargado correctamente", "success");
       setSelectedDocument(null);
       await loadGateInfo();
-      onSave({ refresh: true });
+      onSave({ refresh: true, markComplete: false });
     } catch (err) {
       showToast(err?.response?.data?.message || "No se pudo cargar el documento", "error");
     } finally {
@@ -1020,13 +1432,8 @@ const DeterminationsSection = ({
       ) : (
         <div className="space-y-5">
           {groupedByEquipment.map((group) => {
-            const reactivosLimit = getWindowLimit(group.key, "reactivos");
-            const tecnicosLimit = getWindowLimit(group.key, "tecnicos");
-            const visibleReactivos = group.reactivos.slice(0, reactivosLimit);
-            const visibleTecnicos = group.tecnicos.slice(0, tecnicosLimit);
-
             return (
-            <div key={group.name} className="space-y-4">
+            <div key={group.key} className="space-y-4">
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-gray-900">{group.name}</h3>
@@ -1034,277 +1441,196 @@ const DeterminationsSection = ({
                 </div>
               </div>
 
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-                  <h4 className="text-sm font-semibold text-gray-800">Reactivos y determinaciones</h4>
-                  <p className="text-xs text-gray-500">
-                    Edita esta seccion con rol comercial / acp comercial / backoffice.
-                  </p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-[640px] text-xs sm:text-sm">
-                    <thead className="bg-gray-50/50">
-                      <tr className="text-left text-gray-500 border-b border-gray-100">
-                        <th className="py-3 px-4 font-semibold">Tipo</th>
-                        <th className="py-3 px-4 font-semibold">Nombre</th>
-                        <th className="py-3 px-4 font-semibold">Cantidad anual</th>
-                        <th className="py-3 px-4 font-semibold">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {visibleReactivos.map((row) => {
-                        const isCustom = row.source === "custom";
-                        const isEditing = editingItemKey === row.key;
-                        const canEditRow = canEditType(row.type);
-                        const manufacturerId = getManufacturerId(row);
-                        return (
-                          <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
-                            <td className="py-3 px-4 text-gray-600">
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                {row.type}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4">
-                              {isEditing ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  <input
-                                    className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="ID fabricante"
-                                    value={editingItem.id}
-                                    onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
-                                    disabled={!canEditRow}
-                                  />
-                                  <input
-                                    className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="Nombre"
-                                    value={editingItem.name}
-                                    onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
-                                    disabled={!canEditRow}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="space-y-0.5">
-                                  <span className="font-semibold text-gray-900">{row.name}</span>
-                                  {manufacturerId && (
-                                    <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
-                                  )}
-                                </div>
-                              )}
-                              {row.source === "catalog" && (
-                                <span className="ml-2 text-xs text-gray-400">(catalogo)</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              <input
-                                type="number"
-                                min={0}
-                                value={getQtyInputValue(row)}
-                                onChange={(e) => handleQtyChange(row.key, e.target.value)}
-                                onBlur={() => handleQtyBlur(row.key)}
-                                className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
-                                placeholder="0"
-                                disabled={!canEditRow}
-                              />
-                            </td>
-                            <td className="py-3 px-4">
-                              {isEditing ? (
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  <button
-                                    onClick={saveEditItem}
-                                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 disabled:opacity-50"
-                                    disabled={!canEditRow}
-                                  >
-                                    <FiCheck size={12} /> Guardar
-                                  </button>
-                                  <button
-                                    onClick={cancelEditItem}
-                                    className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded flex items-center gap-1"
-                                  >
-                                    <FiX size={12} /> Cancelar
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  {isCustom && (
-                                    <button
-                                      onClick={() => startEditItem(row)}
-                                      className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1 disabled:opacity-50"
-                                      disabled={!canEditRow}
-                                    >
-                                      <FiEdit2 size={12} /> Editar
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => removeItem(row)}
-                                    className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded flex items-center gap-1 disabled:opacity-50"
-                                    disabled={!canEditRow}
-                                  >
-                                    <FiTrash2 size={12} /> Quitar
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!group.reactivos.length && (
-                        <tr>
-                          <td colSpan={4} className="py-8 text-center text-gray-500">
-                            No hay reactivos o determinaciones para este equipo.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {group.reactivos.length > visibleReactivos.length && (
-                  <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
-                    <button
-                      type="button"
-                      onClick={() => expandRowWindow(group.key, "reactivos")}
-                      className="text-xs font-semibold text-blue-700 hover:text-blue-800"
-                    >
-                      Mostrar mas ({group.reactivos.length - visibleReactivos.length} restantes)
-                    </button>
-                  </div>
-                )}
-              </div>
+              {DETERMINATION_CATEGORY_CONFIG.map((section) => {
+                const rows = group.categories?.[section.key] || [];
+                const rowLimit = getWindowLimit(group.key, section.key);
+                const visibleRows = rows.slice(0, rowLimit);
+                const isCollapsed = isSectionCollapsed(group.key, section.key);
+                const isDone =
+                  rows.length > 0 &&
+                  rows.every((row) => toPositiveNumber(getQtyInputValue(row)) > 0);
+                const sectionPendingCount = getSectionPendingCount(rows);
 
-              <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
-                <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/70">
-                  <h4 className="text-sm font-semibold text-gray-800">Controles, calibradores y consumibles</h4>
-                  <p className="text-xs text-gray-500">
-                    Edita esta seccion con rol jefe tecnico / tecnico.
-                  </p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="min-w-[640px] text-xs sm:text-sm">
-                    <thead className="bg-gray-50/50">
-                      <tr className="text-left text-gray-500 border-b border-gray-100">
-                        <th className="py-3 px-4 font-semibold">Tipo</th>
-                        <th className="py-3 px-4 font-semibold">Nombre</th>
-                        <th className="py-3 px-4 font-semibold">Cantidad anual</th>
-                        <th className="py-3 px-4 font-semibold">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {visibleTecnicos.map((row) => {
-                        const isCustom = row.source === "custom";
-                        const isEditing = editingItemKey === row.key;
-                        const canEditRow = canEditType(row.type);
-                        const manufacturerId = getManufacturerId(row);
-                        return (
-                          <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
-                            <td className="py-3 px-4 text-gray-600">
-                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
-                                {row.type}
-                              </span>
-                            </td>
-                            <td className="py-3 px-4">
-                              {isEditing ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                                  <input
-                                    className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="ID fabricante"
-                                    value={editingItem.id}
-                                    onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
-                                    disabled={!canEditRow}
-                                  />
-                                  <input
-                                    className="border rounded-lg px-2 py-1 w-full"
-                                    placeholder="Nombre"
-                                    value={editingItem.name}
-                                    onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
-                                    disabled={!canEditRow}
-                                  />
-                                </div>
-                              ) : (
-                                <div className="space-y-0.5">
-                                  <span className="font-semibold text-gray-900">{row.name}</span>
-                                  {manufacturerId && (
-                                    <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
-                                  )}
-                                </div>
+                return (
+                  <div key={`${group.key}:${section.key}`} className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+                    <div className="w-full px-4 py-3 border-b border-gray-100 bg-gray-50/70 text-left flex items-center justify-between gap-3">
+                      <div>
+                        <h4 className="text-sm font-semibold text-gray-800">{section.title}</h4>
+                        <p className="text-xs text-gray-500">{section.description}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {sectionPendingCount > 0 && (
+                          <span className="inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold bg-amber-100 text-amber-700">
+                            {sectionPendingCount} cambio(s)
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            handleSaveSection(rows);
+                          }}
+                          disabled={saving || !canEditFinal}
+                          className="inline-flex items-center gap-1 rounded-lg border border-blue-200 bg-blue-50 px-2.5 py-1.5 text-[11px] font-semibold text-blue-700 hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Guardar seccion
+                        </button>
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ${
+                            isDone ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
+                          }`}
+                        >
+                          <FiCheck size={11} />
+                          {isDone ? "Realizado" : "Pendiente"}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleSectionCollapsed(group.key, section.key)}
+                          className="inline-flex items-center justify-center rounded-md border border-gray-200 bg-white p-1.5 text-gray-500 hover:bg-gray-100"
+                          aria-label={isCollapsed ? "Expandir seccion" : "Colapsar seccion"}
+                        >
+                          <FiChevronDown
+                            className={`transition-transform ${isCollapsed ? "" : "rotate-180"}`}
+                            size={16}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {!isCollapsed && (
+                      <>
+                        <div className="overflow-x-auto">
+                          <table className="min-w-[640px] text-xs sm:text-sm">
+                            <thead className="bg-gray-50/50">
+                              <tr className="text-left text-gray-500 border-b border-gray-100">
+                                <th className="py-3 px-4 font-semibold">Tipo</th>
+                                <th className="py-3 px-4 font-semibold">Nombre</th>
+                                <th className="py-3 px-4 font-semibold">Cantidad anual</th>
+                                <th className="py-3 px-4 font-semibold">Acciones</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {visibleRows.map((row) => {
+                                const isCustom = row.source === "custom";
+                                const isEditing = editingItemKey === row.key;
+                                const canEditRow = canEditType(row.type);
+                                const manufacturerId = getManufacturerId(row);
+                                return (
+                                  <tr key={row.key} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="py-3 px-4 text-gray-600">
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-600">
+                                        {row.type}
+                                      </span>
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      {isEditing ? (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                          <input
+                                            className="border rounded-lg px-2 py-1 w-full"
+                                            placeholder="ID fabricante"
+                                            value={editingItem.id}
+                                            onChange={(e) => setEditingItem({ ...editingItem, id: e.target.value })}
+                                            disabled={!canEditRow}
+                                          />
+                                          <input
+                                            className="border rounded-lg px-2 py-1 w-full"
+                                            placeholder="Nombre"
+                                            value={editingItem.name}
+                                            onChange={(e) => setEditingItem({ ...editingItem, name: e.target.value })}
+                                            disabled={!canEditRow}
+                                          />
+                                        </div>
+                                      ) : (
+                                        <div className="space-y-0.5">
+                                          <span className="font-semibold text-gray-900">{row.name}</span>
+                                          {manufacturerId && (
+                                            <div className="text-xs text-gray-400">ID fabricante: {manufacturerId}</div>
+                                          )}
+                                        </div>
+                                      )}
+                                      {row.source === "catalog" && (
+                                        <span className="ml-2 text-xs text-gray-400">(catalogo)</span>
+                                      )}
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        value={getQtyInputValue(row)}
+                                        onChange={(e) => handleQtyChange(row.key, e.target.value)}
+                                        onBlur={() => handleQtyBlur(row.key)}
+                                        className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
+                                        placeholder="0"
+                                        disabled={!canEditRow}
+                                      />
+                                    </td>
+                                    <td className="py-3 px-4">
+                                      {isEditing ? (
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                          <button
+                                            onClick={saveEditItem}
+                                            className="px-2 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 disabled:opacity-50"
+                                            disabled={!canEditRow}
+                                          >
+                                            <FiCheck size={12} /> Guardar
+                                          </button>
+                                          <button
+                                            onClick={cancelEditItem}
+                                            className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded flex items-center gap-1"
+                                          >
+                                            <FiX size={12} /> Cancelar
+                                          </button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex flex-col sm:flex-row gap-2">
+                                          {isCustom && (
+                                            <button
+                                              onClick={() => startEditItem(row)}
+                                              className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1 disabled:opacity-50"
+                                              disabled={!canEditRow}
+                                            >
+                                              <FiEdit2 size={12} /> Editar
+                                            </button>
+                                          )}
+                                          <button
+                                            onClick={() => removeItem(row)}
+                                            className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded flex items-center gap-1 disabled:opacity-50"
+                                            disabled={!canEditRow}
+                                          >
+                                            <FiTrash2 size={12} /> Quitar
+                                          </button>
+                                        </div>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                              {!rows.length && (
+                                <tr>
+                                  <td colSpan={4} className="py-8 text-center text-gray-500">
+                                    No hay elementos en {section.title.toLowerCase()} para este equipo.
+                                  </td>
+                                </tr>
                               )}
-                              {row.source === "catalog" && (
-                                <span className="ml-2 text-xs text-gray-400">(catalogo)</span>
-                              )}
-                            </td>
-                            <td className="py-3 px-4">
-                              <input
-                                type="number"
-                                min={0}
-                                value={getQtyInputValue(row)}
-                                onChange={(e) => handleQtyChange(row.key, e.target.value)}
-                                onBlur={() => handleQtyBlur(row.key)}
-                                className="w-32 border border-gray-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all text-gray-900 font-medium disabled:bg-gray-50 disabled:text-gray-400"
-                                placeholder="0"
-                                disabled={!canEditRow}
-                              />
-                            </td>
-                            <td className="py-3 px-4">
-                              {isEditing ? (
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  <button
-                                    onClick={saveEditItem}
-                                    className="px-2 py-1 text-xs bg-blue-600 text-white rounded flex items-center gap-1 disabled:opacity-50"
-                                    disabled={!canEditRow}
-                                  >
-                                    <FiCheck size={12} /> Guardar
-                                  </button>
-                                  <button
-                                    onClick={cancelEditItem}
-                                    className="px-2 py-1 text-xs bg-gray-200 text-gray-700 rounded flex items-center gap-1"
-                                  >
-                                    <FiX size={12} /> Cancelar
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="flex flex-col sm:flex-row gap-2">
-                                  {isCustom && (
-                                    <button
-                                      onClick={() => startEditItem(row)}
-                                      className="px-2 py-1 text-xs bg-gray-100 text-gray-700 rounded flex items-center gap-1 disabled:opacity-50"
-                                      disabled={!canEditRow}
-                                    >
-                                      <FiEdit2 size={12} /> Editar
-                                    </button>
-                                  )}
-                                  <button
-                                    onClick={() => removeItem(row)}
-                                    className="px-2 py-1 text-xs bg-red-50 text-red-600 rounded flex items-center gap-1 disabled:opacity-50"
-                                    disabled={!canEditRow}
-                                  >
-                                    <FiTrash2 size={12} /> Quitar
-                                  </button>
-                                </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                      {!group.tecnicos.length && (
-                        <tr>
-                          <td colSpan={4} className="py-8 text-center text-gray-500">
-                            No hay controles, calibradores o consumibles para este equipo.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-                {group.tecnicos.length > visibleTecnicos.length && (
-                  <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
-                    <button
-                      type="button"
-                      onClick={() => expandRowWindow(group.key, "tecnicos")}
-                      className="text-xs font-semibold text-blue-700 hover:text-blue-800"
-                    >
-                      Mostrar mas ({group.tecnicos.length - visibleTecnicos.length} restantes)
-                    </button>
+                            </tbody>
+                          </table>
+                        </div>
+                        {rows.length > visibleRows.length && (
+                          <div className="px-4 py-3 border-t border-gray-100 bg-gray-50/70">
+                            <button
+                              type="button"
+                              onClick={() => expandRowWindow(group.key, section.key)}
+                              className="text-xs font-semibold text-blue-700 hover:text-blue-800"
+                            >
+                              Mostrar mas ({rows.length - visibleRows.length} restantes)
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })}
 
               <div className="p-4 border border-gray-100 bg-gray-50/50 rounded-2xl">
                 <div className="text-sm font-semibold text-gray-800 mb-2">
