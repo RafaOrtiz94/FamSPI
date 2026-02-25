@@ -132,11 +132,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         showLoader();
         try {
             const famSignConsentText =
-                "Al enviar esta solicitud acepto el uso de FamSign como firma electronica para la firma de solicitud y su aprobacion automatica en SPI.";
+                "Al enviar esta solicitud acepto el uso de FamSign para firmar la solicitud y registrar la aprobacion/rechazo del jefe inmediato en SPI.";
             const payload = {
                 tipo_solicitud: tipoSolicitud,
                 ...formData,
-                fam_sign_notice_version: "FS-AUTO-2026.02",
+                fam_sign_notice_version: "FS-WF-2026.02",
                 fam_sign_consent_text: famSignConsentText,
             };
 
@@ -164,8 +164,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             if (response.ok) {
                 showToast(
                     tipoSolicitud === "vacaciones"
-                        ? "Solicitud de vacaciones creada y aprobada automaticamente"
-                        : "Solicitud de permiso creada y aprobada automaticamente",
+                        ? "Solicitud de vacaciones enviada para aprobacion del jefe inmediato"
+                        : "Solicitud de permiso enviada para aprobacion del jefe inmediato",
                     "success"
                 );
                 onSuccess?.();
@@ -632,7 +632,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">
                 <p className="text-xs text-indigo-800">
                     <strong>Consentimiento FamSign:</strong> Al enviar esta solicitud aceptas el uso de la firma electronica
-                    FamSign para registrar la firma del solicitante y la aprobacion automatica del flujo.
+                    FamSign para registrar la firma del solicitante y la decision final del jefe inmediato.
                 </p>
                 <p className="text-xs text-indigo-700">
                     Este consentimiento queda registrado en la trazabilidad legal de la solicitud
