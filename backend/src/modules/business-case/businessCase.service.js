@@ -859,14 +859,17 @@ function normalizeExcludedForItems(items = [], excluded = []) {
 
   const protectedKeys = new Set();
   items.forEach((item) => {
-    const key = String(item?.key || "").trim();
+    const key = String(item?.key || item?.item_key || "").trim();
     if (key) protectedKeys.add(key);
     const legacy = deriveLegacyConsumptionKey(key);
     if (legacy) protectedKeys.add(legacy);
-    if (item?.catalogId != null && item?.equipmentId != null) {
-      const prefix = String(item?.type || "").toLowerCase() === "determinacion" ? "det" : "cons";
-      protectedKeys.add(`${prefix}:${item.equipmentId}:${item.catalogId}`);
-      protectedKeys.add(`${prefix}:${item.catalogId}`);
+    const catalogId = item?.catalogId ?? item?.catalog_id ?? null;
+    const equipmentId = item?.equipmentId ?? item?.equipment_id ?? null;
+    if (catalogId != null && equipmentId != null) {
+      const normalizedType = String(item?.type || item?.item_type || "").toLowerCase();
+      const prefix = normalizedType === "determinacion" ? "det" : "cons";
+      protectedKeys.add(`${prefix}:${equipmentId}:${catalogId}`);
+      protectedKeys.add(`${prefix}:${catalogId}`);
     }
   });
 
@@ -933,9 +936,10 @@ function assertConsumptionVersion(expectedVersion, currentVersion) {
 }
 
 async function syncConsumptionData(businessCaseId, metadata = {}) {
-  const items = normalizeConsumptionItemsForComparison(
+  const normalizedItems = normalizeConsumptionItemsForComparison(
     Array.isArray(metadata.consumption_items) ? metadata.consumption_items : [],
-  ).map((item) => ({
+  );
+  const items = normalizedItems.map((item) => ({
     item_key: item.key,
     item_id: item.itemId || null,
     name: item.name || item.key,
@@ -946,7 +950,8 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     equipment_id: Number.isFinite(Number(item.equipmentId)) ? Number(item.equipmentId) : null,
     equipment_name: item.equipmentName || null,
   }));
-  const excluded = normalizeExcludedKeysForComparison(
+  const excluded = normalizeExcludedForItems(
+    normalizedItems,
     Array.isArray(metadata.consumption_excluded) ? metadata.consumption_excluded : [],
   );
   const client = await db.getClient();
@@ -1091,6 +1096,7 @@ async function saveConsumptionItems(businessCaseId, items = [], excluded = [], o
     });
     nextExcluded = nextExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
   }
+  nextExcluded = normalizeExcludedForItems(nextItems, nextExcluded);
   const current = await loadConsumptionData(businessCaseId);
   assertConsumptionVersion(expectedVersion, current?.version || null);
 
@@ -1160,6 +1166,7 @@ async function patchConsumptionItem(businessCaseId, itemKey, patch = {}, options
       nextExcluded = Array.from(new Set([...nextExcluded, ...exclusionKeys]));
     }
   }
+  nextExcluded = normalizeExcludedForItems(nextItems, nextExcluded);
 
   if (isSameConsumptionPayload(current, nextItems, nextExcluded)) {
     return current;

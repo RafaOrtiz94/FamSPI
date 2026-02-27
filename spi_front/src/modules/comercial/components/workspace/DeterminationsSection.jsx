@@ -53,6 +53,26 @@ const deriveLegacyConsumptionKey = (key) => {
   }
   return null;
 };
+
+const normalizeExcludedAgainstItems = (items = [], excluded = []) => {
+  const safeItems = Array.isArray(items) ? items : [];
+  const safeExcluded = Array.isArray(excluded) ? excluded : [];
+  if (!safeItems.length || !safeExcluded.length) return safeExcluded;
+
+  const protectedKeys = new Set();
+  safeItems.forEach((item) => {
+    const key = String(item?.key || "").trim();
+    if (key) protectedKeys.add(key);
+    const legacy = deriveLegacyConsumptionKey(key);
+    if (legacy) protectedKeys.add(legacy);
+    if (item?.catalogId != null && item?.equipmentId != null) {
+      const prefix = String(item?.type || "").toLowerCase() === "determinacion" ? "det" : "cons";
+      protectedKeys.add(`${prefix}:${item.equipmentId}:${item.catalogId}`);
+      protectedKeys.add(`${prefix}:${item.catalogId}`);
+    }
+  });
+  return safeExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
+};
 const DETERMINATION_CATEGORY_CONFIG = [
   {
     key: "reactivos",
@@ -612,26 +632,6 @@ const DeterminationsSection = ({
     return parsed > 0 ? parsed : 0;
   };
 
-  const normalizeExcludedAgainstItems = useCallback((items = [], excluded = []) => {
-    const safeItems = Array.isArray(items) ? items : [];
-    const safeExcluded = Array.isArray(excluded) ? excluded : [];
-    if (!safeItems.length || !safeExcluded.length) return safeExcluded;
-
-    const protectedKeys = new Set();
-    safeItems.forEach((item) => {
-      const key = String(item?.key || "").trim();
-      if (key) protectedKeys.add(key);
-      const legacy = deriveLegacyConsumptionKey(key);
-      if (legacy) protectedKeys.add(legacy);
-      if (item?.catalogId != null && item?.equipmentId != null) {
-        const prefix = String(item?.type || "").toLowerCase() === "determinacion" ? "det" : "cons";
-        protectedKeys.add(`${prefix}:${item.equipmentId}:${item.catalogId}`);
-        protectedKeys.add(`${prefix}:${item.catalogId}`);
-      }
-    });
-    return safeExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
-  }, []);
-
   const syncQuantityDrafts = useCallback((items = []) => {
     const next = {};
     (Array.isArray(items) ? items : []).forEach((item) => {
@@ -658,7 +658,7 @@ const DeterminationsSection = ({
     setPendingChangesCount(0);
     setHasStructureChanges(false);
     return { persistedItems, persistedExcluded };
-  }, [normalizeExcludedAgainstItems, syncQuantityDrafts]);
+  }, [syncQuantityDrafts]);
 
   const getWindowLimit = (groupKey, tableType) =>
     rowWindowByGroup[`${groupKey}:${tableType}`] || ROW_WINDOW_STEP;
@@ -909,7 +909,12 @@ const DeterminationsSection = ({
       nextItems: nextItems.length,
       nextExcluded: nextExcluded.length,
     });
-    await persistItems(nextItems, nextExcluded, { refresh: false, silent: false, revalidate: false, markComplete });
+    await persistItems(nextItems, nextExcluded, {
+      refresh: false,
+      silent: false,
+      revalidate: Boolean(force),
+      markComplete,
+    });
     debugInfo("[DET_DEBUG] flushPendingQtyChanges:done", { bcId });
   };
 
@@ -999,12 +1004,14 @@ const DeterminationsSection = ({
     return count;
   };
 
-  const handleSaveSection = (rows = []) => {
+  const handleSaveSection = async (rows = []) => {
     const pending = getSectionPendingCount(rows);
+    const globalPending = Object.keys(pendingQtyChangesRef.current || {}).length;
     debugInfo("[DET_DEBUG] handleSaveSection", {
       bcId,
       rows: rows.length,
       pending,
+      globalPending,
       hasStructureChanges,
       rowKeysSample: rows.slice(0, 10).map((r) => r?.key),
     });
@@ -1012,150 +1019,18 @@ const DeterminationsSection = ({
       showToast("No hay cambios pendientes en esta seccion.", "info");
       return;
     }
-    debugInfo("[DET_DEBUG] handleSaveSection:trigger_flush", {
+    debugInfo("[DET_DEBUG] handleSaveSection:full_snapshot", {
       bcId,
       force: true,
       markComplete: false,
     });
-    const rowsByKey = new Map();
-    rows.forEach((row) => {
-      if (!row?.key) return;
-      rowsByKey.set(row.key, row);
-      if (row.legacyKey) rowsByKey.set(row.legacyKey, row);
+    const { nextItems, nextExcluded } = buildPersistPayloadFromDrafts();
+    await persistItems(nextItems, nextExcluded, {
+      refresh: false,
+      silent: false,
+      revalidate: true,
+      markComplete: false,
     });
-    const changedKeys = Object.keys(pendingQtyChangesRef.current || {});
-    const targetRows = changedKeys
-      .map((key) => rowsByKey.get(key))
-      .filter(Boolean)
-      .filter((row, index, arr) => arr.findIndex((candidate) => candidate.key === row.key) === index);
-
-    if (!targetRows.length) {
-      debugInfo("[DET_DEBUG] handleSaveSection:no_target_rows_fallback", { bcId, changedKeys });
-      flushPendingQtyChanges({ force: true, markComplete: false });
-      return;
-    }
-
-    (async () => {
-      setSaving(true);
-      try {
-        let latestData = null;
-        const patchedRows = [];
-        for (const row of targetRows) {
-          const rawValue =
-            quantityDraftsRef.current[row.key]
-            ?? (row.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
-            ?? getSavedRow(row)?.annualQty
-            ?? 0;
-          const annualQty = toPositiveNumber(rawValue);
-          patchedRows.push({ row, annualQty });
-          const payload = {
-            annualQty,
-            row: {
-              key: row.key,
-              itemId: row.itemId ?? null,
-              name: row.name,
-              type: row.type,
-              source: row.source,
-              catalogId: row.catalogId ?? null,
-              equipmentId: row.equipmentId ?? null,
-              equipmentName: row.equipmentName ?? null,
-            },
-            exclude: false,
-            version: consumptionVersionRef.current,
-            idempotency_key: getIdempotencyKey("bc.consumption.patch", {
-              key: row.key,
-              annualQty,
-              version: consumptionVersionRef.current,
-            }),
-          };
-          debugInfo("[DET_DEBUG] handleSaveSection:patch_request", {
-            bcId,
-            key: row.key,
-            annualQty,
-            version: consumptionVersionRef.current,
-          });
-          const response = await api.patch(
-            `/business-case/${bcId}/consumption-items/${encodeURIComponent(row.key)}`,
-            payload,
-          );
-          latestData = response?.data?.data || latestData;
-          if (latestData?.version) {
-            consumptionVersionRef.current = latestData.version;
-          }
-          debugInfo("[DET_DEBUG] handleSaveSection:patch_success", {
-            bcId,
-            key: row.key,
-            status: response?.status,
-            version: latestData?.version || null,
-          });
-        }
-
-        if (latestData) {
-          const baseItems = Array.isArray(latestData.items) ? [...latestData.items] : [];
-          patchedRows.forEach(({ row, annualQty }) => {
-            const idx = baseItems.findIndex((item) => {
-              const itemKey = String(item?.key || "").trim();
-              const rowKey = String(row?.key || "").trim();
-              const rowLegacy = String(row?.legacyKey || "").trim();
-              if (itemKey && (itemKey === rowKey || (rowLegacy && itemKey === rowLegacy))) return true;
-              if (
-                item?.catalogId != null &&
-                row?.catalogId != null &&
-                String(item.catalogId) === String(row.catalogId) &&
-                String(item?.equipmentId || "") === String(row?.equipmentId || "")
-              ) {
-                return true;
-              }
-              return false;
-            });
-
-            const patchedItem = {
-              key: row.key,
-              itemId: row.itemId ?? null,
-              name: row.name,
-              type: row.type,
-              source: row.source,
-              catalogId: row.catalogId ?? null,
-              annualQty,
-              equipmentId: row.equipmentId ?? null,
-              equipmentName: row.equipmentName ?? null,
-            };
-
-            if (idx >= 0) {
-              baseItems[idx] = {
-                ...baseItems[idx],
-                ...patchedItem,
-              };
-            } else {
-              baseItems.push(patchedItem);
-            }
-          });
-
-          const mergedData = {
-            ...latestData,
-            items: baseItems,
-          };
-          debugInfo("[DET_DEBUG] handleSaveSection:apply_snapshot", {
-            bcId,
-            responseItems: Array.isArray(latestData.items) ? latestData.items.length : 0,
-            mergedItems: baseItems.length,
-            patchedRows: patchedRows.map(({ row, annualQty }) => ({ key: row.key, annualQty })),
-          });
-          applyPersistedSnapshot(mergedData, savedItemsRef.current, excludedKeysRef.current);
-        }
-        showToast("Seccion guardada correctamente.", "success");
-      } catch (error) {
-        debugError("[DET_DEBUG] handleSaveSection:patch_error", {
-          bcId,
-          message: error?.response?.data?.message || error?.message,
-          code: error?.response?.data?.code || null,
-          status: error?.response?.status || null,
-        });
-        showToast(error?.response?.data?.message || "No se pudo guardar esta seccion", "error");
-      } finally {
-        setSaving(false);
-      }
-    })();
   };
 
   const handleUploadStatDocument = async () => {
