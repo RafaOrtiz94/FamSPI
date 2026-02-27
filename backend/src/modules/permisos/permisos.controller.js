@@ -35,6 +35,8 @@ const normalizePermisoRow = (row) => {
     "aprobacion_final_at",
     "created_at",
     "updated_at",
+    "fecha_inicio_hora",
+    "fecha_fin_hora",
   ]);
   return {
     ...normalized,

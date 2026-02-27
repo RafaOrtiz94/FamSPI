@@ -220,6 +220,32 @@ function stableStringify(input) {
   return JSON.stringify(input);
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function normalizeDateTime(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString();
+}
+
+function calculateDurationHours(startValue, endValue) {
+  const start = new Date(startValue);
+  const end = new Date(endValue);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return null;
+  const hours = (end - start) / (1000 * 60 * 60);
+  return Math.round(hours * 100) / 100;
+}
+
 function sha256Hex(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
@@ -245,6 +271,8 @@ function buildSignatureSnapshot(solicitud = {}) {
     approver_email: solicitud.approver_email,
     fecha_inicio: solicitud.fecha_inicio,
     fecha_fin: solicitud.fecha_fin,
+    fecha_inicio_hora: solicitud.fecha_inicio_hora,
+    fecha_fin_hora: solicitud.fecha_fin_hora,
     fecha_regreso: solicitud.fecha_regreso,
     duracion_horas: solicitud.duracion_horas,
     duracion_dias: solicitud.duracion_dias,
@@ -434,6 +462,8 @@ async function ensureTable() {
       duracion_dias DECIMAL(5,2),
       fecha_inicio DATE,
       fecha_fin DATE,
+      fecha_inicio_hora TIMESTAMPTZ,
+      fecha_fin_hora TIMESTAMPTZ,
       es_recuperable BOOLEAN DEFAULT false,
       periodo_vacaciones TEXT,
       justificacion_requerida TEXT[],
@@ -461,6 +491,8 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS duracion_dias DECIMAL(5,2)");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_inicio DATE");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_fin DATE");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_inicio_hora TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_fin_hora TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificacion_requerida TEXT[]");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificantes_urls TEXT[]");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS aprobacion_parcial_at TIMESTAMPTZ");
@@ -591,9 +623,30 @@ async function createSolicitud({ body, user, meta }) {
   let driveMeta = {};
   let justificacionRequerida = [];
   let esRecuperable = false;
+  const startDateTimeRaw = payload.fecha_inicio_hora || payload.fecha_inicio_datetime;
+  const endDateTimeRaw = payload.fecha_fin_hora || payload.fecha_fin_datetime;
+  payload.fecha_inicio_hora = normalizeDateTime(startDateTimeRaw);
+  payload.fecha_fin_hora = normalizeDateTime(endDateTimeRaw);
+  payload.fecha_inicio = normalizeDateOnly(payload.fecha_inicio || payload.fecha_inicio_hora);
+  payload.fecha_fin = normalizeDateOnly(payload.fecha_fin || payload.fecha_fin_hora);
 
   // Validar y procesar segun tipo de solicitud
   if (payload.tipo_solicitud === "permiso") {
+    const isEstudios = payload.tipo_permiso === "estudios";
+    const isPersonal = payload.tipo_permiso === "personal";
+    const hasDateTimeRange = Boolean(payload.fecha_inicio_hora && payload.fecha_fin_hora);
+    const shouldAutoCalculateHours =
+      (isEstudios || isPersonal || payload.tipo_permiso === "salud") && hasDateTimeRange;
+    if (shouldAutoCalculateHours) {
+      const durationHours = calculateDurationHours(payload.fecha_inicio_hora, payload.fecha_fin_hora);
+      if (!durationHours) {
+        const err = new Error("La fecha/hora de fin debe ser posterior a la fecha/hora de inicio.");
+        err.status = 400;
+        throw err;
+      }
+      payload.duracion_horas = durationHours;
+      payload.duracion_dias = "";
+    }
     if (
       payload.tipo_permiso === "salud" &&
       !payload.duracion_dias &&
@@ -671,11 +724,11 @@ async function createSolicitud({ body, user, meta }) {
     `INSERT INTO permisos_vacaciones (
       user_email, user_fullname, user_id, approver_role, approver_user_id, approver_email, department_id,
       tipo_solicitud, tipo_permiso, subtipo_calamidad, 
-      duracion_horas, duracion_dias, fecha_inicio, fecha_fin, fecha_regreso,
+      duracion_horas, duracion_dias, fecha_inicio, fecha_fin, fecha_inicio_hora, fecha_fin_hora, fecha_regreso,
       es_recuperable, periodo_vacaciones, justificacion_requerida, 
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
       status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,'pending') RETURNING *`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,'pending') RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -691,6 +744,8 @@ async function createSolicitud({ body, user, meta }) {
       payload.duracion_dias || null,
       payload.fecha_inicio || null,
       payload.fecha_fin || null,
+      payload.fecha_inicio_hora || null,
+      payload.fecha_fin_hora || null,
       payload.fecha_regreso || null,
       esRecuperable,
       payload.periodo_vacaciones || null,

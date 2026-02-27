@@ -347,18 +347,25 @@ function fillPermisoFields(form, solicitud) {
       }
     }
 
-    // Fechas
-    if (solicitud.fecha_inicio) {
+    // Fechas (incluir hora cuando exista en el detalle del permiso)
+    const startValue = solicitud.fecha_inicio_hora || solicitud.fecha_inicio;
+    const endValue = solicitud.fecha_fin_hora || solicitud.fecha_fin;
+
+    if (startValue) {
       try {
-        form.getTextField("per_desde").setText(formatDate(solicitud.fecha_inicio));
+        form.getTextField("per_desde").setText(
+          formatDate(startValue, { includeTime: Boolean(solicitud.fecha_inicio_hora) })
+        );
       } catch (e) {
         console.warn("Campo per_desde no encontrado");
       }
     }
 
-    if (solicitud.fecha_fin) {
+    if (endValue) {
       try {
-        form.getTextField("per_hasta").setText(formatDate(solicitud.fecha_fin));
+        form.getTextField("per_hasta").setText(
+          formatDate(endValue, { includeTime: Boolean(solicitud.fecha_fin_hora) })
+        );
       } catch (e) {
         console.warn("Campo per_hasta no encontrado");
       }
@@ -620,10 +627,22 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
 /**
  * Formatear fecha
  */
-function formatDate(date) {
+function formatDate(date, options = {}) {
+  const includeTime = Boolean(options.includeTime);
   if (!date) return "";
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return "";
+  if (includeTime) {
+    return d.toLocaleString(LEGAL_PDF_LOCALE, {
+      timeZone: LEGAL_PDF_TIMEZONE,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+  }
   return d.toLocaleDateString(LEGAL_PDF_LOCALE, { timeZone: LEGAL_PDF_TIMEZONE });
 }
 

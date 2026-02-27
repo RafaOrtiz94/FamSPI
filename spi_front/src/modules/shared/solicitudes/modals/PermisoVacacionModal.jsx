@@ -28,11 +28,46 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [rejectedVacationDays, setRejectedVacationDays] = useState(0);
     const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
     const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
+    const usesPermisoHoras = (permiso, saludTipo) =>
+        permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
+    const usesPermisoDateTime = (permiso, saludTipo) =>
+        permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
+    const extractDatePart = (value) =>
+        typeof value === "string" && value.includes("T") ? value.split("T")[0] : value || "";
+    const toIsoDateTime = (value) => {
+        if (!value) return "";
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? "" : date.toISOString();
+    };
+    const calculateHoursBetween = (startValue, endValue) => {
+        if (!startValue || !endValue) return "";
+        const start = new Date(startValue);
+        const end = new Date(endValue);
+        if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return "";
+        const hours = (end - start) / (1000 * 60 * 60);
+        return (Math.round(hours * 100) / 100).toString();
+    };
+    const formatDisplayDate = (value) => {
+        if (!value) return "";
+        if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return value;
+        return date.toLocaleString("es-EC", {
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+        });
+    };
 
     const [formData, setFormData] = useState({
         // ComÃºn
         fecha_inicio: "",
         fecha_fin: "",
+        fecha_inicio_hora: "",
+        fecha_fin_hora: "",
 
         // Permisos
         duracion_horas: "",
@@ -80,6 +115,27 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             }));
         }
     }, [vacacionMedioDia]);
+
+    useEffect(() => {
+        const shouldAutoCalculateHours =
+            tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+        if (!shouldAutoCalculateHours) return;
+
+        const nextHoras = calculateHoursBetween(formData.fecha_inicio_hora, formData.fecha_fin_hora);
+        setFormData((prev) => {
+            if (String(prev.duracion_horas || "") === String(nextHoras || "")) return prev;
+            return {
+                ...prev,
+                duracion_horas: nextHoras,
+            };
+        });
+    }, [
+        tipoSolicitud,
+        tipoPermiso,
+        saludDuracionTipo,
+        formData.fecha_inicio_hora,
+        formData.fecha_fin_hora,
+    ]);
 
     const loadVacationSummary = async () => {
         try {
@@ -148,6 +204,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setFormData({
             fecha_inicio: "",
             fecha_fin: "",
+            fecha_inicio_hora: "",
+            fecha_fin_hora: "",
             duracion_horas: "",
             tipo_permiso: "",
             subtipo_calamidad: "",
@@ -177,6 +235,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             if (tipoSolicitud === "permiso") {
                 payload.tipo_permiso = tipoPermiso;
+                const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+                if (shouldUseDateTime) {
+                    payload.fecha_inicio_hora = toIsoDateTime(formData.fecha_inicio_hora);
+                    payload.fecha_fin_hora = toIsoDateTime(formData.fecha_fin_hora);
+                    payload.fecha_inicio = extractDatePart(formData.fecha_inicio_hora);
+                    payload.fecha_fin = extractDatePart(formData.fecha_fin_hora);
+                    payload.duracion_horas = calculateHoursBetween(formData.fecha_inicio_hora, formData.fecha_fin_hora);
+                    payload.duracion_dias = "";
+                } else {
+                    payload.fecha_inicio_hora = "";
+                    payload.fecha_fin_hora = "";
+                }
                 if (tipoPermiso === "calamidad") {
                     payload.subtipo_calamidad = subtipoCalamidad.trim();
                 }
@@ -289,10 +359,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const renderPermisoForm = () => {
         const isSalud = tipoPermiso === "salud";
-        const usesHoras =
-            tipoPermiso === "estudios" ||
-            tipoPermiso === "personal" ||
-            (isSalud && saludDuracionTipo === "horas");
+        const usesHoras = usesPermisoHoras(tipoPermiso, saludDuracionTipo);
+        const usesDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+        const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
+        const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
+        const invalidDateRange =
+            Boolean(startValue && endValue) && new Date(endValue).getTime() <= new Date(startValue).getTime();
+        const hasDates = Boolean(startValue && endValue);
+        const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
+        const isAutoHours = usesHoras && usesDateTime;
 
         return (
             <div className="space-y-4">
@@ -308,7 +383,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Por Estudios</p>
-                        <p className="text-xs text-gray-500 mt-1">MÃ¡x 3h recuperables</p>
+                        <p className="text-xs text-gray-500 mt-1">Máx 3h recuperables</p>
                     </button>
 
                     <button
@@ -320,7 +395,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Asuntos Personales</p>
-                        <p className="text-xs text-gray-500 mt-1">MÃ¡x 2h/semana</p>
+                        <p className="text-xs text-gray-500 mt-1">Máx 2h/semana</p>
                     </button>
 
                     <button
@@ -332,7 +407,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className="font-semibold text-sm">Por Salud</p>
-                        <p className="text-xs text-gray-500 mt-1">Con certificado mÃ©dico</p>
+                        <p className="text-xs text-gray-500 mt-1">Con certificado médico</p>
                     </button>
 
                     <button
@@ -343,7 +418,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             : "border-gray-200 hover:border-indigo-300"
                             }`}
                     >
-                        <p className="font-semibold text-sm">Calamidad DomÃ©stica</p>
+                        <p className="font-semibold text-sm">Calamidad Doméstica</p>
                         <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
                     </button>
                 </div>
@@ -366,13 +441,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <>
                         {isSalud && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Duracion</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
                                 <select
                                     value={saludDuracionTipo}
                                     onChange={(e) => setSaludDuracionTipo(e.target.value)}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                 >
-                                    <option value="dias">DÃ­as</option>
+                                    <option value="dias">Días</option>
                                     <option value="horas">Horas</option>
                                 </select>
                             </div>
@@ -382,13 +457,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Fecha desde</label>
                                 <input
-                                    type="date"
-                                    value={formData.fecha_inicio}
+                                    type={usesDateTime ? "datetime-local" : "date"}
+                                    value={startValue}
                                     onChange={(e) => {
                                         const value = e.target.value;
                                         setFormData((prev) => ({
                                             ...prev,
-                                            fecha_inicio: value,
+                                            ...(usesDateTime
+                                                ? { fecha_inicio_hora: value, fecha_inicio: extractDatePart(value) }
+                                                : { fecha_inicio: value }),
                                         }));
                                     }}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
@@ -399,23 +476,35 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
                                 <input
-                                    type="date"
-                                    value={formData.fecha_fin}
-                                    onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
-                                    min={formData.fecha_inicio || undefined}
+                                    type={usesDateTime ? "datetime-local" : "date"}
+                                    value={endValue}
+                                    onChange={(e) =>
+                                        setFormData({
+                                            ...formData,
+                                            ...(usesDateTime
+                                                ? { fecha_fin_hora: e.target.value, fecha_fin: extractDatePart(e.target.value) }
+                                                : { fecha_fin: e.target.value }),
+                                        })
+                                    }
+                                    min={startValue || undefined}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                     required
                                 />
                             </div>
                         </div>
+                        {usesDateTime && invalidDateRange && (
+                            <p className="text-xs text-red-600">La fecha/hora de fin debe ser posterior a la de inicio.</p>
+                        )}
 
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">{usesHoras ? "Horas" : "DÃ­as"}</label>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                {usesHoras ? (isAutoHours ? "Horas (calculadas automáticamente)" : "Horas") : "Días"}
+                            </label>
                             <input
                                 type="number"
                                 step={usesHoras ? "0.5" : "1"}
                                 value={usesHoras ? formData.duracion_horas : formData.duracion_dias}
-                                onChange={(e) =>
+                                onChange={(e) => !isAutoHours &&
                                     setFormData({
                                         ...formData,
                                         [usesHoras ? "duracion_horas" : "duracion_dias"]: e.target.value,
@@ -423,6 +512,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 }
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                 required
+                                readOnly={isAutoHours}
                                 min="0.5"
                                 max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
                             />
@@ -444,7 +534,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 variant="primary"
                                 onClick={() => setStep(3)}
                                 className="flex-1"
-                                disabled={!tipoPermiso || (tipoPermiso === "calamidad" && !subtipoCalamidad.trim())}
+                                disabled={
+                                    !tipoPermiso ||
+                                    (tipoPermiso === "calamidad" && !subtipoCalamidad.trim()) ||
+                                    !hasDates ||
+                                    !hasDuration ||
+                                    invalidDateRange
+                                }
                             >
                                 Continuar
                             </Button>
@@ -517,7 +613,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <p className="text-xs text-amber-700">
                             Estás cerca de completar tus vacaciones. Te quedan{" "}
-                            <strong>{remaining}</strong> dÃ­as disponibles.
+                            <strong>{remaining}</strong> días disponibles.
                         </p>
                     </div>
                 )}
@@ -525,8 +621,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 {isAdvanceRequest && (
                     <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <p className="text-xs text-blue-700">
-                            Aun no cumples un aÃ±o de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
-                            acreditara/descontara cuando cumplas el ano ({vacationSummary?.eligible_from || "fecha de aniversario"}).
+                            Aun no cumples un año de trabajo. Puedes solicitar vacaciones adelantadas y el saldo se
+                            acreditara/descontara cuando cumplas el año ({vacationSummary?.eligible_from || "fecha de aniversario"}).
                         </p>
                     </div>
                 )}
@@ -632,8 +728,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         );
     };
 
-    const renderStep3 = () => (
-        <div className="space-y-4">
+    const renderStep3 = () => {
+        const usesDateTime =
+            tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+        const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
+        const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
+        return (
+            <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900">Confirmar Solicitud</h3>
 
             <div className="p-4 bg-gray-50 rounded-lg space-y-2">
@@ -645,24 +746,24 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </div>
                 <div className="flex justify-between">
                     <span className="text-sm text-gray-600">Fecha inicio:</span>
-                    <span className="text-sm font-semibold text-gray-900">{formData.fecha_inicio}</span>
+                    <span className="text-sm font-semibold text-gray-900">{formatDisplayDate(startValue)}</span>
                 </div>
-                {formData.fecha_fin && (
+                {endValue && (
                     <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Fecha fin:</span>
-                        <span className="text-sm font-semibold text-gray-900">{formData.fecha_fin}</span>
+                        <span className="text-sm font-semibold text-gray-900">{formatDisplayDate(endValue)}</span>
                     </div>
                 )}
                 <div className="flex justify-between">
-                    <span className="text-sm text-gray-600">DuraciÃ³n:</span>
+                    <span className="text-sm text-gray-600">Duración:</span>
                     <span className="text-sm font-semibold text-gray-900">
                         {tipoSolicitud === "vacaciones"
                             ? vacacionMedioDia
-                                ? "0.5 dÃ­as (4h)"
-                                : `${calculateDays()} dÃ­as`
+                                ? "0.5 días (4h)"
+                                : `${calculateDays()} días`
                             : formData.duracion_horas
                                 ? `${formData.duracion_horas} horas`
-                                : `${formData.duracion_dias} dÃ­as`}
+                                : `${formData.duracion_dias} días`}
                     </span>
                 </div>
             </div>
@@ -693,7 +794,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </Button>
             </div>
         </div>
-    );
+        );
+    };
 
     if (!open) return null;
 
