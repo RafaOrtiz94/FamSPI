@@ -9,6 +9,7 @@ const { ensureFolder, replaceTags, exportPdf } = require("../../utils/drive");
 const { drive } = require("../../config/google");
 const notificationManager = require("../notifications/notificationManager");
 const { generateFirmaLegalValidationPdf } = require("../permisos/permisos.pdf");
+const { createTimeOffEvent } = require("../../utils/calendar");
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const ANNUAL_ALLOWANCE = 15;
@@ -30,6 +31,30 @@ const resolveLegalVerificationBaseUrl = () => {
   return "https://spi-backend-983537733948.us-central1.run.app";
 };
 const LEGAL_VERIFICATION_BASE_URL = resolveLegalVerificationBaseUrl();
+
+function buildVacationCalendarDescription({ solicitudId, status, period, days }) {
+  const lines = [
+    "Solicitud de vacaciones registrada en SPI.",
+    `ID: ${solicitudId}`,
+    `Estado: ${status || "pendiente"}`,
+  ];
+  if (period) lines.push(`Periodo: ${period}`);
+  if (Number.isFinite(Number(days))) lines.push(`Dias: ${days}`);
+  return lines.join("\n");
+}
+
+function buildWorkdayDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  let dateOnly = null;
+  if (dateValue instanceof Date && !Number.isNaN(dateValue.getTime())) {
+    dateOnly = dateValue.toISOString().slice(0, 10);
+  } else {
+    const raw = String(dateValue).trim();
+    dateOnly = raw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || null;
+  }
+  if (!dateOnly) return null;
+  return `${dateOnly}T${timeValue}:00`;
+}
 
 async function ensureTable() {
   await db.query(`
@@ -797,6 +822,34 @@ async function updateVacationStatus(id, status, user, meta = {}) {
     );
   }
 
+  if (mappedStatus === "aprobado") {
+    try {
+      const requester = await loadUser(updated[0]?.requester_id);
+      const startDateTime = buildWorkdayDateTime(updated[0]?.start_date, "09:00");
+      const endDateTime = buildWorkdayDateTime(updated[0]?.end_date, "18:00");
+      await createTimeOffEvent({
+        userEmail: requester?.email || null,
+        summary: `Vacaciones - ${requester?.fullname || requester?.email || "Colaborador"}`,
+        description: buildVacationCalendarDescription({
+          solicitudId: updated[0]?.id,
+          status: updated[0]?.status,
+          period: updated[0]?.period,
+          days: updated[0]?.days,
+        }),
+        startDate: updated[0]?.start_date,
+        endDate: updated[0]?.end_date,
+        startDateTime,
+        endDateTime,
+        reminderMinutesBefore: 1440,
+      });
+    } catch (calendarError) {
+      logger.warn(
+        { calendarError, solicitudId: updated[0]?.id, requesterId: updated[0]?.requester_id },
+        "No se pudo crear evento de calendario en aprobacion final de vacaciones"
+      );
+    }
+  }
+
   const signatures = await getVacationSignaturesBySolicitudId(updated[0]?.id);
   return {
     ...updated[0],
@@ -924,4 +977,3 @@ module.exports = {
   summary,
   getLegalVerificationByToken,
 };
-

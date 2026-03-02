@@ -5,6 +5,7 @@ const { validatePermisoRequest } = require("./permisos.validation");
 const { generateFRH10, generateFirmaLegalValidationPdf } = require("./permisos.pdf");
 const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
+const { createTimeOffEvent } = require("../../utils/calendar");
 
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
@@ -257,6 +258,38 @@ function generateLegalVerificationToken() {
 function buildLegalVerificationUrl(token) {
   if (!token) return null;
   return `${String(LEGAL_VERIFICATION_BASE_URL).replace(/\/+$/, "")}/api/v1/permisos/legal-verification/${token}`;
+}
+
+function buildTimeOffCalendarSummary({ tipoSolicitud, tipoPermiso, userFullname }) {
+  if (tipoSolicitud === "vacaciones") {
+    return `Vacaciones - ${userFullname || "Colaborador"}`;
+  }
+  const permisoLabel = tipoPermiso ? `Permiso (${tipoPermiso})` : "Permiso";
+  return `${permisoLabel} - ${userFullname || "Colaborador"}`;
+}
+
+function buildTimeOffCalendarDescription({ solicitudId, tipoSolicitud, tipoPermiso, status }) {
+  const lines = [
+    "Solicitud registrada en SPI.",
+    `ID: ${solicitudId}`,
+    `Tipo: ${tipoSolicitud || "permiso"}`,
+    `Estado: ${status || "pending"}`,
+  ];
+  if (tipoPermiso) lines.push(`Subtipo: ${tipoPermiso}`);
+  return lines.join("\n");
+}
+
+function buildWorkdayDateTime(dateValue, timeValue) {
+  if (!dateValue) return null;
+  let dateOnly = null;
+  if (dateValue instanceof Date && !Number.isNaN(dateValue.getTime())) {
+    dateOnly = dateValue.toISOString().slice(0, 10);
+  } else {
+    const raw = String(dateValue).trim();
+    dateOnly = raw.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || null;
+  }
+  if (!dateOnly) return null;
+  return `${dateOnly}T${timeValue}:00`;
 }
 
 function buildSignatureSnapshot(solicitud = {}) {
@@ -887,6 +920,33 @@ async function aprobarParcial({ id, approver, meta }) {
     logger.warn({ signatureError, solicitudId: rows[0]?.id }, "No se pudo registrar firma de aprobacion parcial");
   }
 
+  try {
+    await createTimeOffEvent({
+      userEmail: rows[0]?.user_email,
+      summary: buildTimeOffCalendarSummary({
+        tipoSolicitud: rows[0]?.tipo_solicitud,
+        tipoPermiso: rows[0]?.tipo_permiso,
+        userFullname: rows[0]?.user_fullname,
+      }),
+      description: buildTimeOffCalendarDescription({
+        solicitudId: rows[0]?.id,
+        tipoSolicitud: rows[0]?.tipo_solicitud,
+        tipoPermiso: rows[0]?.tipo_permiso,
+        status: rows[0]?.status,
+      }),
+      startDate: rows[0]?.fecha_inicio,
+      endDate: rows[0]?.fecha_fin,
+      startDateTime: rows[0]?.fecha_inicio_hora,
+      endDateTime: rows[0]?.fecha_fin_hora,
+      reminderMinutesBefore: 30,
+    });
+  } catch (calendarError) {
+    logger.warn(
+      { calendarError, solicitudId: rows[0]?.id, userEmail: rows[0]?.user_email },
+      "No se pudo crear evento de calendario en aprobacion parcial de permiso"
+    );
+  }
+
   const enriched = await attachWorkflowSignatures([rows[0]]);
   return enriched[0] || rows[0];
 }
@@ -1088,6 +1148,37 @@ async function aprobarFinal({ id, approver, meta }) {
         WHERE id = $1`,
       [id, pdfUrl, legalPdfUrl]
     );
+  }
+
+  if (update.rows[0]?.tipo_solicitud === "vacaciones") {
+    const startDateTime = buildWorkdayDateTime(update.rows[0]?.fecha_inicio, "09:00");
+    const endDateTime = buildWorkdayDateTime(update.rows[0]?.fecha_fin, "18:00");
+    try {
+      await createTimeOffEvent({
+        userEmail: update.rows[0]?.user_email,
+        summary: buildTimeOffCalendarSummary({
+          tipoSolicitud: update.rows[0]?.tipo_solicitud,
+          tipoPermiso: update.rows[0]?.tipo_permiso,
+          userFullname: update.rows[0]?.user_fullname,
+        }),
+        description: buildTimeOffCalendarDescription({
+          solicitudId: update.rows[0]?.id,
+          tipoSolicitud: update.rows[0]?.tipo_solicitud,
+          tipoPermiso: update.rows[0]?.tipo_permiso,
+          status: update.rows[0]?.status,
+        }),
+        startDate: update.rows[0]?.fecha_inicio,
+        endDate: update.rows[0]?.fecha_fin,
+        startDateTime: startDateTime || update.rows[0]?.fecha_inicio_hora,
+        endDateTime: endDateTime || update.rows[0]?.fecha_fin_hora,
+        reminderMinutesBefore: 1440,
+      });
+    } catch (calendarError) {
+      logger.warn(
+        { calendarError, solicitudId: update.rows[0]?.id, userEmail: update.rows[0]?.user_email },
+        "No se pudo crear evento de calendario en aprobacion final de vacaciones"
+      );
+    }
   }
 
   const enriched = await attachWorkflowSignatures([update.rows[0]]);
@@ -1598,4 +1689,3 @@ module.exports = {
   getLegalVerificationByToken,
   getLegalCoverage,
 };
-

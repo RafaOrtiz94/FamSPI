@@ -197,6 +197,40 @@ function hasGeneralPayloadChanges(payload = {}) {
   return false;
 }
 
+function hasGeneralSavePayload(payload = {}) {
+  if (!payload || typeof payload !== "object") return false;
+  if (Object.prototype.hasOwnProperty.call(payload, "client_name")) return true;
+  if (Object.prototype.hasOwnProperty.call(payload, "process_code")) return true;
+  if (Object.prototype.hasOwnProperty.call(payload, "contract_object")) return true;
+  const metadata = payload?.modern_bc_metadata;
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false;
+  if (Object.prototype.hasOwnProperty.call(metadata, "general_data")) return true;
+  return false;
+}
+
+function isCommercialSectionActor(req = {}) {
+  const role = String(req.user?.role || "").toLowerCase();
+  const scope = String(req.user?.scope || req.user?.role_name || "").toLowerCase();
+  const tokens = new Set(
+    [role, scope]
+      .filter(Boolean)
+      .flatMap((value) => value.split(/[,\s|]+/))
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
+  return tokens.has("comercial");
+}
+
+function shouldStartQueueOnGeneralSave(businessCase = {}) {
+  const purchaseType = String(businessCase?.bc_purchase_type || "").trim().toLowerCase();
+  return (
+    purchaseType === "public" ||
+    purchaseType === "private_comodato" ||
+    purchaseType === "comodato_publico" ||
+    purchaseType === "comodato_privado"
+  );
+}
+
 function isTruthyFlag(value) {
   if (typeof value === "boolean") return value;
   if (typeof value === "number") return value === 1;
@@ -736,6 +770,25 @@ async function update(req, res) {
         await preflowService.ensurePreflowStarted(req.params.id, PRE_BC_DURATION_HOURS);
       }
     }
+
+    const shouldNotifyFirstProcessByGeneralSave =
+      shouldStartQueueOnGeneralSave(bc) &&
+      hasGeneralSavePayload(value) &&
+      isCommercialSectionActor(req);
+    if (shouldNotifyFirstProcessByGeneralSave) {
+      try {
+        await notifyBusinessCaseFirstProcessEmail({
+          businessCaseId: req.params.id,
+          actorUser: req.user,
+        });
+      } catch (mailError) {
+        logger.warn(
+          { error: mailError.message, businessCaseId: req.params.id },
+          "No se pudo iniciar notificacion de proceso al guardar datos generales",
+        );
+      }
+    }
+
     const refreshed = await businessCaseService.getBusinessCaseById(req.params.id);
     res.json({ ok: true, data: refreshed });
   } catch (err) {
@@ -2709,8 +2762,8 @@ async function recordSectionCompletion(req, res) {
 
     const processResult = await preflowService.ensurePreflowWorkspaceProcess({ businessCaseId: id, actorUser: user, durationHours: PRE_BC_DURATION_HOURS });
     const latestBusinessCase = await businessCaseService.getBusinessCaseById(id);
-    const isCommercialActor = String(userRole || "").toLowerCase().includes("comercial");
-    if (canonicalSection === "general" && isCommercialActor) {
+    const isCommercialActor = isCommercialSectionActor(req);
+    if (canonicalSection === "general" && isCommercialActor && shouldStartQueueOnGeneralSave(latestBusinessCase)) {
       try {
         await notifyBusinessCaseFirstProcessEmail({
           businessCaseId: id,

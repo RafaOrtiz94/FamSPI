@@ -7,6 +7,7 @@ const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContrac
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
 const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCasePreflowExpiryScheduler');
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
+const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -111,6 +112,24 @@ router.post('/business-case/determinations-gate/expiry', async (_req, res) => {
         console.error('Error en job de expiracion determinaciones:', error);
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion de determinaciones',
+            details: error.message
+        });
+    }
+});
+
+// Endpoint para respaldo de base de datos en Drive
+router.post('/database/backup', async (_req, res) => {
+    try {
+        const result = await runDatabaseBackupToDrive();
+        res.json({
+            success: true,
+            message: 'Respaldo de base de datos completado',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de respaldo de base de datos:', error);
+        res.status(500).json({
+            error: 'Fallo el respaldo de base de datos',
             details: error.message
         });
     }

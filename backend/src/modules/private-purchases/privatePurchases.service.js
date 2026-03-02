@@ -502,19 +502,32 @@ class PrivatePurchasesService {
         role: userRole
       });
 
+      const isComodato = normalizedOfferKind === 'comodato';
+      const clientDisplayName = clientData.name || clientData.commercial_name || 'Cliente sin nombre';
+      const queueStartEvent = isComodato ? 'business_case_general_saved' : 'request_created';
+      const creatorSubject = `Compra privada - ${clientDisplayName} - Solicitud ${purchaseId}`;
+      const backofficeSubject = `Nueva solicitud privada - ${clientDisplayName} - ${normalizedOfferKind}`;
+
       // Enviar notificaciรณn de creaciรณn (síncrono para Cloud Run)
       try {
         await notificationManager.sendNotification({
           userId: user.id,
           template: 'private_purchase_created',
+          customTitle: creatorSubject,
           data: {
             creator_name: user.fullname || user.name || 'Usuario',
-            client_name: clientData.name || 'Cliente sin nombre',
-            purchase_id: purchaseId
+            client_name: clientDisplayName,
+            purchase_id: purchaseId,
+            email_subject: creatorSubject,
           },
           source: 'private_purchase.creation',
-          email: true,
-          chat: false
+          email: !isComodato,
+          chat: false,
+          meta: {
+            purchase_id: purchaseId,
+            offer_kind: normalizedOfferKind,
+            queue_start_event: queueStartEvent,
+          },
         });
       } catch (error) {
         logger.error('[PRIVATE_PURCHASE] Error enviando notificaciรณn de creaciรณn:', error);
@@ -523,20 +536,31 @@ class PrivatePurchasesService {
       // Notificar a backoffice (síncrono para Cloud Run)
       try {
         const recipients = await PrivatePurchaseStateMachine._getUsersByRole('backoffice_comercial');
-        if (!recipients.length) return;
+        if (!recipients.length) {
+          logger.info({ purchaseId }, '[PRIVATE_PURCHASE] Sin destinatarios backoffice para notificación inicial');
+        }
         const payload = {
           purchase_id: purchaseId,
-          client_name: clientData.name || clientData.commercial_name || 'Cliente sin nombre',
-          offer_kind: normalizedOfferKind
+          client_name: clientDisplayName,
+          offer_kind: normalizedOfferKind,
+          email_subject: backofficeSubject,
         };
-        await Promise.all(recipients.map((recipient) => notificationManager.sendNotification({
-          userId: recipient.id,
-          template: 'private_purchase_request_submitted',
-          data: payload,
-          email: true,
-          chat: true,
-          source: 'private_purchase.request'
-        })));
+        if (recipients.length) {
+          await Promise.all(recipients.map((recipient) => notificationManager.sendNotification({
+            userId: recipient.id,
+            template: 'private_purchase_request_submitted',
+            customTitle: backofficeSubject,
+            data: payload,
+            email: !isComodato,
+            chat: !isComodato,
+            source: 'private_purchase.request',
+            meta: {
+              purchase_id: purchaseId,
+              offer_kind: normalizedOfferKind,
+              queue_start_event: queueStartEvent,
+            },
+          })));
+        }
       } catch (error) {
         logger.warn({ error, purchaseId }, 'No se pudo notificar a backoffice de nueva solicitud');
       }

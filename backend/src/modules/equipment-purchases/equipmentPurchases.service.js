@@ -496,7 +496,18 @@ async function getSingleUserByRole(role) {
   }
 }
 
-async function notifyUsers({ userIds = [], title, message, type = "info", source, priority = 1, meta = {} }) {
+async function notifyUsers({
+  userIds = [],
+  title,
+  message,
+  type = "info",
+  source,
+  priority = 1,
+  meta = {},
+  data = {},
+  email = true,
+  chat = false,
+}) {
   const uniqueIds = Array.from(new Set(userIds.filter(Boolean)));
   if (!uniqueIds.length) return;
   await Promise.all(uniqueIds.map((userId) =>
@@ -507,7 +518,9 @@ async function notifyUsers({ userIds = [], title, message, type = "info", source
       type,
       source,
       priority,
-      email: true,
+      data,
+      email,
+      chat,
       meta,
     })
   ));
@@ -2339,7 +2352,13 @@ async function createPurchaseRequest({
       type: "task",
       source: "equipment_purchases",
       priority: 1,
-      meta: { request_id: created.id, client_name: created.client_name },
+      email: false,
+      chat: false,
+      meta: {
+        request_id: created.id,
+        client_name: created.client_name,
+        queue_start_event: "business_case_general_saved",
+      },
     });
     await notifyUsers({
       userIds: [created.created_by],
@@ -2348,7 +2367,13 @@ async function createPurchaseRequest({
       type: "info",
       source: "equipment_purchases",
       priority: 0,
-      meta: { request_id: created.id, client_name: created.client_name },
+      email: false,
+      chat: false,
+      meta: {
+        request_id: created.id,
+        client_name: created.client_name,
+        queue_start_event: "business_case_general_saved",
+      },
     });
   } catch (notifyError) {
     logger.warn({ notifyError, requestId: created.id }, "No se pudieron enviar notificaciones de creación");
@@ -4365,5 +4390,4 @@ module.exports = {
   getTechnicalScheduleCalendar,
   STATUS,
 };
-
 

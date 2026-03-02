@@ -117,7 +117,13 @@ async function sendViaGmail({
     delegatedUser: from,
   });
 
-  return { delivered: true, via: "gmail", response };
+  return {
+    delivered: true,
+    via: "gmail",
+    response,
+    providerThreadId: response?.threadId || null,
+    providerMessageId: response?.messageId || null,
+  };
 }
 
 const encodeHeaderValue = (value) => {
@@ -158,6 +164,7 @@ async function sendViaServiceAccount({
   bcc,
   replyTo,
   from,
+  threadId = null,
 }) {
   const delegatedFrom =
     resolveDelegatedUser(from) ||
@@ -207,9 +214,13 @@ async function sendViaServiceAccount({
   const delegatedGmail = google.gmail({ version: "v1", auth: delegatedAuth });
   let response;
   try {
+    const requestBody = { raw };
+    if (threadId) {
+      requestBody.threadId = threadId;
+    }
     response = await delegatedGmail.users.messages.send({
       userId: "me",
-      requestBody: { raw },
+      requestBody,
     });
   } catch (err) {
     logGoogleApiError(err, {
@@ -228,7 +239,13 @@ async function sendViaServiceAccount({
     delegatedUser: delegatedFrom,
   });
 
-  return { delivered: true, via: "service_account", response };
+  return {
+    delivered: true,
+    via: "service_account",
+    response,
+    providerThreadId: response?.data?.threadId || null,
+    providerMessageId: response?.data?.id || null,
+  };
 }
 
 async function sendViaChatFallback({ to, subject, html, text, cc, bcc, replyTo, from, reason }) {
@@ -271,6 +288,7 @@ async function sendMail({
   delegatedUser = null,
   gmailUserId = null,
   source = null,
+  threadId = null,
 } = {}) {
   if (!to || !subject || (!html && !text)) {
     return { delivered: false, via: "none", reason: "missing_fields" };
@@ -314,6 +332,7 @@ async function sendMail({
     bcc,
     replyTo,
     from: fromAddress || delegatedUser || undefined,
+    threadId,
   });
 }
 

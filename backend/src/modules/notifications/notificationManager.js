@@ -110,6 +110,7 @@ class NotificationManager {
       String(process.env.NOTIFICATION_ASYNC_DISPATCH_ENABLED ?? "false").trim().toLowerCase() !== "false";
     this.defaultMaxAttempts = Number(process.env.NOTIFICATION_DISPATCH_MAX_ATTEMPTS || 5);
     this.defaultBatchLimit = Number(process.env.NOTIFICATION_DISPATCH_BATCH_LIMIT || 50);
+    this._warnedMissingThreadTable = false;
   }
 
   normalizeProcessRef(value) {
@@ -167,6 +168,159 @@ class NotificationManager {
     return `${processSource}:user:${userId}`;
   }
 
+  resolveThreadProcessKey({ notification = {}, data = {}, options = {} }) {
+    const explicitThreadOption = this.normalizeProcessRef(
+      options?.threadProcessKey || options?.thread_process_key || options?.emailThreadKey,
+    );
+    if (explicitThreadOption) return explicitThreadOption;
+
+    const explicitOption = this.normalizeProcessRef(options?.processKey || options?.process_key);
+    if (explicitOption) return explicitOption;
+
+    const meta =
+      notification?.meta && typeof notification.meta === "object" && !Array.isArray(notification.meta)
+        ? notification.meta
+        : {};
+    const explicit =
+      this.normalizeProcessRef(meta?.process_key || meta?.workflow_key) ||
+      this.normalizeProcessRef(data?.process_key || data?.workflow_key);
+    if (explicit) return explicit;
+
+    const businessCaseRef = this.normalizeProcessRef(
+      meta?.business_case_id ||
+      meta?.businessCaseId ||
+      data?.business_case_id ||
+      data?.businessCaseId
+    );
+    if (businessCaseRef) return `business_case:${businessCaseRef}`;
+
+    const purchaseRef = this.normalizeProcessRef(
+      meta?.purchase_id ||
+      meta?.purchaseId ||
+      meta?.private_purchase_id ||
+      meta?.public_purchase_id ||
+      data?.purchase_id ||
+      data?.purchaseId ||
+      data?.private_purchase_id ||
+      data?.public_purchase_id
+    );
+    if (purchaseRef) return `purchase:${purchaseRef}`;
+
+    const requestRef = this.normalizeProcessRef(
+      meta?.solicitud_id ||
+      meta?.request_id ||
+      meta?.client_request_id ||
+      data?.request_id ||
+      data?.client_request_id
+    );
+    if (requestRef) return `request:${requestRef}`;
+
+    return null;
+  }
+
+  isMissingRelationError(error) {
+    return String(error?.code || "") === "42P01";
+  }
+
+  warnMissingThreadTableOnce(context = {}) {
+    if (this._warnedMissingThreadTable) return;
+    this._warnedMissingThreadTable = true;
+    logger.warn(
+      context,
+      "[NOTIFICATIONS] Tabla notification_process_email_threads no existe; ejecutar migracion 113",
+    );
+  }
+
+  async getEmailThreadContext(processKey) {
+    const normalized = this.normalizeProcessRef(processKey);
+    if (!normalized) return null;
+    try {
+      const { rows } = await db.query(
+        `
+        SELECT
+          process_key,
+          provider,
+          thread_id,
+          root_subject,
+          last_subject,
+          last_provider_message_id,
+          last_notification_id,
+          first_sent_at,
+          last_sent_at
+        FROM notification_process_email_threads
+        WHERE process_key = $1
+        LIMIT 1
+        `,
+        [normalized],
+      );
+      return rows[0] || null;
+    } catch (error) {
+      if (this.isMissingRelationError(error)) {
+        this.warnMissingThreadTableOnce({ processKey: normalized });
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async upsertEmailThreadContext({
+    processKey,
+    threadId,
+    rootSubject = null,
+    lastSubject = null,
+    lastProviderMessageId = null,
+    notificationId = null,
+  }) {
+    const normalizedProcess = this.normalizeProcessRef(processKey);
+    const normalizedThread = this.normalizeProcessRef(threadId);
+    if (!normalizedProcess || !normalizedThread) return null;
+    try {
+      const { rows } = await db.query(
+        `
+        INSERT INTO notification_process_email_threads (
+          process_key,
+          provider,
+          thread_id,
+          root_subject,
+          last_subject,
+          last_provider_message_id,
+          last_notification_id,
+          first_sent_at,
+          last_sent_at,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, 'gmail', $2, $3, $4, $5, $6, NOW(), NOW(), NOW(), NOW())
+        ON CONFLICT (process_key)
+        DO UPDATE SET
+          thread_id = COALESCE(EXCLUDED.thread_id, notification_process_email_threads.thread_id),
+          root_subject = COALESCE(notification_process_email_threads.root_subject, EXCLUDED.root_subject),
+          last_subject = COALESCE(EXCLUDED.last_subject, notification_process_email_threads.last_subject),
+          last_provider_message_id = COALESCE(EXCLUDED.last_provider_message_id, notification_process_email_threads.last_provider_message_id),
+          last_notification_id = COALESCE(EXCLUDED.last_notification_id, notification_process_email_threads.last_notification_id),
+          last_sent_at = NOW(),
+          updated_at = NOW()
+        RETURNING process_key, thread_id, root_subject, last_subject, last_provider_message_id, last_notification_id
+        `,
+        [
+          normalizedProcess,
+          normalizedThread,
+          rootSubject || null,
+          lastSubject || null,
+          lastProviderMessageId || null,
+          notificationId || null,
+        ],
+      );
+      return rows[0] || null;
+    } catch (error) {
+      if (this.isMissingRelationError(error)) {
+        this.warnMissingThreadTableOnce({ processKey: normalizedProcess });
+        return null;
+      }
+      throw error;
+    }
+  }
+
   /**
    * Envía notificación completa (BD + Email + Chat)
    */
@@ -189,6 +343,18 @@ class NotificationManager {
       if (!templateData && !customTitle) {
         throw new Error(`Template '${template}' no encontrado`);
       }
+      const processKey = this.resolveProcessKey({
+        source: source || template,
+        template,
+        userId,
+        meta,
+        data,
+      });
+      const threadProcessKey = this.resolveThreadProcessKey({
+        notification: { meta },
+        data,
+        options: {},
+      });
 
       const notificationData = {
         user_id: userId,
@@ -197,15 +363,14 @@ class NotificationManager {
         type: type || templateData?.type || 'info',
         source: source || template,
         priority: priority || templateData?.priority || 0,
-        meta: { ...meta, template, data, sent_at: new Date().toISOString() }
+        meta: {
+          ...meta,
+          template,
+          data,
+          process_key: meta?.process_key || threadProcessKey || null,
+          sent_at: new Date().toISOString(),
+        }
       };
-      const processKey = this.resolveProcessKey({
-        source: notificationData.source,
-        template,
-        userId,
-        meta: notificationData.meta,
-        data,
-      });
 
       // 2. Crear notificación en BD
       const notification = await loadNotificationService().createNotification(notificationData);
@@ -215,7 +380,13 @@ class NotificationManager {
         try {
           const queueOps = [];
           if (email) {
-            queueOps.push(this.enqueueDispatch(notification.id, "email", { data, processKey }));
+            queueOps.push(
+              this.enqueueDispatch(notification.id, "email", {
+                data,
+                processKey,
+                emailThreadKey: threadProcessKey,
+              }),
+            );
           }
           if (chat) {
             queueOps.push(this.enqueueDispatch(notification.id, "chat", { data, processKey }));
@@ -227,7 +398,7 @@ class NotificationManager {
             "[NOTIFICATIONS] Fallo en cola asincrona, aplicando fallback sincrono",
           );
           if (email) {
-            await this.sendEmailNotification(notification, data);
+            await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
           }
           if (chat) {
             await this.sendChatNotification(notification, data);
@@ -235,7 +406,7 @@ class NotificationManager {
         }
       } else {
         if (email) {
-          await this.sendEmailNotification(notification, data);
+          await this.sendEmailNotification(notification, data, { processKey: threadProcessKey });
         }
         if (chat) {
           await this.sendChatNotification(notification, data);
@@ -371,7 +542,11 @@ class NotificationManager {
 
       try {
         if (job.channel === "email") {
-          await this.sendEmailNotification(notification, payload.data || {}, { strict: true });
+          await this.sendEmailNotification(notification, payload.data || {}, {
+            strict: true,
+            threadProcessKey: payload.emailThreadKey || null,
+            processKey: job.process_key || payload.processKey || null,
+          });
         } else if (job.channel === "chat") {
           await this.sendChatNotification(notification, payload.data || {}, { strict: true });
         } else {
@@ -452,15 +627,19 @@ class NotificationManager {
         return;
       }
 
-      const subject =
+      const processKey = this.resolveThreadProcessKey({ notification, data, options });
+      const threadContext = processKey ? await this.getEmailThreadContext(processKey) : null;
+
+      const resolvedSubject =
         data?.email_subject ||
         data?.subject ||
         notification?.meta?.email_subject ||
         notification?.meta?.subject ||
         notification.title;
+      const subject = threadContext?.root_subject || resolvedSubject;
       const html = this.generateEmailHTML(notification, data);
 
-      await sendMail({
+      const sendResult = await sendMail({
         to,
         cc: explicitCc || null,
         subject,
@@ -468,9 +647,32 @@ class NotificationManager {
         from: process.env.SMTP_FROM,
         senderName: "FamSPI Sistema",
         source: notification.source,
+        threadId: threadContext?.thread_id || null,
       });
 
-      logger.info({ to, cc: explicitCc || null, subject, notificationId: notification.id }, "[NOTIFICATIONS] Email enviado");
+      const providerThreadId = this.normalizeProcessRef(sendResult?.providerThreadId || sendResult?.threadId);
+      if (processKey && providerThreadId) {
+        await this.upsertEmailThreadContext({
+          processKey,
+          threadId: providerThreadId,
+          rootSubject: threadContext?.root_subject || resolvedSubject,
+          lastSubject: subject,
+          lastProviderMessageId: this.normalizeProcessRef(sendResult?.providerMessageId || sendResult?.messageId),
+          notificationId: notification?.id || null,
+        });
+      }
+
+      logger.info(
+        {
+          to,
+          cc: explicitCc || null,
+          subject,
+          notificationId: notification.id,
+          processKey,
+          providerThreadId: providerThreadId || null,
+        },
+        "[NOTIFICATIONS] Email enviado",
+      );
     } catch (error) {
       logger.error({ error: error.message, notificationId: notification?.id }, "Error enviando email");
       if (strict) throw error;
