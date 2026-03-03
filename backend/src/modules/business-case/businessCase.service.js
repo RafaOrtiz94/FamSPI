@@ -1,10 +1,10 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const crypto = require("crypto");
-const { ensureFolder } = require("../../utils/drive");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
 const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
+const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -486,16 +486,15 @@ async function createBusinessCase(data, user) {
   const returnedId = rows[0].id;
 
   try {
-    const parentFolderId = process.env.BUSINESS_CASE_ROOT_FOLDER_ID;
-    const folderName = `Business Case ${returnedId}`;
-    const folder = await ensureFolder(folderName, parentFolderId);
-
-    await db.query(`UPDATE equipment_purchase_requests SET drive_folder_id = $1 WHERE id = $2`, [
-      folder.id,
-      returnedId,
-    ]);
+    await ensureBusinessCaseDriveFolder({
+      businessCaseId: returnedId,
+      clientName: client_name || "Cliente",
+      bcPurchaseType: bc_purchase_type,
+      existingFolderId: null,
+      persist: true,
+    });
   } catch (error) {
-    logger.warn({ error: error.message }, "No se pudo crear carpeta en Drive para el BC");
+    logger.warn({ error: error.message, businessCaseId: returnedId }, "No se pudo crear carpeta en Drive para el BC");
   }
 
   // NOTIFICACIÓN: Crear Business Case

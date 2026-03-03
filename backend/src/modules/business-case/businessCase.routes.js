@@ -11,6 +11,7 @@ const equipmentCatalogCtrl = require("./equipmentCatalog.controller");
 const determinationsCatalogCtrl = require("./determinationsCatalog.controller");
 const calculationTemplatesCtrl = require("./calculationTemplates.controller");
 const observabilityService = require("./businessCaseObservability.service");
+const sheetGenerationCtrl = require("./businessCaseSheetGeneration.controller");
 
 const businessCaseRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
 const investmentRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
@@ -121,6 +122,10 @@ router.post(
   ctrl.submitFeasibilityDecision,
 );
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
+router.post("/:id/sheets/generate", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.enqueueSheetGeneration);
+router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getLatestSheetGenerationJobStatus);
+router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);
+router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.getSheetGenerationMetrics);
 
 // UI Guidance routes (Workspace)
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);

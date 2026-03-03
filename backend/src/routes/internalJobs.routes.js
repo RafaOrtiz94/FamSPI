@@ -7,6 +7,7 @@ const { runOnce: runContractReminderEmails } = require('../jobs/equipmentContrac
 const { runOnce: runNotificationDispatchQueue } = require('../jobs/processNotificationDispatchQueue');
 const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCasePreflowExpiryScheduler');
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
+const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 
 const jobsAuth = require('../middlewares/jobsAuth');
@@ -112,6 +113,26 @@ router.post('/business-case/determinations-gate/expiry', async (_req, res) => {
         console.error('Error en job de expiracion determinaciones:', error);
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion de determinaciones',
+            details: error.message
+        });
+    }
+});
+
+router.post('/business-case/sheets/process-queue', async (req, res) => {
+    try {
+        const rawLimit = req.body?.limit ?? req.query?.limit;
+        const parsedLimit = Number(rawLimit);
+        const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+        const result = await runBusinessCaseSheetQueue(limit ? { limit } : {});
+        res.json({
+            success: true,
+            message: 'Cola de generacion de hojas BC procesada',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de cola de hojas BC:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de cola de hojas BC',
             details: error.message
         });
     }

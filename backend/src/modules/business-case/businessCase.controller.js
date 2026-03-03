@@ -26,6 +26,7 @@ const { STATES } = require("./businessCaseStates.constants");
 const preflowService = require("./businessCasePreflow.service");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const determinationsGateService = require("./businessCaseDeterminationsGate.service");
+const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
 
 const createSchema = Joi.object({
   client_name: Joi.string().required(),
@@ -2487,13 +2488,14 @@ async function uploadDeterminationsStatDocument(req, res) {
       ? { ...metadata.determinations_gate }
       : {};
 
-    const rootFolderId = bc?.drive_folder_id || process.env.BUSINESS_CASE_ROOT_FOLDER_ID || null;
-    const bcFolderId = bc?.drive_folder_id || null;
-    const safeBcFolderName = `BC-${bc?.id || id}`.replace(/[^\w.-]+/g, "_");
-    const bcFolder = bcFolderId
-      ? { id: bcFolderId }
-      : (rootFolderId ? await ensureFolder(safeBcFolderName, rootFolderId) : null);
-    const determinationsFolder = await ensureFolder("Determinaciones", bcFolder?.id || rootFolderId || undefined);
+    const driveTarget = await ensureBusinessCaseDriveFolder({
+      businessCaseId: id,
+      clientName: bc?.client_name || "Cliente",
+      bcPurchaseType: bc?.bc_purchase_type || "public",
+      existingFolderId: bc?.drive_folder_id || null,
+      persist: true,
+    });
+    const determinationsFolder = await ensureFolder("Determinaciones", driveTarget.folderId);
     const uploaded = await uploadBase64File(
       file.originalname || `documento-estadistico-${id}.pdf`,
       Buffer.from(file.buffer).toString("base64"),
