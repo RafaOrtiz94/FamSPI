@@ -56,6 +56,39 @@ function buildWorkdayDateTime(dateValue, timeValue) {
   return `${dateOnly}T${timeValue}:00`;
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function getCurrentDateInAppTimezone() {
+  const timeZone = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return normalizeDateOnly(new Date());
+  return `${year}-${month}-${day}`;
+}
+
+function canCancelByDateRule(solicitud = {}) {
+  const startDate = normalizeDateOnly(solicitud?.start_date || solicitud?.start_time);
+  if (!startDate) return false;
+  const today = getCurrentDateInAppTimezone();
+  return today <= startDate;
+}
+
 async function ensureTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
@@ -920,6 +953,9 @@ async function cancelVacationRequest(id, reason, actor) {
   if (!["aprobado", "approved"].includes(normalizedStatus)) {
     throw new Error("Solo solicitudes aprobadas pueden entrar en flujo de cancelación");
   }
+  if (!canCancelByDateRule(current)) {
+    throw new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
+  }
 
   if (isRequester && !isApprover) {
     if (String(current.cancellation_status || "none").toLowerCase() === "pending") {
@@ -989,6 +1025,9 @@ async function reviewVacationCancellation(id, decision, reason, actor) {
   if (!isApprover) throw new Error("No tienes permisos para revisar esta cancelación");
 
   if (normalizedDecision === "approve") {
+    if (!canCancelByDateRule(current)) {
+      throw new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
+    }
     const { rows: updated } = await db.query(
       `UPDATE vacaciones_solicitudes
           SET status = 'cancelado',

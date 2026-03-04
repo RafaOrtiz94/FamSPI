@@ -681,6 +681,30 @@ const PermisosStatusWidget = () => {
       : solicitud.observaciones
       ? [solicitud.observaciones]
       : [];
+    const traceabilityItems = [];
+    if (rejectionNotes.length > 0) {
+      rejectionNotes.forEach((note) => {
+        traceabilityItems.push({ label: "Observación", text: note });
+      });
+    }
+    if (solicitud?.cancellation_request_reason) {
+      traceabilityItems.push({
+        label: "Motivo solicitud de cancelación",
+        text: solicitud.cancellation_request_reason,
+      });
+    }
+    if (solicitud?.cancellation_review_reason) {
+      traceabilityItems.push({
+        label: "Motivo revisión de cancelación",
+        text: solicitud.cancellation_review_reason,
+      });
+    }
+    if (solicitud?.cancellation_reason) {
+      traceabilityItems.push({
+        label: "Motivo final de cancelación",
+        text: solicitud.cancellation_reason,
+      });
+    }
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
     const isRejectedStatus = ["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus);
@@ -1007,13 +1031,13 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
-        {rejectionNotes.length > 0 && (
+        {traceabilityItems.length > 0 && (
           <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mt-2">
-            <p className="text-xs font-semibold text-rose-900 mb-1">Observaciones:</p>
+            <p className="text-xs font-semibold text-rose-900 mb-1">Trazabilidad / mensajes relevantes:</p>
             <ul className="space-y-1">
-              {rejectionNotes.map((note, idx) => (
-                <li key={`${solicitud.id}-obs-${idx}`} className="text-xs text-rose-800">
-                  - {note}
+              {traceabilityItems.map((item, idx) => (
+                <li key={`${solicitud.id}-trace-${idx}`} className="text-xs text-rose-800">
+                  <span className="font-semibold">{item.label}:</span> {item.text}
                 </li>
               ))}
             </ul>
