@@ -71,8 +71,8 @@ const SectionNavigator = ({
     },
     {
       id: "consumption_export",
-      title: "Exportacion Reactivos",
-      description: "Salida ordenada para Excel/Sheets",
+      title: "Sincronizacion",
+      description: "Generacion y sincronizacion del formato BC en Sheets",
       icon: "EXP"
     },
     {

@@ -297,7 +297,7 @@ const CaseHeader = ({ uiGuidance, onRefresh }) => {
             disabled
           >
             <FiDownload size={16} />
-            Exportar
+            Sincronizar
           </button>
           <button
             type="button"

@@ -124,13 +124,13 @@ export const WORKSPACE_TEXTS = {
       warnings: ['El analisis financiero es clave para aprobacion']
     },
     consumption_export: {
-      title: 'Exportacion de Reactivos',
-      description: 'Salida ordenada para Excel o Google Sheets',
+      title: 'Sincronizacion de Business Case',
+      description: 'Vista previa y sincronizacion del formato oficial en Google Sheets',
       tips: [
-        'Use este reporte temporal para enviar consumos',
-        'Revise que los equipos y cantidades anuales esten completos'
+        'Revise la vista previa antes de sincronizar',
+        'Confirme que campos e inversiones esten completos para evitar reprocesos'
       ],
-      warnings: ['Solo disponible para Jefe Comercial y ACP Comercial']
+      warnings: ['La sincronizacion genera el documento oficial en Drive y Sheets']
     },
     dispatch_workspace: {
       title: 'Workspace de Despacho',
