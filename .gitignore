@@ -27,3 +27,8 @@ spi_front/.env
 # Credenciales de Backend
 backend\src\data\dashboard-spi-3d9bca86a1bb.json
 backend/src/data/dashboard-spi-3d9bca86a1bb.json
+/Mapeador_Sheets
+/Mapeador_Sheets
+/Mapeador_Sheets
+*.md
+Mapeador_Sheets/excel_mapper.py

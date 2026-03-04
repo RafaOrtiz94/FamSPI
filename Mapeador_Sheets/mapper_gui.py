@@ -20,6 +20,7 @@ class MapperGUI(tk.Tk):
         "column",
         "source",
         "target_header",
+        "value_state",
         "reason",
         "label",
         "description",
@@ -50,6 +51,8 @@ class MapperGUI(tk.Tk):
         self._rows_general = []
         self._rows_all = []
         self._filtered_rows = []
+        self._target_header_options = []
+        self._selected_target_headers = []
 
         self._build_ui()
 
@@ -131,17 +134,27 @@ class MapperGUI(tk.Tk):
         self.sheet_filter_combo.bind("<<ComboboxSelected>>", self._apply_filter)
 
         ttk.Label(filter_frame, text="Columna objetivo:").grid(row=0, column=4, padx=(12, 6), sticky="w")
-        self.target_header_filter_combo = ttk.Combobox(
+        self.target_header_filter_entry = ttk.Entry(
             filter_frame,
-            state="readonly",
-            values=["(Todas)"],
             textvariable=self.target_header_filter_var,
-            width=30,
+            state="readonly",
+            width=32,
         )
-        self.target_header_filter_combo.grid(row=0, column=5, sticky="w")
-        self.target_header_filter_combo.bind("<<ComboboxSelected>>", self._apply_filter)
+        self.target_header_filter_entry.grid(row=0, column=5, sticky="w")
+        ttk.Button(filter_frame, text="Seleccionar...", command=self._select_target_headers).grid(
+            row=0,
+            column=6,
+            padx=(8, 4),
+            sticky="w",
+        )
+        ttk.Button(filter_frame, text="Todas", command=self._clear_target_headers_selection).grid(
+            row=0,
+            column=7,
+            padx=(0, 4),
+            sticky="w",
+        )
 
-        ttk.Button(filter_frame, text="Limpiar filtros", command=self._clear_filters).grid(row=0, column=6, padx=8)
+        ttk.Button(filter_frame, text="Limpiar filtros", command=self._clear_filters).grid(row=0, column=8, padx=8)
 
         ttk.Label(filter_frame, text="Buscar:").grid(row=1, column=0, padx=(0, 6), pady=(8, 0), sticky="w")
         self.search_entry = ttk.Entry(filter_frame, textvariable=self.search_var)
@@ -171,6 +184,7 @@ class MapperGUI(tk.Tk):
             "column",
             "source",
             "target_header",
+            "value_state",
             "reason",
             "label",
             "description",
@@ -184,6 +198,7 @@ class MapperGUI(tk.Tk):
         self.targets_tree.heading("column", text="Columna")
         self.targets_tree.heading("source", text="Fuente")
         self.targets_tree.heading("target_header", text="Columna objetivo")
+        self.targets_tree.heading("value_state", text="Estado valor")
         self.targets_tree.heading("reason", text="Motivo")
         self.targets_tree.heading("label", text="Contexto/Etiqueta")
         self.targets_tree.heading("description", text="Descripcion de relleno")
@@ -194,6 +209,7 @@ class MapperGUI(tk.Tk):
         self.targets_tree.column("column", width=95, anchor="center")
         self.targets_tree.column("source", width=120, anchor="center")
         self.targets_tree.column("target_header", width=210, anchor="w")
+        self.targets_tree.column("value_state", width=110, anchor="center")
         self.targets_tree.column("reason", width=110, anchor="center")
         self.targets_tree.column("label", width=260, anchor="w")
         self.targets_tree.column("description", width=560, anchor="w")
@@ -277,6 +293,7 @@ class MapperGUI(tk.Tk):
             "column": f"{target.get('column_letter')}/{target.get('column_index')}",
             "source": target.get("source", ""),
             "target_header": target.get("target_header_original") or target.get("target_header") or "",
+            "value_state": target.get("value_state", ""),
             "reason": target.get("detection_reason", ""),
             "label": target.get("label") or "(sin contexto)",
             "description": target.get("fill_description", ""),
@@ -326,19 +343,87 @@ class MapperGUI(tk.Tk):
         self.sheet_filter_combo.configure(values=sheet_values)
         self.sheet_filter_var.set("(Todas)")
 
-        header_values = {"(Todas)"}
+        header_values = set()
         for row in self._rows_objective + self._rows_all:
             if row["target_header"]:
                 header_values.add(row["target_header"])
 
-        sorted_headers = ["(Todas)"] + sorted(value for value in header_values if value != "(Todas)")
-        self.target_header_filter_combo.configure(values=sorted_headers)
-        self.target_header_filter_var.set("(Todas)")
+        self._target_header_options = sorted(header_values)
+        self._selected_target_headers = [
+            header for header in self._selected_target_headers if header in self._target_header_options
+        ]
+        self._update_target_header_filter_text()
+
+    def _update_target_header_filter_text(self):
+        if not self._selected_target_headers:
+            self.target_header_filter_var.set("(Todas)")
+            return
+
+        if len(self._selected_target_headers) == 1:
+            self.target_header_filter_var.set(self._selected_target_headers[0])
+            return
+
+        preview = ", ".join(self._selected_target_headers[:2])
+        remaining = len(self._selected_target_headers) - 2
+        if remaining > 0:
+            preview += f" (+{remaining})"
+        self.target_header_filter_var.set(preview)
+
+    def _clear_target_headers_selection(self):
+        self._selected_target_headers = []
+        self._update_target_header_filter_text()
+        self._apply_filter()
+
+    def _select_target_headers(self):
+        if not self._target_header_options:
+            messagebox.showinfo("Sin columnas objetivo", "No hay columnas objetivo detectadas para seleccionar.")
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Seleccionar columnas objetivo")
+        dialog.geometry("520x420")
+        dialog.transient(self)
+        dialog.grab_set()
+
+        ttk.Label(
+            dialog,
+            text="Selecciona una o varias columnas objetivo (Ctrl o Shift para seleccionar multiples).",
+            wraplength=480,
+        ).pack(anchor="w", padx=12, pady=(12, 6))
+
+        frame = ttk.Frame(dialog)
+        frame.pack(fill="both", expand=True, padx=12, pady=6)
+
+        listbox = tk.Listbox(frame, selectmode="extended")
+        listbox.pack(side="left", fill="both", expand=True)
+
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=listbox.yview)
+        scrollbar.pack(side="right", fill="y")
+        listbox.config(yscrollcommand=scrollbar.set)
+
+        for index, header in enumerate(self._target_header_options):
+            listbox.insert("end", header)
+            if header in self._selected_target_headers:
+                listbox.selection_set(index)
+
+        button_frame = ttk.Frame(dialog)
+        button_frame.pack(fill="x", padx=12, pady=(0, 12))
+
+        def apply_selection():
+            selected_indices = listbox.curselection()
+            self._selected_target_headers = [self._target_header_options[i] for i in selected_indices]
+            self._update_target_header_filter_text()
+            self._apply_filter()
+            dialog.destroy()
+
+        ttk.Button(button_frame, text="Aplicar", command=apply_selection).pack(side="right")
+        ttk.Button(button_frame, text="Cancelar", command=dialog.destroy).pack(side="right", padx=(0, 8))
 
     def _clear_filters(self):
         self.view_mode_var.set("Objetivo")
         self.sheet_filter_var.set("(Todas)")
-        self.target_header_filter_var.set("(Todas)")
+        self._selected_target_headers = []
+        self._update_target_header_filter_text()
         self.search_var.set("")
         self._apply_filter()
 
@@ -357,9 +442,9 @@ class MapperGUI(tk.Tk):
         if selected_sheet and selected_sheet != "(Todas)":
             rows = [row for row in rows if row["sheet"] == selected_sheet]
 
-        selected_header = self.target_header_filter_var.get().strip()
-        if selected_header and selected_header != "(Todas)":
-            rows = [row for row in rows if row["target_header"] == selected_header]
+        if self._selected_target_headers:
+            selected_set = set(self._selected_target_headers)
+            rows = [row for row in rows if row["target_header"] in selected_set]
 
         search_text = self.search_var.get().strip().lower()
         if search_text:
@@ -372,6 +457,7 @@ class MapperGUI(tk.Tk):
                         str(row["column"]),
                         str(row["source"]),
                         str(row["target_header"]),
+                        str(row["value_state"]),
                         str(row["reason"]),
                         str(row["label"]),
                         str(row["description"]),
@@ -395,6 +481,7 @@ class MapperGUI(tk.Tk):
                     row["column"],
                     row["source"],
                     row["target_header"],
+                    row["value_state"],
                     row["reason"],
                     row["label"],
                     row["description"],
@@ -461,7 +548,7 @@ class MapperGUI(tk.Tk):
             "exported_at": datetime.now().isoformat(),
             "view_mode": self.view_mode_var.get(),
             "sheet_filter": self.sheet_filter_var.get(),
-            "target_header_filter": self.target_header_filter_var.get(),
+            "target_header_filter": list(self._selected_target_headers),
             "search": self.search_var.get(),
             "rows": rows,
         }

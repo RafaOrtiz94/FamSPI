@@ -32,6 +32,29 @@ const getClientLabel = (client) =>
   client?.id ||
   "Cliente";
 
+const toCleanText = (value) => {
+  const normalized = String(value || "").trim();
+  return normalized || "";
+};
+
+const resolveProvinceCityFromClient = (client) => {
+  if (!client || typeof client !== "object") return "";
+
+  // Prefer explicit shipping fields, then fall back to other known variants.
+  const province =
+    toCleanText(client?.shipping_province) ||
+    toCleanText(client?.establishment_province) ||
+    toCleanText(client?.provincia) ||
+    toCleanText(client?.province);
+  const city =
+    toCleanText(client?.shipping_city) ||
+    toCleanText(client?.establishment_city) ||
+    toCleanText(client?.ciudad) ||
+    toCleanText(client?.city);
+
+  return [province, city].filter(Boolean).join(", ");
+};
+
 const normalizeClientType = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
   if (["persona_natural", "natural", "pn"].includes(normalized)) return "persona_natural";
@@ -125,6 +148,10 @@ const ClientDataSection = ({
         businessCase?.modern_bc_metadata ||
         fallbackBusinessCase?.modern_bc_metadata ||
         {};
+      const metadataGeneral =
+        metadata?.general_data && typeof metadata.general_data === "object"
+          ? metadata.general_data
+          : {};
       const initialData = {
         client:
           businessCase?.client_name ||
@@ -137,17 +164,20 @@ const ClientDataSection = ({
                 businessCase?.clientType ||
                 fallbackBusinessCase?.clientType ||
                 metadata.clientType ||
+                metadataGeneral.clientType ||
                 "",
               ),
         contractingEntity:
           businessCase?.contractingEntity ||
           fallbackBusinessCase?.contractingEntity ||
           metadata.contractingEntity ||
+          metadataGeneral.contractingEntity ||
           "",
         provinceCity:
           businessCase?.provinceCity ||
           fallbackBusinessCase?.provinceCity ||
           metadata.provinceCity ||
+          metadataGeneral.provinceCity ||
           "",
         processCode:
           businessCase?.processCode ||
@@ -165,6 +195,7 @@ const ClientDataSection = ({
           businessCase?.notes ||
           fallbackBusinessCase?.notes ||
           metadata.notes ||
+          metadataGeneral.notes ||
           "",
       };
 
@@ -357,13 +388,11 @@ const ClientDataSection = ({
 
     if (!selectedClient) {
       if (!naClientType && !startedAsPublic) setValue("clientType", "", { shouldDirty: true });
-      if (!naProvinceCity) setValue("provinceCity", "", { shouldDirty: true });
+      // Preserve stored province/city when no client match is resolved.
       return;
     }
 
-    const provinceCity = [selectedClient?.shipping_city, selectedClient?.shipping_province]
-      .filter(Boolean)
-      .join(", ");
+    const provinceCity = resolveProvinceCityFromClient(selectedClient);
 
     if (!naClientType && !startedAsPublic) {
       setValue(
@@ -378,7 +407,7 @@ const ClientDataSection = ({
       );
     }
     if (!naProvinceCity) {
-      setValue("provinceCity", provinceCity || "", { shouldDirty: true });
+      setValue("provinceCity", provinceCity || "", { shouldDirty: false });
     }
   }, [selectedClient, setValue, naFields.clientType, naFields.provinceCity, startedAsPublic, watchClientType]);
 
@@ -401,6 +430,12 @@ const ClientDataSection = ({
       clientType: finalClientType,
       contractingEntity: formData.contractingEntity,
       provinceCity: formData.provinceCity,
+      general_data: {
+        notes: formData.notes,
+        clientType: finalClientType,
+        contractingEntity: formData.contractingEntity,
+        provinceCity: formData.provinceCity,
+      },
     };
 
     showLoader();

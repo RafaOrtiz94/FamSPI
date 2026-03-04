@@ -87,15 +87,22 @@ Regla actual de deteccion:
 - Prioriza columnas objetivo detectadas por encabezado en cada hoja.
 - Ejemplos de encabezados objetivo:
   - `DET/AÑO PROCESO` (incluye variantes como `DET/AÑO/PROCESO`, `DET AÑO/PROCESO`, `CANTIDAD PROCESO/AÑO`)
-  - `PRODUCTO A ENTREGAR`
+  - `PRODUCTO A ENTREGAR` (tambien reconoce `PRODUCTO A ENVIAR`)
 - Solo marca como rellenables las celdas vacias debajo de esas columnas cuando la fila tiene contexto de producto/insumo.
+- Tambien registra casos donde la celda objetivo esta en `0` o contiene `formula` para que no se pierdan en el mapeo.
 - Adicionalmente mantiene deteccion general para conservar el informe completo anterior.
+- En la hoja `BC` aplica una regla extra:
+  - Celdas con relleno de color no se consideran rellenables.
+  - Etiquetas de contexto con relleno de color tambien se excluyen para evitar falsos positivos.
+  - Solo se consideran celdas con borde visible de campo (evita detectar celdas contiguas sin formato de entrada).
+  - Desde el bloque de tabla de inversiones (fila de encabezado con `Características`, `Cantidad`, `Precio`), se mapean especificamente esas columnas.
 
 Cada celda reportada incluye:
 - Celda (ejemplo: `C1`)
 - Fila (ejemplo: `1`)
 - Columna en letra e indice (ejemplo: `C/3`)
 - Columna objetivo detectada (encabezado del formulario)
+- Estado del valor detectado (`empty`, `zero`, `formula`)
 - Motivo de deteccion (`target_column`)
 - Contexto de fila detectado (si existe)
 - Descripcion clara de donde rellenar (`fill_description`)
@@ -135,7 +142,8 @@ Cada celda reportada incluye:
    - `Ambas`: consolidado sin duplicados.
 8. Usa filtros:
    - `Hoja`
-   - `Columna objetivo`
+   - `Columna objetivo` (puedes combinar 2 o mas con `Seleccionar...`)
+     - En la ventana de seleccion usa `Ctrl` o `Shift` para multiple seleccion.
    - `Buscar` (texto libre por celda, descripcion, producto, etc.).
 9. Exporta lo que necesites desde la vista actual:
    - Selecciona formato de exportacion (`csv`, `json`, `xlsx`).

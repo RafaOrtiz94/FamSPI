@@ -11,6 +11,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 TARGET_HEADER_DET = "DET/AÑO PROCESO"
 TARGET_HEADER_PRODUCT = "PRODUCTO A ENTREGAR"
+BC_TARGET_COLUMNS_NORMALIZED = {"CARACTERISTICAS", "CANTIDAD", "PRECIO"}
 
 
 def detect_data_validations(sheet):
@@ -90,7 +91,7 @@ def classify_fillable_header(value):
 
     tokens = set(normalized.split())
 
-    if "PRODUCTO" in tokens and "ENTREGAR" in tokens:
+    if "PRODUCTO" in tokens and ("ENTREGAR" in tokens or "ENVIAR" in tokens):
         return TARGET_HEADER_PRODUCT
 
     has_process_year = "PROCESO" in tokens and "ANO" in tokens
@@ -111,6 +112,28 @@ def is_cell_empty(cell):
     return False
 
 
+def classify_target_cell_state(cell):
+    if cell.data_type == "f":
+        return "formula"
+
+    value = cell.value
+    if value is None:
+        return "empty"
+
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return "empty"
+        if stripped in {"0", "0.0", "0,0"}:
+            return "zero"
+        return "filled"
+
+    if isinstance(value, (int, float)) and float(value) == 0.0:
+        return "zero"
+
+    return "filled"
+
+
 def extract_label_text(cell):
     if cell.data_type == "f":
         return None
@@ -128,12 +151,32 @@ def extract_label_text(cell):
     return str(value)
 
 
-def find_nearest_label(sheet, row_idx, col_idx, max_left_steps=2, max_up_steps=1):
+def has_colored_fill(cell):
+    fill = cell.fill
+    if not fill:
+        return False
+    return fill.fill_type not in (None, "none")
+
+
+def has_visible_border(cell):
+    border = cell.border
+    if not border:
+        return False
+    sides = [border.left, border.right, border.top, border.bottom]
+    for side in sides:
+        if side is not None and getattr(side, "style", None):
+            return True
+    return False
+
+
+def find_nearest_label(sheet, row_idx, col_idx, max_left_steps=2, max_up_steps=1, skip_colored=False):
     for step in range(1, max_left_steps + 1):
         left_col = col_idx - step
         if left_col >= 1:
             candidate_cell = sheet.cell(row=row_idx, column=left_col)
             label_text = extract_label_text(candidate_cell)
+            if skip_colored and has_colored_fill(candidate_cell):
+                continue
             if label_text:
                 return {
                     "label": label_text,
@@ -146,6 +189,8 @@ def find_nearest_label(sheet, row_idx, col_idx, max_left_steps=2, max_up_steps=1
         if upper_row >= 1:
             candidate_cell = sheet.cell(row=upper_row, column=col_idx)
             label_text = extract_label_text(candidate_cell)
+            if skip_colored and has_colored_fill(candidate_cell):
+                continue
             if label_text:
                 return {
                     "label": label_text,
@@ -178,11 +223,17 @@ def build_general_fill_description(sheet_name, cell_coord, row_idx, col_idx, lab
     )
 
 
-def build_general_fill_target(sheet, cell, validations):
+def build_general_fill_target(sheet, cell, validations, is_bc_sheet=False):
     row_idx = cell.row
     col_idx = cell.column
-    label_context = find_nearest_label(sheet, row_idx, col_idx)
+    label_context = find_nearest_label(sheet, row_idx, col_idx, skip_colored=is_bc_sheet)
     has_validation = cell.coordinate in validations
+
+    if is_bc_sheet and has_colored_fill(cell):
+        return None
+
+    if is_bc_sheet and not has_visible_border(cell):
+        return None
 
     if not (has_validation or label_context):
         return None
@@ -274,7 +325,7 @@ def find_row_context_for_target(sheet, row_idx, target_col):
     return string_fallback or any_fallback
 
 
-def build_target_fill_description(sheet_name, target_cell, header_info, row_context):
+def build_target_fill_description(sheet_name, target_cell, header_info, row_context, value_state):
     row_idx = target_cell.row
     col_idx = target_cell.column
     col_letter = get_column_letter(col_idx)
@@ -285,12 +336,111 @@ def build_target_fill_description(sheet_name, target_cell, header_info, row_cont
         f"(fila {row_idx}, columna {col_letter}/{col_idx})."
     )
 
+    if value_state == "formula":
+        description += " La celda tiene formula; verificar si debe reemplazarse con dato manual."
+    elif value_state == "zero":
+        description += " La celda tiene valor 0; verificar si corresponde ingresar valor real."
+
     if row_context:
         description += (
             f" Contexto de fila: '{row_context['label']}' en {row_context['cell']}."
         )
 
     return description
+
+
+def detect_bc_table_blocks(sheet, bounds):
+    blocks = []
+    for row_idx in range(bounds["min_row"], bounds["max_row"] + 1):
+        columns = {}
+        for col_idx in range(bounds["min_col"], bounds["max_col"] + 1):
+            cell = sheet.cell(row=row_idx, column=col_idx)
+            if not isinstance(cell.value, str):
+                continue
+            normalized = normalize_text(cell.value)
+            if normalized in BC_TARGET_COLUMNS_NORMALIZED:
+                columns[normalized] = {
+                    "column": col_idx,
+                    "cell": cell.coordinate,
+                    "header_text": cell.value.strip(),
+                }
+
+        if BC_TARGET_COLUMNS_NORMALIZED.issubset(columns.keys()):
+            blocks.append({"row": row_idx, "columns": columns})
+
+    return blocks
+
+
+def build_bc_table_fill_targets(sheet, blocks, validations):
+    fill_targets = []
+    if not blocks:
+        return fill_targets
+
+    block_rows = [block["row"] for block in blocks]
+
+    for block in blocks:
+        header_row = block["row"]
+        next_rows = [row_value for row_value in block_rows if row_value > header_row]
+        max_row = min(next_rows) - 1 if next_rows else sheet.max_row
+        started = False
+
+        header_columns = [
+            block["columns"]["CARACTERISTICAS"],
+            block["columns"]["CANTIDAD"],
+            block["columns"]["PRECIO"],
+        ]
+
+        for row_idx in range(header_row + 1, max_row + 1):
+            context_cell = sheet.cell(row=row_idx, column=1)
+            context_label = extract_label_text(context_cell)
+
+            if context_label is None:
+                if started:
+                    break
+                continue
+
+            started = True
+            if isinstance(context_label, str) and context_label.strip().startswith("*"):
+                break
+
+            row_context = {"label": context_label, "cell": context_cell.coordinate}
+
+            for header_col in header_columns:
+                col_idx = header_col["column"]
+                target_cell = sheet.cell(row=row_idx, column=col_idx)
+                value_state = classify_target_cell_state(target_cell)
+                if value_state == "filled":
+                    continue
+
+                fill_targets.append(
+                    {
+                        "cell": target_cell.coordinate,
+                        "row": row_idx,
+                        "column_letter": get_column_letter(col_idx),
+                        "column_index": col_idx,
+                        "source": "objective",
+                        "detection_reason": f"target_column_{value_state}",
+                        "value_state": value_state,
+                        "current_value": target_cell.value,
+                        "target_header": header_col["header_text"],
+                        "target_header_cell": header_col["cell"],
+                        "target_header_original": header_col["header_text"],
+                        "has_validation": target_cell.coordinate in validations,
+                        "validation": validations.get(target_cell.coordinate),
+                        "label": row_context["label"],
+                        "label_cell": row_context["cell"],
+                        "label_direction": "row_item",
+                        "fill_description": build_target_fill_description(
+                            sheet.title,
+                            target_cell,
+                            {"header_text": header_col["header_text"]},
+                            row_context,
+                            value_state,
+                        ),
+                    }
+                )
+
+    return fill_targets
 
 
 def build_fill_targets_by_headers(sheet, headers, validations):
@@ -310,13 +460,13 @@ def build_fill_targets_by_headers(sheet, headers, validations):
             target_cell = sheet.cell(row=row_idx, column=target_col)
             row_context = find_row_context_for_target(sheet, row_idx, target_col)
 
-            has_target_value = not is_cell_empty(target_cell)
             has_context = row_context is not None
+            value_state = classify_target_cell_state(target_cell)
 
-            if not has_target_value and not has_context:
+            if not has_context:
                 continue
 
-            if has_target_value:
+            if value_state == "filled":
                 continue
 
             fill_targets.append(
@@ -326,7 +476,9 @@ def build_fill_targets_by_headers(sheet, headers, validations):
                     "column_letter": get_column_letter(target_col),
                     "column_index": target_col,
                     "source": "objective",
-                    "detection_reason": "target_column",
+                    "detection_reason": f"target_column_{value_state}",
+                    "value_state": value_state,
+                    "current_value": target_cell.value,
                     "target_header": header["target_header"],
                     "target_header_cell": header["cell"],
                     "target_header_original": header["header_text"],
@@ -340,6 +492,7 @@ def build_fill_targets_by_headers(sheet, headers, validations):
                         target_cell,
                         header,
                         row_context,
+                        value_state,
                     ),
                 }
             )
@@ -347,7 +500,7 @@ def build_fill_targets_by_headers(sheet, headers, validations):
     return fill_targets
 
 
-def collect_general_fill_targets(sheet, validations, bounds, merged_non_anchor_cells):
+def collect_general_fill_targets(sheet, validations, bounds, merged_non_anchor_cells, is_bc_sheet=False):
     targets = []
     for row in sheet.iter_rows(
         min_row=bounds["min_row"],
@@ -361,7 +514,7 @@ def collect_general_fill_targets(sheet, validations, bounds, merged_non_anchor_c
             if not is_cell_empty(cell):
                 continue
 
-            target = build_general_fill_target(sheet, cell, validations)
+            target = build_general_fill_target(sheet, cell, validations, is_bc_sheet=is_bc_sheet)
             if target:
                 targets.append(target)
 
@@ -406,10 +559,36 @@ def analyze_sheet(sheet, include_empty=False):
     validations = detect_data_validations(sheet)
     bounds = get_used_bounds(sheet, validations)
     merged_non_anchor_cells, _ = build_merged_cell_helpers(sheet)
+    is_bc_sheet = sheet.title.strip().upper() == "BC"
 
     fillable_headers = detect_fillable_headers(sheet, merged_non_anchor_cells, bounds)
     objective_targets = build_fill_targets_by_headers(sheet, fillable_headers, validations)
-    general_targets = collect_general_fill_targets(sheet, validations, bounds, merged_non_anchor_cells)
+
+    if is_bc_sheet:
+        bc_blocks = detect_bc_table_blocks(sheet, bounds)
+        bc_headers = []
+        for block in bc_blocks:
+            for normalized_key in ("CARACTERISTICAS", "CANTIDAD", "PRECIO"):
+                info = block["columns"][normalized_key]
+                bc_headers.append(
+                    {
+                        "cell": info["cell"],
+                        "row": block["row"],
+                        "column": info["column"],
+                        "target_header": info["header_text"],
+                        "header_text": info["header_text"],
+                    }
+                )
+        fillable_headers.extend(bc_headers)
+        objective_targets.extend(build_bc_table_fill_targets(sheet, bc_blocks, validations))
+
+    general_targets = collect_general_fill_targets(
+        sheet,
+        validations,
+        bounds,
+        merged_non_anchor_cells,
+        is_bc_sheet=is_bc_sheet,
+    )
     merged_targets = merge_fill_targets(objective_targets, general_targets)
 
     sheet_info["fillable_headers"] = fillable_headers
@@ -516,15 +695,16 @@ def _append_targets_table(markdown, title, targets, include_target_header=False)
         return markdown
 
     if include_target_header:
-        markdown += "| Celda | Fila | Columna | Columna objetivo | Motivo | Contexto fila | Descripcion de relleno |\n"
-        markdown += "|-------|------|---------|------------------|--------|---------------|--------------------------|\n"
+        markdown += "| Celda | Fila | Columna | Columna objetivo | Estado valor | Motivo | Contexto fila | Descripcion de relleno |\n"
+        markdown += "|-------|------|---------|------------------|--------------|--------|---------------|--------------------------|\n"
         for target in targets:
             context_label = target["label"] if target["label"] else "(sin contexto)"
             description = target["fill_description"].replace("|", "\\|")
             target_header = target.get("target_header_original") or target.get("target_header")
+            value_state = target.get("value_state", "")
             markdown += (
                 f"| {target['cell']} | {target['row']} | {target['column_letter']}/{target['column_index']} "
-                f"| {target_header} | {target['detection_reason']} | {context_label} | {description} |\n"
+                f"| {target_header} | {value_state} | {target['detection_reason']} | {context_label} | {description} |\n"
             )
     else:
         markdown += "| Celda | Fila | Columna | Motivo | Etiqueta detectada | Descripcion de relleno |\n"

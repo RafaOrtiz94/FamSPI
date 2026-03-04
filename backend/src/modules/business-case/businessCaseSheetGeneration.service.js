@@ -3,6 +3,12 @@ const crypto = require("crypto");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const idempotencyService = require("./businessCaseIdempotency.service");
+const investmentsService = require("./investments.service");
+const bcLabEnvironmentService = require("./bcLabEnvironment.service");
+const bcEquipmentDetailsService = require("./bcEquipmentDetails.service");
+const bcLisIntegrationService = require("./bcLisIntegration.service");
+const bcRequirementsService = require("./bcRequirements.service");
+const bcDeliveriesService = require("./bcDeliveries.service");
 const { ensureBusinessCaseDriveFolderById } = require("./businessCaseDriveFolder.service");
 const {
   validateGenerationRequest,
@@ -32,6 +38,11 @@ const WEBAPP_TIMEOUT_MS = Number(process.env.BC_SHEET_WEBAPP_TIMEOUT_MS || 12000
 const CIRCUIT_FAILURE_THRESHOLD = Number(process.env.BC_SHEET_CIRCUIT_FAILURE_THRESHOLD || 5);
 const CIRCUIT_RESET_MS = Number(process.env.BC_SHEET_CIRCUIT_RESET_MS || 60000);
 const MAX_ATTEMPTS_DEFAULT = Number(process.env.BC_SHEET_MAX_ATTEMPTS || 3);
+const DELIVERY_TYPE_LABELS = Object.freeze({
+  total: "Total",
+  partial_time: "Parcial - Tiempo",
+  partial_need: "Parcial a necesidad",
+});
 
 let tableReady = false;
 let tablePromise = null;
@@ -166,7 +177,9 @@ async function ensureQueueTable() {
 
 async function assertBusinessCaseExists(businessCaseId) {
   const { rows } = await db.query(
-    `SELECT id, request_type, uses_modern_system, client_name, bc_purchase_type, drive_folder_id
+    `SELECT id, request_type, uses_modern_system, client_name, bc_purchase_type, drive_folder_id,
+            bc_equipment_cost,
+            process_code, contract_object, modern_bc_metadata, extra
        FROM equipment_purchase_requests
       WHERE id = $1
       LIMIT 1`,
@@ -196,6 +209,252 @@ async function assertBusinessCaseExists(businessCaseId) {
   }
 
   return row;
+}
+
+function toObject(value) {
+  if (!value) return {};
+  if (typeof value === "object" && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+function hasValue(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+}
+
+function pickFirst(...values) {
+  for (const value of values) {
+    if (hasValue(value)) return value;
+  }
+  return null;
+}
+
+function setFieldIfPresent(target, key, value) {
+  if (!hasValue(value)) return;
+  target[key] = value;
+}
+
+function normalizePurchaseTypeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized.includes("public")) return "publico";
+  if (normalized.includes("priv")) return "privado";
+  return normalized;
+}
+
+function normalizeEquipmentTypeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === "new_available") return "Nuevo";
+  if (normalized === "installed_client") return "Instalado en cliente";
+  if (normalized === "cu") return "CU";
+  return value;
+}
+
+function normalizeDeliveryTypeLabel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return null;
+  return DELIVERY_TYPE_LABELS[normalized] || value;
+}
+
+function normalizeInvestmentNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+async function getEquipmentNamesMapByIds(ids = []) {
+  const cleanIds = Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+  if (!cleanIds.length) return new Map();
+
+  const { rows } = await db.query(
+    `
+    WITH source AS (
+      SELECT equipment_id::int AS id, equipment_name::text AS name
+      FROM v_equipment_full_catalog
+      WHERE equipment_id = ANY($1::int[])
+      UNION
+      SELECT id::int AS id, name::text AS name
+      FROM equipment_models
+      WHERE id = ANY($1::int[])
+    )
+    SELECT id, MAX(name) AS name
+    FROM source
+    GROUP BY id
+    `,
+    [cleanIds],
+  );
+
+  const map = new Map();
+  rows.forEach((row) => {
+    map.set(Number(row.id), row.name || null);
+  });
+  return map;
+}
+
+function buildInversionesPayload(investments = []) {
+  const out = {};
+  const safeInvestments = Array.isArray(investments) ? investments : [];
+  safeInvestments
+    .filter((item) => Boolean(item?.selected))
+    .forEach((item) => {
+      const name = String(item?.name || "").trim();
+      if (!name) return;
+      const cantidad = normalizeInvestmentNumber(item?.quantity);
+      const precio = normalizeInvestmentNumber(item?.unit_price);
+      if (cantidad === null && precio === null) return;
+      out[name] = {
+        cantidad: cantidad === null ? 0 : cantidad,
+        precio: precio === null ? 0 : precio,
+      };
+    });
+  return out;
+}
+
+async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
+  const metadata = toObject(bcRow?.modern_bc_metadata);
+  const generalData = toObject(metadata.general_data);
+  const extra = toObject(bcRow?.extra);
+  const equipmentPairs = Array.isArray(extra?.equipment_details) ? extra.equipment_details : [];
+  const primaryPair = equipmentPairs.find((pair) => Number(pair?.primary_id) > 0) || equipmentPairs[0] || null;
+  const primaryId = Number(primaryPair?.primary_id) || null;
+  const backupId = Number(primaryPair?.backup_id) || null;
+
+  const [
+    labEnvironment,
+    equipmentDetails,
+    lisIntegration,
+    requirements,
+    deliveries,
+    investments,
+    equipmentNamesMap,
+  ] = await Promise.all([
+    bcLabEnvironmentService.getLabEnvironment(businessCaseId),
+    bcEquipmentDetailsService.getEquipmentDetails(businessCaseId),
+    bcLisIntegrationService.getLisIntegration(businessCaseId),
+    bcRequirementsService.getRequirements(businessCaseId),
+    bcDeliveriesService.getDeliveries(businessCaseId),
+    investmentsService.getCatalogWithSelections(businessCaseId),
+    getEquipmentNamesMapByIds([primaryId, backupId]),
+  ]);
+
+  const lisInterfaces = lisIntegration?.id
+    ? await bcLisIntegrationService.getEquipmentInterfaces(lisIntegration.id)
+    : [];
+
+  const fields = {};
+  setFieldIfPresent(fields, "TipoDeCliente", pickFirst(
+    generalData.clientType,
+    metadata.clientType,
+    normalizePurchaseTypeLabel(bcRow?.bc_purchase_type),
+  ));
+  setFieldIfPresent(fields, "EntidadContratante", pickFirst(
+    generalData.contractingEntity,
+    metadata.contractingEntity,
+  ));
+  setFieldIfPresent(fields, "Cliente", bcRow?.client_name);
+  setFieldIfPresent(fields, "CodigoProceso", bcRow?.process_code);
+  setFieldIfPresent(fields, "ObjetoContratacion", bcRow?.contract_object);
+  setFieldIfPresent(fields, "ProvinciaCiudad", pickFirst(
+    generalData.provinceCity,
+    metadata.provinceCity,
+  ));
+
+  setFieldIfPresent(fields, "DiasLaboratorio", labEnvironment?.work_days_per_week);
+  setFieldIfPresent(fields, "TurnosPorDia", labEnvironment?.shifts_per_day);
+  setFieldIfPresent(fields, "HorasPorTurno", labEnvironment?.hours_per_shift);
+  setFieldIfPresent(fields, "ControlesCalidadPorTurno", labEnvironment?.quality_controls_per_shift);
+  setFieldIfPresent(fields, "NivelesDeControl", labEnvironment?.control_levels);
+  setFieldIfPresent(fields, "FrecuenciaControlesRutina", labEnvironment?.routine_qc_frequency);
+  setFieldIfPresent(fields, "PruebasEspeciales", labEnvironment?.special_tests);
+  setFieldIfPresent(fields, "FrecuenciaControlesEspeciales", labEnvironment?.special_qc_frequency);
+
+  setFieldIfPresent(fields, "NombreEquipoPrincipal", pickFirst(
+    equipmentNamesMap.get(primaryId),
+    equipmentDetails?.equipment_name,
+  ));
+  setFieldIfPresent(fields, "EstadoEquipoPrincipal", pickFirst(
+    equipmentDetails?.equipment_status,
+    normalizeEquipmentTypeLabel(primaryPair?.primary_type),
+  ));
+  setFieldIfPresent(fields, "PropiedadEquipoPrincipal", equipmentDetails?.ownership_status);
+  setFieldIfPresent(fields, "NombreEquipoBackUp", pickFirst(
+    equipmentNamesMap.get(backupId),
+    equipmentDetails?.backup_equipment_name,
+  ));
+  setFieldIfPresent(fields, "EstadoEquipoBackUp", pickFirst(
+    equipmentDetails?.backup_status,
+    normalizeEquipmentTypeLabel(primaryPair?.backup_type),
+  ));
+  setFieldIfPresent(fields, "InstalarJuntoPrincipal", pickFirst(
+    primaryPair?.backup_install_simultaneous,
+    equipmentDetails?.install_with_primary,
+  ));
+  setFieldIfPresent(fields, "UbicacionEquipos", equipmentDetails?.installation_location);
+  setFieldIfPresent(fields, "RequiereEquipoComplementario", equipmentDetails?.requires_complementary);
+  setFieldIfPresent(fields, "EquipoComplementarioPrueba", equipmentDetails?.complementary_test_purpose);
+
+  const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
+  const hasCurrentSystem = hasValue(lisIntegration?.current_system_name) || hasValue(lisIntegration?.current_system_provider);
+  setFieldIfPresent(fields, "IncluyeLIS", includesLis);
+  setFieldIfPresent(fields, "ProveedorSistemaTrabajar", lisIntegration?.lis_provider);
+  setFieldIfPresent(fields, "IncluyeHadwareLIS", lisIntegration?.includes_hardware);
+  setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
+  setFieldIfPresent(fields, "InterfazSistemaActual", hasCurrentSystem);
+  setFieldIfPresent(fields, "NombreSistema", lisIntegration?.current_system_name);
+  setFieldIfPresent(fields, "ProveedorSistemaActual", lisIntegration?.current_system_provider);
+  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", lisIntegration?.current_system_hardware);
+  setFieldIfPresent(fields, "ModeloProveedor1", lisInterfaces[0]?.model || lisInterfaces[0]?.provider);
+  setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
+  setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);
+
+  setFieldIfPresent(fields, "Plazo", requirements?.deadline_months);
+  setFieldIfPresent(fields, "ProyeccionPlazo", requirements?.projected_deadline_months);
+  setFieldIfPresent(fields, "PresupuestoReferencial", pickFirst(
+    metadata.referential_budget,
+    generalData.referential_budget,
+    bcRow?.bc_equipment_cost,
+  ));
+  setFieldIfPresent(fields, "PorcentajeMaximoCanje", pickFirst(
+    metadata.max_trade_in_percent,
+    generalData.max_trade_in_percent,
+  ));
+  setFieldIfPresent(fields, "CompromisoDeCompra", pickFirst(
+    metadata.purchase_commitment,
+    generalData.purchase_commitment,
+  ));
+  setFieldIfPresent(fields, "TipoEntrega", normalizeDeliveryTypeLabel(deliveries?.delivery_type));
+  setFieldIfPresent(fields, "DeterminacionEfectiva", deliveries?.effective_determination);
+  setFieldIfPresent(fields, "Observaciones", pickFirst(requirements?.observations, metadata?.notes, generalData?.notes));
+
+  // The WebApp contract requires at least one field. Keep Cliente as minimal fallback.
+  if (!Object.keys(fields).length && hasValue(bcRow?.client_name)) {
+    fields.Cliente = bcRow.client_name;
+  }
+
+  const hasManualInversiones =
+    input?.inversiones &&
+    typeof input.inversiones === "object" &&
+    !Array.isArray(input.inversiones) &&
+    Object.keys(input.inversiones).length > 0;
+
+  return {
+    ...input,
+    fields,
+    inversiones: hasManualInversiones ? input.inversiones : buildInversionesPayload(investments),
+  };
 }
 
 function buildPayloadHash(payload) {
@@ -245,9 +504,24 @@ async function enqueueGenerationJob({
   correlationId = null,
 }) {
   await ensureQueueTable();
-  await assertBusinessCaseExists(businessCaseId);
+  const bcRow = await assertBusinessCaseExists(businessCaseId);
 
-  const validation = validateGenerationRequest(input || {});
+  let normalizedInput = input || {};
+  const hasFieldsInput =
+    normalizedInput?.fields &&
+    typeof normalizedInput.fields === "object" &&
+    !Array.isArray(normalizedInput.fields) &&
+    Object.keys(normalizedInput.fields).length > 0;
+
+  if (!hasFieldsInput) {
+    normalizedInput = await buildAutoGenerationInput({
+      businessCaseId,
+      bcRow,
+      input: normalizedInput,
+    });
+  }
+
+  const validation = validateGenerationRequest(normalizedInput);
   if (!validation.ok) {
     throw createAppError(validation.message || "Payload invalido para generacion de hoja", {
       status: 400,
@@ -357,6 +631,72 @@ async function enqueueGenerationJob({
     }
     throw error;
   }
+}
+
+async function getGenerationPreview({ businessCaseId, input = {} }) {
+  const bcRow = await assertBusinessCaseExists(businessCaseId);
+
+  let normalizedInput = input || {};
+  const hasFieldsInput =
+    normalizedInput?.fields &&
+    typeof normalizedInput.fields === "object" &&
+    !Array.isArray(normalizedInput.fields) &&
+    Object.keys(normalizedInput.fields).length > 0;
+
+  if (!hasFieldsInput) {
+    normalizedInput = await buildAutoGenerationInput({
+      businessCaseId,
+      bcRow,
+      input: normalizedInput,
+    });
+  }
+
+  const validation = validateGenerationRequest(normalizedInput);
+  if (!validation.ok) {
+    throw createAppError(validation.message || "Payload invalido para previsualizacion de hoja", {
+      status: 400,
+      code: "VALIDATION_ERROR",
+      retryable: false,
+    });
+  }
+
+  const normalized = {
+    ...validation.value,
+    mapping_version: validation.value.mapping_version || DEFAULT_MAPPING_VERSION,
+  };
+
+  const metadata = toObject(bcRow?.modern_bc_metadata);
+  const lastGeneration =
+    metadata?.bc_sheet_generation?.last && typeof metadata.bc_sheet_generation.last === "object"
+      ? metadata.bc_sheet_generation.last
+      : null;
+  const inversiones = normalized.inversiones && typeof normalized.inversiones === "object"
+    ? normalized.inversiones
+    : {};
+
+  return {
+    ok: true,
+    data: {
+      business_case_id: businessCaseId,
+      mapping_version: normalized.mapping_version,
+      fields: normalized.fields || {},
+      inversiones,
+      summary: {
+        fields_count: Object.keys(normalized.fields || {}).length,
+        inversiones_count: Object.keys(inversiones).length,
+      },
+      last_generation: lastGeneration
+        ? {
+            job_id: lastGeneration.job_id || null,
+            request_id: lastGeneration.request_id || null,
+            mapping_version: lastGeneration.mapping_version || null,
+            sheet_id: lastGeneration.sheet_id || null,
+            sheet_url: lastGeneration.sheet_url || null,
+            generated_at: lastGeneration.generated_at || null,
+          }
+        : null,
+    },
+  };
 }
 
 async function resolveOutputFolderIdForJob(job) {
@@ -532,12 +872,13 @@ async function persistSheetResultInBusinessCase({
   requestId,
   mappingVersion,
   webAppResponse,
+  createdByUserId = null,
 }) {
   const client = await db.getClient();
   try {
     await client.query("BEGIN");
     const { rows } = await client.query(
-      `SELECT modern_bc_metadata
+      `SELECT modern_bc_metadata, bc_stage
          FROM equipment_purchase_requests
         WHERE id = $1
         FOR UPDATE`,
@@ -552,14 +893,21 @@ async function persistSheetResultInBusinessCase({
     }
 
     const nowIso = new Date().toISOString();
-    const metadata =
-      rows[0]?.modern_bc_metadata && typeof rows[0].modern_bc_metadata === "object"
-        ? { ...rows[0].modern_bc_metadata }
-        : {};
+    const row = rows[0];
+    const metadata = toObject(row?.modern_bc_metadata);
     const current = metadata.bc_sheet_generation && typeof metadata.bc_sheet_generation === "object"
       ? { ...metadata.bc_sheet_generation }
       : {};
     const history = Array.isArray(current.history) ? [...current.history] : [];
+    let createdByEmail = null;
+    if (createdByUserId) {
+      const { rows: userRows } = await client.query(
+        `SELECT email FROM users WHERE id = $1 LIMIT 1`,
+        [createdByUserId],
+      );
+      createdByEmail = userRows[0]?.email || null;
+    }
+
     const record = {
       job_id: Number(jobId),
       request_id: requestId,
@@ -578,14 +926,38 @@ async function persistSheetResultInBusinessCase({
     current.history = history.slice(0, 10);
     metadata.bc_sheet_generation = current;
 
+    const feasibility = toObject(metadata.feasibility);
+    const previousExport = toObject(feasibility.export_excel);
+    feasibility.export_excel = {
+      ...previousExport,
+      at: record.generated_at,
+      by_id: createdByUserId || previousExport.by_id || null,
+      by_email: createdByEmail || previousExport.by_email || null,
+      source: "bc_sheet_generation",
+      sheet_job_id: Number(jobId),
+      sheet_url: webAppResponse.url,
+    };
+
+    const hasDecision = Boolean(feasibility?.decision?.decided_at);
+    if (!hasDecision) {
+      feasibility.status = "esperando_calculos";
+      feasibility.requires_change_approval = true;
+    }
+    metadata.feasibility = feasibility;
+
+    const currentStage = String(row?.bc_stage || "").trim().toLowerCase();
+    const shouldMoveStage = !hasDecision && currentStage !== "factible" && currentStage !== "cerrado_no_factible";
+    const nextStage = shouldMoveStage ? "esperando_calculos" : null;
+
     await client.query(
       `
       UPDATE equipment_purchase_requests
          SET modern_bc_metadata = $2::jsonb,
+             bc_stage = COALESCE($3, bc_stage),
              updated_at = NOW()
        WHERE id = $1
       `,
-      [businessCaseId, JSON.stringify(metadata)],
+      [businessCaseId, JSON.stringify(metadata), nextStage],
     );
     await client.query("COMMIT");
   } catch (error) {
@@ -711,6 +1083,7 @@ async function processSingleJob(job) {
       requestId: job.request_id,
       mappingVersion: job.mapping_version,
       webAppResponse,
+      createdByUserId: job.created_by || null,
     });
     await markJobCompleted({
       jobId: job.id,
@@ -868,6 +1241,7 @@ async function getQueueMetrics() {
 
 module.exports = {
   enqueueGenerationJob,
+  getGenerationPreview,
   processPendingJobsBatch,
   getJobStatus,
   getLatestJobStatus,

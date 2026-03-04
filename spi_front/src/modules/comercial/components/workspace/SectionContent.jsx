@@ -97,8 +97,8 @@ const SectionContent = ({
       icon: "INV"
     },
     consumption_export: {
-      title: "Exportacion Reactivos",
-      description: "Salida ordenada para Excel/Sheets",
+      title: "Sincronizacion Sheets",
+      description: "Sincronizacion y generacion del formato oficial BC en Google Sheets",
       icon: "EXP"
     },
     dispatch_workspace: {

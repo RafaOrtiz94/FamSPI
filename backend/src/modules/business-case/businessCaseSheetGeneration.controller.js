@@ -54,6 +54,19 @@ async function enqueueSheetGeneration(req, res) {
   }
 }
 
+async function getSheetGenerationPreview(req, res) {
+  try {
+    const { id } = req.params;
+    const response = await sheetGenerationService.getGenerationPreview({
+      businessCaseId: id,
+      input: req.query || {},
+    });
+    return res.json(response);
+  } catch (error) {
+    return sendError(res, error, "No se pudo generar la vista previa de sincronizacion");
+  }
+}
+
 async function getSheetGenerationJobStatus(req, res) {
   try {
     const { id, jobId } = req.params;
@@ -100,6 +113,7 @@ async function getSheetGenerationMetrics(_req, res) {
 
 module.exports = {
   enqueueSheetGeneration,
+  getSheetGenerationPreview,
   getSheetGenerationJobStatus,
   getLatestSheetGenerationJobStatus,
   getSheetGenerationMetrics,

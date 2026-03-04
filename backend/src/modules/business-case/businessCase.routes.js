@@ -122,6 +122,7 @@ router.post(
   ctrl.submitFeasibilityDecision,
 );
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
+router.get("/:id/sheets/preview", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationPreview);
 router.post("/:id/sheets/generate", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.enqueueSheetGeneration);
 router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getLatestSheetGenerationJobStatus);
 router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);

@@ -1,546 +1,376 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { FiDownload, FiCopy } from "react-icons/fi";
+import { FiCheckCircle, FiClock, FiDownload, FiExternalLink, FiRefreshCw } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
-import { useAuth } from "../../../../../core/auth/AuthContext";
-import { submitBusinessCaseFeasibilityDecision } from "../../../../../core/api/businessCaseApi";
 
-const TYPE_MAP = {
-  reactivo: "reactivo",
-  determinacion: "prueba",
-  control: "control",
-  calibrador: "calibrador",
-  consumible: "consumible",
-  material: "consumible",
+const MAX_POLL_ATTEMPTS = 45;
+const POLL_INTERVAL_MS = 3000;
+
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const formatDateTime = (value) => {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "-";
+  return parsed.toLocaleString("es-EC", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    timeZone: "America/Guayaquil",
+  });
 };
 
-const normalizeType = (value) => TYPE_MAP[String(value || "").toLowerCase()] || null;
+const toInversionRows = (inversiones = {}) =>
+  Object.entries(inversiones || {}).map(([name, data]) => ({
+    name,
+    cantidad: data?.cantidad ?? 0,
+    precio: data?.precio ?? 0,
+  }));
 
-const getAnnualQty = (item) =>
-  item?.annualQty ??
-  item?.annual_quantity ??
-  item?.annualQuantity ??
-  item?.annual_qty ??
-  0;
-
-const getEquipmentName = (item) =>
-  item?.equipmentName ||
-  item?.equipment_name ||
-  (item?.equipmentId ? `Equipo ${item.equipmentId}` : "Sin equipo");
-
-const getPurchaseTypeLabel = (value) => {
-  const normalized = String(value || "").toLowerCase();
-  if (normalized.includes("priv")) return "privada";
-  if (normalized.includes("pub")) return "publica";
-  return "n/a";
-};
-
-const buildRows = ({ items, investments, clientName, bcId, bcType }) => {
-  const groups = {};
-  (items || []).forEach((item) => {
-    const normalizedType = normalizeType(item?.type);
-    if (!normalizedType) return;
-    const equipmentName = getEquipmentName(item);
-    const equipmentId = item?.equipmentId || item?.equipment_id || "manual";
-    const key = `${equipmentId}::${equipmentName}`;
-    if (!groups[key]) {
-      groups[key] = {
-        equipmentName,
-        reactivos: [],
-        pruebas: [],
-        controles: [],
-        calibradores: [],
-        consumibles: [],
-      };
-    }
-    const entry = {
-      name: item?.name || item?.itemName || "Sin nombre",
-      annualQty: getAnnualQty(item),
+const resolveLastGeneration = ({ latestJob, previewLast, metadataLast }) => {
+  if (latestJob?.status === "completed") {
+    return {
+      source: "job",
+      sheet_url: latestJob.sheet_url || null,
+      sheet_id: latestJob.sheet_id || null,
+      generated_at: latestJob.updated_at || null,
+      status: latestJob.status,
     };
-    if (normalizedType === "reactivo") groups[key].reactivos.push(entry);
-    if (normalizedType === "prueba") groups[key].pruebas.push(entry);
-    if (normalizedType === "control") groups[key].controles.push(entry);
-    if (normalizedType === "calibrador") groups[key].calibradores.push(entry);
-    if (normalizedType === "consumible") groups[key].consumibles.push(entry);
-  });
-
-  const rows = [];
-  Object.values(groups).forEach((group) => {
-    const maxLen = Math.max(
-      group.reactivos.length,
-      group.pruebas.length,
-      group.controles.length,
-      group.calibradores.length,
-      group.consumibles.length,
-      1,
-    );
-    for (let i = 0; i < maxLen; i += 1) {
-      const reactivo = group.reactivos[i];
-      const prueba = group.pruebas[i];
-      const control = group.controles[i];
-      const calibrador = group.calibradores[i];
-      const consumible = group.consumibles[i];
-      rows.push({
-        Cliente: clientName,
-        "BC ID": bcId,
-        TIPO: bcType,
-        Equipo: group.equipmentName,
-        Reactivos: reactivo?.name || "",
-        "Reactivo cantidad anual": reactivo?.annualQty ?? "",
-        Pruebas: prueba?.name || "",
-        "Prueba cantidad anual": prueba?.annualQty ?? "",
-        Controles: control?.name || "",
-        "Control cantidad anual": control?.annualQty ?? "",
-        Calibradores: calibrador?.name || "",
-        "Calibrador cantidad anual": calibrador?.annualQty ?? "",
-        Consumibles: consumible?.name || "",
-        "Consumible cantidad anual": consumible?.annualQty ?? "",
-        "Inversiones adicionales": "",
-        "Precio inversion": "",
-      });
-    }
-  });
-
-  const selectedInvestments = (investments || []).filter((inv) => inv?.selected);
-  if (!rows.length && !selectedInvestments.length) {
-    rows.push({
-      Cliente: clientName,
-      "BC ID": bcId,
-      TIPO: bcType,
-      Equipo: "",
-      Reactivos: "",
-      "Reactivo cantidad anual": "",
-      Pruebas: "",
-      "Prueba cantidad anual": "",
-      Controles: "",
-      "Control cantidad anual": "",
-      Calibradores: "",
-      "Calibrador cantidad anual": "",
-      Consumibles: "",
-      "Consumible cantidad anual": "",
-      "Inversiones adicionales": "",
-      "Precio inversion": "",
-    });
   }
 
-  selectedInvestments.forEach((inv) => {
-    rows.push({
-      Cliente: clientName,
-      "BC ID": bcId,
-      TIPO: bcType,
-      Equipo: "",
-      Reactivos: "",
-      "Reactivo cantidad anual": "",
-      Pruebas: "",
-      "Prueba cantidad anual": "",
-      Controles: "",
-      "Control cantidad anual": "",
-      Calibradores: "",
-      "Calibrador cantidad anual": "",
-      Consumibles: "",
-      "Consumible cantidad anual": "",
-      "Inversiones adicionales": inv?.name || inv?.item_name || "",
-      "Precio inversion": inv?.unit_price ?? inv?.price ?? "",
-    });
-  });
+  if (previewLast) {
+    return {
+      source: "preview",
+      sheet_url: previewLast.sheet_url || null,
+      sheet_id: previewLast.sheet_id || null,
+      generated_at: previewLast.generated_at || null,
+      status: "completed",
+    };
+  }
 
-  return rows;
+  if (metadataLast) {
+    return {
+      source: "metadata",
+      sheet_url: metadataLast.sheet_url || null,
+      sheet_id: metadataLast.sheet_id || null,
+      generated_at: metadataLast.generated_at || null,
+      status: "completed",
+    };
+  }
+
+  return null;
 };
 
-const toCsv = (rows) => {
-  const headers = [
-    "Cliente",
-    "BC ID",
-    "TIPO",
-    "Equipo",
-    "Reactivos",
-    "Reactivo cantidad anual",
-    "Pruebas",
-    "Prueba cantidad anual",
-    "Controles",
-    "Control cantidad anual",
-    "Calibradores",
-    "Calibrador cantidad anual",
-    "Consumibles",
-    "Consumible cantidad anual",
-    "Inversiones adicionales",
-    "Precio inversion",
-  ];
-  const escape = (value) => {
-    const text = value === null || value === undefined ? "" : String(value);
-    if (/[",\n]/.test(text)) {
-      return `"${text.replace(/"/g, '""')}"`;
-    }
-    return text;
-  };
-  const lines = [headers.join(",")];
-  rows.forEach((row) => {
-    lines.push(headers.map((key) => escape(row[key])).join(","));
-  });
-  return `\uFEFF${lines.join("\n")}`;
+const resolveSyncStatus = (latestJob, hasLastSync) => {
+  if (latestJob?.status === "processing") return { label: "Sincronizando", tone: "blue" };
+  if (latestJob?.status === "pending") return { label: "En cola", tone: "amber" };
+  if (latestJob?.status === "failed") return { label: "Error en sincronizacion", tone: "red" };
+  if (latestJob?.status === "completed" || hasLastSync) return { label: "Sincronizado", tone: "green" };
+  return { label: "Sin sincronizacion", tone: "gray" };
 };
 
-const toTsv = (rows) => {
-  const headers = [
-    "Cliente",
-    "BC ID",
-    "TIPO",
-    "Equipo",
-    "Reactivos",
-    "Reactivo cantidad anual",
-    "Pruebas",
-    "Prueba cantidad anual",
-    "Controles",
-    "Control cantidad anual",
-    "Calibradores",
-    "Calibrador cantidad anual",
-    "Consumibles",
-    "Consumible cantidad anual",
-    "Inversiones adicionales",
-    "Precio inversion",
-  ];
-  const escape = (value) => {
-    const text = value === null || value === undefined ? "" : String(value);
-    return text.replace(/\t/g, " ").replace(/\n/g, " ");
-  };
-  const lines = [headers.join("\t")];
-  rows.forEach((row) => {
-    lines.push(headers.map((key) => escape(row[key])).join("\t"));
-  });
-  return lines.join("\n");
+const toneClass = {
+  gray: "bg-gray-100 text-gray-700",
+  blue: "bg-blue-100 text-blue-700",
+  amber: "bg-amber-100 text-amber-700",
+  red: "bg-rose-100 text-rose-700",
+  green: "bg-emerald-100 text-emerald-700",
 };
 
 const ConsumptionExportSection = ({ businessCase }) => {
   const { id: bcId } = useParams();
   const { showToast } = useUI();
-  const { user } = useAuth();
-  const [items, setItems] = useState([]);
-  const [investments, setInvestments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [decisionLoading, setDecisionLoading] = useState(false);
-  const [decisionForm, setDecisionForm] = useState({
-    notes: "",
-    fallback_offer_kind: "venta",
-  });
-  const [hasExportForCalculations, setHasExportForCalculations] = useState(false);
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(true);
+  const [previewError, setPreviewError] = useState(null);
+  const [syncing, setSyncing] = useState(false);
+  const [latestJob, setLatestJob] = useState(null);
 
-  const clientName = businessCase?.client_name || businessCase?.clientName || "Cliente";
-  const bcType = getPurchaseTypeLabel(
-    businessCase?.bc_purchase_type || businessCase?.bcPurchaseType,
-  );
-  const feasibilityMetadata = businessCase?.modern_bc_metadata?.feasibility || {};
-  const feasibilityStatus = feasibilityMetadata?.status || "sin_definir";
-  const userRoles = Array.isArray(user?.roles)
-    ? user.roles
-    : [user?.role, user?.scope].filter(Boolean);
-  const normalizedRoles = userRoles.map((role) => String(role || "").toLowerCase());
-  const canDecideFeasibility = normalizedRoles.some((role) =>
-    ["jefe_comercial", "gerencia", "gerencia_general"].includes(role),
-  );
+  const loadPreview = useCallback(async () => {
+    if (!bcId) return;
+    try {
+      setLoadingPreview(true);
+      setPreviewError(null);
+      const res = await api.get(`/business-case/${bcId}/sheets/preview`);
+      setPreview(res?.data?.data || null);
+    } catch (error) {
+      setPreviewError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo obtener la vista previa de sincronizacion",
+      );
+      setPreview(null);
+    } finally {
+      setLoadingPreview(false);
+    }
+  }, [bcId]);
+
+  const loadLatestJob = useCallback(async (silent404 = true) => {
+    if (!bcId) return;
+    try {
+      const res = await api.get(`/business-case/${bcId}/sheets/jobs/latest`);
+      setLatestJob(res?.data?.data || null);
+    } catch (error) {
+      const status = Number(error?.response?.status || 0);
+      if (silent404 && status === 404) {
+        setLatestJob(null);
+        return;
+      }
+      throw error;
+    }
+  }, [bcId]);
 
   useEffect(() => {
-    const loadItems = async () => {
-      if (!bcId) return;
+    if (!bcId) return;
+    let mounted = true;
+    const bootstrap = async () => {
       try {
-        setLoading(true);
-        setError(null);
-        const res = await api.get(`/business-case/${bcId}/consumption-items`);
-        const data = res?.data?.data || {};
-        const loaded = Array.isArray(data.items) ? data.items : [];
-        if (loaded.length) {
-          setItems(loaded);
-        } else {
-          const fallback = businessCase?.modern_bc_metadata?.consumption_items || [];
-          setItems(Array.isArray(fallback) ? fallback : []);
-        }
-        const invRes = await api.get(`/business-case/${bcId}/investments/catalog`);
-        const invData = invRes?.data?.data || [];
-        setInvestments(Array.isArray(invData) ? invData : []);
-        const exportAt =
-          businessCase?.modern_bc_metadata?.feasibility?.export_excel?.at ||
-          businessCase?.modern_bc_metadata?.feasibility?.decision?.decided_at;
-        setHasExportForCalculations(Boolean(exportAt));
-        return;
-      } catch (err) {
-        const fallback = businessCase?.modern_bc_metadata?.consumption_items || [];
-        setItems(Array.isArray(fallback) ? fallback : []);
-        setInvestments([]);
-        setError("No se pudieron cargar consumos, usando datos locales.");
-      } finally {
-        setLoading(false);
+        await Promise.all([loadPreview(), loadLatestJob(true)]);
+      } catch (_error) {
+        if (!mounted) return;
       }
     };
+    bootstrap();
+    return () => {
+      mounted = false;
+    };
+  }, [bcId, loadLatestJob, loadPreview]);
 
-    loadItems();
-  }, [bcId, businessCase?.modern_bc_metadata?.consumption_items]);
+  const handleSyncNow = async () => {
+    if (!bcId) return;
 
-  const rows = useMemo(
-    () => buildRows({ items, investments, clientName, bcId, bcType }),
-    [items, investments, clientName, bcId, bcType],
+    let sheetTab = null;
+    try {
+      setSyncing(true);
+      sheetTab = window.open("", "_blank");
+
+      const enqueueRes = await api.post(`/business-case/${bcId}/sheets/generate`, {});
+      const jobId = enqueueRes?.data?.data?.job_id;
+      if (!jobId) throw new Error("No se pudo encolar la sincronizacion a Sheets");
+
+      let completedJob = null;
+      for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const statusRes = await api.get(`/business-case/${bcId}/sheets/jobs/${jobId}`);
+        const job = statusRes?.data?.data || {};
+
+        if (job.status === "completed") {
+          completedJob = job;
+          break;
+        }
+
+        if (job.status === "failed") {
+          throw new Error(job.error_message || "Fallo la sincronizacion a Google Sheets");
+        }
+
+        // eslint-disable-next-line no-await-in-loop
+        await wait(POLL_INTERVAL_MS);
+      }
+
+      if (!completedJob?.sheet_url) {
+        if (sheetTab && !sheetTab.closed) sheetTab.close();
+        showToast("La sincronizacion sigue en cola. Reintenta en unos minutos.", "warning");
+        await loadLatestJob(false);
+        return;
+      }
+
+      setLatestJob(completedJob);
+      if (sheetTab && !sheetTab.closed) {
+        sheetTab.location.href = completedJob.sheet_url;
+      } else {
+        window.open(completedJob.sheet_url, "_blank", "noopener,noreferrer");
+      }
+
+      showToast("Sincronizacion completada en Google Sheets", "success");
+      await loadPreview();
+    } catch (error) {
+      if (sheetTab && !sheetTab.closed) sheetTab.close();
+      showToast(
+        error?.response?.data?.message || error?.message || "No se pudo sincronizar con Google Sheets",
+        "error",
+      );
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const fieldRows = useMemo(() => Object.entries(preview?.fields || {}), [preview?.fields]);
+  const inversionRows = useMemo(() => toInversionRows(preview?.inversiones || {}), [preview?.inversiones]);
+  const metadataLast = businessCase?.modern_bc_metadata?.bc_sheet_generation?.last || null;
+  const lastSync = useMemo(
+    () =>
+      resolveLastGeneration({
+        latestJob,
+        previewLast: preview?.last_generation,
+        metadataLast,
+      }),
+    [latestJob, preview?.last_generation, metadataLast],
+  );
+  const syncStatus = useMemo(
+    () => resolveSyncStatus(latestJob, Boolean(lastSync)),
+    [latestJob, lastSync],
   );
 
-  const handleDownload = () => {
-    const downloadBackendExcel = async () => {
-      const res = await api.get(`/business-case/${bcId}/export/excel`, { responseType: "blob" });
-      const url = window.URL.createObjectURL(new Blob([res.data]));
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `business-case-${bcId}.xlsx`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    };
-
-    const downloadCsvFallback = () => {
-      if (!rows.length) {
-        showToast("No hay datos para exportar", "warning");
-        return;
-      }
-      const csv = toCsv(rows);
-      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.setAttribute("download", `bc_${bcId}_reactivos.csv`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-    };
-
-    downloadBackendExcel()
-      .then(() => {
-        setHasExportForCalculations(true);
-        showToast("Excel exportado. Estado actualizado a esperando calculos", "success");
-      })
-      .catch(() => {
-        downloadCsvFallback();
-        showToast("Exportacion local generada. Verifique integracion de Excel backend", "warning");
-      });
-  };
-
-  const handleCopy = async () => {
-    if (!rows.length) {
-      showToast("No hay datos para copiar", "warning");
-      return;
-    }
-    const tsv = toTsv(rows);
-    try {
-      await navigator.clipboard.writeText(tsv);
-      showToast("Datos copiados para Sheets", "success");
-    } catch (err) {
-      showToast("No se pudo copiar al portapapeles", "error");
-    }
-  };
-
-  const handleSubmitDecision = async (isFeasible) => {
-    if (!bcId) return;
-    if (!hasExportForCalculations && !feasibilityMetadata?.export_excel?.at) {
-      showToast("Primero exporte el Excel para habilitar la decision de factibilidad", "warning");
-      return;
-    }
-
-    try {
-      setDecisionLoading(true);
-      const payload = {
-        is_feasible: Boolean(isFeasible),
-        notes: decisionForm.notes || "",
-      };
-      if (!isFeasible) {
-        payload.fallback_offer_kind = decisionForm.fallback_offer_kind;
-      }
-      await submitBusinessCaseFeasibilityDecision(bcId, payload);
-      showToast(
-        isFeasible
-          ? "Factibilidad aprobada y flujo actualizado"
-          : "Business Case cerrado como no factible y flujo alterno activado",
-        "success",
-      );
-    } catch (err) {
-      showToast(err?.response?.data?.message || "No se pudo guardar la decision de factibilidad", "error");
-    } finally {
-      setDecisionLoading(false);
-    }
-  };
-
   return (
-    <div className="space-y-6 animate-fadeIn">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600">
-            <span className="text-2xl"></span>
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-gray-900 tracking-tight">Exportacion de Reactivos</h2>
-              <span className="text-[10px] uppercase font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">
-                Temporal
-              </span>
-            </div>
-            <p className="text-sm text-gray-500">
-              Exporta consumos para el calculo manual de factibilidad en Excel o Google Sheets
-            </p>
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-gray-900 tracking-tight">Sincronizacion con Google Sheets</h2>
+          <p className="text-sm text-gray-500 mt-1">
+            Genera el documento oficial en Sheets con la informacion consolidada del Business Case.
+          </p>
+          <div className="mt-2 inline-flex items-center gap-2">
+            <span className={`text-xs font-semibold px-2.5 py-1 rounded-full ${toneClass[syncStatus.tone]}`}>
+              {syncStatus.label}
+            </span>
+            {lastSync?.generated_at && (
+              <span className="text-xs text-gray-500">Ultima sincronizacion: {formatDateTime(lastSync.generated_at)}</span>
+            )}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
+
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleCopy}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-full font-semibold hover:bg-gray-50 transition-all"
+            type="button"
+            onClick={loadPreview}
+            disabled={loadingPreview || syncing}
+            className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-50 disabled:opacity-60"
           >
-            <FiCopy size={16} />
-            Copiar para Sheets
+            <FiRefreshCw size={14} />
+            Actualizar vista previa
           </button>
           <button
-            onClick={handleDownload}
-            className="flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-600 text-white rounded-full font-semibold hover:bg-emerald-700 transition-all shadow-sm"
+            type="button"
+            onClick={handleSyncNow}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
           >
-            <FiDownload size={16} />
-            Descargar Excel (CSV)
+            <FiDownload size={14} />
+            {syncing ? "Sincronizando..." : "Sincronizar ahora"}
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="bg-amber-50 border border-amber-100 rounded-xl p-4 text-amber-800 text-sm">
-          {error}
+      {lastSync?.sheet_url && (
+        <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="flex items-center gap-2 text-emerald-800 text-sm font-medium">
+            <FiCheckCircle size={16} />
+            Documento en Sheets disponible
+          </div>
+          <a
+            href={lastSync.sheet_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:text-emerald-900"
+          >
+            Abrir documento
+            <FiExternalLink size={14} />
+          </a>
         </div>
       )}
 
-      {canDecideFeasibility && (
-        <div className="bg-white rounded-2xl p-5 border border-gray-100 shadow-sm space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <h3 className="text-base font-semibold text-gray-900">Decision de factibilidad (Jefe Comercial)</h3>
-            <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">
-              Estado actual: {String(feasibilityStatus).replace(/_/g, " ")}
-            </span>
-          </div>
-
-          <div className="text-xs text-gray-600">
-            {hasExportForCalculations || feasibilityMetadata?.export_excel?.at
-              ? "Exportacion registrada. Puede decidir factibilidad."
-              : "Debe exportar Excel primero para pasar a esperando calculos."}
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Notas de evaluación</label>
-            <textarea
-              rows={3}
-              value={decisionForm.notes}
-              onChange={(e) => setDecisionForm((prev) => ({ ...prev, notes: e.target.value }))}
-              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-200"
-              placeholder="Resumen de cálculos, cantidades y precios evaluados"
-              disabled={decisionLoading}
-            />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <label className="text-sm text-gray-700">Si no es factible, continuar como:</label>
-            <select
-              value={decisionForm.fallback_offer_kind}
-              onChange={(e) =>
-                setDecisionForm((prev) => ({ ...prev, fallback_offer_kind: e.target.value }))
-              }
-              className="rounded-lg border border-gray-200 px-2 py-1.5 text-sm"
-              disabled={decisionLoading}
-            >
-              <option value="venta">Venta directa</option>
-              <option value="alquiler">Alquiler</option>
-              <option value="alquiler_transferencia_dominio">Alquiler con transferencia de dominio</option>
-            </select>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => handleSubmitDecision(true)}
-              disabled={decisionLoading}
-              className="px-4 py-2 rounded-full bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-60"
-            >
-              Marcar Factible
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSubmitDecision(false)}
-              disabled={decisionLoading}
-              className="px-4 py-2 rounded-full bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 disabled:opacity-60"
-            >
-              Marcar No Factible
-            </button>
-          </div>
-        </div>
+      {previewError && (
+        <div className="bg-rose-50 border border-rose-100 rounded-xl p-4 text-rose-700 text-sm">{previewError}</div>
       )}
 
-      {loading ? (
-        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm">
-          <div className="flex items-center justify-center py-8">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600"></div>
+      {loadingPreview ? (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8">
+          <div className="flex items-center justify-center gap-2 text-gray-500">
+            <FiClock className="animate-pulse" />
+            Cargando vista previa...
           </div>
-        </div>
-      ) : rows.length === 0 ? (
-        <div className="bg-white rounded-2xl p-8 border border-gray-100 shadow-sm text-center text-gray-500">
-          No hay consumos registrados para exportar.
         </div>
       ) : (
-        <div className="bg-white rounded-2xl p-6 border border-gray-100 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900">Vista previa</h3>
-            <span className="text-xs font-medium px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full">
-              {rows.length} filas
-            </span>
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="bg-white border border-gray-100 rounded-xl p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Version mapping</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.mapping_version || "-"}</p>
+            </div>
+            <div className="bg-white border border-gray-100 rounded-xl p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Campos</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.summary?.fields_count ?? fieldRows.length}</p>
+            </div>
+            <div className="bg-white border border-gray-100 rounded-xl p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Inversiones</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.summary?.inversiones_count ?? inversionRows.length}</p>
+            </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-100 text-gray-500">
-                  <th className="text-left py-2 px-3">Cliente</th>
-                  <th className="text-left py-2 px-3">BC ID</th>
-                  <th className="text-left py-2 px-3">Tipo</th>
-                  <th className="text-left py-2 px-3">Equipo</th>
-                  <th className="text-left py-2 px-3">Reactivos</th>
-                  <th className="text-left py-2 px-3">Cantidad anual</th>
-                  <th className="text-left py-2 px-3">Pruebas</th>
-                  <th className="text-left py-2 px-3">Cantidad anual</th>
-                  <th className="text-left py-2 px-3">Controles</th>
-                  <th className="text-left py-2 px-3">Cantidad anual</th>
-                  <th className="text-left py-2 px-3">Calibradores</th>
-                  <th className="text-left py-2 px-3">Cantidad anual</th>
-                  <th className="text-left py-2 px-3">Consumibles</th>
-                  <th className="text-left py-2 px-3">Cantidad anual</th>
-                  <th className="text-left py-2 px-3">Inversiones</th>
-                  <th className="text-left py-2 px-3">Precio</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-50">
-                {rows.slice(0, 12).map((row, idx) => (
-                  <tr key={idx} className="text-gray-700">
-                    <td className="py-2 px-3">{row["Cliente"]}</td>
-                    <td className="py-2 px-3">{row["BC ID"]}</td>
-                    <td className="py-2 px-3 capitalize">{row["TIPO"]}</td>
-                    <td className="py-2 px-3">{row["Equipo"]}</td>
-                    <td className="py-2 px-3">{row["Reactivos"]}</td>
-                    <td className="py-2 px-3">{row["Reactivo cantidad anual"]}</td>
-                    <td className="py-2 px-3">{row["Pruebas"]}</td>
-                    <td className="py-2 px-3">{row["Prueba cantidad anual"]}</td>
-                    <td className="py-2 px-3">{row["Controles"]}</td>
-                    <td className="py-2 px-3">{row["Control cantidad anual"]}</td>
-                    <td className="py-2 px-3">{row["Calibradores"]}</td>
-                    <td className="py-2 px-3">{row["Calibrador cantidad anual"]}</td>
-                    <td className="py-2 px-3">{row["Consumibles"]}</td>
-                    <td className="py-2 px-3">{row["Consumible cantidad anual"]}</td>
-                    <td className="py-2 px-3">{row["Inversiones adicionales"]}</td>
-                    <td className="py-2 px-3">{row["Precio inversion"]}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          {rows.length > 12 && (
-            <p className="text-xs text-gray-500 mt-3">
-              Mostrando 12 de {rows.length} filas. Usa exportacion para ver todo.
+
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
+            <h3 className="text-base font-semibold text-gray-900">Vista previa de datos a sincronizar</h3>
+            <p className="text-xs text-gray-500">
+              Esta vista muestra el payload consolidado que se enviara al WebApp para llenar el formato BC.
             </p>
-          )}
-        </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="border border-gray-100 rounded-xl">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-800">Campos del formato</p>
+                  <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">{fieldRows.length}</span>
+                </div>
+                {fieldRows.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">No hay campos disponibles para previsualizar.</div>
+                ) : (
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Campo</th>
+                          <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {fieldRows.map(([key, value]) => (
+                          <tr key={key}>
+                            <td className="px-4 py-2 text-gray-700 font-medium">{key}</td>
+                            <td className="px-4 py-2 text-gray-600 break-words">{String(value ?? "")}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              <div className="border border-gray-100 rounded-xl">
+                <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                  <p className="text-sm font-semibold text-gray-800">Inversiones adicionales</p>
+                  <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">{inversionRows.length}</span>
+                </div>
+                {inversionRows.length === 0 ? (
+                  <div className="p-4 text-sm text-gray-500">No hay inversiones seleccionadas.</div>
+                ) : (
+                  <div className="max-h-[420px] overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Nombre</th>
+                          <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Cantidad</th>
+                          <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Precio</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-gray-50">
+                        {inversionRows.map((item) => (
+                          <tr key={item.name}>
+                            <td className="px-4 py-2 text-gray-700">{item.name}</td>
+                            <td className="px-4 py-2 text-gray-600">{item.cantidad}</td>
+                            <td className="px-4 py-2 text-gray-600">{item.precio}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
