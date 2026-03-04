@@ -22,7 +22,7 @@ function validatePermisoEstudios(horas) {
   if (Number(horas) > 3) {
     throw new Error("El permiso por estudios no puede exceder 3 horas");
   }
-  return { valid: true, justificantes_requeridos: ["certificado_institucion"], es_recuperable: true };
+  return { valid: true, justificantes_requeridos: [], es_recuperable: true };
 }
 
 async function validatePermisoPersonal({ user_email, duracion_horas, fecha_inicio }) {
@@ -45,10 +45,10 @@ async function validatePermisoPersonal({ user_email, duracion_horas, fecha_inici
   if (totalHoras > 2) {
     throw new Error(`Ya has usado ${rows[0]?.total || 0} horas esta semana. Máximo permitido: 2 horas semanales`);
   }
-  return { valid: true, justificantes_requeridos: ["evidencia_general"], es_recuperable: false };
+  return { valid: true, justificantes_requeridos: [], es_recuperable: true };
 }
 
-function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin }) {
+function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin, subtipo_salud }) {
   if (!fecha_inicio || !fecha_fin) {
     throw new Error("Las fechas de inicio y fin son obligatorias para el permiso de salud");
   }
@@ -60,6 +60,14 @@ function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fec
   }
   if (end < start) {
     throw new Error("La fecha de fin no puede ser anterior a la fecha de inicio");
+  }
+
+  const normalizedSubtype = String(subtipo_salud || "").trim().toLowerCase();
+  if (!normalizedSubtype) {
+    throw new Error("Debes indicar el subtipo de permiso por salud");
+  }
+  if (!["enfermedad_certificada", "atencion_medica_familiar"].includes(normalizedSubtype)) {
+    throw new Error("Subtipo de permiso por salud no válido");
   }
 
   const horasNum = Number(duracion_horas || 0);
@@ -81,7 +89,12 @@ function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fec
   }
 
   if (diasNum > 0 && diasNum < 4) {
-    return { valid: true, justificantes_requeridos: ["certificado_medico"], requiere_tramite_iess: false };
+    return {
+      valid: true,
+      justificantes_requeridos: ["certificado_medico"],
+      requiere_tramite_iess: false,
+      es_recuperable: normalizedSubtype === "atencion_medica_familiar",
+    };
   }
 
   if (diasNum >= 4) {
@@ -89,11 +102,17 @@ function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fec
       valid: true,
       justificantes_requeridos: ["certificado_medico_iess"],
       requiere_tramite_iess: true,
+      es_recuperable: normalizedSubtype === "atencion_medica_familiar",
       mensaje: "Debe realizar tramite de subsidios en el IESS",
     };
   }
 
-  return { valid: true, justificantes_requeridos: ["certificado_medico"], requiere_tramite_iess: false };
+  return {
+    valid: true,
+    justificantes_requeridos: ["certificado_medico"],
+    requiere_tramite_iess: false,
+    es_recuperable: normalizedSubtype === "atencion_medica_familiar",
+  };
 }
 
 function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
@@ -107,13 +126,17 @@ function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
       if (diasNum > 3) {
         throw new Error("Permiso por fallecimiento: m??ximo 3 d??as");
       }
-      return { valid: true, justificantes_requeridos: ["certificado_defuncion", "documento_parentesco"] };
+      return {
+        valid: true,
+        justificantes_requeridos: ["certificado_defuncion", "documento_parentesco"],
+        es_recuperable: false,
+      };
     case "accidente":
-      return { valid: true, justificantes_requeridos: ["certificado_medico_familiar"] };
+      return { valid: true, justificantes_requeridos: ["certificado_medico_familiar"], es_recuperable: true };
     case "desastre":
-      return { valid: true, justificantes_requeridos: ["evidencia_fotografica"] };
+      return { valid: true, justificantes_requeridos: ["evidencia_fotografica"], es_recuperable: true };
     default:
-      return { valid: true, justificantes_requeridos: ["evidencia_general"] };
+      return { valid: true, justificantes_requeridos: ["evidencia_general"], es_recuperable: true };
   }
 }
 
@@ -126,7 +149,7 @@ async function validatePermisoRequest(data) {
     case "personal":
       return validatePermisoPersonal({ user_email: data.user_email, duracion_horas, fecha_inicio });
     case "salud":
-      return validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin });
+      return validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin, subtipo_salud: data.subtipo_salud });
     case "calamidad":
       return validatePermisoCalamidad({ subtipo_calamidad: data.subtipo_calamidad, duracion_dias });
     default:
@@ -143,4 +166,3 @@ module.exports = {
   getStartOfWeek,
   getEndOfWeek,
 };
-

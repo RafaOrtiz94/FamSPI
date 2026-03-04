@@ -22,6 +22,11 @@ import {
   aprobarParcial,
   aprobarFinal,
   rechazar,
+  cancelarSolicitud,
+  revisarCancelacionSolicitud,
+  updateRecoveryPlan,
+  getPendingStudyEnrollments,
+  reviewStudyEnrollment,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
 import { getActiveException, getTodayAttendance } from "../../../../core/api/attendanceApi";
@@ -41,6 +46,58 @@ const formatDateTime = (value) => {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "N/A";
   return parsed.toLocaleString();
+};
+
+const formatTimeRange = (solicitud = {}) => {
+  const start = solicitud?.fecha_inicio_hora || solicitud?.start_time || null;
+  const end = solicitud?.fecha_fin_hora || solicitud?.end_time || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const startLabel = startDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const endLabel = endDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${startLabel} - ${endLabel}`;
+};
+
+const normalizeDateOnly = (value) => {
+  if (!value) return null;
+  const text = String(value);
+  const direct = text.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (direct) return direct[1];
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toISOString().slice(0, 10);
+};
+
+const getTodayLocalDate = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const canCancelByDateRule = (solicitud = {}) => {
+  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
+  if (!startDate) return false;
+  return getTodayLocalDate() <= startDate;
+};
+
+const RECOVERY_COORDINATION_LABELS = {
+  not_required: "No requiere coordinación",
+  pending_approver_proposal: "Pendiente propuesta del jefe inmediato",
+  pending_requester_acceptance: "Pendiente aceptación del solicitante",
+  agreed: "Tramos acordados",
+  finalized_by_approver: "Tramos definidos por jefe inmediato",
+};
+
+const estimateRequestedHoursFromSolicitud = (solicitud = {}) => {
+  const hours = Number(solicitud?.duracion_horas || 0);
+  if (Number.isFinite(hours) && hours > 0) return hours;
+  const days = Number(solicitud?.duracion_dias || 0);
+  if (Number.isFinite(days) && days > 0) return Math.round(((days * 8) + Number.EPSILON) * 100) / 100;
+  return 0;
 };
 
 const PermisosStatusWidget = () => {
@@ -79,12 +136,23 @@ const PermisosStatusWidget = () => {
   const [misSolicitudes, setMisSolicitudes] = useState([]);
   const [pendientesParcial, setPendientesParcial] = useState([]);
   const [pendientesFinal, setPendientesFinal] = useState([]);
+  const [pendientesAprobadas, setPendientesAprobadas] = useState([]);
+  const [pendientesCancelacion, setPendientesCancelacion] = useState([]);
+  const [pendingStudyEnrollments, setPendingStudyEnrollments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [showEnrollmentReviewModal, setShowEnrollmentReviewModal] = useState(false);
   const [selectedSolicitud, setSelectedSolicitud] = useState(null);
+  const [selectedEnrollment, setSelectedEnrollment] = useState(null);
   const [rejectReason, setRejectReason] = useState("");
+  const [cancelReason, setCancelReason] = useState("");
+  const [enrollmentReviewDecision, setEnrollmentReviewDecision] = useState("approve");
+  const [enrollmentReviewReason, setEnrollmentReviewReason] = useState("");
+  const [recoveryRows, setRecoveryRows] = useState([]);
   const [activeException, setActiveException] = useState(null);
   const [attendance, setAttendance] = useState(null);
   const refreshPromiseRef = useRef(null);
@@ -98,6 +166,27 @@ const PermisosStatusWidget = () => {
       return value.value || value.date || value.timestamp || value.time || value.iso || null;
     }
     return value;
+  };
+
+  const normalizeTimeText = (value) => {
+    const text = String(value || "").trim();
+    const match = text.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+    if (!match) return "";
+    const hh = Number(match[1]);
+    const mm = Number(match[2]);
+    if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return "";
+    return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  };
+
+  const computeRecoveryHours = (startTime, endTime) => {
+    const start = normalizeTimeText(startTime);
+    const end = normalizeTimeText(endTime);
+    if (!start || !end) return "";
+    const [sh, sm] = start.split(":").map(Number);
+    const [eh, em] = end.split(":").map(Number);
+    const diff = eh * 60 + em - (sh * 60 + sm);
+    if (diff <= 0) return "";
+    return String(Math.round(((diff / 60) + Number.EPSILON) * 100) / 100);
   };
 
 
@@ -166,8 +255,11 @@ const PermisosStatusWidget = () => {
         if (isApprover) {
           requests.push(getPendientes("pending"));
           requests.push(getPendientes("pending_final"));
+          requests.push(getPendientes("approved"));
+          requests.push(getPendientes("cancellation_pending"));
+          requests.push(getPendingStudyEnrollments());
         }
-        const [mineResp, pendingResp, finalResp] = await Promise.all(requests);
+        const [mineResp, pendingResp, finalResp, approvedResp, cancellationResp, enrollmentResp] = await Promise.all(requests);
 
         if (mineResp?.ok) {
           setMisSolicitudes((mineResp.data || []).map(normalizeSolicitudDates));
@@ -189,6 +281,29 @@ const PermisosStatusWidget = () => {
           setPendientesFinal(filtered);
         } else {
           setPendientesFinal([]);
+        }
+        if (approvedResp?.ok) {
+          const filtered = (approvedResp.data || [])
+            .map(normalizeSolicitudDates)
+            .filter((s) => s.user_email !== userEmail)
+            .filter((s) => canSeeSolicitudForApproval(s));
+          setPendientesAprobadas(filtered);
+        } else {
+          setPendientesAprobadas([]);
+        }
+        if (cancellationResp?.ok) {
+          const filtered = (cancellationResp.data || [])
+            .map(normalizeSolicitudDates)
+            .filter((s) => s.user_email !== userEmail)
+            .filter((s) => canSeeSolicitudForApproval(s));
+          setPendientesCancelacion(filtered);
+        } else {
+          setPendientesCancelacion([]);
+        }
+        if (enrollmentResp?.ok) {
+          setPendingStudyEnrollments(Array.isArray(enrollmentResp.data) ? enrollmentResp.data : []);
+        } else {
+          setPendingStudyEnrollments([]);
         }
       } catch (error) {
         console.error("Error loading permisos:", error);
@@ -219,7 +334,12 @@ const PermisosStatusWidget = () => {
     try {
       const response = await aprobarParcial(id);
       if (response.ok) {
-        showToast("Aprobado parcialmente. El colaborador debe subir documentos.", "success");
+        const nextStatus = String(response?.data?.status || "").toLowerCase();
+        if (nextStatus === "approved") {
+          showToast("Aprobado definitivamente.", "success");
+        } else {
+          showToast("Aprobado parcialmente. El colaborador debe subir documentos.", "success");
+        }
         await loadData();
       }
     } catch (error) {
@@ -274,8 +394,171 @@ const PermisosStatusWidget = () => {
     await loadData();
   };
 
+  const handleCancelar = async () => {
+    if (!selectedSolicitud || !cancelReason.trim()) {
+      showToast("Debes indicar el motivo de cancelación", "warning");
+      return;
+    }
+    setActionLoading(selectedSolicitud.id);
+    try {
+      const response = await cancelarSolicitud(selectedSolicitud.id, cancelReason.trim());
+      if (response?.ok) {
+        showToast("Solicitud cancelada", "success");
+        setShowCancelModal(false);
+        setSelectedSolicitud(null);
+        setCancelReason("");
+        await loadData();
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || "Error al cancelar la solicitud", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReviewCancellation = async (solicitud, decision) => {
+    const reviewReason = String(cancelReason || "").trim();
+    if (!reviewReason) {
+      showToast("Debes indicar el motivo de la decisión", "warning");
+      return;
+    }
+    setActionLoading(solicitud.id);
+    try {
+      const response = await revisarCancelacionSolicitud(solicitud.id, decision, reviewReason);
+      if (response?.ok) {
+        showToast(
+          decision === "approve"
+            ? "Cancelación aprobada"
+            : "Cancelación rechazada",
+          "success"
+        );
+        setShowCancelModal(false);
+        setSelectedSolicitud(null);
+        setCancelReason("");
+        await loadData();
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || "Error revisando cancelación", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReviewEnrollment = async () => {
+    if (!selectedEnrollment) return;
+    const reason = String(enrollmentReviewReason || "").trim();
+    if (!reason) {
+      showToast("Debes registrar el motivo de la decisión", "warning");
+      return;
+    }
+    setActionLoading(`enroll-${selectedEnrollment.id}`);
+    try {
+      const response = await reviewStudyEnrollment(selectedEnrollment.id, enrollmentReviewDecision, reason);
+      if (response?.ok) {
+        showToast(
+          enrollmentReviewDecision === "approve" ? "Matrícula validada" : "Matrícula rechazada",
+          "success"
+        );
+        setShowEnrollmentReviewModal(false);
+        setSelectedEnrollment(null);
+        setEnrollmentReviewReason("");
+        await loadData();
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || "Error revisando matrícula", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const openEnrollmentReviewModal = (enrollment, decision) => {
+    setSelectedEnrollment(enrollment);
+    setEnrollmentReviewDecision(decision);
+    setEnrollmentReviewReason("");
+    setShowEnrollmentReviewModal(true);
+  };
+
+  const openRecoveryEditor = (solicitud) => {
+    const currentPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
+    setSelectedSolicitud(solicitud);
+    setRecoveryRows(
+      currentPlan.length > 0
+        ? currentPlan.map((row) => ({
+            date: String(row?.date || ""),
+            start_time: normalizeTimeText(row?.start_time),
+            end_time: normalizeTimeText(row?.end_time),
+            notes: String(row?.notes || ""),
+          }))
+        : [{ date: "", start_time: "", end_time: "", notes: "" }]
+    );
+    setShowRecoveryModal(true);
+  };
+
+  const handleSaveRecoveryPlan = async (action = "propose") => {
+    if (!selectedSolicitud) return;
+    const normalizedPlan = recoveryRows
+      .map((row) => {
+        const date = String(row?.date || "");
+        const start_time = normalizeTimeText(row?.start_time);
+        const end_time = normalizeTimeText(row?.end_time);
+        const notes = String(row?.notes || "").trim();
+        const hours = Number(computeRecoveryHours(start_time, end_time) || 0);
+        return { date, start_time, end_time, notes, hours };
+      })
+      .filter((row) => row.date && row.start_time && row.end_time && row.hours > 0)
+      .map((row) => ({
+        date: row.date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        notes: row.notes || null,
+      }));
+
+    if (normalizedPlan.length === 0) {
+      showToast("Debes registrar al menos un tramo válido de recuperación", "warning");
+      return;
+    }
+
+    setActionLoading(`recovery-${selectedSolicitud.id}`);
+    try {
+      const response = await updateRecoveryPlan(selectedSolicitud.id, normalizedPlan, action);
+      if (response?.ok) {
+        showToast(
+          action === "accept"
+            ? "Plan de recuperación aprobado"
+            : action === "finalize"
+            ? "Plan de recuperación definido de forma definitiva"
+            : "Plan de recuperación actualizado",
+          "success"
+        );
+        setShowRecoveryModal(false);
+        setSelectedSolicitud(null);
+        setRecoveryRows([]);
+        await loadData();
+      }
+    } catch (error) {
+      showToast(error.response?.data?.message || "Error actualizando plan de recuperación", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const requestedRecoveryHours = estimateRequestedHoursFromSolicitud(selectedSolicitud || {});
+  const plannedRecoveryHours =
+    Math.round(
+      (recoveryRows.reduce((acc, row) => acc + Number(computeRecoveryHours(row.start_time, row.end_time) || 0), 0) +
+        Number.EPSILON) *
+        100
+    ) / 100;
+  const isRecoveryPlanComplete = requestedRecoveryHours > 0 && plannedRecoveryHours >= requestedRecoveryHours;
+
   const pendientesDeJustificante = useMemo(
-    () => misSolicitudes.filter((sol) => sol.status === "partially_approved"),
+    () =>
+      misSolicitudes.filter(
+        (sol) =>
+          sol.status === "partially_approved" &&
+          Array.isArray(sol.justificacion_requerida) &&
+          sol.justificacion_requerida.length > 0
+      ),
     [misSolicitudes]
   );
 
@@ -340,7 +623,12 @@ const PermisosStatusWidget = () => {
       base.push({
         id: "approve",
         label: isGerencia ? "Aprobar final" : "Aprobar",
-        count: pendientesParcial.length + pendientesFinal.length,
+        count:
+          pendientesParcial.length +
+          pendientesFinal.length +
+          pendientesAprobadas.length +
+          pendientesCancelacion.length +
+          pendingStudyEnrollments.length,
         visible: true,
       });
     }
@@ -353,7 +641,18 @@ const PermisosStatusWidget = () => {
       });
     }
     return base.filter((t) => t.visible);
-  }, [misSolicitudes.length, pendientesParcial.length, pendientesFinal.length, misEsperandoGerencia.length, isApprover, isGerencia, isJefe]);
+  }, [
+    misSolicitudes.length,
+    pendientesParcial.length,
+    pendientesFinal.length,
+    pendientesAprobadas.length,
+    pendientesCancelacion.length,
+    pendingStudyEnrollments.length,
+    misEsperandoGerencia.length,
+    isApprover,
+    isGerencia,
+    isJefe,
+  ]);
 
   const renderStatusBadge = (status) => {
     const meta = STATUS_META[status] || STATUS_META.pending;
@@ -369,7 +668,9 @@ const PermisosStatusWidget = () => {
   const renderSolicitudCard = (solicitud, options = {}) => {
     const { showActions = false, showUser = false, showDocs = false } = options;
     const shouldShowDocs = (showActions || showDocs) && hasJustificantes(solicitud);
-    const requiresUpload = solicitud.status === "partially_approved" && !showActions;
+    const hasRequiredJustification =
+      Array.isArray(solicitud?.justificacion_requerida) && solicitud.justificacion_requerida.length > 0;
+    const requiresUpload = solicitud.status === "partially_approved" && hasRequiredJustification && !showActions;
     const isVacation = solicitud.tipo_solicitud === "vacaciones";
     const approverDisplay =
       solicitud.approver_email ||
@@ -381,7 +682,40 @@ const PermisosStatusWidget = () => {
       ? [solicitud.observaciones]
       : [];
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
-    const isRejectedStatus = String(solicitud?.status || "").toLowerCase() === "rejected";
+    const normalizedStatus = String(solicitud?.status || "").toLowerCase();
+    const isRejectedStatus = ["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus);
+    const timeRange = formatTimeRange(solicitud);
+    const recoveryPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
+    const recoveryTotal = Number(solicitud?.recovery_plan_total_hours || 0);
+    const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
+    const isRequesterOfSolicitud = Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id));
+    const isApproverOfSolicitud =
+      Boolean(userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
+      canSeeSolicitudForApproval(solicitud);
+    const canEditRecovery =
+      Boolean(solicitud?.es_recuperable) &&
+      !["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus) &&
+      (
+        (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+        (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id))
+      );
+    const canRequesterAcceptProposal =
+      isRequesterOfSolicitud && coordinationStatus === "pending_requester_acceptance" && recoveryPlan.length > 0;
+    const canApproverFinalize =
+      isApproverOfSolicitud &&
+      coordinationStatus === "pending_approver_proposal" &&
+      Number(solicitud?.recovery_coordination_round || 0) > 0 &&
+      recoveryPlan.length > 0;
+    const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
+    const canCancelThis =
+      ["approved", "aprobado"].includes(normalizedStatus) &&
+      cancellationStatus !== "pending" &&
+      canCancelByDateRule(solicitud) &&
+      (
+        (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+        (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id))
+      );
+    const hasPendingCancellation = cancellationStatus === "pending";
     const canViewLegalForThis =
       canViewLegalValidationDoc ||
       (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
@@ -437,6 +771,7 @@ const PermisosStatusWidget = () => {
               <span className="font-medium text-gray-700">
                 {solicitud.duracion_horas ? `${solicitud.duracion_horas}h` : `${solicitud.duracion_dias}d`}
               </span>
+              {timeRange && <span className="font-medium text-indigo-700">{timeRange}</span>}
             </div>
           </div>
 
@@ -457,10 +792,63 @@ const PermisosStatusWidget = () => {
           )}
         </div>
 
+        {solicitud.es_recuperable && (
+          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-emerald-900">
+                Plan de recuperación
+                {recoveryTotal > 0 ? ` (${recoveryTotal}h)` : ""}
+              </p>
+              {canEditRecovery && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-xs py-1 px-2"
+                  onClick={() => openRecoveryEditor(solicitud)}
+                >
+                  Coordinar tramos
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-emerald-800 mt-1">
+              Estado: {RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required}
+            </p>
+            {recoveryPlan.length > 0 ? (
+              <div className="mt-1 space-y-1">
+                {recoveryPlan.slice(0, 4).map((row, idx) => (
+                  <p key={`${solicitud.id}-recovery-${idx}`} className="text-[11px] text-emerald-800">
+                    {row?.date || "N/A"} · {row?.start_time || "--:--"} - {row?.end_time || "--:--"}
+                    {row?.notes ? ` · ${row.notes}` : ""}
+                  </p>
+                ))}
+                {recoveryPlan.length > 4 && (
+                  <p className="text-[11px] text-emerald-700">+{recoveryPlan.length - 4} tramo(s) adicionales</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-emerald-800 mt-1">Sin tramos definidos aún.</p>
+            )}
+            {(canRequesterAcceptProposal || canApproverFinalize) && (
+              <div className="mt-2">
+                {canRequesterAcceptProposal && (
+                  <p className="text-[11px] text-emerald-800">
+                    Tienes una propuesta del jefe pendiente de tu aprobación o ajuste.
+                  </p>
+                )}
+                {canApproverFinalize && (
+                  <p className="text-[11px] text-emerald-800">
+                    Hay una contrapropuesta del solicitante pendiente de decisión definitiva.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
           <div className="text-xs">
             <p className="text-gray-500">Solicitud</p>
-            <p className="font-medium text-gray-800">#{solicitud.id}</p>
+            <p className="font-medium text-gray-800">#{showUser ? solicitud.id : solicitud.requester_sequence || solicitud.id}</p>
           </div>
           <div className="text-xs">
             <p className="text-gray-500">Enviada</p>
@@ -474,10 +862,24 @@ const PermisosStatusWidget = () => {
                 : solicitud.tipo_permiso || "Permiso"}
             </p>
           </div>
+          {hasPendingCancellation && (
+            <div className="text-xs sm:col-span-2">
+              <p className="text-amber-700 font-semibold">Cancelación pendiente de revisión</p>
+              <p className="text-gray-700">
+                Motivo solicitado: {solicitud.cancellation_request_reason || solicitud.cancellation_reason || "No registrado"}
+              </p>
+            </div>
+          )}
           <div className="text-xs">
             <p className="text-gray-500">Aprobador asignado</p>
             <p className="font-medium text-gray-800">{approverDisplay}</p>
           </div>
+          {timeRange && (
+            <div className="text-xs">
+              <p className="text-gray-500">Rango horario</p>
+              <p className="font-medium text-gray-800">{timeRange}</p>
+            </div>
+          )}
           {solicitud.aprobacion_parcial_at && (
             <div className="text-xs">
               <p className="text-gray-500">Aprobacion parcial</p>
@@ -621,25 +1023,49 @@ const PermisosStatusWidget = () => {
         {showActions && (
           <div className="space-y-2 mt-3">
             <div className="flex gap-2">
-              {solicitud.status === "pending" && (
+              {hasPendingCancellation && (
                 <>
                   <Button
                     size="sm"
                     variant="primary"
-                    onClick={() =>
-                      isVacation
-                        ? handleAprobarFinal(solicitud.id)
-                        : handleAprobarParcial(solicitud.id)
-                    }
+                    onClick={() => {
+                      setSelectedSolicitud(solicitud);
+                      setCancelReason("");
+                      setShowCancelModal(true);
+                    }}
                     disabled={actionLoading === solicitud.id}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                    className="flex-1 bg-amber-600 hover:bg-amber-700 text-xs py-1.5"
                   >
-                    {actionLoading === solicitud.id
-                      ? "..."
-                      : isVacation
-                      ? "Aprobar definitiva"
-                      : "Aprobar parcial"}
+                    Revisar cancelación
                   </Button>
+                </>
+              )}
+              {solicitud.status === "pending" && (
+                <>
+                  {(() => {
+                    const isDirectFinalApproval =
+                      !isVacation &&
+                      ["estudios", "personal"].includes(String(solicitud?.tipo_permiso || "").toLowerCase());
+                    return (
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() =>
+                          isVacation
+                            ? handleAprobarFinal(solicitud.id)
+                            : handleAprobarParcial(solicitud.id)
+                        }
+                        disabled={actionLoading === solicitud.id}
+                        className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                      >
+                        {actionLoading === solicitud.id
+                          ? "..."
+                          : isVacation || isDirectFinalApproval
+                          ? "Aprobar definitiva"
+                          : "Aprobar parcial"}
+                      </Button>
+                    );
+                  })()}
                   <Button
                     size="sm"
                     variant="secondary"
@@ -681,6 +1107,30 @@ const PermisosStatusWidget = () => {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {canCancelThis && (
+          <div className="mt-3">
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => {
+                setSelectedSolicitud(solicitud);
+                setCancelReason("");
+                setShowCancelModal(true);
+              }}
+              className="w-full text-xs py-1.5 bg-rose-50 text-rose-700 hover:bg-rose-100"
+            >
+              Cancelar solicitud
+            </Button>
+          </div>
+        )}
+        {hasPendingCancellation && !showActions && (
+          <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2">
+            <p className="text-xs text-amber-800">
+              La cancelación está pendiente de aprobación del jefe inmediato.
+            </p>
           </div>
         )}
       </motion.div>
@@ -744,7 +1194,12 @@ const PermisosStatusWidget = () => {
 
     if (activeTab === "approve") {
       if (!isApprover) return null;
-      const noItems = pendientesParcial.length === 0 && pendientesFinal.length === 0;
+      const noItems =
+        pendientesParcial.length === 0 &&
+        pendientesFinal.length === 0 &&
+        pendientesAprobadas.length === 0 &&
+        pendientesCancelacion.length === 0 &&
+        pendingStudyEnrollments.length === 0;
       if (noItems) {
         return (
           <div className="text-center py-10">
@@ -756,8 +1211,52 @@ const PermisosStatusWidget = () => {
       }
       return (
         <>
+          {pendingStudyEnrollments.length > 0 && (
+            <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-sm font-semibold text-indigo-900">Matrículas de estudios pendientes de validación</p>
+              <div className="mt-2 space-y-2">
+                {pendingStudyEnrollments.map((enrollment) => (
+                  <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-2">
+                    <p className="text-xs text-gray-800">
+                      <strong>{enrollment.user_email}</strong> · {enrollment.institution_name} · vence {String(enrollment.valid_until || "").slice(0, 10)}
+                    </p>
+                    <a
+                      href={enrollment.drive_file_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 inline-flex text-xs text-indigo-700 underline"
+                    >
+                      Ver matrícula subida
+                    </a>
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => openEnrollmentReviewModal(enrollment, "reject")}
+                        disabled={actionLoading === `enroll-${enrollment.id}`}
+                        className="text-xs py-1.5"
+                      >
+                        Rechazar
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="primary"
+                        onClick={() => openEnrollmentReviewModal(enrollment, "approve")}
+                        disabled={actionLoading === `enroll-${enrollment.id}`}
+                        className="text-xs py-1.5 bg-emerald-600 hover:bg-emerald-700"
+                      >
+                        Aprobar
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {pendientesParcial.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
           {pendientesFinal.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
+          {pendientesAprobadas.map((sol) => renderSolicitudCard(sol, { showActions: false, showUser: true }))}
+          {pendientesCancelacion.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
         </>
       );
     }
@@ -859,7 +1358,7 @@ const PermisosStatusWidget = () => {
                   Accion requerida
                 </h3>
                 <p className="text-sm text-blue-700">
-                  Tienes permisos aprobados parcialmente. Debes subir los documentos justificantes.
+                  Tienes permisos aprobados parcialmente con documentos pendientes por subir.
                 </p>
               </div>
             </div>
@@ -873,7 +1372,7 @@ const PermisosStatusWidget = () => {
               >
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-gray-900 truncate">
-                    #{sol.id}  {getTipoLabel(sol)}
+                    #{sol.requester_sequence || sol.id}  {getTipoLabel(sol)}
                   </p>
                   <p className="text-xs text-gray-500">
                     {formatDateShort(sol.fecha_inicio)} - {formatDateShort(sol.fecha_fin)}
@@ -991,6 +1490,322 @@ const PermisosStatusWidget = () => {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showCancelModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+            >
+              <Card className="w-full max-w-md p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 bg-rose-100 rounded-xl">
+                    <FiAlertCircle className="w-6 h-6 text-rose-600" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+                        ? "Revisar Cancelación"
+                        : "Cancelar Solicitud"}
+                    </h3>
+                    <p className="text-sm text-gray-600">
+                      {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+                        ? "Registrar decisión sobre la cancelación solicitada"
+                        : "Registrar motivo de cancelación"}
+                    </p>
+                  </div>
+                </div>
+
+                <textarea
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
+                  placeholder={
+                    String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+                      ? "Motivo de la decisión (aprobar o rechazar)"
+                      : "Motivo de cancelación"
+                  }
+                />
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowCancelModal(false);
+                      setSelectedSolicitud(null);
+                      setCancelReason("");
+                    }}
+                  >
+                    Cerrar
+                  </Button>
+                  {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending" ? (
+                    <>
+                      <Button
+                        variant="secondary"
+                        onClick={() => handleReviewCancellation(selectedSolicitud, "reject")}
+                        disabled={!!actionLoading}
+                      >
+                        Rechazar cancelación
+                      </Button>
+                      <Button
+                        variant="danger"
+                        onClick={() => handleReviewCancellation(selectedSolicitud, "approve")}
+                        disabled={!!actionLoading}
+                      >
+                        Aprobar cancelación
+                      </Button>
+                    </>
+                  ) : (
+                    <Button variant="danger" onClick={handleCancelar} disabled={!!actionLoading}>
+                      Confirmar
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showRecoveryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-3xl"
+            >
+              <Card className="p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">Plan de recuperación</h3>
+                    <p className="text-xs text-gray-600">Define tramos horarios (ej. 30 min diarios o 1h diaria).</p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowRecoveryModal(false);
+                      setRecoveryRows([]);
+                      setSelectedSolicitud(null);
+                    }}
+                  >
+                    Cerrar
+                  </Button>
+                </div>
+
+                <div className="space-y-2 max-h-[52vh] overflow-auto pr-1">
+                  {recoveryRows.map((row, idx) => {
+                    const computedHours = computeRecoveryHours(row.start_time, row.end_time);
+                    return (
+                      <div key={`modal-recovery-${idx}`} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end rounded-lg border border-gray-200 bg-gray-50 p-2">
+                        <div className="sm:col-span-3">
+                          <label className="text-[11px] text-gray-600">Fecha</label>
+                          <input
+                            type="date"
+                            value={row.date || ""}
+                            onChange={(e) =>
+                              setRecoveryRows((prev) => prev.map((it, i) => (i === idx ? { ...it, date: e.target.value } : it)))
+                            }
+                            className="w-full border rounded px-2 py-1.5"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] text-gray-600">Inicio</label>
+                          <input
+                            type="time"
+                            value={row.start_time || ""}
+                            onChange={(e) =>
+                              setRecoveryRows((prev) => prev.map((it, i) => (i === idx ? { ...it, start_time: e.target.value } : it)))
+                            }
+                            className="w-full border rounded px-2 py-1.5"
+                          />
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="text-[11px] text-gray-600">Fin</label>
+                          <input
+                            type="time"
+                            value={row.end_time || ""}
+                            onChange={(e) =>
+                              setRecoveryRows((prev) => prev.map((it, i) => (i === idx ? { ...it, end_time: e.target.value } : it)))
+                            }
+                            className="w-full border rounded px-2 py-1.5"
+                          />
+                        </div>
+                        <div className="sm:col-span-4">
+                          <label className="text-[11px] text-gray-600">Notas</label>
+                          <input
+                            type="text"
+                            value={row.notes || ""}
+                            onChange={(e) =>
+                              setRecoveryRows((prev) => prev.map((it, i) => (i === idx ? { ...it, notes: e.target.value } : it)))
+                            }
+                            className="w-full border rounded px-2 py-1.5"
+                            placeholder="Opcional"
+                          />
+                        </div>
+                        <div className="sm:col-span-1 text-center">
+                          <p className="text-[11px] text-gray-600">h</p>
+                          <p className="text-xs font-semibold text-indigo-700">{computedHours || "-"}</p>
+                        </div>
+                        <div className="sm:col-span-12">
+                          <Button
+                            variant="secondary"
+                            className="text-xs px-2 py-1"
+                            onClick={() => setRecoveryRows((prev) => prev.filter((_, i) => i !== idx))}
+                          >
+                            Eliminar tramo
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-3 flex items-center justify-between">
+                  <Button
+                    variant="secondary"
+                    disabled={isRecoveryPlanComplete}
+                    onClick={() =>
+                      setRecoveryRows((prev) => [...prev, { date: "", start_time: "", end_time: "", notes: "" }])
+                    }
+                  >
+                    {isRecoveryPlanComplete ? "Límite alcanzado" : "+ Agregar tramo"}
+                  </Button>
+                  <p className="text-xs text-gray-600">
+                    {plannedRecoveryHours}h{requestedRecoveryHours > 0 ? ` / ${requestedRecoveryHours}h` : ""}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
+                      "pending_requester_acceptance" &&
+                      userId &&
+                      selectedSolicitud?.user_id &&
+                      Number(userId) === Number(selectedSolicitud.user_id) && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleSaveRecoveryPlan("propose")}
+                          disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                        >
+                          Proponer nueva
+                        </Button>
+                      )}
+                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
+                      "pending_approver_proposal" &&
+                      userId &&
+                      selectedSolicitud?.approver_user_id &&
+                      Number(userId) === Number(selectedSolicitud.approver_user_id) &&
+                      Number(selectedSolicitud?.recovery_coordination_round || 0) > 0 && (
+                        <Button
+                          variant="secondary"
+                          onClick={() => handleSaveRecoveryPlan("finalize")}
+                          disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                        >
+                          Definir definitivo
+                        </Button>
+                      )}
+                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
+                      "pending_requester_acceptance" &&
+                      userId &&
+                      selectedSolicitud?.user_id &&
+                      Number(userId) === Number(selectedSolicitud.user_id) && (
+                        <Button
+                          variant="primary"
+                          onClick={() => handleSaveRecoveryPlan("accept")}
+                          disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                        >
+                          Aprobar propuesta
+                        </Button>
+                      )}
+                    <Button
+                      variant="primary"
+                      onClick={() => handleSaveRecoveryPlan("propose")}
+                      disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                    >
+                      Guardar plan
+                    </Button>
+                  </div>
+                </div>
+                {isRecoveryPlanComplete && (
+                  <p className="mt-2 text-xs text-emerald-700">
+                    Se alcanzaron las horas solicitadas. No puedes agregar más tramos.
+                  </p>
+                )}
+              </Card>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showEnrollmentReviewModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md"
+            >
+              <Card className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-3 bg-indigo-100 rounded-xl">
+                    <FiFileText className="w-6 h-6 text-indigo-700" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-gray-900">
+                      {enrollmentReviewDecision === "approve" ? "Aprobar matrícula" : "Rechazar matrícula"}
+                    </h3>
+                    <p className="text-sm text-gray-600">Registra el motivo de tu decisión</p>
+                  </div>
+                </div>
+
+                {selectedEnrollment && (
+                  <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <p className="text-xs text-gray-800">
+                      <strong>{selectedEnrollment.user_email}</strong>
+                    </p>
+                    <p className="text-xs text-gray-700">
+                      {selectedEnrollment.institution_name} · vence {String(selectedEnrollment.valid_until || "").slice(0, 10)}
+                    </p>
+                  </div>
+                )}
+
+                <textarea
+                  value={enrollmentReviewReason}
+                  onChange={(e) => setEnrollmentReviewReason(e.target.value)}
+                  className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
+                  placeholder={
+                    enrollmentReviewDecision === "approve"
+                      ? "Motivo de aprobación"
+                      : "Motivo de rechazo"
+                  }
+                />
+
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="secondary"
+                    onClick={() => {
+                      setShowEnrollmentReviewModal(false);
+                      setSelectedEnrollment(null);
+                      setEnrollmentReviewReason("");
+                    }}
+                  >
+                    Cerrar
+                  </Button>
+                  <Button
+                    variant={enrollmentReviewDecision === "approve" ? "primary" : "danger"}
+                    onClick={handleReviewEnrollment}
+                    disabled={!!actionLoading}
+                  >
+                    Confirmar
+                  </Button>
+                </div>
+              </Card>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Modal de subida de justificantes */}
       <UploadJustificantesModal
         open={showUploadModal}
@@ -1003,4 +1818,3 @@ const PermisosStatusWidget = () => {
 };
 
 export default PermisosStatusWidget;
-

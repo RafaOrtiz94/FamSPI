@@ -20,9 +20,21 @@ export const getVacationSummary = async (all = false) => {
   return data?.data || data;
 };
 
+export const cancelVacationRequest = async (id, reason) => {
+  const { data } = await api.post(`/vacaciones/${id}/cancel`, { reason });
+  return data?.data || data;
+};
+
+export const reviewVacationCancellation = async (id, decision, reason) => {
+  const { data } = await api.post(`/vacaciones/${id}/cancel/review`, { decision, reason });
+  return data?.data || data;
+};
+
 export default {
   createVacationRequest,
   listVacationRequests,
   updateVacationStatus,
+  cancelVacationRequest,
+  reviewVacationCancellation,
   getVacationSummary,
 };

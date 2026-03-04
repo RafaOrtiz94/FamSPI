@@ -10,6 +10,11 @@ router.use(verifyToken);
 
 // Crear solicitud (permiso o vacación)
 router.post("/", controller.create);
+router.post("/estudios/matricula", controller.upload.single("matricula"), controller.registerStudyEnrollment);
+router.get("/estudios/matricula/activa", controller.getActiveStudyEnrollment);
+router.get("/estudios/matriculas", controller.listMyStudyEnrollments);
+router.get("/estudios/matriculas/pendientes", controller.listPendingStudyEnrollments);
+router.post("/estudios/matriculas/:id/revisar", controller.reviewStudyEnrollment);
 
 // Aprobación parcial (jefe)
 router.post("/:id/aprobar-parcial", controller.aprobarParcial);
@@ -22,6 +27,9 @@ router.post("/:id/aprobar-final", controller.aprobarFinal);
 
 // Rechazar
 router.post("/:id/rechazar", controller.rechazar);
+router.post("/:id/cancelar", controller.cancelar);
+router.post("/:id/cancelar/revisar", controller.revisarCancelacion);
+router.post("/:id/recovery-plan", controller.updateRecoveryPlan);
 
 // Listar pendientes (jefes)
 router.get("/pendientes", controller.listarPendientes);

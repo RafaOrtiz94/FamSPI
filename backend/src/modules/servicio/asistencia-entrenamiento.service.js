@@ -13,6 +13,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 
 const TEMPLATE_PATH = path.join(
     __dirname,
@@ -165,8 +166,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
         logger.warn({ appearanceErr }, "No se pudieron ajustar apariencias de campos de asistencia");
     }
 
-    // Don't flatten the form to avoid corruption
-    // form.flatten();
+    securePdfForm(form);
 
     const pdfBytes = await pdfDoc.save();
     return Buffer.from(pdfBytes);
@@ -376,4 +376,3 @@ module.exports = {
     generateAttendanceListPDF,
     generateAttendanceListPDFEndpoint,
 };
-

@@ -1,6 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const { PDFDocument } = require("pdf-lib");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 
 const TEMPLATE_PATH = path.join(
   __dirname,
@@ -83,6 +84,7 @@ const generateDeliveryActPdf = async ({
   setTextField(form, "ent_por", deliveredBy);
   setTextField(form, "fecha_ent", formatDate(deliveredAt));
 
+  securePdfForm(form);
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
 };

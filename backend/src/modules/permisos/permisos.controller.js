@@ -62,6 +62,72 @@ async function create(req, res) {
   }
 }
 
+async function registerStudyEnrollment(req, res) {
+  try {
+    const file = Array.isArray(req.files) ? req.files[0] : req.file;
+    const data = await permisosService.registerStudyEnrollment({
+      actor: req.user,
+      payload: req.body || {},
+      file,
+    });
+    res.status(201).json({ ok: true, data });
+  } catch (error) {
+    console.error("Error registrando matrícula de estudios:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function getActiveStudyEnrollment(req, res) {
+  try {
+    const actorId = req.user?.id;
+    const data = await permisosService.getActiveStudyEnrollment({
+      userId: actorId,
+      date: req.query?.date || null,
+    });
+    res.json({ ok: true, data: data || null });
+  } catch (error) {
+    console.error("Error obteniendo matrícula activa:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function listMyStudyEnrollments(req, res) {
+  try {
+    const actorId = req.user?.id;
+    const data = await permisosService.listMyStudyEnrollments({ userId: actorId });
+    res.json({ ok: true, data: data || [] });
+  } catch (error) {
+    console.error("Error listando matrículas:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function listPendingStudyEnrollments(req, res) {
+  try {
+    const data = await permisosService.listPendingStudyEnrollments({ approver: req.user });
+    res.json({ ok: true, data: data || [] });
+  } catch (error) {
+    console.error("Error listando matrículas pendientes:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function reviewStudyEnrollment(req, res) {
+  try {
+    const { id } = req.params;
+    const data = await permisosService.reviewStudyEnrollment({
+      id: Number(id),
+      approver: req.user,
+      decision: req.body?.decision,
+      reason: req.body?.reason,
+    });
+    res.json({ ok: true, data });
+  } catch (error) {
+    console.error("Error revisando matrícula:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 async function aprobarParcial(req, res) {
   try {
     const { id } = req.params;
@@ -137,6 +203,53 @@ async function rechazar(req, res) {
     res.json({ ok: true, data: result });
   } catch (error) {
     console.error("Error rechazando:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function cancelar(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.cancelarSolicitud({
+      id: Number(id),
+      actor: req.user,
+      reason: req.body?.reason,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error cancelando:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function revisarCancelacion(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.revisarCancelacionSolicitud({
+      id: Number(id),
+      actor: req.user,
+      decision: req.body?.decision,
+      reason: req.body?.reason,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error revisando cancelación:", error);
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function updateRecoveryPlan(req, res) {
+  try {
+    const { id } = req.params;
+    const result = await permisosService.updateRecoveryPlan({
+      id: Number(id),
+      actor: req.user,
+      recoveryPlan: req.body?.recovery_plan,
+      action: req.body?.action,
+    });
+    res.json({ ok: true, data: result });
+  } catch (error) {
+    console.error("Error actualizando plan de recuperación:", error);
     res.status(error.status || 500).json({ ok: false, message: error.message });
   }
 }
@@ -284,10 +397,18 @@ async function getLegalCoverage(req, res) {
 
 module.exports = {
   create,
+  registerStudyEnrollment,
+  getActiveStudyEnrollment,
+  listMyStudyEnrollments,
+  listPendingStudyEnrollments,
+  reviewStudyEnrollment,
   aprobarParcial,
   uploadJustificantes,
   aprobarFinal,
   rechazar,
+  cancelar,
+  revisarCancelacion,
+  updateRecoveryPlan,
   listarPendientes,
   listarMias,
   listarResumenColaboradores,
@@ -295,4 +416,3 @@ module.exports = {
   getLegalCoverage,
   upload,
 };
-
