@@ -251,6 +251,64 @@ async function upsertInvestmentSelection(businessCaseId, data, user) {
     return rows[0];
 }
 
+async function upsertInvestmentSelectionsBatch(businessCaseId, selections = [], user) {
+    if (!Array.isArray(selections) || !selections.length) {
+        const error = new Error("selections es requerido y debe contener elementos");
+        error.status = 400;
+        throw error;
+    }
+
+    const client = await db.getClient();
+    try {
+        await client.query("BEGIN");
+        const out = [];
+        for (const item of selections) {
+            const { catalog_id, selected = true, notes = null, quantity = null, characteristics = null, unit_price = null } = item || {};
+            if (!catalog_id) {
+                const error = new Error("catalog_id es requerido en cada seleccion");
+                error.status = 400;
+                throw error;
+            }
+
+            const { rows } = await client.query(
+                `INSERT INTO bc_investment_selections
+                   (business_case_id, catalog_id, selected, notes, quantity, characteristics, unit_price, updated_by_role, updated_by_email)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 ON CONFLICT (business_case_id, catalog_id)
+                 DO UPDATE SET
+                   selected = EXCLUDED.selected,
+                   notes = EXCLUDED.notes,
+                   quantity = EXCLUDED.quantity,
+                   characteristics = EXCLUDED.characteristics,
+                   unit_price = EXCLUDED.unit_price,
+                   updated_by_role = EXCLUDED.updated_by_role,
+                   updated_by_email = EXCLUDED.updated_by_email,
+                   updated_at = now()
+                 RETURNING *`,
+                [
+                    businessCaseId,
+                    catalog_id,
+                    selected,
+                    notes,
+                    quantity,
+                    characteristics,
+                    unit_price,
+                    user?.role || null,
+                    user?.email || null
+                ]
+            );
+            out.push(rows[0]);
+        }
+        await client.query("COMMIT");
+        return out;
+    } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+    } finally {
+        client.release();
+    }
+}
+
 module.exports = {
     addInvestment,
     getInvestments,
@@ -262,4 +320,5 @@ module.exports = {
     getInvestmentSelections,
     getCatalogWithSelections,
     upsertInvestmentSelection,
+    upsertInvestmentSelectionsBatch,
 };

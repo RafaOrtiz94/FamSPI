@@ -1,146 +1,223 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { FiCheckCircle } from "react-icons/fi";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
 import { useAuth } from "../../../../../core/auth/AuthContext";
 
-const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {} }) => {
+const makeTempId = () => `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+const isTempId = (id) => String(id).startsWith("tmp-");
+
+const dedupeItemsById = (rows = []) => {
+  const map = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.id);
+    if (!key) return;
+    const previous = map.get(key) || {};
+    map.set(key, { ...previous, ...row });
+  });
+  return Array.from(map.values());
+};
+
+const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
   const { id: bcId } = useParams();
   const { showToast } = useUI();
   const { user } = useAuth();
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [savingId, setSavingId] = useState(null);
+  const [savingCart, setSavingCart] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newCategory, setNewCategory] = useState("");
+  const [newQuantity, setNewQuantity] = useState("");
+  const [newCharacteristics, setNewCharacteristics] = useState("");
+  const [newNotes, setNewNotes] = useState("");
+  const [newPrice, setNewPrice] = useState("");
+  const [dirtyMap, setDirtyMap] = useState({});
+
   const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
   const role = (user?.role || user?.scope || user?.role_name || "").toLowerCase();
   const canSeePrice = role === "jefe_operaciones" || role === "jefe_de_operaciones";
   const canEditPrice = canEdit && canSeePrice;
-  const [searchTerm, setSearchTerm] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newCategory, setNewCategory] = useState("");
-  const [newNotes, setNewNotes] = useState("");
-  const [newPrice, setNewPrice] = useState("");
-  const [creating, setCreating] = useState(false);
 
-  const loadCatalog = async () => {
+  const loadCatalog = useCallback(async () => {
     if (!bcId) return;
     try {
       setLoading(true);
       const res = await api.get(`/business-case/${bcId}/investments/catalog`);
       const data = res?.data?.data || res?.data || [];
       setItems(Array.isArray(data) ? data : []);
+      setDirtyMap({});
     } catch (err) {
       console.error("Error loading investment catalog", err);
       showToast("No se pudo cargar el catalogo de inversiones", "error");
     } finally {
       setLoading(false);
     }
-  };
+  }, [bcId, showToast]);
 
   useEffect(() => {
     loadCatalog();
-  }, [bcId]);
+  }, [loadCatalog]);
 
-  const handleToggle = async (item) => {
+  const markDirty = (id) => {
+    setDirtyMap((prev) => ({ ...prev, [String(id)]: true }));
+  };
+
+  const handleToggle = (item) => {
     if (!canEdit) return;
+    setItems((prev) =>
+      prev.map((row) =>
+        row.id === item.id
+          ? {
+              ...row,
+              selected: !row.selected,
+            }
+          : row,
+      ),
+    );
+    markDirty(item.id);
+  };
+
+  const updateItem = (id, patch) => {
+    setItems((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+    markDirty(id);
+  };
+
+  const handleSaveCart = async () => {
+    if (!canEdit || !bcId) return;
+
+    const dirtyItems = items.filter((row) => Boolean(dirtyMap[String(row.id)]));
+    if (!dirtyItems.length) {
+      showToast("No hay cambios pendientes por guardar", "info");
+      return;
+    }
+
     try {
-      setSavingId(item.id);
-      const nextSelected = !item.selected;
-      const res = await api.post(`/business-case/${bcId}/investments/selections`, {
-        catalog_id: item.id,
-        selected: nextSelected,
-        notes: item.notes || null,
-        quantity: item.quantity ?? null,
-        characteristics: item.characteristics || null,
-        unit_price: canEditPrice ? (item.unit_price ?? null) : undefined,
-      });
-      const saved = res?.data?.data;
-      setItems((prev) =>
-        prev.map((row) =>
-          row.id === item.id
-            ? {
-                ...row,
-                selected: saved?.selected ?? nextSelected,
-                notes: saved?.notes ?? row.notes,
-                quantity: saved?.quantity ?? row.quantity,
-                characteristics: saved?.characteristics ?? row.characteristics,
-                unit_price: saved?.unit_price ?? row.unit_price,
-              }
-            : row
-        )
+      setSavingCart(true);
+      let workingItems = [...items];
+      const tempItems = dirtyItems.filter((row) => isTempId(row.id));
+      const tempIdToCatalog = new Map();
+
+      for (const row of tempItems) {
+        // eslint-disable-next-line no-await-in-loop
+        const createRes = await api.post(`/business-case/${bcId}/investments/catalog`, {
+          name: row.name,
+          category: row.category || null,
+          selected: false,
+        });
+        const created = createRes?.data?.data;
+        if (!created?.id) {
+          throw new Error(`No se pudo crear la inversion del carrito: ${row.name || "sin nombre"}`);
+        }
+        tempIdToCatalog.set(String(row.id), created);
+      }
+
+      if (tempIdToCatalog.size > 0) {
+        workingItems = workingItems.map((row) => {
+          const created = tempIdToCatalog.get(String(row.id));
+          if (!created) return row;
+          return {
+            ...row,
+            id: created.id,
+            code: created.code,
+            name: created.name,
+            category: created.category,
+            is_active: created.is_active,
+            _pendingCreate: false,
+          };
+        });
+        workingItems = dedupeItemsById(workingItems);
+      }
+
+      const normalizedDirtyIds = new Set(
+        Object.keys(dirtyMap).map((key) => {
+          const created = tempIdToCatalog.get(String(key));
+          return String(created?.id || key);
+        }),
       );
-      onSave?.();
+      const dirtyItemsToSave = workingItems.filter((row) => normalizedDirtyIds.has(String(row.id)));
+
+      const payload = {
+        selections: dirtyItemsToSave.map((row) => ({
+          catalog_id: row.id,
+          selected: Boolean(row.selected),
+          notes: row.notes || null,
+          quantity: row.quantity ?? null,
+          characteristics: row.characteristics || null,
+          unit_price: canEditPrice ? row.unit_price ?? null : undefined,
+        })),
+      };
+
+      const res = await api.post(`/business-case/${bcId}/investments/selections`, payload);
+      const savedRows = Array.isArray(res?.data?.data?.items) ? res.data.data.items : [];
+
+      if (savedRows.length) {
+        const savedByCatalog = new Map(savedRows.map((row) => [Number(row.catalog_id), row]));
+        workingItems = workingItems.map((row) => {
+          const saved = savedByCatalog.get(Number(row.id));
+          if (!saved) return row;
+          return {
+            ...row,
+            selected: saved.selected,
+            notes: saved.notes,
+            quantity: saved.quantity,
+            characteristics: saved.characteristics,
+            unit_price: saved.unit_price,
+            updated_by_role: saved.updated_by_role,
+            updated_by_email: saved.updated_by_email,
+          };
+        });
+      }
+
+      setItems(workingItems);
+      setDirtyMap({});
+      showToast(`Se guardaron ${dirtyItemsToSave.length} inversiones del carrito`, "success");
     } catch (err) {
-      console.error("Error saving investment selection", err);
-      showToast(err.response?.data?.message || "No se pudo guardar", "error");
+      console.error("Error saving investment cart", err);
+      showToast(err.response?.data?.message || "No se pudo guardar el carrito de inversiones", "error");
     } finally {
-      setSavingId(null);
+      setSavingCart(false);
     }
   };
 
-  const handleNotesChange = (id, value) => {
-    setItems((prev) => prev.map((row) => (row.id === id ? { ...row, notes: value } : row)));
-  };
-
-  const handleItemSave = async (item) => {
-    if (!canEdit || !item.selected) return;
-    try {
-      setSavingId(item.id);
-      await api.post(`/business-case/${bcId}/investments/selections`, {
-        catalog_id: item.id,
-        selected: item.selected || false,
-        notes: item.notes || null,
-        quantity: item.quantity ?? null,
-        characteristics: item.characteristics || null,
-        unit_price: canEditPrice ? (item.unit_price ?? null) : undefined,
-      });
-      onSave?.();
-    } catch (err) {
-      console.error("Error saving investment data", err);
-      showToast(err.response?.data?.message || "No se pudo guardar la inversion", "error");
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const handleCreateCustomInvestment = async () => {
+  const handleCreateCustomInvestment = () => {
     if (!canEdit || !bcId) return;
     const name = newName.trim();
     if (!name) {
       showToast("Ingresa el nombre de la inversion", "warning");
       return;
     }
-    try {
-      setCreating(true);
-      const res = await api.post(`/business-case/${bcId}/investments/catalog`, {
-        name,
-        category: newCategory.trim() || null,
-        notes: newNotes.trim() || null,
-        selected: true,
-        unit_price: canEditPrice && newPrice !== "" ? Number(newPrice) : undefined,
-      });
-      const created = res?.data?.data;
-      if (created) {
-        setItems((prev) => {
-          const exists = prev.some((row) => row.id === created.id);
-          if (exists) {
-            return prev.map((row) => (row.id === created.id ? { ...row, ...created } : row));
-          }
-          return [...prev, created];
-        });
-        setNewName("");
-        setNewCategory("");
-        setNewNotes("");
-        setNewPrice("");
-        onSave?.();
-      }
-    } catch (err) {
-      console.error("Error creating custom investment", err);
-      showToast(err.response?.data?.message || "No se pudo crear la inversion", "error");
-    } finally {
-      setCreating(false);
-    }
+
+    const tempId = makeTempId();
+    const normalizedQuantity = newQuantity === "" ? null : Number(newQuantity);
+    const normalizedPrice = canEditPrice && newPrice !== "" ? Number(newPrice) : null;
+    const localItem = {
+      id: tempId,
+      code: null,
+      name,
+      category: newCategory.trim() || null,
+      is_active: true,
+      selected: true,
+      quantity: Number.isFinite(normalizedQuantity) ? normalizedQuantity : null,
+      characteristics: newCharacteristics.trim() || null,
+      notes: newNotes.trim() || null,
+      unit_price: Number.isFinite(normalizedPrice) ? normalizedPrice : null,
+      updated_by_role: null,
+      updated_by_email: null,
+      _pendingCreate: true,
+    };
+
+    setItems((prev) => [...prev, localItem]);
+    markDirty(tempId);
+    setNewName("");
+    setNewCategory("");
+    setNewQuantity("");
+    setNewCharacteristics("");
+    setNewNotes("");
+    setNewPrice("");
+
+    showToast("Inversion agregada al carrito local. Guarda para persistir.", "success");
   };
 
   const normalizedSearch = searchTerm.trim().toLowerCase();
@@ -150,139 +227,130 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
       const name = String(item.name || "").toLowerCase();
       const category = String(item.category || "").toLowerCase();
       const notes = String(item.notes || "").toLowerCase();
+      const characteristics = String(item.characteristics || "").toLowerCase();
       return (
         name.includes(normalizedSearch) ||
         category.includes(normalizedSearch) ||
-        notes.includes(normalizedSearch)
+        notes.includes(normalizedSearch) ||
+        characteristics.includes(normalizedSearch)
       );
     });
   }, [items, normalizedSearch]);
 
   const selectedCount = useMemo(() => items.filter((i) => i.selected).length, [items]);
+  const dirtyCount = useMemo(() => Object.keys(dirtyMap).length, [dirtyMap]);
+  const pendingCreateCount = useMemo(() => items.filter((item) => isTempId(item.id)).length, [items]);
 
-  const renderInvestmentCard = (item) => (
-    <div key={item.id} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
-      <div className="flex items-start justify-between gap-3">
-        <label className="flex items-start gap-3 cursor-pointer">
-          <input
-            type="checkbox"
-            className="mt-1 accent-emerald-600"
-            checked={!!item.selected}
-            onChange={() => handleToggle(item)}
-            disabled={!canEdit || savingId === item.id}
-          />
-          <div>
-            <div className="text-sm font-semibold text-gray-900">{item.name}</div>
-            <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
-            {item.updated_by_role && (
-              <div className="text-xs text-gray-500">
-                Actualizado por: {item.updated_by_role}
-                {item.updated_by_email ? ` (${item.updated_by_email})` : ""}
-              </div>
-            )}
-          </div>
-        </label>
-
-        <span
-          className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${
-            item.selected ? "text-emerald-700 bg-emerald-50" : "text-gray-600 bg-gray-100"
-          }`}
-        >
-          {item.selected ? (
-            <>
-              <FiCheckCircle size={12} />
-              Seleccionado
-            </>
-          ) : (
-            "No seleccionado"
-          )}
-        </span>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        <div className="flex flex-col gap-2">
-          <label className="text-xs font-semibold text-gray-500">Cantidad requerida</label>
-          <input
-            type="number"
-            min={0}
-            value={item.quantity ?? ""}
-            onChange={(e) =>
-              setItems((prev) =>
-                prev.map((row) =>
-                  row.id === item.id
-                    ? { ...row, quantity: e.target.value === "" ? null : Number(e.target.value) }
-                    : row
+  const renderInvestmentCard = (item) => {
+    const isDirty = Boolean(dirtyMap[String(item.id)]);
+    const pendingCreate = isTempId(item.id);
+    return (
+      <div key={item.id} className="p-4 flex flex-col gap-3 border-b last:border-b-0">
+        <div className="flex items-start justify-between gap-3">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-1 accent-emerald-600"
+              checked={!!item.selected}
+              onChange={() => handleToggle(item)}
+              disabled={!canEdit || savingCart}
+            />
+            <div>
+              <div className="text-sm font-semibold text-gray-900">{item.name}</div>
+              <div className="text-xs text-gray-500">Categoria: {item.category || "Sin categoria"}</div>
+              {pendingCreate ? (
+                <div className="text-xs text-amber-700">Pendiente de creacion en catalogo</div>
+              ) : (
+                item.updated_by_role && (
+                  <div className="text-xs text-gray-500">
+                    Ultima actualizacion por: {item.updated_by_role}
+                    {item.updated_by_email ? ` (${item.updated_by_email})` : ""}
+                  </div>
                 )
-              )
-            }
-            disabled={!canEdit || !item.selected}
-            placeholder="0"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
-          />
+              )}
+            </div>
+          </label>
+
+          <span
+            className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-1 rounded-full ${
+              isDirty
+                ? "text-amber-700 bg-amber-50"
+                : item.selected
+                ? "text-emerald-700 bg-emerald-50"
+                : "text-gray-600 bg-gray-100"
+            }`}
+          >
+            {isDirty ? (
+              <>
+                <FiClock size={12} />
+                Pendiente de guardar
+              </>
+            ) : item.selected ? (
+              <>
+                <FiCheckCircle size={12} />
+                En carrito
+              </>
+            ) : (
+              "No seleccionado"
+            )}
+          </span>
         </div>
 
-        {canSeePrice && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
+            <label className="text-xs font-semibold text-gray-500">Cantidad</label>
             <input
               type="number"
               min={0}
-              step="0.01"
-              value={item.unit_price ?? ""}
-              onChange={(e) =>
-                setItems((prev) =>
-                  prev.map((row) =>
-                    row.id === item.id
-                      ? { ...row, unit_price: e.target.value === "" ? null : Number(e.target.value) }
-                      : row
-                  )
-                )
-              }
-              disabled={!canEditPrice || !item.selected}
-              placeholder="0.00"
+              value={item.quantity ?? ""}
+              onChange={(e) => updateItem(item.id, { quantity: e.target.value === "" ? null : Number(e.target.value) })}
+              disabled={!canEdit || !item.selected || savingCart}
+              placeholder="0"
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
             />
           </div>
-        )}
 
-        <div className="flex flex-col gap-2 md:col-span-2">
-          <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
-          <input
-            value={item.characteristics || ""}
-            onChange={(e) =>
-              setItems((prev) =>
-                prev.map((row) => (row.id === item.id ? { ...row, characteristics: e.target.value } : row))
-              )
-            }
-            disabled={!canEdit || !item.selected}
-            placeholder="Especificaciones solicitadas"
-            className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
-          />
-        </div>
+          {canSeePrice && (
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={item.unit_price ?? ""}
+                onChange={(e) => updateItem(item.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })}
+                disabled={!canEditPrice || !item.selected || savingCart}
+                placeholder="0.00"
+                className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
+              />
+            </div>
+          )}
 
-        <div className="flex flex-col gap-2 md:col-span-3">
-          <label className="text-xs font-semibold text-gray-500">Observaciones</label>
-          <div className="flex flex-col md:flex-row gap-2">
+          <div className="flex flex-col gap-2 md:col-span-2">
+            <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
+            <input
+              value={item.characteristics || ""}
+              onChange={(e) => updateItem(item.id, { characteristics: e.target.value })}
+              disabled={!canEdit || !item.selected || savingCart}
+              placeholder="Especificaciones solicitadas"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
+            />
+          </div>
+
+          <div className="flex flex-col gap-2 md:col-span-3">
+            <label className="text-xs font-semibold text-gray-500">Observaciones</label>
             <input
               value={item.notes || ""}
-              onChange={(e) => handleNotesChange(item.id, e.target.value)}
-              disabled={!canEdit || !item.selected}
+              onChange={(e) => updateItem(item.id, { notes: e.target.value })}
+              disabled={!canEdit || !item.selected || savingCart}
               placeholder="Detalles adicionales"
-              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 flex-1 disabled:bg-gray-50"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
             />
-            <button
-              type="button"
-              onClick={() => handleItemSave(item)}
-              disabled={!canEdit || !item.selected || savingId === item.id}
-              className="px-3 py-2 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
-            >
-              Guardar
-            </button>
           </div>
         </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   if (loading) {
     return (
@@ -304,11 +372,21 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
         <div>
           <h2 className="text-2xl font-bold text-gray-900 tracking-tight">Inversiones adicionales</h2>
           <p className="text-sm text-gray-500">
-            Todas las inversiones se listan aqui. Selecciona y completa cantidades y detalles desde la misma lista.
+            Agrega multiples inversiones al carrito y guarda todo en un solo paso.
           </p>
         </div>
-        <div className="text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full w-fit">
-          {selectedCount} seleccionadas
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="text-xs sm:text-sm font-semibold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full w-fit">
+            {selectedCount} en carrito
+          </div>
+          <div className="text-xs sm:text-sm font-semibold text-amber-700 bg-amber-50 px-3 py-1 rounded-full w-fit">
+            {dirtyCount} pendientes
+          </div>
+          {pendingCreateCount > 0 && (
+            <div className="text-xs sm:text-sm font-semibold text-blue-700 bg-blue-50 px-3 py-1 rounded-full w-fit">
+              {pendingCreateCount} nuevos por crear
+            </div>
+          )}
         </div>
       </div>
 
@@ -321,17 +399,17 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
       <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5 space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-gray-900">Agregar inversion no listada</h3>
-          <p className="text-xs text-gray-500">Si no aparece en el catalogo, puedes crearla y quedara disponible para futuros casos.</p>
+          <p className="text-xs text-gray-500">Si no aparece en el catalogo, puedes crearla y agregarla al carrito.</p>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div className="flex flex-col gap-2">
-            <label className="text-xs font-semibold text-gray-500">Nombre</label>
+            <label className="text-xs font-semibold text-gray-500">Producto / nombre</label>
             <input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="Ej: Control externo de tercera opinion"
+              placeholder="Ej: Control externo"
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-              disabled={!canEdit}
+              disabled={!canEdit || savingCart}
             />
           </div>
           <div className="flex flex-col gap-2">
@@ -339,19 +417,21 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
             <input
               value={newCategory}
               onChange={(e) => setNewCategory(e.target.value)}
-              placeholder="Ej: Tecnologia / Laboratorio"
+              placeholder="Ej: Tecnologia"
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-              disabled={!canEdit}
+              disabled={!canEdit || savingCart}
             />
           </div>
-          <div className="flex flex-col gap-2 md:col-span-1">
-            <label className="text-xs font-semibold text-gray-500">Observaciones</label>
+          <div className="flex flex-col gap-2">
+            <label className="text-xs font-semibold text-gray-500">Cantidad</label>
             <input
-              value={newNotes}
-              onChange={(e) => setNewNotes(e.target.value)}
-              placeholder="Detalles opcionales"
+              type="number"
+              min={0}
+              value={newQuantity}
+              onChange={(e) => setNewQuantity(e.target.value)}
+              placeholder="0"
               className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-              disabled={!canEdit}
+              disabled={!canEdit || savingCart}
             />
           </div>
           {canSeePrice && (
@@ -365,19 +445,48 @@ const InvestmentsSection = ({ permissions = {}, ownership = {}, onSave = () => {
                 onChange={(e) => setNewPrice(e.target.value)}
                 placeholder="0.00"
                 className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
-                disabled={!canEditPrice}
+                disabled={!canEditPrice || savingCart}
               />
             </div>
           )}
+          <div className="flex flex-col gap-2 md:col-span-2">
+            <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
+            <input
+              value={newCharacteristics}
+              onChange={(e) => setNewCharacteristics(e.target.value)}
+              placeholder="Especificaciones"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              disabled={!canEdit || savingCart}
+            />
+          </div>
+          <div className="flex flex-col gap-2 md:col-span-2">
+            <label className="text-xs font-semibold text-gray-500">Observaciones</label>
+            <input
+              value={newNotes}
+              onChange={(e) => setNewNotes(e.target.value)}
+              placeholder="Detalles adicionales"
+              className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
+              disabled={!canEdit || savingCart}
+            />
+          </div>
         </div>
-        <div>
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
             onClick={handleCreateCustomInvestment}
-            disabled={!canEdit || creating}
-            className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 w-full sm:w-auto"
+            disabled={!canEdit || savingCart}
+            className="inline-flex items-center justify-center px-4 py-2 rounded-xl bg-emerald-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
           >
-            {creating ? "Agregando..." : "Agregar inversion"}
+            Agregar al carrito
+          </button>
+          <button
+            type="button"
+            onClick={handleSaveCart}
+            disabled={!canEdit || savingCart || dirtyCount === 0}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
+          >
+            <FiSave size={14} />
+            {savingCart ? "Guardando carrito..." : "Guardar carrito"}
           </button>
         </div>
       </div>

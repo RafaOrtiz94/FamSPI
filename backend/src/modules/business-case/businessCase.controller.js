@@ -1175,8 +1175,17 @@ async function saveInvestmentSelection(req, res) {
     await businessCaseService.assertModernBusinessCase(id);
     const role = resolveRequestRole(req);
     const canEditPrice = ["jefe_operaciones", "jefe_de_operaciones"].includes(role);
-    const payload = { ...req.body };
-    if (!canEditPrice) {
+    const isBatch = Array.isArray(req.body?.selections);
+    const payload = isBatch
+      ? {
+          selections: req.body.selections.map((item) => {
+            const normalized = { ...(item || {}) };
+            if (!canEditPrice) delete normalized.unit_price;
+            return normalized;
+          }),
+        }
+      : { ...req.body };
+    if (!canEditPrice && !isBatch) {
       delete payload.unit_price;
     }
 
@@ -1191,8 +1200,18 @@ async function saveInvestmentSelection(req, res) {
       return res.status(idempotencySession.replayStatus).json(idempotencySession.replayPayload);
     }
 
-    const selection = await investmentsService.upsertInvestmentSelection(id, payload, req.user);
-    const responseBody = { ok: true, data: selection };
+    if (isBatch && !payload.selections.length) {
+      const error = new Error("selections no puede estar vacio");
+      error.status = 400;
+      throw error;
+    }
+
+    const selection = isBatch
+      ? await investmentsService.upsertInvestmentSelectionsBatch(id, payload.selections, req.user)
+      : await investmentsService.upsertInvestmentSelection(id, payload, req.user);
+    const responseBody = isBatch
+      ? { ok: true, data: { items: selection, saved_count: selection.length } }
+      : { ok: true, data: selection };
     await completeIdempotentWrite(idempotencySession, responseBody, 200);
     res.json(responseBody);
   } catch (error) {

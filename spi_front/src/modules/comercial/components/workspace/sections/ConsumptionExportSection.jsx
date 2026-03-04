@@ -9,6 +9,23 @@ const POLL_INTERVAL_MS = 3000;
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const toObject = (value) => (
+  value && typeof value === "object" && !Array.isArray(value) ? value : {}
+);
+
+const hasValue = (value) => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  return true;
+};
+
+const pickFirst = (...values) => {
+  for (const value of values) {
+    if (hasValue(value)) return value;
+  }
+  return null;
+};
+
 const formatDateTime = (value) => {
   if (!value) return "-";
   const parsed = new Date(value);
@@ -31,6 +48,76 @@ const toInversionRows = (inversiones = {}) =>
     cantidad: data?.cantidad ?? 0,
     precio: data?.precio ?? 0,
   }));
+
+const toNumberOrZero = (value) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const buildLocalFieldsPreview = (businessCase) => {
+  const metadata = toObject(businessCase?.modern_bc_metadata);
+  const general = toObject(metadata?.general_data);
+
+  const fields = {};
+  const setIfPresent = (key, value) => {
+    if (!hasValue(value)) return;
+    fields[key] = value;
+  };
+
+  setIfPresent("TipoDeCliente", pickFirst(general.clientType, metadata.clientType));
+  setIfPresent("EntidadContratante", pickFirst(general.contractingEntity, metadata.contractingEntity));
+  setIfPresent("Cliente", businessCase?.client_name);
+  setIfPresent("CodigoProceso", pickFirst(businessCase?.process_code, businessCase?.processCode, general.processCode));
+  setIfPresent("ObjetoContratacion", pickFirst(businessCase?.contract_object, businessCase?.contractObject, general.contractObject));
+  setIfPresent("ProvinciaCiudad", pickFirst(general.provinceCity, metadata.provinceCity, businessCase?.provinceCity));
+  setIfPresent("PresupuestoReferencial", pickFirst(general.referential_budget, metadata.referential_budget, businessCase?.bc_equipment_cost));
+  setIfPresent("CompromisoDeCompra", pickFirst(general.purchase_commitment, metadata.purchase_commitment));
+  setIfPresent("Observaciones", pickFirst(general.notes, metadata.notes, businessCase?.notes));
+
+  return fields;
+};
+
+const buildLocalInversionesPreview = (catalogItems = []) => {
+  const selected = (Array.isArray(catalogItems) ? catalogItems : [])
+    .filter((item) => Boolean(item?.selected));
+  const out = {};
+  selected.forEach((item) => {
+    const name = String(item?.name || "").trim();
+    if (!name) return;
+    out[name] = {
+      cantidad: toNumberOrZero(item?.quantity),
+      precio: toNumberOrZero(item?.unit_price),
+    };
+  });
+  return out;
+};
+
+const buildLocalPreview = ({ businessCase, catalogItems }) => {
+  const fields = buildLocalFieldsPreview(businessCase);
+  const inversiones = buildLocalInversionesPreview(catalogItems);
+  const metadataLast = businessCase?.modern_bc_metadata?.bc_sheet_generation?.last || null;
+
+  return {
+    business_case_id: businessCase?.id || null,
+    mapping_version: metadataLast?.mapping_version || "FORMATO BC - 15-01-2026",
+    fields,
+    inversiones,
+    summary: {
+      fields_count: Object.keys(fields).length,
+      inversiones_count: Object.keys(inversiones).length,
+    },
+    last_generation: metadataLast
+      ? {
+          job_id: metadataLast.job_id || null,
+          request_id: metadataLast.request_id || null,
+          mapping_version: metadataLast.mapping_version || null,
+          sheet_id: metadataLast.sheet_id || null,
+          sheet_url: metadataLast.sheet_url || null,
+          generated_at: metadataLast.generated_at || null,
+        }
+      : null,
+  };
+};
 
 const resolveLastGeneration = ({ latestJob, previewLast, metadataLast }) => {
   if (latestJob?.status === "completed") {
@@ -92,54 +179,33 @@ const ConsumptionExportSection = ({ businessCase }) => {
   const [latestJob, setLatestJob] = useState(null);
 
   const loadPreview = useCallback(async () => {
-    if (!bcId) return;
+    if (!bcId) {
+      setPreview(buildLocalPreview({ businessCase, catalogItems: [] }));
+      setLoadingPreview(false);
+      return;
+    }
+
     try {
       setLoadingPreview(true);
       setPreviewError(null);
-      const res = await api.get(`/business-case/${bcId}/sheets/preview`);
-      setPreview(res?.data?.data || null);
+      const catalogRes = await api.get(`/business-case/${bcId}/investments/catalog`);
+      const catalogItems = Array.isArray(catalogRes?.data?.data) ? catalogRes.data.data : [];
+      setPreview(buildLocalPreview({ businessCase, catalogItems }));
     } catch (error) {
+      setPreview(buildLocalPreview({ businessCase, catalogItems: [] }));
       setPreviewError(
         error?.response?.data?.message ||
           error?.message ||
-          "No se pudo obtener la vista previa de sincronizacion",
+          "No se pudo actualizar la vista previa con inversiones",
       );
-      setPreview(null);
     } finally {
       setLoadingPreview(false);
     }
-  }, [bcId]);
-
-  const loadLatestJob = useCallback(async (silent404 = true) => {
-    if (!bcId) return;
-    try {
-      const res = await api.get(`/business-case/${bcId}/sheets/jobs/latest`);
-      setLatestJob(res?.data?.data || null);
-    } catch (error) {
-      const status = Number(error?.response?.status || 0);
-      if (silent404 && status === 404) {
-        setLatestJob(null);
-        return;
-      }
-      throw error;
-    }
-  }, [bcId]);
+  }, [bcId, businessCase]);
 
   useEffect(() => {
-    if (!bcId) return;
-    let mounted = true;
-    const bootstrap = async () => {
-      try {
-        await Promise.all([loadPreview(), loadLatestJob(true)]);
-      } catch (_error) {
-        if (!mounted) return;
-      }
-    };
-    bootstrap();
-    return () => {
-      mounted = false;
-    };
-  }, [bcId, loadLatestJob, loadPreview]);
+    loadPreview();
+  }, [loadPreview]);
 
   const handleSyncNow = async () => {
     if (!bcId) return;
@@ -154,10 +220,13 @@ const ConsumptionExportSection = ({ businessCase }) => {
       if (!jobId) throw new Error("No se pudo encolar la sincronizacion a Sheets");
 
       let completedJob = null;
+      let lastObservedJob = null;
       for (let attempt = 0; attempt < MAX_POLL_ATTEMPTS; attempt += 1) {
         // eslint-disable-next-line no-await-in-loop
         const statusRes = await api.get(`/business-case/${bcId}/sheets/jobs/${jobId}`);
         const job = statusRes?.data?.data || {};
+        lastObservedJob = job;
+        setLatestJob(job);
 
         if (job.status === "completed") {
           completedJob = job;
@@ -174,8 +243,8 @@ const ConsumptionExportSection = ({ businessCase }) => {
 
       if (!completedJob?.sheet_url) {
         if (sheetTab && !sheetTab.closed) sheetTab.close();
+        if (lastObservedJob) setLatestJob(lastObservedJob);
         showToast("La sincronizacion sigue en cola. Reintenta en unos minutos.", "warning");
-        await loadLatestJob(false);
         return;
       }
 
