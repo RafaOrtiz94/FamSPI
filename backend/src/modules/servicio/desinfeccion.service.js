@@ -9,6 +9,7 @@ const { PDFDocument, StandardFonts } = require("pdf-lib");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 
 // Resuelve la plantilla contemplando ambas grafias del nombre (acento correcto y nombre actual en disco)
 const TEMPLATE_FILENAMES = [
@@ -302,6 +303,7 @@ const generateDisinfectionPDF = async (disinfectionData, providedSignatureBuffer
     logger.warn({ appearanceErr }, "No se pudieron ajustar apariencias de campos");
   }
 
+  securePdfForm(form);
   const pdfBytes = await pdfDoc.save();
   return Buffer.from(pdfBytes);
 };

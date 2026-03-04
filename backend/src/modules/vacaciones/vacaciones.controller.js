@@ -38,6 +38,35 @@ async function updateStatus(req, res) {
   }
 }
 
+async function cancel(req, res) {
+  try {
+    const updated = await service.cancelVacationRequest(
+      req.params.id,
+      req.body?.reason,
+      req.user
+    );
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    logger.error(err, "Error cancelando vacaciones");
+    res.status(400).json({ ok: false, message: err.message || "No se pudo cancelar" });
+  }
+}
+
+async function reviewCancel(req, res) {
+  try {
+    const updated = await service.reviewVacationCancellation(
+      req.params.id,
+      req.body?.decision,
+      req.body?.reason,
+      req.user
+    );
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    logger.error(err, "Error revisando cancelación de vacaciones");
+    res.status(400).json({ ok: false, message: err.message || "No se pudo revisar cancelación" });
+  }
+}
+
 async function verifyLegalToken(req, res) {
   try {
     const responseAsJson = shouldRespondJson(req);
@@ -107,5 +136,4 @@ async function getSummary(req, res) {
   }
 }
 
-module.exports = { create, list, updateStatus, getSummary, verifyLegalToken };
-
+module.exports = { create, list, updateStatus, cancel, reviewCancel, getSummary, verifyLegalToken };

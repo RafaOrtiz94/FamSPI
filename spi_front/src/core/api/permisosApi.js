@@ -12,6 +12,43 @@ export const createSolicitud = async (data) => {
   return response.data;
 };
 
+export const registerStudyEnrollment = async (data) => {
+  const formData = new FormData();
+  formData.append("institution_name", data.institution_name);
+  formData.append("program_name", data.program_name);
+  formData.append("valid_from", data.valid_from);
+  formData.append("valid_until", data.valid_until);
+  if (data.matricula_file) {
+    formData.append("matricula", data.matricula_file);
+  }
+  const response = await api.post("/permisos/estudios/matricula", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+};
+
+export const getActiveStudyEnrollment = async (date = null) => {
+  const response = await api.get("/permisos/estudios/matricula/activa", {
+    params: date ? { date } : {},
+  });
+  return response.data;
+};
+
+export const getMyStudyEnrollments = async () => {
+  const response = await api.get("/permisos/estudios/matriculas");
+  return response.data;
+};
+
+export const getPendingStudyEnrollments = async () => {
+  const response = await api.get("/permisos/estudios/matriculas/pendientes");
+  return response.data;
+};
+
+export const reviewStudyEnrollment = async (id, decision, reason) => {
+  const response = await api.post(`/permisos/estudios/matriculas/${id}/revisar`, { decision, reason });
+  return response.data;
+};
+
 /**
  * Listar mis solicitudes
  */
@@ -74,6 +111,21 @@ export const aprobarFinal = async (id) => {
  */
 export const rechazar = async (id, observaciones) => {
   const response = await api.post(`/permisos/${id}/rechazar`, { observaciones });
+  return response.data;
+};
+
+export const cancelarSolicitud = async (id, reason) => {
+  const response = await api.post(`/permisos/${id}/cancelar`, { reason });
+  return response.data;
+};
+
+export const revisarCancelacionSolicitud = async (id, decision, reason) => {
+  const response = await api.post(`/permisos/${id}/cancelar/revisar`, { decision, reason });
+  return response.data;
+};
+
+export const updateRecoveryPlan = async (id, recovery_plan, action = "propose") => {
+  const response = await api.post(`/permisos/${id}/recovery-plan`, { recovery_plan, action });
   return response.data;
 };
 

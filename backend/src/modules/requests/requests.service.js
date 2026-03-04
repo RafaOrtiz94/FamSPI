@@ -15,6 +15,7 @@ const PDFKitDocument = require("pdfkit");
 const { PDFDocument: PdfLibDocument, StandardFonts } = require("pdf-lib");
 const path = require("path");
 const fs = require("fs");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 const {
   copyTemplate,
   replaceTags,
@@ -1434,7 +1435,7 @@ async function generateInspectionFormPdf({
     setTextField(`e_equipo_${i + 1}`, state, { fontSize: 8 });
   }
 
-  form.flatten();
+  securePdfForm(form);
   const pdfBytes = await pdfDoc.save();
   const pdfName = `${docLabel} - ${normalizedCode}-${paddedId}.pdf`;
   const stored = await uploadBase64File(

@@ -3,6 +3,7 @@ const path = require("path");
 const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray } = require("pdf-lib");
 const QRCode = require("qrcode");
 const { uploadJustificante } = require("./permisos.drive");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/F.RH-10_V01_SOLICITUD DE PERMISO.pdf");
 const LEGAL_PDF_TIMEZONE =
@@ -42,6 +43,9 @@ async function generateFRH10(solicitud) {
 
     // Firma visual tipo rubrica y enlace a hoja de validacion
     await applySignatureVisualDesign(pdfDoc, form, solicitud, validationPage);
+
+    // Seguridad: convertir campos de formulario en contenido estático (no editable).
+    securePdfForm(form);
 
     // Guardar PDF
     const pdfBytes = await pdfDoc.save();
@@ -650,4 +654,3 @@ module.exports = {
   generateFRH10,
   generateFirmaLegalValidationPdf,
 };
-

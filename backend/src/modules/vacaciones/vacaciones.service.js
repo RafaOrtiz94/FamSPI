@@ -56,6 +56,39 @@ function buildWorkdayDateTime(dateValue, timeValue) {
   return `${dateOnly}T${timeValue}:00`;
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function getCurrentDateInAppTimezone() {
+  const timeZone = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return normalizeDateOnly(new Date());
+  return `${year}-${month}-${day}`;
+}
+
+function canCancelByDateRule(solicitud = {}) {
+  const startDate = normalizeDateOnly(solicitud?.start_date || solicitud?.start_time);
+  if (!startDate) return false;
+  const today = getCurrentDateInAppTimezone();
+  return today <= startDate;
+}
+
 async function ensureTable() {
   await db.query(`
     CREATE TABLE IF NOT EXISTS vacaciones_solicitudes (
@@ -86,6 +119,26 @@ async function ensureTable() {
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS legal_verification_token TEXT");
   await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS legal_verification_created_at TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS start_time TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS end_time TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS duration_hours NUMERIC(6,2)");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancelled_by_user_id INTEGER");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancelled_by_email TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_reason TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_status TEXT NOT NULL DEFAULT 'none'");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_requested_at TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_requested_by_user_id INTEGER");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_requested_by_email TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_request_reason TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_reviewed_at TIMESTAMPTZ");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_reviewed_by_user_id INTEGER");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_reviewed_by_email TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes ADD COLUMN IF NOT EXISTS cancellation_review_reason TEXT");
+  await db.query("ALTER TABLE vacaciones_solicitudes DROP CONSTRAINT IF EXISTS vacaciones_solicitudes_cancellation_status_check");
+  await db.query(
+    "ALTER TABLE vacaciones_solicitudes ADD CONSTRAINT vacaciones_solicitudes_cancellation_status_check CHECK (cancellation_status IN ('none','pending','approved','rejected'))"
+  );
   await db.query(
     `CREATE UNIQUE INDEX IF NOT EXISTS ux_vacaciones_legal_verification_token
      ON vacaciones_solicitudes (legal_verification_token)
@@ -537,6 +590,14 @@ async function createVacationRequest(payload, userId, meta = {}) {
   if (!user) throw new Error("Usuario no encontrado");
 
   const { start_date, end_date, period, allow_advance } = payload;
+  const startTime = payload?.start_time ? new Date(payload.start_time) : null;
+  const endTime = payload?.end_time ? new Date(payload.end_time) : null;
+  let durationHours = Number(payload?.duration_hours || 0);
+  if (startTime && endTime && !Number.isNaN(startTime.getTime()) && !Number.isNaN(endTime.getTime())) {
+    const diffHours = (endTime.getTime() - startTime.getTime()) / (1000 * 60 * 60);
+    if (diffHours <= 0) throw new Error("El rango horario de vacaciones no es válido");
+    durationHours = Math.round(diffHours * 100) / 100;
+  }
   if (!start_date || !end_date) throw new Error("Las fechas de inicio y fin son obligatorias");
   const hireDateValue = await getHireDate(userId);
   const allowanceInfo = computeVacationAllowance(hireDateValue, start_date);
@@ -581,8 +642,8 @@ async function createVacationRequest(payload, userId, meta = {}) {
     `INSERT INTO vacaciones_solicitudes (
       requester_id, approver_id, approver_role, department_id, start_date, end_date, return_date, period, days, status,
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
-      advance_request, advance_eligible_from
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pendiente',$10,$11,$12,$13,$14,$15,$16)
+      advance_request, advance_eligible_from, start_time, end_time, duration_hours
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'pendiente',$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
     RETURNING *`,
     [
       userId,
@@ -601,6 +662,9 @@ async function createVacationRequest(payload, userId, meta = {}) {
       driveMeta.folderId,
       (!allowanceInfo.eligible && !allowanceInfo.missingHireDate && (allow_advance !== false)) || allowanceInfo.missingHireDate,
       !allowanceInfo.eligible ? allowanceInfo.eligibleFrom : null,
+      startTime && !Number.isNaN(startTime.getTime()) ? startTime.toISOString() : null,
+      endTime && !Number.isNaN(endTime.getTime()) ? endTime.toISOString() : null,
+      durationHours > 0 ? durationHours : null,
     ]
   );
 
@@ -827,6 +891,8 @@ async function updateVacationStatus(id, status, user, meta = {}) {
       const requester = await loadUser(updated[0]?.requester_id);
       const startDateTime = buildWorkdayDateTime(updated[0]?.start_date, "09:00");
       const endDateTime = buildWorkdayDateTime(updated[0]?.end_date, "18:00");
+      const effectiveStartDateTime = updated[0]?.start_time || startDateTime;
+      const effectiveEndDateTime = updated[0]?.end_time || endDateTime;
       await createTimeOffEvent({
         userEmail: requester?.email || null,
         summary: `Vacaciones - ${requester?.fullname || requester?.email || "Colaborador"}`,
@@ -838,8 +904,8 @@ async function updateVacationStatus(id, status, user, meta = {}) {
         }),
         startDate: updated[0]?.start_date,
         endDate: updated[0]?.end_date,
-        startDateTime,
-        endDateTime,
+        startDateTime: effectiveStartDateTime,
+        endDateTime: effectiveEndDateTime,
         reminderMinutesBefore: 1440,
       });
     } catch (calendarError) {
@@ -858,6 +924,143 @@ async function updateVacationStatus(id, status, user, meta = {}) {
     legal_verification_token: verificationToken || updated[0]?.legal_verification_token || null,
     legal_verification_url: buildLegalVerificationUrl(verificationToken || updated[0]?.legal_verification_token || null),
   };
+}
+
+async function cancelVacationRequest(id, reason, actor) {
+  await ensureTable();
+  const trimmedReason = String(reason || "").trim();
+  if (!trimmedReason) throw new Error("Debes registrar el motivo de cancelación");
+
+  const { rows } = await db.query("SELECT * FROM vacaciones_solicitudes WHERE id = $1", [id]);
+  const current = rows[0];
+  if (!current) throw new Error("Solicitud no encontrada");
+  if (["rechazado", "cancelado"].includes(String(current.status || "").toLowerCase())) {
+    throw new Error("La solicitud ya no puede ser cancelada");
+  }
+
+  const actorId = Number(actor?.id || 0);
+  const roleCandidates = getApproverRoleCandidates(actor);
+  const isRequester = Number(current.requester_id) === actorId;
+  const isApprover =
+    Number(current.approver_id) === actorId ||
+    (current.approver_role &&
+      (GERENCIA_GENERAL_ROLES.has(String(current.approver_role).toLowerCase())
+        ? roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate))
+        : roleCandidates.includes(String(current.approver_role).toLowerCase())));
+  if (!isRequester && !isApprover) throw new Error("No tienes permisos para cancelar esta solicitud");
+
+  const normalizedStatus = String(current.status || "").toLowerCase();
+  if (!["aprobado", "approved"].includes(normalizedStatus)) {
+    throw new Error("Solo solicitudes aprobadas pueden entrar en flujo de cancelación");
+  }
+  if (!canCancelByDateRule(current)) {
+    throw new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
+  }
+
+  if (isRequester && !isApprover) {
+    if (String(current.cancellation_status || "none").toLowerCase() === "pending") {
+      throw new Error("Ya existe una solicitud de cancelación pendiente");
+    }
+    const { rows: requested } = await db.query(
+      `UPDATE vacaciones_solicitudes
+          SET cancellation_status = 'pending',
+              cancellation_requested_at = NOW(),
+              cancellation_requested_by_user_id = $2,
+              cancellation_requested_by_email = $3,
+              cancellation_request_reason = $4,
+              cancellation_reviewed_at = NULL,
+              cancellation_reviewed_by_user_id = NULL,
+              cancellation_reviewed_by_email = NULL,
+              cancellation_review_reason = NULL,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, actorId || null, actor?.email || null, trimmedReason]
+    );
+    return requested[0];
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET status = 'cancelado',
+            cancelled_at = NOW(),
+            cancelled_by_user_id = $2,
+            cancelled_by_email = $3,
+            cancellation_reason = $4,
+            cancellation_status = 'approved',
+            cancellation_reviewed_at = NOW(),
+            cancellation_reviewed_by_user_id = $2,
+            cancellation_reviewed_by_email = $3,
+            cancellation_review_reason = $4,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [id, actorId || null, actor?.email || null, trimmedReason]
+  );
+  return updated[0];
+}
+
+async function reviewVacationCancellation(id, decision, reason, actor) {
+  await ensureTable();
+  const normalizedDecision = String(decision || "").toLowerCase();
+  if (!["approve", "reject"].includes(normalizedDecision)) throw new Error("Decision inválida");
+  const trimmedReason = String(reason || "").trim();
+  if (!trimmedReason) throw new Error("Debes registrar el motivo de la decisión");
+
+  const { rows } = await db.query("SELECT * FROM vacaciones_solicitudes WHERE id = $1", [id]);
+  const current = rows[0];
+  if (!current) throw new Error("Solicitud no encontrada");
+  if (String(current.cancellation_status || "none").toLowerCase() !== "pending") {
+    throw new Error("No existe una cancelación pendiente para esta solicitud");
+  }
+
+  const actorId = Number(actor?.id || 0);
+  const roleCandidates = getApproverRoleCandidates(actor);
+  const isApprover =
+    Number(current.approver_id) === actorId ||
+    (current.approver_role &&
+      (GERENCIA_GENERAL_ROLES.has(String(current.approver_role).toLowerCase())
+        ? roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate))
+        : roleCandidates.includes(String(current.approver_role).toLowerCase())));
+  if (!isApprover) throw new Error("No tienes permisos para revisar esta cancelación");
+
+  if (normalizedDecision === "approve") {
+    if (!canCancelByDateRule(current)) {
+      throw new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
+    }
+    const { rows: updated } = await db.query(
+      `UPDATE vacaciones_solicitudes
+          SET status = 'cancelado',
+              cancelled_at = NOW(),
+              cancelled_by_user_id = $2,
+              cancelled_by_email = $3,
+              cancellation_reason = COALESCE(cancellation_request_reason, $4),
+              cancellation_status = 'approved',
+              cancellation_reviewed_at = NOW(),
+              cancellation_reviewed_by_user_id = $2,
+              cancellation_reviewed_by_email = $3,
+              cancellation_review_reason = $4,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [id, actorId || null, actor?.email || null, trimmedReason]
+    );
+    return updated[0];
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET cancellation_status = 'rejected',
+            cancellation_reviewed_at = NOW(),
+            cancellation_reviewed_by_user_id = $2,
+            cancellation_reviewed_by_email = $3,
+            cancellation_review_reason = $4,
+            updated_at = NOW()
+      WHERE id = $1
+      RETURNING *`,
+    [id, actorId || null, actor?.email || null, trimmedReason]
+  );
+  return updated[0];
 }
 
 async function summary(user, includeAll = false) {
@@ -974,6 +1177,8 @@ module.exports = {
   createVacationRequest,
   listVacationRequests,
   updateVacationStatus,
+  cancelVacationRequest,
+  reviewVacationCancellation,
   summary,
   getLegalVerificationByToken,
 };

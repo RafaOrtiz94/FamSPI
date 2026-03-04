@@ -12,6 +12,7 @@ const { PDFDocument } = require("pdf-lib");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
+const { securePdfForm } = require("../../utils/pdfFormSecurity");
 
 const TEMPLATE_PATH = path.join(
     __dirname,
@@ -299,7 +300,7 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
         signatureNote
     );
 
-    form.flatten();
+    securePdfForm(form);
 
     const pdfBytes = await pdfDoc.save();
     return Buffer.from(pdfBytes);

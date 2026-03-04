@@ -4,7 +4,12 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
-import { createSolicitud, getMisSolicitudes } from "../../../../core/api/permisosApi";
+import {
+    createSolicitud,
+    getMisSolicitudes,
+    registerStudyEnrollment,
+    getMyStudyEnrollments,
+} from "../../../../core/api/permisosApi";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 
 /**
@@ -27,7 +32,19 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [pendingVacationDays, setPendingVacationDays] = useState(0);
     const [rejectedVacationDays, setRejectedVacationDays] = useState(0);
     const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
+    const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
     const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
+    const [studyEnrollments, setStudyEnrollments] = useState([]);
+    const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
+    const [loadingStudyEnrollment, setLoadingStudyEnrollment] = useState(false);
+    const [studyForm, setStudyForm] = useState({
+        institution_name: "",
+        program_name: "",
+        valid_from: "",
+        valid_until: "",
+        matricula_file: null,
+    });
+    const [recoveryPlanRows, setRecoveryPlanRows] = useState([]);
     const usesPermisoHoras = (permiso, saludTipo) =>
         permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
     const usesPermisoDateTime = (permiso, saludTipo) =>
@@ -62,6 +79,49 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         });
     };
 
+    const normalizeTimeText = (value) => {
+        const text = String(value || "").trim();
+        const match = text.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
+        if (!match) return "";
+        const hh = Number(match[1]);
+        const mm = Number(match[2]);
+        if (!Number.isFinite(hh) || !Number.isFinite(mm) || hh < 0 || hh > 23 || mm < 0 || mm > 59) return "";
+        return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    };
+
+    const computeRecoveryHours = (startTime, endTime) => {
+        const start = normalizeTimeText(startTime);
+        const end = normalizeTimeText(endTime);
+        if (!start || !end) return "";
+        const [sh, sm] = start.split(":").map(Number);
+        const [eh, em] = end.split(":").map(Number);
+        const diff = eh * 60 + em - (sh * 60 + sm);
+        if (diff <= 0) return "";
+        return String(Math.round(((diff / 60) + Number.EPSILON) * 100) / 100);
+    };
+
+    const estimateRequestedHours = () => {
+        const hours = Number(formData.duracion_horas || 0);
+        if (Number.isFinite(hours) && hours > 0) return hours;
+        const days = Number(formData.duracion_dias || 0);
+        if (Number.isFinite(days) && days > 0) return Math.round(((days * 8) + Number.EPSILON) * 100) / 100;
+        return 0;
+    };
+
+    const canBeRecoverableByRule = () => {
+        if (tipoSolicitud !== "permiso") return false;
+        if (tipoPermiso === "estudios") return true;
+        if (tipoPermiso === "personal") return true;
+        if (tipoPermiso === "calamidad") {
+            const normalized = String(subtipoCalamidad || "").trim().toLowerCase();
+            return Boolean(normalized) && normalized !== "fallecimiento";
+        }
+        if (tipoPermiso === "salud") {
+            return subtipoSalud === "atencion_medica_familiar";
+        }
+        return false;
+    };
+
     const [formData, setFormData] = useState({
         // ComÃºn
         fecha_inicio: "",
@@ -73,11 +133,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         duracion_horas: "",
         tipo_permiso: "",
         subtipo_calamidad: "",
+        subtipo_salud: "",
 
         // Vacaciones
         duracion_dias: "",
         periodo_vacaciones: new Date().getFullYear().toString(),
         fecha_regreso: "",
+        vacation_start_time: "",
+        vacation_end_time: "",
     });
 
     useEffect(() => {
@@ -96,8 +159,37 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     useEffect(() => {
         if (tipoPermiso !== "salud") {
             setSaludDuracionTipo("dias");
+            setSubtipoSalud("");
         }
     }, [tipoPermiso]);
+
+    useEffect(() => {
+        if (!canBeRecoverableByRule()) {
+            setRecoveryPlanRows([]);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [tipoSolicitud, tipoPermiso, subtipoCalamidad, subtipoSalud]);
+
+    useEffect(() => {
+        const loadEnrollment = async () => {
+            if (!open || tipoSolicitud !== "permiso" || tipoPermiso !== "estudios") return;
+            setLoadingStudyEnrollment(true);
+            try {
+                const response = await getMyStudyEnrollments();
+                const items = Array.isArray(response?.data) ? response.data : [];
+                const activeItems = items.filter((item) => String(item?.status || "").toLowerCase() === "active");
+                setStudyEnrollments(items);
+                setSelectedStudyEnrollmentId(activeItems[0] ? String(activeItems[0].id) : "");
+            } catch (error) {
+                console.error("Error loading study enrollment:", error);
+                setStudyEnrollments([]);
+                setSelectedStudyEnrollmentId("");
+            } finally {
+                setLoadingStudyEnrollment(false);
+            }
+        };
+        loadEnrollment();
+    }, [open, tipoSolicitud, tipoPermiso]);
 
     useEffect(() => {
         if (vacacionMedioDia) {
@@ -194,6 +286,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setTipoSolicitud("");
         setTipoPermiso("");
         setSubtipoCalamidad("");
+        setSubtipoSalud("");
         setSaludDuracionTipo("dias");
         setVacacionMedioDia(false);
         setVacationSummary(null);
@@ -209,10 +302,24 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             duracion_horas: "",
             tipo_permiso: "",
             subtipo_calamidad: "",
+            subtipo_salud: "",
             duracion_dias: "",
             periodo_vacaciones: new Date().getFullYear().toString(),
             fecha_regreso: "",
+            vacation_start_time: "",
+            vacation_end_time: "",
         });
+        setStudyEnrollments([]);
+        setSelectedStudyEnrollmentId("");
+        setLoadingStudyEnrollment(false);
+        setStudyForm({
+            institution_name: "",
+            program_name: "",
+            valid_from: "",
+            valid_until: "",
+            matricula_file: null,
+        });
+        setRecoveryPlanRows([]);
     };
 
     const handleClose = () => {
@@ -235,6 +342,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             if (tipoSolicitud === "permiso") {
                 payload.tipo_permiso = tipoPermiso;
+                if (tipoPermiso === "salud") {
+                    if (!subtipoSalud) {
+                        throw new Error("Debes seleccionar el subtipo de permiso por salud.");
+                    }
+                    payload.subtipo_salud = subtipoSalud;
+                }
+                if (tipoPermiso === "estudios") {
+                    if (!selectedStudyEnrollmentId) {
+                        throw new Error("Debes seleccionar una matrícula activa para continuar.");
+                    }
+                    payload.study_enrollment_id = Number(selectedStudyEnrollmentId);
+                }
                 const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
                 if (shouldUseDateTime) {
                     payload.fecha_inicio_hora = toIsoDateTime(formData.fecha_inicio_hora);
@@ -256,12 +375,47 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 if (tipoPermiso === "salud" && saludDuracionTipo === "dias") {
                     payload.duracion_horas = "";
                 }
+
+                if (canBeRecoverableByRule() && recoveryPlanRows.length > 0) {
+                    const normalizedRecoveryPlan = recoveryPlanRows
+                        .map((row) => {
+                            const date = row?.date || "";
+                            const start_time = normalizeTimeText(row?.start_time);
+                            const end_time = normalizeTimeText(row?.end_time);
+                            const notes = String(row?.notes || "").trim();
+                            const hours = Number(computeRecoveryHours(start_time, end_time) || 0);
+                            return { date, start_time, end_time, notes, hours };
+                        })
+                        .filter((row) => row.date && row.start_time && row.end_time && row.hours > 0)
+                        .map((row) => ({
+                            date: row.date,
+                            start_time: row.start_time,
+                            end_time: row.end_time,
+                            notes: row.notes || null,
+                        }));
+
+                    if (normalizedRecoveryPlan.length === 0) {
+                        throw new Error("El plan de recuperación contiene tramos incompletos o inválidos.");
+                    }
+                    payload.recovery_plan = normalizedRecoveryPlan;
+                }
             }
 
             if (tipoSolicitud === "vacaciones" && vacacionMedioDia) {
                 payload.duracion_dias = 0.5;
                 payload.duracion_horas = 4;
                 payload.fecha_fin = payload.fecha_inicio;
+                if (!formData.vacation_start_time || !formData.vacation_end_time) {
+                    throw new Error("Para vacaciones de medio día debes registrar el rango horario.");
+                }
+                const startIso = toIsoDateTime(`${payload.fecha_inicio}T${formData.vacation_start_time}`);
+                const endIso = toIsoDateTime(`${payload.fecha_inicio}T${formData.vacation_end_time}`);
+                if (!startIso || !endIso || new Date(endIso) <= new Date(startIso)) {
+                    throw new Error("El rango horario de vacaciones no es válido.");
+                }
+                payload.start_time = startIso;
+                payload.end_time = endIso;
+                payload.duration_hours = Number(calculateHoursBetween(startIso, endIso) || 0);
             }
 
             const response = await createSolicitud(payload);
@@ -368,6 +522,25 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const hasDates = Boolean(startValue && endValue);
         const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
         const isAutoHours = usesHoras && usesDateTime;
+        const needsEnrollment = tipoPermiso === "estudios";
+        const requiresActiveEnrollmentSelection = needsEnrollment && !selectedStudyEnrollmentId;
+        const activeEnrollments = studyEnrollments.filter((item) => String(item?.status || "").toLowerCase() === "active");
+        const pendingEnrollments = studyEnrollments.filter((item) => String(item?.status || "").toLowerCase() === "pending_validation");
+        const hasStudyForm =
+            studyForm.institution_name.trim() &&
+            studyForm.program_name.trim() &&
+            studyForm.valid_from &&
+            studyForm.valid_until &&
+            studyForm.matricula_file;
+        const plannedRecoveryHours =
+            Math.round(
+                (recoveryPlanRows.reduce(
+                    (acc, row) => acc + Number(computeRecoveryHours(row.start_time, row.end_time) || 0),
+                    0
+                ) + Number.EPSILON) * 100
+            ) / 100;
+        const requestedHours = estimateRequestedHours();
+        const isRecoveryPlanComplete = requestedHours > 0 && plannedRecoveryHours >= requestedHours;
 
         return (
             <div className="space-y-4">
@@ -439,8 +612,136 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
                 {tipoPermiso && (
                     <>
+                        {tipoPermiso === "estudios" && (
+                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+                                <p className="text-xs font-semibold text-indigo-900">
+                                    Matrícula para permisos por educación
+                                </p>
+                                {loadingStudyEnrollment ? (
+                                    <p className="text-xs text-indigo-700">Validando matrícula activa...</p>
+                                ) : (
+                                    <>
+                                        {activeEnrollments.length > 0 ? (
+                                            <div className="space-y-2">
+                                                <p className="text-xs text-indigo-700">
+                                                    Selecciona una matrícula activa para habilitar la solicitud.
+                                                </p>
+                                                <select
+                                                    value={selectedStudyEnrollmentId}
+                                                    onChange={(e) => setSelectedStudyEnrollmentId(e.target.value)}
+                                                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                >
+                                                    <option value="">Selecciona matrícula activa</option>
+                                                    {activeEnrollments.map((item) => (
+                                                        <option key={item.id} value={item.id}>
+                                                            {item.institution_name} - vence {String(item.valid_until).slice(0, 10)}
+                                                        </option>
+                                                    ))}
+                                                </select>
+                                            </div>
+                                        ) : (
+                                            <p className="text-xs text-indigo-700">
+                                                No tienes matrícula activa. Primero debes subir una matrícula y esperar validación del jefe inmediato.
+                                            </p>
+                                        )}
+
+                                        {pendingEnrollments.length > 0 && (
+                                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
+                                                <p className="text-xs text-amber-800">
+                                                    Tienes matrícula en <strong>esperando validación</strong>. No puedes pedir permisos por estudios hasta su aprobación.
+                                                </p>
+                                            </div>
+                                        )}
+
+                                        {activeEnrollments.length === 0 && (
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                            <input
+                                                type="text"
+                                                placeholder="Institución"
+                                                value={studyForm.institution_name}
+                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, institution_name: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                            <input
+                                                type="text"
+                                                placeholder="Programa"
+                                                value={studyForm.program_name}
+                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, program_name: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                            <input
+                                                type="date"
+                                                value={studyForm.valid_from}
+                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_from: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                            <input
+                                                type="date"
+                                                value={studyForm.valid_until}
+                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_until: e.target.value }))}
+                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                            />
+                                            <input
+                                                type="file"
+                                                accept=".pdf,.png,.jpg,.jpeg"
+                                                onChange={(e) =>
+                                                    setStudyForm((prev) => ({
+                                                        ...prev,
+                                                        matricula_file: e.target.files?.[0] || null,
+                                                    }))
+                                                }
+                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 sm:col-span-2"
+                                            />
+                                        </div>
+                                        )}
+                                    </>
+                                )}
+                                {activeEnrollments.length === 0 && (
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        onClick={async () => {
+                                            try {
+                                                const enrollmentPayload = {
+                                                    institution_name: studyForm.institution_name,
+                                                    program_name: studyForm.program_name,
+                                                    valid_from: studyForm.valid_from,
+                                                    valid_until: studyForm.valid_until,
+                                                    matricula_file: studyForm.matricula_file,
+                                                };
+                                                await registerStudyEnrollment(enrollmentPayload);
+                                                showToast("Matrícula enviada. Estado: esperando validación.", "success");
+                                                const refreshed = await getMyStudyEnrollments();
+                                                const items = Array.isArray(refreshed?.data) ? refreshed.data : [];
+                                                const activeItems = items.filter((item) => String(item?.status || "").toLowerCase() === "active");
+                                                setStudyEnrollments(items);
+                                                setSelectedStudyEnrollmentId(activeItems[0] ? String(activeItems[0].id) : "");
+                                            } catch (error) {
+                                                showToast(error.response?.data?.message || error.message || "No se pudo registrar matrícula", "error");
+                                            }
+                                        }}
+                                        disabled={!hasStudyForm}
+                                        className="w-full"
+                                    >
+                                        Subir matrícula para validación
+                                    </Button>
+                                )}
+                            </div>
+                        )}
+
                         {isSalud && (
                             <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Subtipo salud</label>
+                                <select
+                                    value={subtipoSalud}
+                                    onChange={(e) => setSubtipoSalud(e.target.value)}
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 mb-3"
+                                >
+                                    <option value="">Selecciona subtipo</option>
+                                    <option value="enfermedad_certificada">Enfermedad certificada</option>
+                                    <option value="atencion_medica_familiar">Atención médica / salud familiar</option>
+                                </select>
+
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
                                 <select
                                     value={saludDuracionTipo}
@@ -450,6 +751,130 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     <option value="dias">Días</option>
                                     <option value="horas">Horas</option>
                                 </select>
+                            </div>
+                        )}
+
+                        {canBeRecoverableByRule() && (
+                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-3">
+                                <div className="flex items-center justify-between">
+                                    <p className="text-xs font-semibold text-emerald-900">Plan de recuperación (opcional y editable con tu jefe)</p>
+                                    <Button
+                                        type="button"
+                                        variant="secondary"
+                                        className="text-xs px-2 py-1"
+                                        disabled={isRecoveryPlanComplete}
+                                        onClick={() =>
+                                            setRecoveryPlanRows((prev) => [
+                                                ...prev,
+                                                { date: "", start_time: "", end_time: "", notes: "" },
+                                            ])
+                                        }
+                                    >
+                                        {isRecoveryPlanComplete ? "Límite alcanzado" : "+ Tramo"}
+                                    </Button>
+                                </div>
+
+                                {recoveryPlanRows.length === 0 ? (
+                                    <p className="text-xs text-emerald-800">
+                                        Puedes dejarlo vacío ahora y coordinarlo luego. Ejemplo: 30 minutos diarios por varios días.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        {recoveryPlanRows.map((row, idx) => {
+                                            const computedHours = computeRecoveryHours(row.start_time, row.end_time);
+                                            return (
+                                                <div key={`recovery-row-${idx}`} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end rounded-md border border-emerald-200 bg-white p-2">
+                                                    <div className="sm:col-span-3">
+                                                        <label className="block text-[11px] text-gray-600">Fecha</label>
+                                                        <input
+                                                            type="date"
+                                                            value={row.date || ""}
+                                                            onChange={(e) =>
+                                                                setRecoveryPlanRows((prev) =>
+                                                                    prev.map((it, itIdx) =>
+                                                                        itIdx === idx ? { ...it, date: e.target.value } : it
+                                                                    )
+                                                                )
+                                                            }
+                                                            className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-2">
+                                                        <label className="block text-[11px] text-gray-600">Inicio</label>
+                                                        <input
+                                                            type="time"
+                                                            value={row.start_time || ""}
+                                                            onChange={(e) =>
+                                                                setRecoveryPlanRows((prev) =>
+                                                                    prev.map((it, itIdx) =>
+                                                                        itIdx === idx ? { ...it, start_time: e.target.value } : it
+                                                                    )
+                                                                )
+                                                            }
+                                                            className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-2">
+                                                        <label className="block text-[11px] text-gray-600">Fin</label>
+                                                        <input
+                                                            type="time"
+                                                            value={row.end_time || ""}
+                                                            onChange={(e) =>
+                                                                setRecoveryPlanRows((prev) =>
+                                                                    prev.map((it, itIdx) =>
+                                                                        itIdx === idx ? { ...it, end_time: e.target.value } : it
+                                                                    )
+                                                                )
+                                                            }
+                                                            className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-3">
+                                                        <label className="block text-[11px] text-gray-600">Notas</label>
+                                                        <input
+                                                            type="text"
+                                                            value={row.notes || ""}
+                                                            onChange={(e) =>
+                                                                setRecoveryPlanRows((prev) =>
+                                                                    prev.map((it, itIdx) =>
+                                                                        itIdx === idx ? { ...it, notes: e.target.value } : it
+                                                                    )
+                                                                )
+                                                            }
+                                                            className="w-full px-2 py-1.5 border border-gray-300 rounded"
+                                                            placeholder="Ej: recuperación diaria"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-1 text-center">
+                                                        <p className="text-[11px] text-gray-600">h</p>
+                                                        <p className="text-xs font-semibold text-emerald-700">{computedHours || "-"}</p>
+                                                    </div>
+                                                    <div className="sm:col-span-1">
+                                                        <Button
+                                                            type="button"
+                                                            variant="secondary"
+                                                            className="w-full text-xs px-2 py-1"
+                                                            onClick={() =>
+                                                                setRecoveryPlanRows((prev) => prev.filter((_, itIdx) => itIdx !== idx))
+                                                            }
+                                                        >
+                                                            X
+                                                        </Button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        <p className="text-xs text-emerald-800">
+                                            Total planificado: <strong>{plannedRecoveryHours}h</strong>
+                                            {requestedHours > 0 ? ` / ${requestedHours}h solicitadas` : ""}
+                                        </p>
+                                        {isRecoveryPlanComplete && (
+                                            <p className="text-xs text-emerald-700">
+                                                Ya alcanzaste las horas solicitadas. No puedes agregar más tramos.
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -470,6 +895,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     }}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                     required
+                                    disabled={requiresActiveEnrollmentSelection}
                                 />
                             </div>
 
@@ -489,6 +915,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     min={startValue || undefined}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                     required
+                                    disabled={requiresActiveEnrollmentSelection}
                                 />
                             </div>
                         </div>
@@ -512,18 +939,35 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 }
                                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                 required
-                                readOnly={isAutoHours}
+                                readOnly={isAutoHours || requiresActiveEnrollmentSelection}
+                                disabled={requiresActiveEnrollmentSelection}
                                 min="0.5"
                                 max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
                             />
                         </div>
 
-                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                            <p className="text-xs text-blue-700">
-                                <strong>Nota:</strong> Después de la aprobación parcial, deberás subir los documentos
-                                justificantes correspondientes.
-                            </p>
-                        </div>
+                        {requiresActiveEnrollmentSelection && (
+                            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-xs text-amber-800">
+                                    Debes seleccionar una matrícula <strong>activa</strong> para habilitar el llenado de la solicitud por estudios.
+                                </p>
+                            </div>
+                        )}
+
+                        {(tipoPermiso === "salud" || tipoPermiso === "calamidad") && (
+                            <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                                <p className="text-xs text-blue-700">
+                                    <strong>Nota:</strong> Este tipo de permiso puede requerir justificación documental.
+                                </p>
+                            </div>
+                        )}
+                        {(tipoPermiso === "estudios" || tipoPermiso === "personal") && (
+                            <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
+                                <p className="text-xs text-emerald-700">
+                                    <strong>Flujo:</strong> Este permiso pasa a aprobación definitiva sin etapa de justificación parcial.
+                                </p>
+                            </div>
+                        )}
 
                         <div className="flex gap-3 pt-4">
                             <Button type="button" variant="secondary" onClick={() => setStep(1)} className="flex-1">
@@ -536,10 +980,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 className="flex-1"
                                 disabled={
                                     !tipoPermiso ||
+                                    (isSalud && !subtipoSalud) ||
                                     (tipoPermiso === "calamidad" && !subtipoCalamidad.trim()) ||
                                     !hasDates ||
                                     !hasDuration ||
-                                    invalidDateRange
+                                    invalidDateRange ||
+                                    (needsEnrollment && !selectedStudyEnrollmentId)
                                 }
                             >
                                 Continuar
@@ -581,8 +1027,9 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const requestedDisplay = summaryHasUsage ? toNumber(summaryRequested) : requestedVacationDays;
         const rejectedDisplay = summaryHasUsage ? toNumber(summaryRejected) : rejectedVacationDays;
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
+        const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
         const allowMissingHireDate = vacationSummary?.missing_hire_date;
-        const canSubmit = days > 0 && hasDates && (allowMissingHireDate || isAdvanceRequest || days <= remaining);
+        const canSubmit = days > 0 && hasDates && hasVacationTimeRange && (allowMissingHireDate || isAdvanceRequest || days <= remaining);
 
         return (
             <div className="space-y-4">
@@ -649,6 +1096,31 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         Medio di­a (4h)
                     </label>
                 </div>
+
+                {vacacionMedioDia && (
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Hora inicio *</label>
+                            <input
+                                type="time"
+                                value={formData.vacation_start_time}
+                                onChange={(e) => setFormData((prev) => ({ ...prev, vacation_start_time: e.target.value }))}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Hora fin *</label>
+                            <input
+                                type="time"
+                                value={formData.vacation_end_time}
+                                onChange={(e) => setFormData((prev) => ({ ...prev, vacation_end_time: e.target.value }))}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500"
+                                required
+                            />
+                        </div>
+                    </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                     <div>
@@ -733,6 +1205,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
         const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
         const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
+        const vacationTimeRange =
+            tipoSolicitud === "vacaciones" && formData.vacation_start_time && formData.vacation_end_time
+                ? `${formData.vacation_start_time} - ${formData.vacation_end_time}`
+                : "";
         return (
             <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900">Confirmar Solicitud</h3>
@@ -752,6 +1228,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Fecha fin:</span>
                         <span className="text-sm font-semibold text-gray-900">{formatDisplayDate(endValue)}</span>
+                    </div>
+                )}
+                {vacationTimeRange && (
+                    <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Rango horario:</span>
+                        <span className="text-sm font-semibold text-gray-900">{vacationTimeRange}</span>
                     </div>
                 )}
                 <div className="flex justify-between">
@@ -849,4 +1331,3 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 };
 
 export default PermisoVacacionModal;
-

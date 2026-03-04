@@ -153,4 +153,52 @@ module.exports = {
   createSolicitudFolder,
   uploadVacationDocument,
   uploadJustificante,
+  uploadStudyEnrollmentDocument: async function uploadStudyEnrollmentDocument({
+    user,
+    fileBuffer,
+    fileName,
+    mimeType,
+  }) {
+    const { Readable } = require("stream");
+    const root = await ensureFolder("Talento Humano", DRIVE_ROOT_FOLDER_ID);
+    const enrollmentsFolder = await ensureFolder("Matriculas Estudios", root.id);
+    const userFolder = await ensureFolder(
+      user?.fullname || user?.name || user?.email || `Usuario-${user?.id || "sin-id"}`,
+      enrollmentsFolder.id
+    );
+
+    const safeName = fileName || `matricula_${Date.now()}.pdf`;
+    const stream = new Readable();
+    stream.push(fileBuffer);
+    stream.push(null);
+
+    const { data: created } = await drive.files.create({
+      supportsAllDrives: true,
+      requestBody: {
+        name: safeName,
+        parents: [userFolder.id],
+      },
+      media: {
+        mimeType: mimeType || "application/octet-stream",
+        body: stream,
+      },
+      fields: "id, webViewLink",
+    });
+
+    try {
+      await drive.permissions.create({
+        fileId: created.id,
+        supportsAllDrives: true,
+        requestBody: { role: "reader", type: "anyone" },
+      });
+    } catch (_) {
+      // no-op: link puede quedar solo interno si politicas de drive lo requieren.
+    }
+
+    return {
+      fileId: created.id,
+      webViewLink: created.webViewLink,
+      folderId: userFolder.id,
+    };
+  },
 };

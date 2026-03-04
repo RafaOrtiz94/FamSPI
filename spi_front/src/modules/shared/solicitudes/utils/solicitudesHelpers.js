@@ -5,7 +5,11 @@ export const STATUS_META = {
   partially_approved: { label: "Subir docs", color: "bg-blue-100 text-blue-800", icon: FiUpload },
   pending_final: { label: "Esperando final", color: "bg-purple-100 text-purple-800", icon: FiClock },
   approved: { label: "Aprobado", color: "bg-green-100 text-green-800", icon: FiCheck },
+  aprobado: { label: "Aprobado", color: "bg-green-100 text-green-800", icon: FiCheck },
   rejected: { label: "Rechazado", color: "bg-red-100 text-red-800", icon: FiX },
+  rechazado: { label: "Rechazado", color: "bg-red-100 text-red-800", icon: FiX },
+  cancelled: { label: "Cancelado", color: "bg-gray-200 text-gray-800", icon: FiX },
+  cancelado: { label: "Cancelado", color: "bg-gray-200 text-gray-800", icon: FiX },
 };
 
 export const formatDateShort = (date) => {

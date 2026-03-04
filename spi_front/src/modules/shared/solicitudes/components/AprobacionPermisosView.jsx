@@ -43,7 +43,12 @@ const AprobacionPermisosView = ({ compact = false }) => {
         try {
             const response = await aprobarParcial(id);
             if (response.ok) {
-                showToast("Solicitud aprobada parcialmente. El colaborador debe subir justificantes.", "success");
+                const nextStatus = String(response?.data?.status || "").toLowerCase();
+                if (nextStatus === "approved") {
+                    showToast("Solicitud aprobada definitivamente.", "success");
+                } else {
+                    showToast("Solicitud aprobada parcialmente. El colaborador debe subir justificantes.", "success");
+                }
                 loadSolicitudes();
             }
         } catch (error) {
@@ -127,6 +132,16 @@ const AprobacionPermisosView = ({ compact = false }) => {
         const parsed = new Date(value);
         if (Number.isNaN(parsed.getTime())) return "N/A";
         return parsed.toLocaleDateString("es-EC");
+    };
+
+    const formatTimeRange = (solicitud = {}) => {
+        const start = solicitud?.fecha_inicio_hora || solicitud?.start_time;
+        const end = solicitud?.fecha_fin_hora || solicitud?.end_time;
+        if (!start || !end) return null;
+        const startDate = new Date(start);
+        const endDate = new Date(end);
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+        return `${startDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false })} - ${endDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
     };
     const spacingClass = compact ? "space-y-4" : "space-y-6";
     const titleClass = compact ? "text-lg font-bold text-gray-900" : "text-2xl font-bold text-gray-900";
@@ -242,6 +257,14 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                                 : "N/A"}
                                     </p>
                                 </div>
+                                {formatTimeRange(solicitud) && (
+                                    <div>
+                                        <p className="text-[10px] text-gray-500">Rango horario</p>
+                                        <p className={compact ? "text-xs font-medium text-gray-900" : "text-sm font-medium text-gray-900"}>
+                                            {formatTimeRange(solicitud)}
+                                        </p>
+                                    </div>
+                                )}
                                 {solicitud.tipo_solicitud === "vacaciones" && solicitud.periodo_vacaciones && (
                                     <div>
                                         <p className="text-[10px] text-gray-500">Período</p>
