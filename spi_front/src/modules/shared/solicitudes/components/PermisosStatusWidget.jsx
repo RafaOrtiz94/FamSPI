@@ -60,6 +60,20 @@ const formatTimeRange = (solicitud = {}) => {
   return `${startLabel} - ${endLabel}`;
 };
 
+const getVacationShiftLabel = (solicitud = {}) => {
+  const start = solicitud?.start_time || solicitud?.fecha_inicio_hora || null;
+  const end = solicitud?.end_time || solicitud?.fecha_fin_hora || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const startHour = startDate.getHours();
+  const endAsDecimal = endDate.getHours() + endDate.getMinutes() / 60;
+  if (startHour < 13 && endAsDecimal <= 13) return "Mañana";
+  if (startHour >= 13) return "Tarde";
+  return "Horario mixto";
+};
+
 const normalizeDateOnly = (value) => {
   if (!value) return null;
   const text = String(value);
@@ -709,6 +723,7 @@ const PermisosStatusWidget = () => {
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
     const isRejectedStatus = ["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus);
     const timeRange = formatTimeRange(solicitud);
+    const vacationShift = isVacation ? getVacationShiftLabel(solicitud) : null;
     const recoveryPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
     const recoveryTotal = Number(solicitud?.recovery_plan_total_hours || 0);
     const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
@@ -718,6 +733,7 @@ const PermisosStatusWidget = () => {
       canSeeSolicitudForApproval(solicitud);
     const canEditRecovery =
       Boolean(solicitud?.es_recuperable) &&
+      coordinationStatus !== "finalized_by_approver" &&
       !["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus) &&
       (
         (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
@@ -902,6 +918,12 @@ const PermisosStatusWidget = () => {
             <div className="text-xs">
               <p className="text-gray-500">Rango horario</p>
               <p className="font-medium text-gray-800">{timeRange}</p>
+            </div>
+          )}
+          {vacationShift && (
+            <div className="text-xs">
+              <p className="text-gray-500">Jornada</p>
+              <p className="font-medium text-gray-800">{vacationShift}</p>
             </div>
           )}
           {solicitud.aprobacion_parcial_at && (

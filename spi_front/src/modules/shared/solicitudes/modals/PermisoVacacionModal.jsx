@@ -89,6 +89,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
     };
 
+    const getVacationShiftLabel = (startTime, endTime) => {
+        const start = normalizeTimeText(startTime);
+        const end = normalizeTimeText(endTime);
+        if (!start || !end) return "";
+        const [startHour] = start.split(":").map(Number);
+        const [endHour, endMinute] = end.split(":").map(Number);
+        const endAsDecimal = endHour + (endMinute / 60);
+        if (startHour < 13 && endAsDecimal <= 13) return "Mañana";
+        if (startHour >= 13) return "Tarde";
+        return "Horario mixto";
+    };
+
     const computeRecoveryHours = (startTime, endTime) => {
         const start = normalizeTimeText(startTime);
         const end = normalizeTimeText(endTime);
@@ -1209,6 +1221,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             tipoSolicitud === "vacaciones" && formData.vacation_start_time && formData.vacation_end_time
                 ? `${formData.vacation_start_time} - ${formData.vacation_end_time}`
                 : "";
+        const vacationShiftLabel =
+            tipoSolicitud === "vacaciones"
+                ? getVacationShiftLabel(formData.vacation_start_time, formData.vacation_end_time)
+                : "";
         return (
             <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-900">Confirmar Solicitud</h3>
@@ -1234,6 +1250,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="flex justify-between">
                         <span className="text-sm text-gray-600">Rango horario:</span>
                         <span className="text-sm font-semibold text-gray-900">{vacationTimeRange}</span>
+                    </div>
+                )}
+                {vacationShiftLabel && (
+                    <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Jornada:</span>
+                        <span className="text-sm font-semibold text-gray-900">{vacationShiftLabel}</span>
                     </div>
                 )}
                 <div className="flex justify-between">

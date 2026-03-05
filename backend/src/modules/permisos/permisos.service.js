@@ -1531,6 +1531,87 @@ async function aprobarParcial({ id, approver, meta }) {
     );
   }
 
+  if (shouldAutoFinal) {
+    try {
+      const requesterIdentity = await getUserIdentity(rows[0]?.user_id).catch(() => null);
+      const approverIdentity = await getUserIdentity(resolveActorId(approver)).catch(() => null);
+      let verificationToken = rows[0]?.legal_verification_token || null;
+      if (!verificationToken) {
+        verificationToken = generateLegalVerificationToken();
+        await db.query(
+          `UPDATE permisos_vacaciones
+              SET legal_verification_token = $2,
+                  legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+                  updated_at = now()
+            WHERE id = $1`,
+          [id, verificationToken]
+        );
+      }
+
+      const signaturesBySolicitud = await getSignaturesBySolicitudIds([rows[0].id]);
+      const signatures = signaturesBySolicitud.get(String(rows[0].id)) || [];
+      const solicitudSignature =
+        signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
+      const finalSignature =
+        signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL) || null;
+      const workflowSummary = buildWorkflowSignatureSummary(signatures);
+
+      const pdfPayload = {
+        ...rows[0],
+        user_fullname: requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email,
+        user_document_id: requesterIdentity?.cedula || "",
+        approver_fullname: approverName,
+        approver_document_id: approverIdentity?.cedula || "",
+        aprobacion_final_por: approverName,
+        aprobacion_final_at: rows[0].aprobacion_final_at,
+        firma_solicitante_texto: buildPdfSignatureText(
+          solicitudSignature,
+          requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email
+        ),
+        firma_aprobador_texto: buildPdfSignatureText(finalSignature, approverName),
+        firma_workflow_estado: workflowSummary?.estado || "pendiente",
+        firma_solicitante_at: solicitudSignature?.signed_at || null,
+        firma_aprobador_at: finalSignature?.signed_at || null,
+        firma_solicitante_hash: solicitudSignature?.signature_hash_sha256 || null,
+        firma_aprobador_hash: finalSignature?.signature_hash_sha256 || null,
+        firma_aprobador_prev_hash: finalSignature?.previous_signature_hash_sha256 || null,
+        legal_verification_token: verificationToken,
+        legal_verification_url: buildLegalVerificationUrl(verificationToken),
+        workflow_signature_summary: workflowSummary,
+      };
+
+      const pdfUrl = await generateFRH10(pdfPayload);
+      const legalPdfUrl = await generateFirmaLegalValidationPdf({
+        solicitud: {
+          ...rows[0],
+          user_fullname: requesterIdentity?.fullname || rows[0].user_fullname || rows[0].user_email,
+          approver_fullname: approverName,
+        },
+        signatures,
+        verification: {
+          token: verificationToken,
+          url: buildLegalVerificationUrl(verificationToken),
+        },
+      });
+
+      if (pdfUrl || legalPdfUrl) {
+        await db.query(
+          `UPDATE permisos_vacaciones
+              SET pdf_generado_url = COALESCE($2, pdf_generado_url),
+                  pdf_validacion_legal_url = COALESCE($3, pdf_validacion_legal_url),
+                  updated_at = now()
+            WHERE id = $1`,
+          [id, pdfUrl, legalPdfUrl]
+        );
+        rows[0].pdf_generado_url = pdfUrl || rows[0].pdf_generado_url || null;
+        rows[0].pdf_validacion_legal_url = legalPdfUrl || rows[0].pdf_validacion_legal_url || null;
+        rows[0].legal_verification_token = verificationToken || rows[0].legal_verification_token || null;
+      }
+    } catch (pdfError) {
+      logger.warn({ pdfError, solicitudId: rows[0]?.id }, "No se pudo generar evidencia legal en auto-aprobación de permiso");
+    }
+  }
+
   const enriched = await attachWorkflowSignatures([rows[0]]);
   return enriched[0] || rows[0];
 }
@@ -2237,6 +2318,11 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
   }
 
   const currentCoordinationStatus = normalizeRecoveryCoordinationStatus(solicitud.recovery_coordination_status);
+  if (currentCoordinationStatus === "finalized_by_approver") {
+    const err = new Error("El plan de recuperación ya fue definido de forma definitiva por el jefe inmediato.");
+    err.status = 409;
+    throw err;
+  }
   let nextCoordinationStatus = currentCoordinationStatus;
   let nextRound = Number(solicitud.recovery_coordination_round || 0);
 
