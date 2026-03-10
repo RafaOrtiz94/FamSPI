@@ -182,6 +182,13 @@ const PermisosStatusWidget = () => {
     return value;
   };
 
+  const getTimestampValue = (value) => {
+    const normalized = normalizeDateValue(value);
+    if (!normalized) return 0;
+    const parsed = new Date(normalized);
+    return Number.isNaN(parsed.getTime()) ? 0 : parsed.getTime();
+  };
+
   const normalizeTimeText = (value) => {
     const text = String(value || "").trim();
     const match = text.match(/^(\d{2}):(\d{2})(?::\d{2})?$/);
@@ -206,11 +213,27 @@ const PermisosStatusWidget = () => {
 
   const canSeeSolicitudForApproval = (solicitud) => {
     if (!solicitud) return false;
-    if (isGerencia) return true;
     const approverRole = (solicitud.approver_role || "").toLowerCase();
     const approverEmail = (solicitud.approver_email || "").toLowerCase();
     const approverUserId = solicitud.approver_user_id;
     if (approverUserId && userId && approverUserId === userId) return true;
+    if (approverEmail && userEmail && approverEmail === userEmail.toLowerCase()) return true;
+    if (approverRole) {
+      if (gerenciaGeneralRoles.has(approverRole)) {
+        return roleCandidates.some((candidate) => gerenciaGeneralRoles.has(candidate));
+      }
+      return roleCandidates.includes(approverRole);
+    }
+    if (isGerencia) return true;
+    return false;
+  };
+
+  const canCurrentUserActAsAssignedApprover = (solicitud) => {
+    if (!solicitud) return false;
+    const approverRole = (solicitud.approver_role || "").toLowerCase();
+    const approverEmail = (solicitud.approver_email || "").toLowerCase();
+    const approverUserId = solicitud.approver_user_id;
+    if (approverUserId && userId && Number(approverUserId) === Number(userId)) return true;
     if (approverEmail && userEmail && approverEmail === userEmail.toLowerCase()) return true;
     if (approverRole) {
       if (gerenciaGeneralRoles.has(approverRole)) {
@@ -225,9 +248,42 @@ const PermisosStatusWidget = () => {
     ...solicitud,
     fecha_inicio: normalizeDateValue(solicitud?.fecha_inicio),
     fecha_fin: normalizeDateValue(solicitud?.fecha_fin),
+    cancellation_requested_at: normalizeDateValue(solicitud?.cancellation_requested_at),
+    recovery_plan_updated_at: normalizeDateValue(solicitud?.recovery_plan_updated_at),
+    aprobacion_parcial_at: normalizeDateValue(solicitud?.aprobacion_parcial_at),
+    aprobacion_final_at: normalizeDateValue(solicitud?.aprobacion_final_at),
     created_at: normalizeDateValue(solicitud?.created_at),
     updated_at: normalizeDateValue(solicitud?.updated_at),
   });
+
+  const isApprovedSolicitud = (solicitud) =>
+    ["approved", "aprobado"].includes(String(solicitud?.status || "").toLowerCase());
+
+  const isCoordinationPendingSolicitud = (solicitud) => {
+    if (!isApprovedSolicitud(solicitud) || !solicitud?.es_recuperable) return false;
+    const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
+    return ["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus);
+  };
+
+  const canCurrentUserCancelSolicitud = (solicitud) => {
+    const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
+    return (
+      isApprovedSolicitud(solicitud) &&
+      cancellationStatus !== "pending" &&
+      canCancelByDateRule(solicitud) &&
+      canCurrentUserActAsAssignedApprover(solicitud)
+    );
+  };
+
+  const getApprovalSortTimestamp = (solicitud) =>
+    Math.max(
+      getTimestampValue(solicitud?.cancellation_requested_at),
+      getTimestampValue(solicitud?.recovery_plan_updated_at),
+      getTimestampValue(solicitud?.aprobacion_final_at),
+      getTimestampValue(solicitud?.aprobacion_parcial_at),
+      getTimestampValue(solicitud?.updated_at),
+      getTimestampValue(solicitud?.created_at)
+    );
 
   const fetchActiveException = async () => {
     try {
@@ -432,13 +488,17 @@ const PermisosStatusWidget = () => {
 
   const handleReviewCancellation = async (solicitud, decision) => {
     const reviewReason = String(cancelReason || "").trim();
-    if (!reviewReason) {
-      showToast("Debes indicar el motivo de la decisión", "warning");
+    if (decision === "reject" && !reviewReason) {
+      showToast("Debes indicar el motivo del rechazo", "warning");
       return;
     }
     setActionLoading(solicitud.id);
     try {
-      const response = await revisarCancelacionSolicitud(solicitud.id, decision, reviewReason);
+      const response = await revisarCancelacionSolicitud(
+        solicitud.id,
+        decision,
+        reviewReason || null
+      );
       if (response?.ok) {
         showToast(
           decision === "approve"
@@ -581,6 +641,39 @@ const PermisosStatusWidget = () => {
     [misSolicitudes]
   );
 
+  const approvalQueue = (() => {
+    const itemsById = new Map();
+
+    const upsert = (solicitud, kinds = []) => {
+      if (!solicitud || kinds.length === 0) return;
+      const existing = itemsById.get(solicitud.id);
+      if (existing) {
+        existing.approvalQueueKinds = Array.from(
+          new Set([...(existing.approvalQueueKinds || []), ...kinds])
+        );
+        return;
+      }
+      itemsById.set(solicitud.id, {
+        ...solicitud,
+        approvalQueueKinds: kinds,
+      });
+    };
+
+    pendientesParcial.forEach((solicitud) => upsert(solicitud, ["approval_pending"]));
+    pendientesFinal.forEach((solicitud) => upsert(solicitud, ["approval_pending"]));
+    pendientesCancelacion.forEach((solicitud) => upsert(solicitud, ["cancellation_pending"]));
+    pendientesAprobadas.forEach((solicitud) => {
+      const kinds = [];
+      if (isCoordinationPendingSolicitud(solicitud)) kinds.push("coordination_pending");
+      if (canCurrentUserCancelSolicitud(solicitud)) kinds.push("cancellable");
+      upsert(solicitud, kinds);
+    });
+
+    return Array.from(itemsById.values()).sort(
+      (left, right) => getApprovalSortTimestamp(right) - getApprovalSortTimestamp(left)
+    );
+  })();
+
   const exceptionStatus = activeException?.status || "NONE";
   const exceptionStepLabel =
     {
@@ -637,14 +730,19 @@ const PermisosStatusWidget = () => {
       base.push({
         id: "approve",
         label: isGerencia ? "Aprobar final" : "Aprobar",
-        count:
-          pendientesParcial.length +
-          pendientesFinal.length +
-          pendientesAprobadas.length +
-          pendientesCancelacion.length +
-          pendingStudyEnrollments.length,
+        count: approvalQueue.length,
         visible: true,
+        icon: FiCheck,
       });
+      if (pendingStudyEnrollments.length > 0) {
+        base.push({
+          id: "study_enrollments",
+          label: "Matrículas",
+          count: pendingStudyEnrollments.length,
+          visible: true,
+          icon: FiFileText,
+        });
+      }
     }
     if (isJefe) {
       base.push({
@@ -657,16 +755,19 @@ const PermisosStatusWidget = () => {
     return base.filter((t) => t.visible);
   }, [
     misSolicitudes.length,
-    pendientesParcial.length,
-    pendientesFinal.length,
-    pendientesAprobadas.length,
-    pendientesCancelacion.length,
+    approvalQueue.length,
     pendingStudyEnrollments.length,
     misEsperandoGerencia.length,
     isApprover,
     isGerencia,
     isJefe,
   ]);
+
+  useEffect(() => {
+    if (!tabs.some((tab) => tab.id === activeTab)) {
+      setActiveTab(tabs[0]?.id || "mine");
+    }
+  }, [activeTab, tabs]);
 
   const renderStatusBadge = (status) => {
     const meta = STATUS_META[status] || STATUS_META.pending;
@@ -728,17 +829,12 @@ const PermisosStatusWidget = () => {
     const recoveryTotal = Number(solicitud?.recovery_plan_total_hours || 0);
     const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
     const isRequesterOfSolicitud = Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id));
-    const isApproverOfSolicitud =
-      Boolean(userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
-      canSeeSolicitudForApproval(solicitud);
+    const isApproverOfSolicitud = canCurrentUserActAsAssignedApprover(solicitud);
     const canEditRecovery =
       Boolean(solicitud?.es_recuperable) &&
       coordinationStatus !== "finalized_by_approver" &&
       !["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus) &&
-      (
-        (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
-        (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id))
-      );
+      (isRequesterOfSolicitud || isApproverOfSolicitud);
     const canRequesterAcceptProposal =
       isRequesterOfSolicitud && coordinationStatus === "pending_requester_acceptance" && recoveryPlan.length > 0;
     const canApproverFinalize =
@@ -751,10 +847,7 @@ const PermisosStatusWidget = () => {
       ["approved", "aprobado"].includes(normalizedStatus) &&
       cancellationStatus !== "pending" &&
       canCancelByDateRule(solicitud) &&
-      (
-        (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
-        (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id))
-      );
+      (isRequesterOfSolicitud || isApproverOfSolicitud);
     const hasPendingCancellation = cancellationStatus === "pending";
     const canViewLegalForThis =
       canViewLegalValidationDoc ||
@@ -1066,7 +1159,7 @@ const PermisosStatusWidget = () => {
           </div>
         )}
 
-        {showActions && (
+        {showActions && (hasPendingCancellation || solicitud.status === "pending" || solicitud.status === "pending_final") && (
           <div className="space-y-2 mt-3">
             <div className="flex gap-2">
               {hasPendingCancellation && (
@@ -1240,13 +1333,7 @@ const PermisosStatusWidget = () => {
 
     if (activeTab === "approve") {
       if (!isApprover) return null;
-      const noItems =
-        pendientesParcial.length === 0 &&
-        pendientesFinal.length === 0 &&
-        pendientesAprobadas.length === 0 &&
-        pendientesCancelacion.length === 0 &&
-        pendingStudyEnrollments.length === 0;
-      if (noItems) {
+      if (approvalQueue.length === 0) {
         return (
           <div className="text-center py-10">
             <FiCheck className="w-12 h-12 text-green-300 mx-auto mb-3" />
@@ -1255,55 +1342,63 @@ const PermisosStatusWidget = () => {
           </div>
         );
       }
+      return approvalQueue.map((sol) =>
+        renderSolicitudCard(sol, { showActions: true, showUser: true })
+      );
+    }
+
+    if (activeTab === "study_enrollments") {
+      if (!isApprover) return null;
+      if (pendingStudyEnrollments.length === 0) {
+        return (
+          <div className="text-center py-10">
+            <FiFileText className="w-12 h-12 text-indigo-300 mx-auto mb-3" />
+            <p className="text-sm font-medium text-gray-900">No hay matrículas pendientes</p>
+            <p className="text-xs text-gray-500 mt-1">Nada por revisar en este momento</p>
+          </div>
+        );
+      }
       return (
-        <>
-          {pendingStudyEnrollments.length > 0 && (
-            <div className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3">
-              <p className="text-sm font-semibold text-indigo-900">Matrículas de estudios pendientes de validación</p>
-              <div className="mt-2 space-y-2">
-                {pendingStudyEnrollments.map((enrollment) => (
-                  <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-2">
-                    <p className="text-xs text-gray-800">
-                      <strong>{enrollment.user_email}</strong> · {enrollment.institution_name} · vence {String(enrollment.valid_until || "").slice(0, 10)}
-                    </p>
-                    <a
-                      href={enrollment.drive_file_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mt-1 inline-flex text-xs text-indigo-700 underline"
-                    >
-                      Ver matrícula subida
-                    </a>
-                    <div className="mt-2 flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => openEnrollmentReviewModal(enrollment, "reject")}
-                        disabled={actionLoading === `enroll-${enrollment.id}`}
-                        className="text-xs py-1.5"
-                      >
-                        Rechazar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="primary"
-                        onClick={() => openEnrollmentReviewModal(enrollment, "approve")}
-                        disabled={actionLoading === `enroll-${enrollment.id}`}
-                        className="text-xs py-1.5 bg-emerald-600 hover:bg-emerald-700"
-                      >
-                        Aprobar
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+          <p className="text-sm font-semibold text-indigo-900">Matrículas de estudios pendientes de validación</p>
+          <div className="mt-2 space-y-2">
+            {pendingStudyEnrollments.map((enrollment) => (
+              <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-2">
+                <p className="text-xs text-gray-800">
+                  <strong>{enrollment.user_email}</strong> · {enrollment.institution_name} · vence {String(enrollment.valid_until || "").slice(0, 10)}
+                </p>
+                <a
+                  href={enrollment.drive_file_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1 inline-flex text-xs text-indigo-700 underline"
+                >
+                  Ver matrícula subida
+                </a>
+                <div className="mt-2 flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => openEnrollmentReviewModal(enrollment, "reject")}
+                    disabled={actionLoading === `enroll-${enrollment.id}`}
+                    className="text-xs py-1.5"
+                  >
+                    Rechazar
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    onClick={() => openEnrollmentReviewModal(enrollment, "approve")}
+                    disabled={actionLoading === `enroll-${enrollment.id}`}
+                    className="text-xs py-1.5 bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    Aprobar
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
-          {pendientesParcial.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
-          {pendientesFinal.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
-          {pendientesAprobadas.map((sol) => renderSolicitudCard(sol, { showActions: false, showUser: true }))}
-          {pendientesCancelacion.map((sol) => renderSolicitudCard(sol, { showActions: true, showUser: true }))}
-        </>
+            ))}
+          </div>
+        </div>
       );
     }
 
@@ -1557,7 +1652,7 @@ const PermisosStatusWidget = () => {
                     </h3>
                     <p className="text-sm text-gray-600">
                       {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
-                        ? "Registrar decisión sobre la cancelación solicitada"
+                        ? "Para aprobar puedes dejar una observación opcional. Para rechazar debes registrar un motivo."
                         : "Registrar motivo de cancelación"}
                     </p>
                   </div>
@@ -1569,7 +1664,7 @@ const PermisosStatusWidget = () => {
                   className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
                   placeholder={
                     String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
-                      ? "Motivo de la decisión (aprobar o rechazar)"
+                      ? "Observación opcional para aprobar o motivo obligatorio para rechazar"
                       : "Motivo de cancelación"
                   }
                 />

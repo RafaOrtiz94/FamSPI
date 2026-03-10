@@ -18,6 +18,7 @@ Definir funciones de plataforma para tablero, documentacion, archivos, notificac
 - Integraciones con servicios externos.
 - Gestion de agendas/calendarios.
 - Atencion de tickets de soporte.
+- Respaldo automatizado de base de datos y ejecucion segura de jobs tecnicos.
 
 ## 5. Actores y perfiles
 - Equipo TI/soporte.
@@ -79,11 +80,22 @@ Definir funciones de plataforma para tablero, documentacion, archivos, notificac
 - Salidas: bitacora tecnica consultable.
 - Reglas: correlacion de eventos por identificador unico.
 
+### FR-PTI-009 Respaldo automatizado de base de datos
+- Descripcion: Ejecutar respaldos de base de datos de forma automatica, segura y trazable sobre infraestructura GCP.
+- Entradas: configuracion de base de datos, credenciales, carpeta destino, programacion y clave de jobs.
+- Salidas: archivo de respaldo generado, comprimido, cargado al destino definido y registrado en logs.
+- Reglas:
+  - La ejecucion productiva debe realizarse mediante `Cloud Scheduler` hacia endpoint interno protegido.
+  - El endpoint debe exigir autenticacion interna mediante `JOBS_KEY`.
+  - El respaldo debe almacenar evidencia suficiente para verificar fecha, tamano y destino.
+  - Toda falla debe quedar registrada para diagnostico posterior.
+
 ## 8. Validaciones de negocio y datos
 - Todo documento/archivo debe referenciar proceso origen.
 - Todo ticket debe tener prioridad, estado y responsable.
 - Integraciones requieren configuracion valida y credenciales activas.
 - Eventos de notificacion deben registrar resultado de entrega.
+- Todo respaldo automatico debe dejar evidencia verificable de ejecucion y destino.
 
 ## 9. Seguridad y control
 - Control de acceso para administracion de integraciones y archivos.
@@ -101,6 +113,7 @@ Definir funciones de plataforma para tablero, documentacion, archivos, notificac
 - Integracion transversal con todas las areas del SPI.
 - Integracion con servicios de correo/proveedores externos.
 - Integracion con seguridad para autenticacion y autorizacion.
+- Integracion con Cloud Run, Cloud Scheduler, Secret Manager, PostgreSQL y Google Drive para jobs tecnicos.
 
 ## 12. Matriz de trazabilidad URS -> FRS -> Prueba
 | URS | FRS | Caso de prueba funcional |
@@ -113,9 +126,11 @@ Definir funciones de plataforma para tablero, documentacion, archivos, notificac
 | REQ-PTI-006 | FR-PTI-006 | Registrar ticket y mover estados de atencion |
 | REQ-PTI-007 | FR-PTI-007 | Consumir servicio transversal desde otro modulo |
 | REQ-PTI-008 | FR-PTI-008 | Verificar bitacora tecnica de integracion |
+| REQ-PTI-009 | FR-PTI-009 | Ejecutar backup automatico y validar evidencia en destino |
 
 ## 13. Criterios de aceptacion del area
 - Servicios transversales disponibles con control de acceso.
 - Integraciones con trazabilidad y manejo de fallos.
 - Tickets y notificaciones con ciclo de vida consistente.
 - Evidencia documental gestionada con referencia valida.
+- Jobs tecnicos criticos con autenticacion interna, programacion externa y evidencia de ejecucion.

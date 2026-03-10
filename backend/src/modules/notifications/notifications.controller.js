@@ -1,5 +1,47 @@
 const service = require("./notifications.service");
 
+const PRIVILEGED_NOTIFICATION_TARGET_ROLES = new Set([
+  "ti",
+  "jefe_ti",
+  "jefe_de_ti",
+  "soporte",
+  "desarrollador",
+  "admin_ti",
+  "admin",
+  "administrador",
+]);
+
+const normalizeRoleName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const collectUserRoles = (user = {}) => {
+  const roles = new Set();
+  const pushRole = (value) => {
+    const normalized = normalizeRoleName(value);
+    if (normalized) roles.add(normalized);
+  };
+
+  pushRole(user.role);
+  pushRole(user.scope);
+  pushRole(user.role_name);
+
+  if (Array.isArray(user.roles)) user.roles.forEach(pushRole);
+  if (Array.isArray(user.scopes)) user.scopes.forEach(pushRole);
+
+  return roles;
+};
+
+const canTargetOtherUsers = (user = {}) => {
+  const roles = collectUserRoles(user);
+  for (const role of roles) {
+    if (PRIVILEGED_NOTIFICATION_TARGET_ROLES.has(role)) return true;
+  }
+  return false;
+};
+
 const list = async (req, res) => {
   try {
     const notifications = await service.listNotifications(req.user.id, {
@@ -19,7 +61,17 @@ const list = async (req, res) => {
 const create = async (req, res) => {
   try {
     const payload = { ...req.body };
-    if (!payload.user_id) payload.user_id = req.user.id;
+    const requestedUserId = payload.user_id ?? req.user.id;
+    const isCrossUserTarget = String(requestedUserId) !== String(req.user.id);
+
+    if (isCrossUserTarget && !canTargetOtherUsers(req.user)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para crear notificaciones para otros usuarios",
+      });
+    }
+
+    payload.user_id = requestedUserId;
     const notification = await service.createNotification(payload);
     return res.status(201).json({ ok: true, data: notification });
   } catch (err) {

@@ -40,6 +40,9 @@ gcloud config set project famspi-sbox
 # GSA Key JSON (opcional FULL - desde archivo local)
 # gcloud secrets create SBX_GSA_KEY_JSON --data-file=./service-account-key.json
 
+# Jobs key para Cloud Scheduler (recomendado si usaras endpoints internos)
+# "una_clave_larga_y_unica_para_jobs" | gcloud secrets create SBX_JOBS_KEY --data-file=-
+
 # ===========================================
 # PASO 2: Build con Cloud Build
 # ===========================================
@@ -62,6 +65,8 @@ gcloud run deploy spi-backend-sandbox `
     --update-secrets=DATABASE_URL=SBX_DATABASE_URL:latest `
     --update-secrets=SECRET_KEY=SBX_JWT_SECRET:latest `
     --update-secrets=REFRESH_SECRET_KEY=SBX_JWT_REFRESH_SECRET:latest `
+    --update-secrets=JOBS_KEY=SBX_JOBS_KEY:latest `
+    --update-secrets=GSA_KEY_JSON=SBX_GSA_KEY_JSON:latest `
     --set-env-vars=NODE_ENV=sandbox `
     --set-env-vars=DB_SSL=true `
     --set-env-vars=DB_SSL_REJECT_UNAUTHORIZED=false `
@@ -72,10 +77,25 @@ gcloud run deploy spi-backend-sandbox `
     --set-env-vars=FRONTEND_URL=https://spi-sandbox.famproject.com.ec `
     --set-env-vars=ALLOWED_DOMAIN=sandbox.famproject.com.ec `
     --set-env-vars=GOOGLE_SUBJECT=admin@sandbox.famproject.com.ec `
+    --set-env-vars=DB_BACKUP_DRIVE_ROOT_FOLDER_ID=[DRIVE_FOLDER_ID_DESTINO_BACKUPS] `
+    --set-env-vars=DB_BACKUP_FOLDER_NAME=Backup Base `
+    --set-env-vars=DB_BACKUP_TIMEZONE=America/Guayaquil `
     --set-env-vars=TRUST_PROXY=1 `
     --set-env-vars=DISABLE_RATE_LIMIT=false `
     --set-env-vars=RATE_LIMIT_WINDOW_MS=900000 `
     --set-env-vars=RATE_LIMIT_MAX=1000
+
+# ===========================================
+# PASO 3.1: Crear Cloud Scheduler para backups
+# ===========================================
+
+# Ejemplo:
+# $env:PROJECT_ID="famspi-sbox"
+# $env:RUN_REGION="southamerica-east1"
+# $env:SCHEDULER_LOCATION="southamerica-east1"
+# $env:SERVICE_NAME="spi-backend-sandbox"
+# $env:JOBS_KEY="[MISMO_VALOR_DE_SBX_JOBS_KEY]"
+# bash ./backend/scripts/create_db_backup_scheduler.sh
 
 # ===========================================
 # PASO 4: Validación post-deploy

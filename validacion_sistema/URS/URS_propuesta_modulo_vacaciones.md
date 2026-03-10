@@ -81,9 +81,9 @@ El modulo Vacaciones se implementa principalmente en backend/src/modules/vacacio
 - RN-VACA-003: Las operaciones del modulo deben persistir informacion en las tablas asociadas manteniendo consistencia de datos.
 - RN-VACA-004: Las integraciones externas del modulo deben ejecutarse con tolerancia a fallos y trazabilidad de incidencias.
 - RN-VACA-005: [Funcionalidad detectada en el sistema] Se identifican reglas implicitas implementadas en servicios/controladores que deben formalizarse en el FRS.
+- RN-VACA-006: En la revision de una cancelacion pendiente, el motivo es obligatorio solo cuando el aprobador rechaza la cancelacion; si la aprueba, la observacion adicional es opcional.
 
 ## 10. Dependencias con otros modulos
 - Notificaciones
 - Permisos
 - Integraciones externas detectadas: Calendario, Eventos en tiempo real, Generacion documental PDF, Google OAuth/Drive.
-

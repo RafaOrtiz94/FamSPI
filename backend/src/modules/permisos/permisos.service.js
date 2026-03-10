@@ -2145,8 +2145,9 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
     throw err;
   }
   const trimmedReason = String(reason || "").trim();
-  if (!trimmedReason) {
-    const err = new Error("Debes registrar el motivo de la decisión");
+  const reviewReason = trimmedReason || null;
+  if (normalizedDecision === "reject" && !reviewReason) {
+    const err = new Error("Debes registrar el motivo del rechazo");
     err.status = 400;
     throw err;
   }
@@ -2196,7 +2197,7 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [id, actorId, actor?.email || null, trimmedReason]
+      [id, actorId, actor?.email || null, reviewReason]
     );
     updated = approvedRows[0];
   } else {
@@ -2210,7 +2211,7 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [id, actorId, actor?.email || null, trimmedReason]
+      [id, actorId, actor?.email || null, reviewReason]
     );
     updated = rejectedRows[0];
   }
@@ -2237,7 +2238,7 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: updated.id, decision: normalizedDecision, reason: trimmedReason },
+        meta: { solicitud_id: updated.id, decision: normalizedDecision, reason: reviewReason },
       });
     }
   } catch (notifyError) {

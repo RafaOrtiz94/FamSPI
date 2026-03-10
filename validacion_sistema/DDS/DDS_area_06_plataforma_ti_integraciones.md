@@ -15,6 +15,7 @@ Este DDS cubre los modulos funcionales activos del area:
 - `schedules`
 - `support-tickets`
 - `calendar` (servicio interno)
+- `database backup` (job interno expuesto para Cloud Scheduler)
 
 Se incluye el modulo `integrations` para documentar su estado tecnico actual.
 
@@ -29,8 +30,10 @@ Se incluye el modulo `integrations` para documentar su estado tecnico actual.
   - `backend/src/modules/schedules/*`
   - `backend/src/modules/support-tickets/*`
   - `backend/src/modules/calendar/calendar.service.js`
+  - `backend/src/jobs/databaseBackupToDrive.js`
   - `backend/src/modules/integrations/*`
   - `backend/src/routes/internalJobs.routes.js`
+  - `backend/src/middlewares/jobsAuth.js`
   - `backend/src/jobs/*` (jobs invocados por rutas internas)
   - `backend/src/middlewares/auth.js`
   - `backend/src/middlewares/roles.js`
@@ -68,7 +71,10 @@ Se incluye el modulo `integrations` para documentar su estado tecnico actual.
   - Google OAuth/Gmail API
   - Google Drive/Docs
   - Google Calendar (service account)
+  - Cloud Scheduler para jobs tecnicos
+  - Secret Manager para secretos operativos
 - Jobs internos protegidos por `JOBS_KEY` (`/internal/jobs/*`).
+- Respaldos de base de datos ejecutados desde `Cloud Scheduler` hacia `Cloud Run`.
 
 ## 2. Arquitectura del sistema
 ### 2.1 Arquitectura general
@@ -80,6 +86,7 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
 - agenda comercial
 - mesa de ayuda TI
 - ejecucion de jobs internos
+- respaldo automatico de base de datos
 
 ### 2.2 Capas y responsabilidades
 - Frontend:
@@ -134,6 +141,7 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
 | Schedules Service | Cronogramas comerciales, visitas planificadas y aprobacion de agenda | `modules/schedules/schedules.controller.js`, `schedules.service.js`, `schedules.routes.js` | `visit_schedules`, `scheduled_visits`, `client_requests`, `client_visit_logs`, `prospect_visits`, `users` |
 | Support Tickets Service | Mesa de ayuda TI con eventos, comentarios, asignacion y KPIs | `modules/support-tickets/supportTickets.controller.js`, `supportTickets.service.js`, `supportTickets.routes.js` | `support_tickets`, `support_ticket_events`, `support_ticket_comments`, `users`, notifications |
 | Calendar Service | Creacion de eventos de entrega y resolucion de asistentes por rol | `modules/calendar/calendar.service.js` | Google Calendar API, `users` |
+| Database Backup Job | Generacion de dump PostgreSQL, compresion y carga en Google Drive | `jobs/databaseBackupToDrive.js`, `routes/internalJobs.routes.js`, `middlewares/jobsAuth.js` | PostgreSQL, `pg_dump`, Drive, Secret Manager, Cloud Scheduler |
 | Internal Jobs Router | Exposicion protegida de jobs batch (notificaciones, backup, expiraciones, overtime, BC queue) | `routes/internalJobs.routes.js` | schedulers/jobs internos, `jobsAuth` |
 | Integrations Module | Artefacto placeholder sin implementacion | `modules/integrations/*.js` | archivos vacios, no montados |
 
@@ -146,6 +154,9 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
   - cache en memoria (TTL 60s)
   - clasificacion de errores de schema (`42P01`, `42703`)
   - consultas paralelas de KPIs
+- Actualizacion 2026-03-06:
+  - la autorizacion del resumen comercial se movio a middleware de ruta usando `middlewares/roles.js`
+  - el frontend ahora protege `/dashboard/comercial` con `ProtectedRoute` especifico para roles comerciales/gerenciales
 
 ### 4.2 Modulo `files`
 - Responsabilidad: gestion de archivos adjuntos relacionados a solicitudes.
@@ -172,6 +183,10 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
   - configuracion de destinatarios por evento/fuente
   - cola de despacho asincrona con estados/reintentos
   - soporte de hilos de correo por proceso (`notification_process_email_threads`)
+- Actualizacion 2026-03-06:
+  - `POST /api/v1/notifications` ya no permite enviar a terceros desde usuarios comunes
+  - el endpoint HTTP queda restringido para destino ajeno a roles privilegiados
+  - los flujos internos siguen operando por `notificationManager` y `notifications.service`
 
 ### 4.5 Modulo `gmail`
 - Responsabilidad: autorizacion delegada por usuario y envio de correo.
@@ -213,6 +228,25 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
   - `integrations.routes.js`, `integrations.controller.js`, `integrations.service.js`, `oracle.service.js` con tamano 0 bytes.
   - no montado en `backend/src/app.js`.
 
+### 4.10 Job `database backup`
+- Responsabilidad: generar respaldo de la base PostgreSQL activa y cargarlo en Google Drive.
+- Flujo tecnico:
+  - resolver configuracion DB desde `DATABASE_URL` o variables `DB_*`
+  - ejecutar `pg_dump`
+  - comprimir salida en `gzip`
+  - cargar archivo a Drive
+  - responder via endpoint interno `POST /internal/jobs/database/backup`
+- Seguridad:
+  - el endpoint se protege mediante `jobsAuth`
+  - en produccion requiere `JOBS_KEY`
+  - el modo esperado de ejecucion es `Cloud Scheduler`, no scheduler interno en memoria
+- Dependencias externas:
+  - Cloud Run
+  - Cloud Scheduler
+  - Secret Manager
+  - Google Drive
+  - cliente `postgresql-client`
+
 ## 5. Modelo de datos
 ### 5.1 Entidades principales del area
 | Entidad | PK | Campos principales detectados | Relaciones |
@@ -242,6 +276,7 @@ El area Plataforma TI provee servicios transversales a todas las areas funcional
 - El sistema combina operaciones sincronas (CRUD API) con procesos asincronos (notification queue jobs).
 - `dashboard.service.js` depende de tablas de negocio (`bc_master`, `requests`, `clients`) y puede fallar por drift de esquema.
 - `calendar.service.js` no persiste eventos localmente, retorna metadata de evento remoto.
+- el backup de base de datos depende de configuracion correcta en Cloud Run y Cloud Scheduler; no debe validarse solo a nivel de codigo.
 
 ## 6. Interfaces API
 ### 6.1 `dashboard` (`/api/v1/dashboard`)
@@ -480,3 +515,4 @@ sequenceDiagram
 2. El FRS plantea gestion explicita de calendario como modulo API; en implementacion actual existe `calendar.service.js` sin router publico propio (consumo interno desde flujos de compras privadas).
 3. El alcance de tablero en FRS es amplio; en API se detecta un endpoint principal activo para resumen comercial (`/dashboard/comercial/summary`).
 4. Parte de la trazabilidad tecnica descrita en FRS se implementa mediante jobs internos y cola de notificaciones, no solo por endpoints directos de modulo.
+5. El respaldo de base de datos es un job interno transversal y debe tratarse como servicio tecnico del area, no como detalle operativo aislado.

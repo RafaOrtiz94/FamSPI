@@ -8,9 +8,7 @@
  */
 
 const service = require("./dashboard.service");
-const { asyncHandler } = require("../../middlewares/asyncHandler");
 const { logAction } = require("../../utils/audit");
-const { requireRole } = require("../../middlewares/auth");
 const logger = require("../../config/logger");
 
 // Helper para clasificar errores PostgreSQL
@@ -60,14 +58,6 @@ const classifyPgError = (err) => {
 // ============================================================
 exports.getCommercialSummary = async (req, res) => {
     try {
-        // Verificar autorización (solo roles comerciales)
-        await requireRole([
-            'comercial',
-            'jefe_comercial',
-            'backoffice_comercial',
-            'acp_comercial'
-        ])(req, res, () => { });
-
         // Soporte para bypass cache con query param ?fresh=1
         const fresh = req.query.fresh === '1' || req.query.fresh === 'true';
 

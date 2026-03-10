@@ -102,6 +102,10 @@ El área opera sobre una arquitectura por capas:
   - Aprobaciones.
   - Firma y verificación pública.
 
+### 2.5 Actualizacion de endurecimiento 2026-03-06
+- El endurecimiento inicial de accesos criticos se implemento moviendo autorizacion sensible a middleware de ruta en endpoints expuestos y agregando `ProtectedRoute` especificos en frontend para rutas administrativas.
+- La referencia operativa de esta entrega queda en `validacion_sistema/informes/informe_ejecucion_paso_03_accesos_criticos.md`.
+
 ## 3. Componentes del sistema
 | Componente | Responsabilidad | Archivos principales | Dependencias |
 |---|---|---|---|
@@ -506,4 +510,3 @@ flowchart TD
   SIGN --> AUD
   SIGN --> REQ
 ```
-

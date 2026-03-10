@@ -94,6 +94,31 @@ const routeFallback = (
   </div>
 );
 
+const commercialDashboardRoles = [
+  "comercial",
+  "jefe_comercial",
+  "backoffice_comercial",
+  "acp_comercial",
+  "gerencia",
+  "gerencia_general",
+  "gerente_general",
+  "director",
+];
+
+const peopleAdminRoles = [
+  "talento_humano",
+  "jefe_talento_humano",
+  "gerencia",
+  "gerencia_general",
+  "gerente_general",
+  "director",
+  "ti",
+  "jefe_ti",
+  "admin_ti",
+  "admin",
+  "administrador",
+];
+
 const AppRoutes = () => {
   return (
     <Suspense fallback={routeFallback}>
@@ -157,7 +182,9 @@ const AppRoutes = () => {
           <Route path="/dashboard/gerencia/aprobaciones-contratos" element={<PurchasesAlbumPage />} />
           <Route path="/dashboard/gerencia/compras-album" element={<PurchasesAlbumPage />} />
           <Route path="/dashboard/finanzas" element={<DashboardFinanzas />} />
-          <Route path="/dashboard/comercial" element={<DashboardComercial />} />
+          <Route element={<ProtectedRoute allowedRoles={commercialDashboardRoles} />}>
+            <Route path="/dashboard/comercial" element={<DashboardComercial />} />
+          </Route>
 
           {/* Subrutas Comercial */}
           <Route
@@ -273,8 +300,10 @@ const AppRoutes = () => {
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub />} />
           <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorWorkspace />} />
-          <Route path="/dashboard/talento-humano/usuarios" element={<ColaboradoresHub initialTab="usuarios" />} />
-          <Route path="/dashboard/talento-humano/departamentos" element={<ColaboradoresHub initialTab="departamentos" />} />
+          <Route element={<ProtectedRoute allowedRoles={peopleAdminRoles} />}>
+            <Route path="/dashboard/talento-humano/usuarios" element={<ColaboradoresHub initialTab="usuarios" />} />
+            <Route path="/dashboard/talento-humano/departamentos" element={<ColaboradoresHub initialTab="departamentos" />} />
+          </Route>
           <Route
             path="/dashboard/talento-humano/solicitudes"
             element={<ColaboradoresHub initialTab="solicitudes" />}

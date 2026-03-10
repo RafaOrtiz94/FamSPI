@@ -13,8 +13,15 @@ const {
 const fs = require("fs");
 let key = null;
 try {
-  if (fs.existsSync(googleKeyPath)) {
+  if (process.env.GSA_KEY_JSON) {
+    key = JSON.parse(process.env.GSA_KEY_JSON);
+    logger.info("✅ Credencial de Service Account cargada desde GSA_KEY_JSON");
+  } else if (process.env.GSA_KEY_JSON_BASE64) {
+    key = JSON.parse(Buffer.from(process.env.GSA_KEY_JSON_BASE64, "base64").toString("utf8"));
+    logger.info("✅ Credencial de Service Account cargada desde GSA_KEY_JSON_BASE64");
+  } else if (fs.existsSync(googleKeyPath)) {
     key = require(googleKeyPath);
+    logger.info("✅ Credencial de Service Account cargada desde archivo", { path: googleKeyPath });
   } else {
     logger.warn("⚠️ Archivo de clave de Service Account no encontrado. Las funcionalidades de Google (Drive, Gmail, etc.) estarán deshabilitadas.", { path: googleKeyPath });
   }

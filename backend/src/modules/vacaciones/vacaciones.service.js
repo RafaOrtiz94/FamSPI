@@ -1005,7 +1005,10 @@ async function reviewVacationCancellation(id, decision, reason, actor) {
   const normalizedDecision = String(decision || "").toLowerCase();
   if (!["approve", "reject"].includes(normalizedDecision)) throw new Error("Decision inválida");
   const trimmedReason = String(reason || "").trim();
-  if (!trimmedReason) throw new Error("Debes registrar el motivo de la decisión");
+  const reviewReason = trimmedReason || null;
+  if (normalizedDecision === "reject" && !reviewReason) {
+    throw new Error("Debes registrar el motivo del rechazo");
+  }
 
   const { rows } = await db.query("SELECT * FROM vacaciones_solicitudes WHERE id = $1", [id]);
   const current = rows[0];
@@ -1043,7 +1046,7 @@ async function reviewVacationCancellation(id, decision, reason, actor) {
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
-      [id, actorId || null, actor?.email || null, trimmedReason]
+      [id, actorId || null, actor?.email || null, reviewReason]
     );
     return updated[0];
   }
@@ -1058,7 +1061,7 @@ async function reviewVacationCancellation(id, decision, reason, actor) {
             updated_at = NOW()
       WHERE id = $1
       RETURNING *`,
-    [id, actorId || null, actor?.email || null, trimmedReason]
+    [id, actorId || null, actor?.email || null, reviewReason]
   );
   return updated[0];
 }

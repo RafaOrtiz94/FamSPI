@@ -137,11 +137,18 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
 - Responsabilidad: administrar usuarios internos (alta, consulta, actualizacion y eliminacion).
 - Regla tecnica destacada: la eliminacion ejecuta limpieza previa en tablas relacionadas para evitar violaciones FK.
 - Dependencias: `departments`, `requests`, `request_approvals`, `request_attachments`, `document_signatures`, `inventory_movements`.
+- Actualizacion 2026-03-06:
+  - `GET /api/v1/users` se mantiene abierto temporalmente por consumidores operativos de Talento Humano, TI, asistencia y clientes.
+  - `GET /api/v1/users/:id`, `POST`, `PUT` y `DELETE` quedaron protegidos por roles administrativos usando `middlewares/roles.js`.
+  - La ruta frontend `/dashboard/talento-humano/usuarios` quedo protegida con `ProtectedRoute` especifico para TH/TI/Gerencia/Admin.
 
 ### 4.2 Modulo `departments`
 - Responsabilidad: gestionar catalogo de departamentos.
 - Reglas: `code` y `name` obligatorios, rechazo de duplicados al crear.
 - Dependencias: `users.department_id`, `personnel_requests.department_id`.
+- Actualizacion 2026-03-06:
+  - todo el CRUD quedo protegido por roles administrativos usando `middlewares/roles.js`
+  - la ruta frontend `/dashboard/talento-humano/departamentos` quedo protegida con `ProtectedRoute` especifico
 
 ### 4.3 Modulo `collaborators`
 - Responsabilidad: consolidar expediente de colaborador (perfil + documentos + certificaciones + avance).
@@ -186,6 +193,12 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
   - flujo de cancelacion con revision
   - matriculas de estudio y su aprobacion
   - plan de recuperacion de horas (`recovery_plan`).
+- Regla tecnica 2026-03-10:
+  - en `POST /api/v1/permisos/:id/cancelar/revisar`, el motivo es obligatorio solo para `decision=reject`; en `decision=approve` la observacion es opcional y se conserva el motivo original de la solicitud de cancelacion.
+- Regla de interfaz 2026-03-10:
+  - en `PermisosStatusWidget`, la pestana `Aprobar` debe listar solo solicitudes accionables para el aprobador: pendientes de aprobacion, cancelaciones pendientes de revision, coordinaciones pendientes o solicitudes aprobadas que aun pueden cancelarse.
+  - la cola de `Aprobar` se ordena por recencia operativa descendente.
+  - las matriculas de estudios pendientes se muestran en una pestana independiente `Matriculas`.
 - Trazabilidad legal: hash SHA-256 encadenado, token de verificacion legal publico, PDF de validacion legal.
 - Integraciones: Calendar, notificaciones, Drive, generacion de formato FRH-10.
 
@@ -197,6 +210,8 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
   - cancelacion por solicitante y revision por aprobador
   - resumen de dias
   - verificacion legal publica por token.
+- Regla tecnica 2026-03-10:
+  - en `POST /api/v1/vacaciones/:id/cancel/review`, el motivo es obligatorio solo para `decision=reject`; en `decision=approve` la observacion es opcional.
 - Trazabilidad legal: `vacaciones_solicitudes_firmas` con firma workflow y token legal.
 
 ### 4.10 Modulo `applicants`
@@ -341,7 +356,7 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
 | `POST /:id/aprobar-final` | Aprobacion final | `id` | `ok`, `data` | `403`, `404`, `500` |
 | `POST /:id/rechazar` | Rechaza solicitud | `id`, `observaciones` | `ok`, `data` | `403`, `404`, `500` |
 | `POST /:id/cancelar` | Solicita o ejecuta cancelacion | `id`, `reason` | `ok`, `data` | `400`, `403`, `409`, `500` |
-| `POST /:id/cancelar/revisar` | Revisa cancelacion pendiente | `id`, `decision`, `reason` | `ok`, `data` | `400`, `403`, `409`, `500` |
+| `POST /:id/cancelar/revisar` | Revisa cancelacion pendiente | `id`, `decision`, `reason` opcional en `approve` y obligatorio en `reject` | `ok`, `data` | `400`, `403`, `409`, `500` |
 | `POST /:id/recovery-plan` | Actualiza plan de recuperacion | `id`, `recovery_plan`, `action` | `ok`, `data` | `400`, `403`, `500` |
 | `GET /pendientes` | Lista pendientes para aprobador | query: `stage` | `ok`, `data[]` | `500` |
 | `GET /mis-solicitudes` | Lista solicitudes del usuario | - | `ok`, `data[]` | `500` |
@@ -356,7 +371,7 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
 | `GET /` | Lista solicitudes (mine/pending/all) | query filtros | `ok`, `data[]` | `500` |
 | `PATCH /:id/status` | Aprueba/rechaza solicitud | `id`, body `status` | `ok`, `data` | `400`, `500` |
 | `POST /:id/cancel` | Solicita/ejecuta cancelacion | `id`, `reason` | `ok`, `data` | `400`, `500` |
-| `POST /:id/cancel/review` | Revisa cancelacion | `id`, `decision`, `reason` | `ok`, `data` | `400`, `500` |
+| `POST /:id/cancel/review` | Revisa cancelacion | `id`, `decision`, `reason` opcional en `approve` y obligatorio en `reject` | `ok`, `data` | `400`, `500` |
 | `GET /summary/data` | Resumen de dias disponibles/consumo | query `all` | `ok`, `data` | `500` |
 
 ### 6.10 `applicants` (`/api/applicants`)
@@ -430,7 +445,7 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
 - Trazabilidad legal avanzada en permisos/vacaciones (firma hash + token publico).
 
 ### 8.2 Riesgos de seguridad detectados
-- `users` y `departments` exponen CRUD con `verifyToken` sin `requireRole` explicito.
+- `GET /users` sigue amplio por compatibilidad; el resto del CRUD de `users` y todo `departments` ya usa `requireRole` explicito.
 - `GET /api/applicants` y `GET /api/applicants/:id` quedan en bloque publico de `app.js`.
 - Inconsistencia de firma de `logAction` en varios servicios puede degradar auditoria efectiva.
 
@@ -535,6 +550,6 @@ sequenceDiagram
 1. El FRS del area describe una exposicion "controlada" de datos de personal; en codigo, el listado/detalle de postulantes (`/api/applicants`) queda en ruta publica.
 2. El FRS modela permisos/vacaciones como bloque unico; la implementacion mantiene dos modulos (`permisos` y `vacaciones`) con solapamiento funcional y modelos distintos.
 3. El modulo `talento_humano/hr` existe en backend, pero sus rutas estan prefijadas de forma no consistente con el montaje y no se detecto consumo frontend activo.
-4. El FRS asume control de acceso estricto para gestion humana; en `users` y `departments` no hay `requireRole` explicito, solo autenticacion.
+4. El FRS asume control de acceso estricto para gestion humana; desde la entrega 2026-03-06 el CRUD administrativo de `users` y `departments` ya se protege con `requireRole`, quedando pendiente solo la separacion fina de `GET /users`.
 5. La trazabilidad de auditoria definida en FRS se ve afectada por llamadas heterogeneas a `logAction` (firmas y nombres de campos no uniformes).
 6. En `user-certifications`, la auditoria del PDF usa `INSERT INTO auditoria` en lugar de `auditoria.logs`, lo que no coincide con el esquema principal observado.

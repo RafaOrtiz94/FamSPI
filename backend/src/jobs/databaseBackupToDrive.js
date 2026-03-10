@@ -6,7 +6,7 @@ const { pipeline } = require("stream/promises");
 
 const logger = require("../config/logger");
 const { ensureFolder } = require("../utils/drive");
-const { drive } = require("../config/google");
+const { drive, jwtClient } = require("../config/google");
 
 const BACKUP_FOLDER_NAME = String(process.env.DB_BACKUP_FOLDER_NAME || "Backup Base").trim() || "Backup Base";
 const BACKUP_ROOT_FOLDER_ID = process.env.DB_BACKUP_DRIVE_ROOT_FOLDER_ID || process.env.DRIVE_ROOT_FOLDER_ID || null;
@@ -151,6 +151,14 @@ async function uploadBackupToDrive({ localPath, fileName, parentFolderId }) {
 
 async function runOnce() {
   const startedAt = new Date();
+  if (!jwtClient) {
+    const error = new Error(
+      "Google Drive no está autenticado. Configura GSA_KEY_JSON, GSA_KEY_JSON_BASE64 o GSA_KEY_PATH y GOOGLE_SUBJECT si aplica.",
+    );
+    error.code = "GOOGLE_DRIVE_AUTH_MISSING";
+    throw error;
+  }
+
   if (!BACKUP_ROOT_FOLDER_ID) {
     const error = new Error(
       "No hay carpeta raíz para backups. Configura DB_BACKUP_DRIVE_ROOT_FOLDER_ID o DRIVE_ROOT_FOLDER_ID.",
