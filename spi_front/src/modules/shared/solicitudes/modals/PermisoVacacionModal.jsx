@@ -50,6 +50,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
     const usesPermisoDateTime = (permiso, saludTipo) =>
         permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
+    const usesSimplifiedHourlyPermiso = (permiso) =>
+        permiso === "estudios" || permiso === "personal";
     const extractDatePart = (value) =>
         typeof value === "string" && value.includes("T") ? value.split("T")[0] : value || "";
     const toIsoDateTime = (value) => {
@@ -64,6 +66,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return "";
         const hours = (end - start) / (1000 * 60 * 60);
         return (Math.round(hours * 100) / 100).toString();
+    };
+    const addHoursToLocalDateTime = (startValue, hoursValue) => {
+        if (!startValue) return "";
+        const start = new Date(startValue);
+        const hours = Number(hoursValue || 0);
+        if (Number.isNaN(start.getTime()) || !Number.isFinite(hours) || hours <= 0) return "";
+        const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+        const pad = (value) => String(value).padStart(2, "0");
+        return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}T${pad(end.getHours())}:${pad(end.getMinutes())}`;
     };
     const formatDisplayDate = (value) => {
         if (!value) return "";
@@ -228,7 +239,9 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     useEffect(() => {
         const shouldAutoCalculateHours =
-            tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+            tipoSolicitud === "permiso" &&
+            usesPermisoDateTime(tipoPermiso, saludDuracionTipo) &&
+            !usesSimplifiedHourlyPermiso(tipoPermiso);
         if (!shouldAutoCalculateHours) return;
 
         const nextHoras = calculateHoursBetween(formData.fecha_inicio_hora, formData.fecha_fin_hora);
@@ -245,6 +258,28 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         saludDuracionTipo,
         formData.fecha_inicio_hora,
         formData.fecha_fin_hora,
+    ]);
+
+    useEffect(() => {
+        const shouldAutoCalculateEnd =
+            tipoSolicitud === "permiso" && usesSimplifiedHourlyPermiso(tipoPermiso);
+        if (!shouldAutoCalculateEnd) return;
+
+        const nextEnd = addHoursToLocalDateTime(formData.fecha_inicio_hora, formData.duracion_horas);
+        const nextDate = extractDatePart(nextEnd);
+        setFormData((prev) => {
+            if ((prev.fecha_fin_hora || "") === nextEnd && (prev.fecha_fin || "") === nextDate) return prev;
+            return {
+                ...prev,
+                fecha_fin_hora: nextEnd,
+                fecha_fin: nextDate,
+            };
+        });
+    }, [
+        tipoSolicitud,
+        tipoPermiso,
+        formData.fecha_inicio_hora,
+        formData.duracion_horas,
     ]);
 
     const loadVacationSummary = async () => {
@@ -411,11 +446,16 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 }
                 const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
                 if (shouldUseDateTime) {
+                    const computedEndValue = usesSimplifiedHourlyPermiso(tipoPermiso)
+                        ? addHoursToLocalDateTime(formData.fecha_inicio_hora, formData.duracion_horas)
+                        : formData.fecha_fin_hora;
                     payload.fecha_inicio_hora = toIsoDateTime(formData.fecha_inicio_hora);
-                    payload.fecha_fin_hora = toIsoDateTime(formData.fecha_fin_hora);
+                    payload.fecha_fin_hora = toIsoDateTime(computedEndValue);
                     payload.fecha_inicio = extractDatePart(formData.fecha_inicio_hora);
-                    payload.fecha_fin = extractDatePart(formData.fecha_fin_hora);
-                    payload.duracion_horas = calculateHoursBetween(formData.fecha_inicio_hora, formData.fecha_fin_hora);
+                    payload.fecha_fin = extractDatePart(computedEndValue);
+                    payload.duracion_horas = usesSimplifiedHourlyPermiso(tipoPermiso)
+                        ? Number(formData.duracion_horas || 0)
+                        : calculateHoursBetween(formData.fecha_inicio_hora, computedEndValue);
                     payload.duracion_dias = "";
                 } else {
                     payload.fecha_inicio_hora = "";
@@ -570,11 +610,16 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const isSalud = tipoPermiso === "salud";
         const usesHoras = usesPermisoHoras(tipoPermiso, saludDuracionTipo);
         const usesDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+        const usesSimplifiedHours = usesSimplifiedHourlyPermiso(tipoPermiso);
         const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
         const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
         const invalidDateRange =
-            Boolean(startValue && endValue) && new Date(endValue).getTime() <= new Date(startValue).getTime();
-        const hasDates = Boolean(startValue && endValue);
+            !usesSimplifiedHours &&
+            Boolean(startValue && endValue) &&
+            new Date(endValue).getTime() <= new Date(startValue).getTime();
+        const hasDates = usesSimplifiedHours
+            ? Boolean(startValue && formData.duracion_horas)
+            : Boolean(startValue && endValue);
         const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
         const isAutoHours = usesHoras && usesDateTime;
         const needsEnrollment = tipoPermiso === "estudios";
@@ -954,6 +999,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     type={usesDateTime ? "datetime-local" : "date"}
                                     value={endValue}
                                     onChange={(e) =>
+                                        !usesSimplifiedHours &&
                                         setFormData({
                                             ...formData,
                                             ...(usesDateTime
@@ -964,7 +1010,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     min={startValue || undefined}
                                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                                     required
-                                    disabled={requiresActiveEnrollmentSelection}
+                                    readOnly={usesSimplifiedHours}
+                                    disabled={requiresActiveEnrollmentSelection || usesSimplifiedHours}
                                 />
                             </div>
                         </div>
@@ -994,6 +1041,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
                             />
                         </div>
+                        {usesSimplifiedHours && (
+                            <p className="text-xs text-gray-500">
+                                El sistema calculará automáticamente la fecha/hora de fin a partir de la hora de inicio y la duración indicada.
+                            </p>
+                        )}
 
                         {requiresActiveEnrollmentSelection && (
                             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">

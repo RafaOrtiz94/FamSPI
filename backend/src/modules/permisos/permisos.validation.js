@@ -26,6 +26,9 @@ function validatePermisoEstudios(horas) {
 }
 
 async function validatePermisoPersonal({ user_email, duracion_horas, fecha_inicio }) {
+  if (Number(duracion_horas) > 2) {
+    throw new Error("El permiso por asuntos personales no puede exceder 2 horas");
+  }
   if (!fecha_inicio) {
     throw new Error("La fecha de inicio es obligatoria para validar el permiso personal");
   }

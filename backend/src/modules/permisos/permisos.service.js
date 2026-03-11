@@ -415,6 +415,13 @@ function calculateDurationHours(startValue, endValue) {
   return Math.round(hours * 100) / 100;
 }
 
+function addHoursToDateTime(startValue, hoursValue) {
+  const start = new Date(startValue);
+  const hours = Number(hoursValue || 0);
+  if (Number.isNaN(start.getTime()) || !Number.isFinite(hours) || hours <= 0) return null;
+  return new Date(start.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
 function sha256Hex(value) {
   return crypto.createHash("sha256").update(String(value || ""), "utf8").digest("hex");
 }
@@ -1273,6 +1280,22 @@ async function createSolicitud({ body, user, meta }) {
   if (payload.tipo_solicitud === "permiso") {
     const isEstudios = payload.tipo_permiso === "estudios";
     const isPersonal = payload.tipo_permiso === "personal";
+    const isSimpleHourlyPermiso = isEstudios || isPersonal;
+    if (
+      isSimpleHourlyPermiso &&
+      payload.fecha_inicio_hora &&
+      !payload.fecha_fin_hora &&
+      Number(payload.duracion_horas || 0) > 0
+    ) {
+      const inferredEndDateTime = addHoursToDateTime(payload.fecha_inicio_hora, payload.duracion_horas);
+      if (!inferredEndDateTime) {
+        const err = new Error("No se pudo calcular la fecha/hora de fin del permiso.");
+        err.status = 400;
+        throw err;
+      }
+      payload.fecha_fin_hora = inferredEndDateTime;
+      payload.fecha_fin = normalizeDateOnly(inferredEndDateTime);
+    }
     const hasDateTimeRange = Boolean(payload.fecha_inicio_hora && payload.fecha_fin_hora);
     const shouldAutoCalculateHours =
       (isEstudios || isPersonal || payload.tipo_permiso === "salud") && hasDateTimeRange;
