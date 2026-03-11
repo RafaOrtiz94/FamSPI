@@ -268,13 +268,13 @@ const privateDeliveriesLink = {
 // Sistema de prioridades por rol
 const getPriorityGroups = (scope, role, auditActive) => {
   const groups = {
-    critical: [], // ðŸ”¥ Funciones crÃ­ticas diarias - siempre visibles
-    primary: [],  // ðŸŸ¡ Funciones principales del rol
-    secondary: [], // ðŸ”µ Funciones especÃ­ficas/secundarias
-    admin: []     // âš« Funciones administrativas/menos usadas
+    critical: [], //  Funciones cri­ticas diarias - siempre visibles
+    primary: [],  // Funciones principales del rol
+    secondary: [], // Funciones especi­ficas/secundarias
+    admin: []     //  Funciones administrativas/menos usadas
   };
 
-  // Siempre incluir inicio como crÃ­tico
+  // Siempre incluir inicio como critico
   groups.critical.push(getHomeLink(scope));
 
   // 📊 GERENCIA - Enfoque en control y supervisión

@@ -102,6 +102,9 @@ El modulo Permisos se implementa principalmente en backend/src/modules/permisos 
 - RN-PERM-003: Las integraciones externas del modulo deben ejecutarse con tolerancia a fallos y trazabilidad de incidencias.
 - RN-PERM-004: [Funcionalidad detectada en el sistema] Se identifican reglas implicitas implementadas en servicios/controladores que deben formalizarse en el FRS.
 - RN-PERM-005: En la revision de una cancelacion pendiente, el motivo es obligatorio solo cuando el aprobador rechaza la cancelacion; si la aprueba, la observacion adicional es opcional.
+- RN-PERM-006: Un colaborador puede mantener una o mas matriculas de estudios activas al mismo tiempo; el sistema debe permitir registrar nuevas matriculas aunque ya existan activas y permitir seleccionar cualquiera de las activas vigentes para un permiso por estudios.
+- RN-PERM-007: Si una solicitud aprobada es cancelada por aprobacion de cancelacion o por cancelacion directa del jefe inmediato, el F.RH-10 y la constancia legal deben quedar marcados como cancelados y el QR publico debe informar estado cancelado, motivo, fecha/hora de solicitud de cancelacion y quien la aprobo o ejecuto.
+- RN-PERM-008: En la revision de una matricula de estudios, el motivo es obligatorio solo cuando el jefe inmediato la rechaza; al aprobar, el sistema debe mostrar la informacion completa de la matricula pendiente y confirmar la accion sin exigir motivo.
 
 ## 10. Dependencias con otros modulos
 - Notificaciones

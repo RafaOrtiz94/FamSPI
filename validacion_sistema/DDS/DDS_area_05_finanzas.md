@@ -90,6 +90,9 @@ El area financiera se implementa en dos subdominios:
   - validacion de distancia, combustible y campo `outside_labor_area`
   - verificacion de asistencia/geo con estados: `unchecked`, `matched`, `review`, `mismatch`, `no_attendance`, `insufficient_geo`
 - Capacidad tecnica: `ensureSchema()` crea/alinea tablas y constraints en runtime si no existen.
+- Regla UI validada:
+  - `ViaticosWorkspace.jsx` debe activar loader global visible en registrar/actualizar, crear desde visita, aprobar, rechazar, marcar pagado, subir soportes y generar reporte.
+  - cuando una accion cambia el estado o evidencias de un viatico, las vistas del dominio `viaticos` deben refrescarse automaticamente sin recargar la pagina.
 
 ### 4.2 Modulo `finanzas`
 - Responsabilidad: control de inventario financiero y conciliacion externa.

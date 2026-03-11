@@ -1,0 +1,31 @@
+gcloud run deploy spi-backend \
+  --image us-central1-docker.pkg.dev/famspi-sbox/cloud-run-source-deploy/spi-backend:manual \
+  --region us-central1 \
+  --project famspi-sbox \
+  --allow-unauthenticated \
+  --memory 512Mi \
+  --cpu 1 \
+  --set-env-vars NODE_ENV=production \
+  --set-env-vars DB_SSL=true \
+  --set-env-vars FRONTEND_URL=https://fam-spi-front.web.app \
+  --set-env-vars GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback \
+  --set-env-vars DB_HOST=ep-muddy-sun-ah5um48r-pooler.c-3.us-east-1.aws.neon.tech \
+  --set-env-vars DB_PORT=5432 \
+  --set-env-vars DB_USER=neondb_owner \
+  --set-env-vars DB_NAME=FamSPI \
+  --set-env-vars GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com \
+  --set-env-vars DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA \
+  --set-env-vars GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com \
+  --set-env-vars GMAIL_DELEGATED_USER=administrador@famproject.com.ec \
+  --set-env-vars GOOGLE_SUBJECT=administrador@famproject.com.ec \
+  --set-env-vars GSA_KEY_PATH=/secrets/gsa-key.json \
+  --set-secrets APPLICANTS_API_KEY=APPLICANTS_API_KEY:latest \
+  --set-secrets DOC_TEMPLATE_SOLICITUD_1=DOC_TEMPLATE_SOLICITUD_1:latest \
+  --set-secrets DOC_TEMPLATE_SOLICITUD_2=DOC_TEMPLATE_SOLICITUD_2:latest \
+  --set-secrets DOC_TEMPLATE_SOLICITUD_3=DOC_TEMPLATE_SOLICITUD_3:latest \
+  --set-secrets DB_PASSWORD=DB_PASSWORD:latest \
+  --set-secrets SECRET_KEY=SECRET_KEY:latest \
+  --set-secrets REFRESH_SECRET_KEY=REFRESH_SECRET_KEY:latest \
+  --set-secrets GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest \
+  --set-secrets SMTP_PASS=SMTP_PASS:latest \
+  --set-secrets /secrets/gsa-key.json=GSA_KEY_JSON:latest

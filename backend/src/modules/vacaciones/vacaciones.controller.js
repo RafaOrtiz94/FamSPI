@@ -75,7 +75,7 @@ async function verifyLegalToken(req, res) {
       if (responseAsJson) return res.status(400).json({ ok: false, message: "Token requerido" });
       return res.status(400).type("html").send(
         renderVerificationHtml({
-          title: "VerificaciÃ³n legal invÃ¡lida",
+          title: "Verificación legal inválida",
           subtitle: "FamSign",
           status: "pending",
           sourceType: "Vacaciones",
@@ -84,7 +84,7 @@ async function verifyLegalToken(req, res) {
     }
     const data = await service.getLegalVerificationByToken(token);
     if (!data) {
-      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificaciÃ³n no encontrado" });
+      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificación no encontrado" });
       return res.status(404).type("html").send(
         renderVerificationHtml({
           title: "Token no encontrado",
@@ -98,7 +98,7 @@ async function verifyLegalToken(req, res) {
     if (responseAsJson) return res.json({ ok: true, data });
     return res.type("html").send(
       renderVerificationHtml({
-        title: "VerificaciÃ³n legal completada",
+        title: "Verificación legal completada",
         subtitle: "FamSign",
         status: data?.status,
         id: data?.id,
@@ -107,6 +107,7 @@ async function verifyLegalToken(req, res) {
         aprobacionFinalAt: data?.approved_at || data?.aprobacion_final_at || null,
         token: data?.legal_verification_token || token,
         workflow: data?.firma_avanzada_resumen || null,
+        cancellation: data?.cancellation || null,
         sourceType: "Vacaciones",
       })
     );
@@ -117,7 +118,7 @@ async function verifyLegalToken(req, res) {
     }
     return res.status(500).type("html").send(
       renderVerificationHtml({
-        title: "Error de verificaciÃ³n",
+        title: "Error de verificación",
         subtitle: "FamSign",
         status: "pending",
         sourceType: "Vacaciones",

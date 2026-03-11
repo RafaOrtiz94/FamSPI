@@ -42,7 +42,14 @@ const hasVisitDetails = (visit) =>
       visit?.observaciones
   );
 
-const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
+const ScheduleDetailModal = ({
+  schedule,
+  onApprove,
+  onReject,
+  approveLoading = false,
+  rejectLoading = false,
+  actionsDisabled = false,
+}) => {
   const grouped = useMemo(() => groupByDate(schedule?.visits || []), [schedule]);
   const totalCities = useMemo(() => new Set((schedule?.visits || []).map((v) => v.city).filter(Boolean)).size, [schedule]);
 
@@ -64,12 +71,26 @@ const ScheduleDetailModal = ({ schedule, onApprove, onReject }) => {
         </div>
         <div className="flex gap-2">
           {onApprove && schedule.status === "pending_approval" && (
-            <Button size="sm" variant="success" icon={FiCheck} onClick={onApprove}>
+            <Button
+              size="sm"
+              variant="success"
+              icon={FiCheck}
+              onClick={onApprove}
+              loading={approveLoading}
+              disabled={actionsDisabled && !approveLoading}
+            >
               Aprobar
             </Button>
           )}
           {onReject && schedule.status === "pending_approval" && (
-            <Button size="sm" variant="danger" icon={FiX} onClick={onReject}>
+            <Button
+              size="sm"
+              variant="danger"
+              icon={FiX}
+              onClick={onReject}
+              loading={rejectLoading}
+              disabled={actionsDisabled && !rejectLoading}
+            >
               Rechazar
             </Button>
           )}

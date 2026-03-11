@@ -1,6 +1,6 @@
 ﻿const fs = require("fs");
 const path = require("path");
-const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray } = require("pdf-lib");
+const { PDFDocument, StandardFonts, rgb, PDFName, PDFArray, degrees } = require("pdf-lib");
 const QRCode = require("qrcode");
 const { uploadJustificante } = require("./permisos.drive");
 const { securePdfForm } = require("../../utils/pdfFormSecurity");
@@ -28,7 +28,7 @@ async function generateFRH10(solicitud) {
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
 
-    // Llenar campos segÃºn tipo de solicitud
+
     if (solicitud.tipo_solicitud === "permiso") {
       fillPermisoFields(form, solicitud);
     } else if (solicitud.tipo_solicitud === "vacaciones") {
@@ -43,6 +43,9 @@ async function generateFRH10(solicitud) {
 
     // Firma visual tipo rubrica y enlace a hoja de validacion
     await applySignatureVisualDesign(pdfDoc, form, solicitud, validationPage);
+
+    // Mantiene visible que el formulario ya no es utilizable cuando la solicitud fue anulada.
+    await applyCancellationWatermark(pdfDoc, solicitud);
 
     // Seguridad: convertir campos de formulario en contenido estático (no editable).
     securePdfForm(form);
@@ -62,7 +65,9 @@ async function generateFRH10(solicitud) {
       solicitudId: solicitud.id,
       tipoJustificante: "F.RH-10",
       fileBuffer: Buffer.from(pdfBytes),
-      fileName: `F.RH-10_${solicitud.id}.pdf`,
+      fileName: isCancelledStatus(solicitud?.status)
+        ? `F.RH-10_${solicitud.id}_CANCELADO.pdf`
+        : `F.RH-10_${solicitud.id}.pdf`,
       mimeType: "application/pdf",
     });
 
@@ -114,6 +119,68 @@ function buildSignatureAlias(fullName = "") {
   return `${initial}.${normalizedLast}`;
 }
 
+function isCancelledStatus(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return normalized === "cancelled" || normalized === "cancelado";
+}
+
+function resolveCancellationAudit(solicitud = {}) {
+  if (!isCancelledStatus(solicitud?.status)) return null;
+
+  const requestedAt = solicitud?.cancellation_requested_at || null;
+  const requestReason = String(solicitud?.cancellation_request_reason || "").trim() || null;
+  const reviewReason = String(solicitud?.cancellation_review_reason || "").trim() || null;
+  const finalReason =
+    String(
+      solicitud?.cancellation_reason ||
+        solicitud?.cancellation_review_reason ||
+        solicitud?.cancellation_request_reason ||
+        ""
+    ).trim() || null;
+  const directCancellation = !requestedAt;
+
+  return {
+    modeLabel: directCancellation ? "Cancelación directa" : "Solicitud de cancelación aprobada",
+    requestedAt,
+    requestedBy:
+      solicitud?.cancellation_requested_by_name ||
+      solicitud?.cancellation_requested_by_email ||
+      (directCancellation ? "No aplica (cancelación directa)" : "No disponible"),
+    requestReason,
+    resolvedAt: solicitud?.cancelled_at || solicitud?.cancellation_reviewed_at || null,
+    resolvedByLabel: directCancellation ? "Cancelado por" : "Cancelación aprobada por",
+    resolvedBy:
+      (directCancellation
+        ? solicitud?.cancelled_by_name || solicitud?.cancelled_by_email
+        : solicitud?.cancellation_reviewed_by_name ||
+          solicitud?.cancellation_reviewed_by_email ||
+          solicitud?.cancelled_by_name ||
+          solicitud?.cancelled_by_email) || "No disponible",
+    finalReason,
+    reviewReason,
+  };
+}
+
+async function applyCancellationWatermark(pdfDoc, solicitud) {
+  if (!isCancelledStatus(solicitud?.status)) return;
+  const pages = pdfDoc.getPages();
+  if (!Array.isArray(pages) || pages.length === 0) return;
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  pages.forEach((page) => {
+    const { width, height } = page.getSize();
+    page.drawText("CANCELADO", {
+      x: Math.max(width * 0.16, 30),
+      y: height * 0.48,
+      size: Math.max(Math.min(width * 0.08, 56), 36),
+      font: bold,
+      color: rgb(0.72, 0.11, 0.11),
+      rotate: degrees(28),
+      opacity: 0.18,
+    });
+  });
+}
+
 async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
   try {
     const page = pdfDoc.addPage([612, 792]);
@@ -144,6 +211,7 @@ async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
       solicitud?.firma_aprobador_texto,
       solicitud?.approver_fullname || solicitud?.aprobacion_final_por || "No disponible"
     );
+    const cancellationAudit = resolveCancellationAudit(solicitud);
 
     draw("F.RH-10 - Bloque FamSign", { size: 15, bold: true, gap: 22 });
     draw("Este anexo forma parte integral del documento y conserva trazabilidad legal del workflow.");
@@ -159,6 +227,22 @@ async function appendAdvancedSignaturePage(pdfDoc, solicitud) {
       `Hash encadenamiento previo: ${summary?.aprobacion?.previous_signature_hash_sha256 || solicitud?.firma_aprobador_prev_hash || "No disponible"}`
     );
     draw(`Token de verificacion: ${legalToken}`);
+    if (cancellationAudit) {
+      draw("Estado documental: cancelado", { bold: true, gap: 18 });
+      draw(
+        `Fecha solicitud cancelacion: ${
+          cancellationAudit.requestedAt ? formatDateTime(cancellationAudit.requestedAt) : "No aplica (cancelación directa)"
+        }`
+      );
+      draw(`Solicitado por: ${cancellationAudit.requestedBy || "No disponible"}`);
+      draw(`Motivo solicitud: ${cancellationAudit.requestReason || "No disponible"}`);
+      draw(`${cancellationAudit.resolvedByLabel}: ${cancellationAudit.resolvedBy || "No disponible"}`);
+      draw(`Fecha resolucion: ${formatDateTime(cancellationAudit.resolvedAt)}`);
+      if (cancellationAudit.reviewReason) {
+        draw(`Observacion revision: ${cancellationAudit.reviewReason}`);
+      }
+      draw(`Motivo final cancelacion: ${cancellationAudit.finalReason || "No disponible"}`);
+    }
 
     const boxY = y - 175;
     page.drawRectangle({
@@ -375,7 +459,6 @@ function fillPermisoFields(form, solicitud) {
       }
     }
 
-    // DuraciÃ³n
     if (solicitud.duracion_dias) {
       try {
         form.getTextField("per_dia").setText(solicitud.duracion_dias.toString());
@@ -540,6 +623,7 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
     const finalSig = timeline.find((item) => item.stage === "aprobacion_final") || null;
     const rechazoSig = timeline.find((item) => item.stage === "rechazo") || null;
     const approvalSig = finalSig || rechazoSig || partialSig || null;
+    const cancellationAudit = resolveCancellationAudit(solicitud);
 
     drawLine("SPI Fam - Constancia de Validacion Legal de FamSign", { size: 14, bold: true, gap: 20 });
     drawLine(
@@ -575,6 +659,24 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
     drawLine(`Usuario aprobador: ${approvalSig?.signer_email || solicitud?.approver_email || "No disponible"}`);
     drawLine(`IP solicitud: ${solicitudSig?.ip_address || "No disponible"}`);
     drawLine(`IP aprobacion: ${approvalSig?.ip_address || "No disponible"}`);
+
+    if (cancellationAudit) {
+      drawSection("Cancelación");
+      drawLine(`Modalidad: ${cancellationAudit.modeLabel}`);
+      drawLine(
+        `Fecha solicitud cancelacion: ${
+          cancellationAudit.requestedAt ? formatDateTime(cancellationAudit.requestedAt) : "No aplica (cancelación directa)"
+        }`
+      );
+      drawLine(`Solicitado por: ${cancellationAudit.requestedBy || "No disponible"}`);
+      drawLine(`Motivo solicitud: ${cancellationAudit.requestReason || "No disponible"}`);
+      drawLine(`${cancellationAudit.resolvedByLabel}: ${cancellationAudit.resolvedBy || "No disponible"}`);
+      drawLine(`Fecha resolucion: ${formatDateTime(cancellationAudit.resolvedAt)}`);
+      drawLine(`Motivo final cancelacion: ${cancellationAudit.finalReason || "No disponible"}`);
+      if (cancellationAudit.reviewReason) {
+        drawLine(`Observacion revision: ${cancellationAudit.reviewReason}`);
+      }
+    }
 
     drawSection("Workflow y Conservacion");
     drawLine(`Estados de flujo: solicitado -> ${finalSig ? "aprobado" : rechazoSig ? "rechazado" : "en proceso"}`);
@@ -616,7 +718,9 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
       solicitudId: solicitud?.id,
       tipoJustificante: "ValidacionLegalFirma",
       fileBuffer: Buffer.from(pdfBytes),
-      fileName: `Validacion_Legal_Firma_${solicitud?.id || "SNA"}.pdf`,
+      fileName: isCancelledStatus(solicitud?.status)
+        ? `Validacion_Legal_Firma_${solicitud?.id || "SNA"}_CANCELADA.pdf`
+        : `Validacion_Legal_Firma_${solicitud?.id || "SNA"}.pdf`,
       mimeType: "application/pdf",
       existingFolderId: solicitud?.drive_folder_id || null,
     });

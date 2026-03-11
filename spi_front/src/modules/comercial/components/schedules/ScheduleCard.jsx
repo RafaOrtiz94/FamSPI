@@ -20,7 +20,17 @@ const monthNames = [
 const getMonthName = (month) => monthNames[(Number(month) || 1) - 1] || "";
 const formatDate = (value) => (value ? new Date(value).toLocaleString("es-EC") : "—");
 
-const ScheduleCard = ({ schedule, onApprove, onReject, onViewDetails, showMeta = false }) => {
+const ScheduleCard = ({
+  schedule,
+  onApprove,
+  onReject,
+  onViewDetails,
+  showMeta = false,
+  approveLoading = false,
+  rejectLoading = false,
+  viewLoading = false,
+  disabled = false,
+}) => {
   const canApprove = schedule.status === "pending_approval";
   const efficiencyPct =
     typeof schedule.efficiency_ratio === "number"
@@ -97,15 +107,36 @@ const ScheduleCard = ({ schedule, onApprove, onReject, onViewDetails, showMeta =
         </div>
 
         <div className="flex gap-2">
-          <Button size="sm" variant="ghost" icon={FiEye} onClick={onViewDetails}>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={FiEye}
+            onClick={onViewDetails}
+            loading={viewLoading}
+            disabled={disabled && !viewLoading}
+          >
             Ver
           </Button>
           {canApprove && (
             <>
-              <Button size="sm" variant="success" icon={FiCheck} onClick={() => onApprove(schedule.id)}>
+              <Button
+                size="sm"
+                variant="success"
+                icon={FiCheck}
+                onClick={() => onApprove(schedule.id)}
+                loading={approveLoading}
+                disabled={disabled && !approveLoading}
+              >
                 Aprobar
               </Button>
-              <Button size="sm" variant="danger" icon={FiX} onClick={onReject}>
+              <Button
+                size="sm"
+                variant="danger"
+                icon={FiX}
+                onClick={onReject}
+                loading={rejectLoading}
+                disabled={disabled && !rejectLoading}
+              >
                 Rechazar
               </Button>
             </>

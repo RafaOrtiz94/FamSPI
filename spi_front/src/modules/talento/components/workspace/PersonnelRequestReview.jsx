@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import toast from "react-hot-toast";
 import { FiClock, FiAlertCircle, FiCheckCircle, FiXCircle } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
+import { useUI } from "../../../../core/ui/UIContext";
 import { formatDateSafe } from "../../../../shared/utils/dateUtils";
 import { updatePersonnelRequestStatus } from "../../../../core/api/personnelRequestsApi";
 
 const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => {
+  const { showLoader, hideLoader } = useUI();
   const [actionNotes, setActionNotes] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
 
@@ -37,6 +39,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
       return;
     }
     setActionLoading(true);
+    showLoader(status === "aprobada" ? "Aprobando solicitud de personal..." : "Rechazando solicitud de personal...");
     try {
       await updatePersonnelRequestStatus(request.id, status, actionNotes.trim() || null);
       toast.success(status === "aprobada" ? "Solicitud aprobada" : "Solicitud rechazada");
@@ -45,6 +48,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
       console.error("Error actualizando solicitud:", error);
       toast.error(error.response?.data?.message || "No se pudo actualizar la solicitud");
     } finally {
+      hideLoader();
       setActionLoading(false);
     }
   };

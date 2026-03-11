@@ -6,6 +6,7 @@ import {
   getClientRequests,
   getClientRequestById,
 } from "../../../core/api/requestsApi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import Button from "../../../core/ui/components/Button";
 import { useUI } from "../../../core/ui/useUI";
 
@@ -25,8 +26,8 @@ const ClientApprovalsWidget = () => {
     reason: "",
   });
 
-  const loadRequests = useCallback(async () => {
-    setLoading(true);
+  const loadRequests = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const data = await getClientRequests({ page: 1, pageSize: 4, status: "pending_approval" });
       const rows = data.rows || data || [];
@@ -43,12 +44,12 @@ const ClientApprovalsWidget = () => {
       console.error(error);
       showToast("No pudimos cargar las solicitudes pendientes", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [showToast]);
 
-  const loadApprovedRequests = useCallback(async () => {
-    setLoadingApproved(true);
+  const loadApprovedRequests = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoadingApproved(true);
     try {
       const data = await getClientRequests({ page: 1, pageSize: 4, status: "approved" });
       const rows = data.rows || data || [];
@@ -68,7 +69,7 @@ const ClientApprovalsWidget = () => {
       console.error(error);
       showToast("No pudimos cargar los clientes aprobados", "error");
     } finally {
-      setLoadingApproved(false);
+      if (!silent) setLoadingApproved(false);
     }
   }, [showToast]);
 
@@ -97,7 +98,7 @@ const ClientApprovalsWidget = () => {
         setProcessingId(null);
       }
     },
-    [loadRequests, showToast],
+    [refreshAll, showToast],
   );
 
   const loadedRef = useRef(false);
@@ -106,6 +107,15 @@ const ClientApprovalsWidget = () => {
     loadedRef.current = true;
     refreshAll();
   }, [refreshAll]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.CLIENT_REQUESTS,
+    () => {
+      loadRequests({ silent: true });
+      loadApprovedRequests({ silent: true });
+    },
+    [loadRequests, loadApprovedRequests],
+  );
 
   const pendingCount = requests.length;
   const approvedCount = approvedRequests.length;

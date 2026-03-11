@@ -21,7 +21,7 @@ const ScheduleApprovalWidget = () => {
     loadPending,
     loadTeamSchedules,
   } = useScheduleApproval();
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
   const role = (user?.role || "").toLowerCase();
   const isGerenciaGeneral = role.includes("gerencia_general");
@@ -29,6 +29,7 @@ const ScheduleApprovalWidget = () => {
   const [modalLoading, setModalLoading] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [showRejectModal, setShowRejectModal] = useState(false);
+  const [actionLoadingKey, setActionLoadingKey] = useState(null);
 
   const schedulesList = useMemo(() => {
     const base = isGerenciaGeneral ? teamSchedules : pending;
@@ -74,28 +75,43 @@ const ScheduleApprovalWidget = () => {
 
   const totalCount = schedulesList.length;
 
-  const handleApprove = async (scheduleId) => {
+  const runActionWithLoader = async (loadingKey, message, action) => {
+    setActionLoadingKey(loadingKey);
+    showLoader(message);
     try {
-      await approve(scheduleId);
-      showToast("Cronograma aprobado", "success");
-      setShowDetailModal(false);
-      setSelectedSchedule(null);
-    } catch (error) {
-      showToast(error.message || "No se pudo aprobar", "error");
+      await action();
+    } finally {
+      hideLoader();
+      setActionLoadingKey(null);
     }
+  };
+
+  const handleApprove = async (scheduleId) => {
+    await runActionWithLoader(`approve-${scheduleId}`, "Aprobando cronograma...", async () => {
+      try {
+        await approve(scheduleId);
+        showToast("Cronograma aprobado", "success");
+        setShowDetailModal(false);
+        setSelectedSchedule(null);
+      } catch (error) {
+        showToast(error.message || "No se pudo aprobar", "error");
+      }
+    });
   };
 
   const handleReject = async (reason) => {
     if (!selectedSchedule) return;
-    try {
-      await reject(selectedSchedule.id, reason);
-      showToast("Cronograma rechazado", "success");
-      setShowRejectModal(false);
-      setShowDetailModal(false);
-      setSelectedSchedule(null);
-    } catch (error) {
-      showToast(error.message || "No se pudo rechazar", "error");
-    }
+    await runActionWithLoader(`reject-${selectedSchedule.id}`, "Rechazando cronograma...", async () => {
+      try {
+        await reject(selectedSchedule.id, reason);
+        showToast("Cronograma rechazado", "success");
+        setShowRejectModal(false);
+        setShowDetailModal(false);
+        setSelectedSchedule(null);
+      } catch (error) {
+        showToast(error.message || "No se pudo rechazar", "error");
+      }
+    });
   };
 
   return (
@@ -151,6 +167,8 @@ const ScheduleApprovalWidget = () => {
               setShowRejectModal(true);
             }}
             onViewDetails={async () => {
+              setActionLoadingKey(`view-${schedule.id}`);
+              showLoader("Cargando detalle de cronograma...");
               setSelectedSchedule(schedule);
               setShowDetailModal(true);
               setModalLoading(true);
@@ -160,9 +178,15 @@ const ScheduleApprovalWidget = () => {
               } catch (err) {
                 showToast("No se pudo cargar el detalle", "error");
               } finally {
+                hideLoader();
+                setActionLoadingKey(null);
                 setModalLoading(false);
               }
             }}
+            approveLoading={actionLoadingKey === `approve-${schedule.id}`}
+            rejectLoading={actionLoadingKey === `reject-${schedule.id}`}
+            viewLoading={actionLoadingKey === `view-${schedule.id}`}
+            disabled={Boolean(actionLoadingKey)}
             showMeta={isGerenciaGeneral}
           />
         ))}
@@ -173,7 +197,13 @@ const ScheduleApprovalWidget = () => {
         )}
       </div>
 
-      <Modal open={showDetailModal} onClose={() => setShowDetailModal(false)} title="Detalle de cronograma">
+      <Modal
+        open={showDetailModal}
+        onClose={() => {
+          if (!actionLoadingKey) setShowDetailModal(false);
+        }}
+        title="Detalle de cronograma"
+      >
         {modalLoading ? (
           <div className="p-10 flex flex-col items-center justify-center text-gray-500">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mb-2"></div>
@@ -186,14 +216,21 @@ const ScheduleApprovalWidget = () => {
             onReject={() => {
               setShowRejectModal(true);
             }}
+            approveLoading={actionLoadingKey === `approve-${selectedSchedule.id}`}
+            rejectLoading={actionLoadingKey === `reject-${selectedSchedule.id}`}
+            actionsDisabled={Boolean(actionLoadingKey)}
           />
         ) : null}
       </Modal>
 
       <RejectScheduleModal
         open={showRejectModal}
-        onClose={() => setShowRejectModal(false)}
+        onClose={() => {
+          if (!actionLoadingKey) setShowRejectModal(false);
+        }}
         onConfirm={handleReject}
+        loading={selectedSchedule ? actionLoadingKey === `reject-${selectedSchedule.id}` : false}
+        disabled={Boolean(actionLoadingKey)}
       />
 
       <div className="flex items-center justify-end gap-2">

@@ -108,10 +108,9 @@ const generateAttendanceListPDF = async (attendanceData) => {
     for (let i = 1; i <= 7; i++) {
         setFieldText(form, `Nombres_Apellidos${i}`, attendanceData[`Nombres_Apellidos${i}`] || "");
         setFieldText(form, `Cargo${i}`, attendanceData[`Cargo${i}`] || "");
-        setFieldText(form, `Correo_ElectrÃ³nico${i}`, attendanceData[`Correo_ElectrÃ³nico${i}`] || "");
+        setFieldText(form, `Correo_Electrónico${i}`, attendanceData[`Correo_Electrónico${i}`] || "");
     }
 
-    // 3ï¸âƒ£ ASISTENCIA POR DÃA (Hasta 3 dÃ­as, 7 asistentes cada uno)
     for (let day = 1; day <= 3; day++) {
         for (let attendee = 1; attendee <= 7; attendee++) {
             const fieldName = `Dia_${day}_${attendee}`;
@@ -152,7 +151,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
         console.log("ðŸ“ Backend: No attendance specialist signature buffer available");
     }
 
-    // Ajustar tipografÃ­a para evitar letras exageradas
+
     try {
         form.getFields().forEach((field) => {
             if (typeof field.updateAppearances === "function") {
@@ -193,10 +192,10 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
             return null;
         }
 
-        // 1. Create Servicio TÃ©cnico folder
-        console.log("ðŸ“ Backend: Creating Servicio TÃ©cnico folder");
-        const servicioTecnicoFolder = await ensureFolder("Servicio TÃ©cnico", DRIVE_ROOT_FOLDER_ID);
-        console.log("ðŸ“ Backend: Servicio TÃ©cnico folder created", { id: servicioTecnicoFolder.id });
+
+        console.log("ðŸ“ Backend: Creating Servicio Técnico folder");
+        const servicioTecnicoFolder = await ensureFolder("Servicio Técnico", DRIVE_ROOT_FOLDER_ID);
+        console.log("ðŸ“ Backend: Servicio Técnico folder created", { id: servicioTecnicoFolder.id });
 
         // 2. Create Entrenamiento folder
         console.log("ðŸ“ Backend: Creating Entrenamiento folder");
@@ -246,7 +245,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
         if (!attendanceData.Num_Orden) {
             return res.status(400).json({
                 ok: false,
-                message: "El nÃºmero de orden (Num_Orden) es obligatorio",
+                message: "El número de orden (Num_Orden) es obligatorio",
             });
         }
 
@@ -273,10 +272,10 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
                 hasAttendees = true;
 
                 // If attendee name exists, cargo and email are required
-                if (!attendanceData[`Cargo${i}`] || !attendanceData[`Correo_ElectrÃ³nico${i}`]) {
+                if (!attendanceData[`Cargo${i}`] || !attendanceData[`Correo_Electrónico${i}`]) {
                     return res.status(400).json({
                         ok: false,
-                        message: `Para el asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}), el cargo y correo electrÃ³nico son obligatorios`,
+                        message: `Para el asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}), el cargo y correo electrónico son obligatorios`,
                     });
                 }
 
@@ -314,11 +313,11 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             logger.error("Attendance PDF buffer is empty or invalid");
             return res.status(500).json({
                 ok: false,
-                message: "Error: PDF de asistencia generado estÃ¡ vacÃ­o",
+                message: "Error: PDF de asistencia generado está vacío",
             });
         }
 
-        logger.info(`PDF de lista de asistencia generado correctamente, tamaÃ±o: ${pdfBuffer.length} bytes`);
+        logger.info(`PDF de lista de asistencia generado correctamente, tamaño: ${pdfBuffer.length} bytes`);
 
         // Save to Google Drive (required - if this fails, return error)
         const driveResult = await saveAttendanceToDrive(pdfBuffer, attendanceData, req.userInfo);

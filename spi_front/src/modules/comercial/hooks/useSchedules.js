@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import {
   fetchSchedules,
   fetchScheduleDetail,
@@ -17,8 +18,8 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
   const [activeSchedule, setActiveSchedule] = useState(null);
   const [error, setError] = useState(null);
 
-  const loadSchedules = useCallback(async () => {
-    setLoading(true);
+  const loadSchedules = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchSchedules();
@@ -26,12 +27,12 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
     } catch (err) {
       setError(err.message || "No se pudieron cargar los cronogramas");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  const loadScheduleDetail = useCallback(async (id) => {
-    setLoading(true);
+  const loadScheduleDetail = useCallback(async (id, { silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchScheduleDetail(id);
@@ -39,7 +40,7 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
     } catch (err) {
       setError(err.message || "No se pudo cargar el cronograma");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -59,7 +60,7 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
         setLoading(false);
       }
     },
-    [],
+    [loadSchedules],
   );
 
   const update = useCallback(
@@ -177,6 +178,18 @@ export const useSchedules = ({ skipLoad = false } = {}) => {
     if (skipLoad) return;
     loadSchedules();
   }, [loadSchedules, skipLoad]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.SCHEDULES,
+    () => {
+      if (skipLoad) return;
+      loadSchedules({ silent: true });
+      if (activeSchedule?.id) {
+        loadScheduleDetail(activeSchedule.id, { silent: true });
+      }
+    },
+    [skipLoad, activeSchedule?.id, loadSchedules, loadScheduleDetail],
+  );
 
   return {
     schedules,

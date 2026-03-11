@@ -182,6 +182,9 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
   - gestion documental (`personnel_request_documents`)
   - vinculacion de colaborador/postulante
   - contratacion (`hire`) con alta/actualizacion en `users` y sincronizacion a `collaborator_*`.
+- Regla de interfaz 2026-03-10:
+  - las acciones de aprobacion y rechazo en widgets o vistas de revision deben activar un loader visible hasta completar la respuesta del backend.
+  - cuando una accion cambia el estado de una solicitud, los widgets y vistas del dominio `personnel-requests` deben refrescarse automaticamente sin requerir recarga manual de pagina.
 - Integraciones: notificaciones, SMTP/Gmail, Drive.
 
 ### 4.8 Modulo `permisos`
@@ -199,6 +202,20 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
   - en `PermisosStatusWidget`, la pestana `Aprobar` debe listar solo solicitudes accionables para el aprobador: pendientes de aprobacion, cancelaciones pendientes de revision, coordinaciones pendientes o solicitudes aprobadas que aun pueden cancelarse.
   - la cola de `Aprobar` se ordena por recencia operativa descendente.
   - las matriculas de estudios pendientes se muestran en una pestana independiente `Matriculas`.
+  - las acciones de aprobar, rechazar, cancelar, revisar cancelacion, revisar matricula y gestionar coordinacion deben mostrar loader visible mientras se procesa la accion.
+  - cuando una accion cambia el estado de permisos, vacaciones, matriculas o coordinaciones, las vistas y widgets del dominio deben refrescarse automaticamente sin requerir F5.
+- Regla de matriculas 2026-03-10:
+  - `permisos_estudios_matriculas` permite multiples registros `active` por colaborador.
+  - al aprobar una nueva matricula no se expiran automaticamente otras matriculas activas del mismo usuario.
+  - una matricula activa pasa a `expired` cuando `valid_until` queda en el pasado.
+  - el modal de permisos por estudios permite seguir cargando matriculas adicionales aunque ya existan activas y deja seleccionar cualquiera de las activas para la solicitud.
+  - en la pestaña `Matriculas`, cada pendiente de validacion debe mostrar solicitante, correo, institucion, programa y vigencia (`valid_from` / `valid_until`).
+  - en la revision de matriculas, el motivo es obligatorio solo para rechazo; la aprobacion no requiere motivo.
+  - al enviar una matricula para validacion, la UI debe mostrar overlay de carga hasta recibir respuesta del backend.
+- Regla de cancelacion documental 2026-03-10:
+  - cuando una solicitud aprobada queda `cancelled`, el backend regenera el F.RH-10 y la constancia legal con marca visible de cancelacion y mantiene el mismo token de verificacion legal para preservar trazabilidad.
+  - la vista publica `GET /api/v1/permisos/legal-verification/:token` muestra estado `Cancelado`, motivo final, fecha/hora de solicitud de cancelacion, actor que aprobo o ejecuto la cancelacion y la observacion de revision si existe.
+  - las solicitudes `cancelled` conservan acceso a `pdf_generado_url`, `pdf_validacion_legal_url` y `legal_verification_token`; solo las rechazadas ocultan evidencia legal.
 - Trazabilidad legal: hash SHA-256 encadenado, token de verificacion legal publico, PDF de validacion legal.
 - Integraciones: Calendar, notificaciones, Drive, generacion de formato FRH-10.
 
@@ -212,6 +229,11 @@ El area de Talento Humano opera sobre cinco capas tecnicas:
   - verificacion legal publica por token.
 - Regla tecnica 2026-03-10:
   - en `POST /api/v1/vacaciones/:id/cancel/review`, el motivo es obligatorio solo para `decision=reject`; en `decision=approve` la observacion es opcional.
+- Regla de cancelacion legal 2026-03-10:
+  - cuando una solicitud de vacaciones aprobada queda cancelada, la constancia legal y la verificacion publica por token se regeneran para reflejar estado cancelado, motivo y trazabilidad del actor que resolvio la cancelacion.
+- Regla de interfaz 2026-03-10:
+  - las acciones de aprobacion y rechazo en widgets de vacaciones deben activar loader visible hasta completar la accion.
+  - cuando una accion cambia estado en `vacaciones`, los widgets y resúmenes relacionados deben refrescarse automaticamente sin recargar la pagina.
 - Trazabilidad legal: `vacaciones_solicitudes_firmas` con firma workflow y token legal.
 
 ### 4.10 Modulo `applicants`

@@ -30,6 +30,7 @@ import {
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
 import { getActiveException, getTodayAttendance } from "../../../../core/api/attendanceApi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
 const normalizeRole = (value = "") => value.toLowerCase();
@@ -47,6 +48,14 @@ const formatDateTime = (value) => {
   if (Number.isNaN(parsed.getTime())) return "N/A";
   return parsed.toLocaleString();
 };
+
+const formatEnrollmentDate = (value) => {
+  const normalized = normalizeDateOnly(value);
+  return normalized ? formatDateShort(normalized) : "No disponible";
+};
+
+const getEnrollmentRequesterName = (enrollment = {}) =>
+  enrollment?.user_fullname || enrollment?.user_email || "No disponible";
 
 const formatTimeRange = (solicitud = {}) => {
   const start = solicitud?.fecha_inicio_hora || solicitud?.start_time || null;
@@ -116,7 +125,7 @@ const estimateRequestedHoursFromSolicitud = (solicitud = {}) => {
 
 const PermisosStatusWidget = () => {
   const { user } = useAuth();
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
   const role = normalizeRole(user?.role || user?.rol);
   const scope = normalizeRole(user?.scope || role);
   const userEmail = user?.email || "";
@@ -399,39 +408,55 @@ const PermisosStatusWidget = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role, scope]);
 
-  const handleAprobarParcial = async (id) => {
-    setActionLoading(id);
+  useScopedAutoUpdate(
+    [DATA_UPDATE_SCOPES.PERMISOS, DATA_UPDATE_SCOPES.VACACIONES],
+    () => {
+      loadData({ silent: true });
+    },
+  );
+
+  const runActionWithLoader = async (loadingKey, message, action) => {
+    setActionLoading(loadingKey);
+    showLoader(message);
     try {
-      const response = await aprobarParcial(id);
-      if (response.ok) {
-        const nextStatus = String(response?.data?.status || "").toLowerCase();
-        if (nextStatus === "approved") {
-          showToast("Aprobado definitivamente.", "success");
-        } else {
-          showToast("Aprobado parcialmente. El colaborador debe subir documentos.", "success");
-        }
-        await loadData();
-      }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error al aprobar", "error");
+      return await action();
     } finally {
+      hideLoader();
       setActionLoading(null);
     }
   };
 
-  const handleAprobarFinal = async (id) => {
-    setActionLoading(id);
-    try {
-      const response = await aprobarFinal(id);
-      if (response.ok) {
-        showToast("Aprobado definitivamente. PDF generado en Drive.", "success");
-        await loadData();
+  const handleAprobarParcial = async (id) => {
+    await runActionWithLoader(id, "Aprobando solicitud...", async () => {
+      try {
+        const response = await aprobarParcial(id);
+        if (response.ok) {
+          const nextStatus = String(response?.data?.status || "").toLowerCase();
+          if (nextStatus === "approved") {
+            showToast("Aprobado definitivamente.", "success");
+          } else {
+            showToast("Aprobado parcialmente. El colaborador debe subir documentos.", "success");
+          }
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al aprobar", "error");
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error al aprobar", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    });
+  };
+
+  const handleAprobarFinal = async (id) => {
+    await runActionWithLoader(id, "Aprobando solicitud...", async () => {
+      try {
+        const response = await aprobarFinal(id);
+        if (response.ok) {
+          showToast("Aprobado definitivamente. PDF generado en Drive.", "success");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al aprobar", "error");
+      }
+    });
   };
 
   const handleRechazar = async () => {
@@ -440,21 +465,20 @@ const PermisosStatusWidget = () => {
       return;
     }
 
-    setActionLoading(selectedSolicitud.id);
-    try {
-      const response = await rechazar(selectedSolicitud.id, rejectReason);
-      if (response.ok) {
-        showToast("Solicitud rechazada", "success");
-        setShowRejectModal(false);
-        setSelectedSolicitud(null);
-        setRejectReason("");
-        await loadData();
+    await runActionWithLoader(selectedSolicitud.id, "Rechazando solicitud...", async () => {
+      try {
+        const response = await rechazar(selectedSolicitud.id, rejectReason);
+        if (response.ok) {
+          showToast("Solicitud rechazada", "success");
+          setShowRejectModal(false);
+          setSelectedSolicitud(null);
+          setRejectReason("");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al rechazar", "error");
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error al rechazar", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    });
   };
 
   const handleUploadSuccess = async () => {
@@ -469,21 +493,20 @@ const PermisosStatusWidget = () => {
       showToast("Debes indicar el motivo de cancelación", "warning");
       return;
     }
-    setActionLoading(selectedSolicitud.id);
-    try {
-      const response = await cancelarSolicitud(selectedSolicitud.id, cancelReason.trim());
-      if (response?.ok) {
-        showToast("Solicitud cancelada", "success");
-        setShowCancelModal(false);
-        setSelectedSolicitud(null);
-        setCancelReason("");
-        await loadData();
+    await runActionWithLoader(selectedSolicitud.id, "Cancelando solicitud...", async () => {
+      try {
+        const response = await cancelarSolicitud(selectedSolicitud.id, cancelReason.trim());
+        if (response?.ok) {
+          showToast("Solicitud cancelada", "success");
+          setShowCancelModal(false);
+          setSelectedSolicitud(null);
+          setCancelReason("");
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error al cancelar la solicitud", "error");
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error al cancelar la solicitud", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    });
   };
 
   const handleReviewCancellation = async (solicitud, decision) => {
@@ -492,57 +515,67 @@ const PermisosStatusWidget = () => {
       showToast("Debes indicar el motivo del rechazo", "warning");
       return;
     }
-    setActionLoading(solicitud.id);
-    try {
-      const response = await revisarCancelacionSolicitud(
-        solicitud.id,
-        decision,
-        reviewReason || null
-      );
-      if (response?.ok) {
-        showToast(
-          decision === "approve"
-            ? "Cancelación aprobada"
-            : "Cancelación rechazada",
-          "success"
-        );
-        setShowCancelModal(false);
-        setSelectedSolicitud(null);
-        setCancelReason("");
-        await loadData();
+    await runActionWithLoader(
+      solicitud.id,
+      decision === "approve" ? "Aprobando cancelación..." : "Rechazando cancelación...",
+      async () => {
+        try {
+          const response = await revisarCancelacionSolicitud(
+            solicitud.id,
+            decision,
+            reviewReason || null
+          );
+          if (response?.ok) {
+            showToast(
+              decision === "approve"
+                ? "Cancelación aprobada"
+                : "Cancelación rechazada",
+              "success"
+            );
+            setShowCancelModal(false);
+            setSelectedSolicitud(null);
+            setCancelReason("");
+            await loadData();
+          }
+        } catch (error) {
+          showToast(error.response?.data?.message || "Error revisando cancelación", "error");
+        }
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error revisando cancelación", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    );
   };
 
   const handleReviewEnrollment = async () => {
     if (!selectedEnrollment) return;
     const reason = String(enrollmentReviewReason || "").trim();
-    if (!reason) {
-      showToast("Debes registrar el motivo de la decisión", "warning");
+    if (enrollmentReviewDecision === "reject" && !reason) {
+      showToast("Debes registrar el motivo del rechazo", "warning");
       return;
     }
-    setActionLoading(`enroll-${selectedEnrollment.id}`);
-    try {
-      const response = await reviewStudyEnrollment(selectedEnrollment.id, enrollmentReviewDecision, reason);
-      if (response?.ok) {
-        showToast(
-          enrollmentReviewDecision === "approve" ? "Matrícula validada" : "Matrícula rechazada",
-          "success"
-        );
-        setShowEnrollmentReviewModal(false);
-        setSelectedEnrollment(null);
-        setEnrollmentReviewReason("");
-        await loadData();
+    await runActionWithLoader(
+      `enroll-${selectedEnrollment.id}`,
+      enrollmentReviewDecision === "approve" ? "Aprobando matrícula..." : "Rechazando matrícula...",
+      async () => {
+        try {
+          const response = await reviewStudyEnrollment(
+            selectedEnrollment.id,
+            enrollmentReviewDecision,
+            reason || null
+          );
+          if (response?.ok) {
+            showToast(
+              enrollmentReviewDecision === "approve" ? "Matrícula validada" : "Matrícula rechazada",
+              "success"
+            );
+            setShowEnrollmentReviewModal(false);
+            setSelectedEnrollment(null);
+            setEnrollmentReviewReason("");
+            await loadData();
+          }
+        } catch (error) {
+          showToast(error.response?.data?.message || "Error revisando matrícula", "error");
+        }
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error revisando matrícula", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    );
   };
 
   const openEnrollmentReviewModal = (enrollment, decision) => {
@@ -592,28 +625,34 @@ const PermisosStatusWidget = () => {
       return;
     }
 
-    setActionLoading(`recovery-${selectedSolicitud.id}`);
-    try {
-      const response = await updateRecoveryPlan(selectedSolicitud.id, normalizedPlan, action);
-      if (response?.ok) {
-        showToast(
-          action === "accept"
-            ? "Plan de recuperación aprobado"
-            : action === "finalize"
-            ? "Plan de recuperación definido de forma definitiva"
-            : "Plan de recuperación actualizado",
-          "success"
-        );
-        setShowRecoveryModal(false);
-        setSelectedSolicitud(null);
-        setRecoveryRows([]);
-        await loadData();
+    const recoveryMessage =
+      action === "accept"
+        ? "Aprobando plan de recuperación..."
+        : action === "finalize"
+        ? "Definiendo plan de recuperación..."
+        : "Actualizando plan de recuperación...";
+
+    await runActionWithLoader(`recovery-${selectedSolicitud.id}`, recoveryMessage, async () => {
+      try {
+        const response = await updateRecoveryPlan(selectedSolicitud.id, normalizedPlan, action);
+        if (response?.ok) {
+          showToast(
+            action === "accept"
+              ? "Plan de recuperación aprobado"
+              : action === "finalize"
+              ? "Plan de recuperación definido de forma definitiva"
+              : "Plan de recuperación actualizado",
+            "success"
+          );
+          setShowRecoveryModal(false);
+          setSelectedSolicitud(null);
+          setRecoveryRows([]);
+          await loadData();
+        }
+      } catch (error) {
+        showToast(error.response?.data?.message || "Error actualizando plan de recuperación", "error");
       }
-    } catch (error) {
-      showToast(error.response?.data?.message || "Error actualizando plan de recuperación", "error");
-    } finally {
-      setActionLoading(null);
-    }
+    });
   };
 
   const requestedRecoveryHours = estimateRequestedHoursFromSolicitud(selectedSolicitud || {});
@@ -822,7 +861,8 @@ const PermisosStatusWidget = () => {
     }
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
-    const isRejectedStatus = ["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus);
+    const isRejectedStatus = ["rejected", "rechazado"].includes(normalizedStatus);
+    const isCancelledStatus = ["cancelled", "cancelado"].includes(normalizedStatus);
     const timeRange = formatTimeRange(solicitud);
     const vacationShift = isVacation ? getVacationShiftLabel(solicitud) : null;
     const recoveryPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
@@ -1082,7 +1122,7 @@ const PermisosStatusWidget = () => {
               className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 rounded text-xs font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
             >
               <FiDownload className="w-3 h-3" />
-              Descargar F.RH-10
+              {isCancelledStatus ? "Descargar F.RH-10 cancelado" : "Descargar F.RH-10"}
             </a>
           </div>
         )}
@@ -1097,7 +1137,7 @@ const PermisosStatusWidget = () => {
               className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors"
             >
               <FiDownload className="w-3 h-3" />
-              Descargar validacion legal
+              {isCancelledStatus ? "Descargar validacion legal cancelada" : "Descargar validacion legal"}
             </a>
             {solicitud.legal_verification_token && (
               <p className="mt-2 text-[11px] text-slate-600 break-all">
@@ -1359,20 +1399,44 @@ const PermisosStatusWidget = () => {
         );
       }
       return (
-        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
           <p className="text-sm font-semibold text-indigo-900">Matrículas de estudios pendientes de validación</p>
           <div className="mt-2 space-y-2">
             {pendingStudyEnrollments.map((enrollment) => (
-              <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-2">
-                <p className="text-xs text-gray-800">
-                  <strong>{enrollment.user_email}</strong> · {enrollment.institution_name} · vence {String(enrollment.valid_until || "").slice(0, 10)}
-                </p>
+              <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-3">
+                <div className="grid grid-cols-1 gap-2 text-xs text-gray-700 sm:grid-cols-2">
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Solicitante</p>
+                    <p className="font-semibold text-gray-900">{getEnrollmentRequesterName(enrollment)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Correo</p>
+                    <p className="text-gray-900 break-all">{enrollment.user_email || "No disponible"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Institución</p>
+                    <p className="text-gray-900">{enrollment.institution_name || "No registrada"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Programa</p>
+                    <p className="text-gray-900">{enrollment.program_name || "No registrado"}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Inicio</p>
+                    <p className="text-gray-900">{formatEnrollmentDate(enrollment.valid_from)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] uppercase tracking-wide text-gray-500">Vence</p>
+                    <p className="text-gray-900">{formatEnrollmentDate(enrollment.valid_until)}</p>
+                  </div>
+                </div>
                 <a
                   href={enrollment.drive_file_url}
                   target="_blank"
                   rel="noreferrer"
-                  className="mt-1 inline-flex text-xs text-indigo-700 underline"
+                  className="mt-2 inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-white px-2.5 py-1.5 text-xs font-medium text-indigo-700 shadow-sm transition-colors hover:border-indigo-300 hover:bg-indigo-50"
                 >
+                  <FiEye className="h-3 w-3" />
                   Ver matrícula subida
                 </a>
                 <div className="mt-2 flex gap-2">
@@ -1896,31 +1960,59 @@ const PermisosStatusWidget = () => {
                     <h3 className="text-lg font-bold text-gray-900">
                       {enrollmentReviewDecision === "approve" ? "Aprobar matrícula" : "Rechazar matrícula"}
                     </h3>
-                    <p className="text-sm text-gray-600">Registra el motivo de tu decisión</p>
+                    <p className="text-sm text-gray-600">
+                      {enrollmentReviewDecision === "approve"
+                        ? "Revisa la información y confirma la validación."
+                        : "Registra el motivo del rechazo."}
+                    </p>
                   </div>
                 </div>
 
                 {selectedEnrollment && (
                   <div className="mb-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
-                    <p className="text-xs text-gray-800">
-                      <strong>{selectedEnrollment.user_email}</strong>
-                    </p>
-                    <p className="text-xs text-gray-700">
-                      {selectedEnrollment.institution_name} · vence {String(selectedEnrollment.valid_until || "").slice(0, 10)}
-                    </p>
+                    <div className="grid grid-cols-1 gap-2 text-xs text-gray-700 sm:grid-cols-2">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Solicitante</p>
+                        <p className="font-semibold text-gray-900">
+                          {getEnrollmentRequesterName(selectedEnrollment)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Correo</p>
+                        <p className="text-gray-900 break-all">{selectedEnrollment.user_email || "No disponible"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Institución</p>
+                        <p className="text-gray-900">{selectedEnrollment.institution_name || "No registrada"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Programa</p>
+                        <p className="text-gray-900">{selectedEnrollment.program_name || "No registrado"}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Inicio</p>
+                        <p className="text-gray-900">{formatEnrollmentDate(selectedEnrollment.valid_from)}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase tracking-wide text-gray-500">Vence</p>
+                        <p className="text-gray-900">{formatEnrollmentDate(selectedEnrollment.valid_until)}</p>
+                      </div>
+                    </div>
                   </div>
                 )}
 
-                <textarea
-                  value={enrollmentReviewReason}
-                  onChange={(e) => setEnrollmentReviewReason(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
-                  placeholder={
-                    enrollmentReviewDecision === "approve"
-                      ? "Motivo de aprobación"
-                      : "Motivo de rechazo"
-                  }
-                />
+                {enrollmentReviewDecision === "reject" ? (
+                  <textarea
+                    value={enrollmentReviewReason}
+                    onChange={(e) => setEnrollmentReviewReason(e.target.value)}
+                    className="w-full border rounded-lg px-3 py-2 text-sm mb-4"
+                    placeholder="Motivo de rechazo"
+                  />
+                ) : (
+                  <div className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                    No se requiere motivo para aprobar la matrícula.
+                  </div>
+                )}
 
                 <div className="flex justify-end gap-2">
                   <Button

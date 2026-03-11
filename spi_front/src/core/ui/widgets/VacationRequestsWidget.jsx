@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCalendar, FiCheck, FiX, FiClock } from "react-icons/fi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../api";
 import { listVacationRequests, updateVacationStatus, getVacationSummary } from "../../api/vacationsApi";
 import Card from "../components/Card";
 import Button from "../components/Button";
@@ -28,16 +29,17 @@ const statusBadge = (status) => {
 };
 
 const VacationRequestsWidget = ({ mode = "approver" }) => {
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
   const role = useMemo(() => (user?.role || "").toLowerCase(), [user]);
   const canApprove = mode === "hr" || managerRoles.includes(role);
   const [requests, setRequests] = useState([]);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const scope = mode === "hr" ? "all" : canApprove ? "pending" : "mine";
       const [reqs, sum] = await Promise.all([
@@ -50,7 +52,7 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
       console.warn("No se pudieron cargar las vacaciones", err);
       showToast("No se pudieron cargar las solicitudes de vacaciones", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [canApprove, mode, showToast]);
 
@@ -58,7 +60,17 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
     load();
   }, [load]);
 
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.VACACIONES,
+    () => {
+      load({ silent: true });
+    },
+    [load],
+  );
+
   const handleAction = async (id, status) => {
+    setActionLoadingId(id);
+    showLoader(status === "aprobado" ? "Aprobando vacaciones..." : "Rechazando vacaciones...");
     try {
       await updateVacationStatus(id, status);
       showToast(`Solicitud ${status === "aprobado" ? "aprobada" : "rechazada"}`, "success");
@@ -66,6 +78,9 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
     } catch (err) {
       console.error(err);
       showToast("No se pudo actualizar la solicitud", "error");
+    } finally {
+      hideLoader();
+      setActionLoadingId(null);
     }
   };
 
@@ -159,10 +174,22 @@ const VacationRequestsWidget = ({ mode = "approver" }) => {
 
               {canApprove && (req.status || "").toLowerCase() === "pendiente" ? (
                 <div className="flex gap-2 mt-2">
-                  <Button size="sm" variant="primary" icon={FiCheck} onClick={() => handleAction(req.id, "aprobado")}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    icon={FiCheck}
+                    onClick={() => handleAction(req.id, "aprobado")}
+                    disabled={actionLoadingId === req.id}
+                  >
                     Aprobar
                   </Button>
-                  <Button size="sm" variant="secondary" icon={FiX} onClick={() => handleAction(req.id, "rechazado")}>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon={FiX}
+                    onClick={() => handleAction(req.id, "rechazado")}
+                    disabled={actionLoadingId === req.id}
+                  >
                     Rechazar
                   </Button>
                 </div>

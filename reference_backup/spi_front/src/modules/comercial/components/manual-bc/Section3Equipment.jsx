@@ -20,7 +20,7 @@ const Section3Equipment = ({ data, updateData }) => {
                         : [];
                 setEquipment(parsedEquipment);
             } catch (err) {
-                console.warn('No se pudo cargar el catÃ¡logo', err.message);
+                console.warn('No se pudo cargar el catálogo', err.message);
             } finally {
                 setLoadingEquipment(false);
             }

@@ -3,6 +3,7 @@ import { FiCalendar, FiClock, FiEye, FiUser, FiSearch, FiX } from "react-icons/f
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 
 const formatDate = (dateStr) => {
@@ -52,8 +53,8 @@ const PermisosColaboradoresAlbum = ({ compact = false }) => {
   const [active, setActive] = useState(null);
   const [search, setSearch] = useState("");
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const response = await getResumenColaboradores();
       setRows(Array.isArray(response?.data) ? response.data : []);
@@ -61,13 +62,20 @@ const PermisosColaboradoresAlbum = ({ compact = false }) => {
       console.error("Error cargando resumen de colaboradores:", error);
       showToast("No se pudo cargar el resumen de colaboradores", "warning");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
   }, []);
+
+  useScopedAutoUpdate(
+    [DATA_UPDATE_SCOPES.PERMISOS, DATA_UPDATE_SCOPES.VACACIONES],
+    () => {
+      load({ silent: true });
+    },
+  );
 
   const filteredRows = useMemo(() => {
     if (!search) return rows;

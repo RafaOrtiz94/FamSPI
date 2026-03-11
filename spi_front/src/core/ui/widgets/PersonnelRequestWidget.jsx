@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { FiUsers, FiPlus, FiClock, FiCheckCircle, FiXCircle, FiAlertCircle } from 'react-icons/fi';
 import toast from 'react-hot-toast';
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from '../../api';
 import Card from '../components/Card';
 import Button from '../components/Button';
 import { formatDateSafe } from '../../../shared/utils/dateUtils';
@@ -18,8 +19,8 @@ const PersonnelRequestWidget = ({ onNewRequest }) => {
         rechazadas: 0,
     });
 
-    const loadRequests = async () => {
-        setLoading(true);
+    const loadRequests = async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
         try {
             const response = await getPersonnelRequests({ my_requests: true, pageSize: 5 });
             setRequests(response.data || []);
@@ -55,13 +56,20 @@ const PersonnelRequestWidget = ({ onNewRequest }) => {
             console.error('Error cargando solicitudes:', error);
             toast.error('Error al cargar solicitudes de personal');
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
         }
     };
 
     useEffect(() => {
         loadRequests();
     }, []);
+
+    useScopedAutoUpdate(
+        DATA_UPDATE_SCOPES.PERSONNEL_REQUESTS,
+        () => {
+            loadRequests({ silent: true });
+        },
+    );
 
     const handleSuccess = () => {
         loadRequests();

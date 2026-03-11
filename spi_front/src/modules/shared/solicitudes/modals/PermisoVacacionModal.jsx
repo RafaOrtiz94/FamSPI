@@ -37,6 +37,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [studyEnrollments, setStudyEnrollments] = useState([]);
     const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
     const [loadingStudyEnrollment, setLoadingStudyEnrollment] = useState(false);
+    const [submittingStudyEnrollment, setSubmittingStudyEnrollment] = useState(false);
     const [studyForm, setStudyForm] = useState({
         institution_name: "",
         program_name: "",
@@ -191,7 +192,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 const items = Array.isArray(response?.data) ? response.data : [];
                 const activeItems = items.filter((item) => String(item?.status || "").toLowerCase() === "active");
                 setStudyEnrollments(items);
-                setSelectedStudyEnrollmentId(activeItems[0] ? String(activeItems[0].id) : "");
+                setSelectedStudyEnrollmentId((current) => {
+                    if (current && activeItems.some((item) => String(item.id) === String(current))) {
+                        return current;
+                    }
+                    return activeItems[0] ? String(activeItems[0].id) : "";
+                });
             } catch (error) {
                 console.error("Error loading study enrollment:", error);
                 setStudyEnrollments([]);
@@ -335,8 +341,45 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     };
 
     const handleClose = () => {
+        if (loading || submittingStudyEnrollment) return;
         handleReset();
         onClose();
+    };
+
+    const handleRegisterStudyEnrollment = async () => {
+        setSubmittingStudyEnrollment(true);
+        try {
+            const enrollmentPayload = {
+                institution_name: studyForm.institution_name,
+                program_name: studyForm.program_name,
+                valid_from: studyForm.valid_from,
+                valid_until: studyForm.valid_until,
+                matricula_file: studyForm.matricula_file,
+            };
+            await registerStudyEnrollment(enrollmentPayload);
+            showToast("Matrícula enviada. Estado: esperando validación.", "success");
+            const refreshed = await getMyStudyEnrollments();
+            const items = Array.isArray(refreshed?.data) ? refreshed.data : [];
+            const activeItems = items.filter((item) => String(item?.status || "").toLowerCase() === "active");
+            setStudyEnrollments(items);
+            setSelectedStudyEnrollmentId((current) => {
+                if (current && activeItems.some((item) => String(item.id) === String(current))) {
+                    return current;
+                }
+                return activeItems[0] ? String(activeItems[0].id) : "";
+            });
+            setStudyForm({
+                institution_name: "",
+                program_name: "",
+                valid_from: "",
+                valid_until: "",
+                matricula_file: null,
+            });
+        } catch (error) {
+            showToast(error.response?.data?.message || error.message || "No se pudo registrar matrícula", "error");
+        } finally {
+            setSubmittingStudyEnrollment(false);
+        }
     };
 
     const handleSubmit = async () => {
@@ -633,39 +676,51 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     <p className="text-xs text-indigo-700">Validando matrícula activa...</p>
                                 ) : (
                                     <>
-                                        {activeEnrollments.length > 0 ? (
-                                            <div className="space-y-2">
+                                        <div className="space-y-2">
+                                            {activeEnrollments.length > 0 ? (
+                                                <>
+                                                    <p className="text-xs text-indigo-700">
+                                                        Selecciona una matrícula activa para habilitar la solicitud.
+                                                    </p>
+                                                    <select
+                                                        value={selectedStudyEnrollmentId}
+                                                        onChange={(e) => setSelectedStudyEnrollmentId(e.target.value)}
+                                                        className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                                    >
+                                                        <option value="">Selecciona matrícula activa</option>
+                                                        {activeEnrollments.map((item) => (
+                                                            <option key={item.id} value={item.id}>
+                                                                {item.institution_name} - vence {String(item.valid_until).slice(0, 10)}
+                                                            </option>
+                                                        ))}
+                                                    </select>
+                                                    <p className="text-[11px] text-indigo-700">
+                                                        Puedes seguir usando una matrícula activa o subir otra adicional para validación.
+                                                    </p>
+                                                </>
+                                            ) : (
                                                 <p className="text-xs text-indigo-700">
-                                                    Selecciona una matrícula activa para habilitar la solicitud.
+                                                    No tienes matrícula activa. Debes subir una matrícula y esperar validación del jefe inmediato.
                                                 </p>
-                                                <select
-                                                    value={selectedStudyEnrollmentId}
-                                                    onChange={(e) => setSelectedStudyEnrollmentId(e.target.value)}
-                                                    className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                                >
-                                                    <option value="">Selecciona matrícula activa</option>
-                                                    {activeEnrollments.map((item) => (
-                                                        <option key={item.id} value={item.id}>
-                                                            {item.institution_name} - vence {String(item.valid_until).slice(0, 10)}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        ) : (
-                                            <p className="text-xs text-indigo-700">
-                                                No tienes matrícula activa. Primero debes subir una matrícula y esperar validación del jefe inmediato.
-                                            </p>
-                                        )}
+                                            )}
+                                        </div>
 
                                         {pendingEnrollments.length > 0 && (
                                             <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
                                                 <p className="text-xs text-amber-800">
-                                                    Tienes matrícula en <strong>esperando validación</strong>. No puedes pedir permisos por estudios hasta su aprobación.
+                                                    {activeEnrollments.length > 0 ? (
+                                                        <>
+                                                            Tienes matrícula en <strong>esperando validación</strong>. Puedes seguir usando una matrícula activa mientras se revisa la nueva.
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            Tienes matrícula en <strong>esperando validación</strong>. No puedes pedir permisos por estudios hasta su aprobación.
+                                                        </>
+                                                    )}
                                                 </p>
                                             </div>
                                         )}
 
-                                        {activeEnrollments.length === 0 && (
                                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                             <input
                                                 type="text"
@@ -705,39 +760,21 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                                 className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 sm:col-span-2"
                                             />
                                         </div>
-                                        )}
                                     </>
                                 )}
-                                {activeEnrollments.length === 0 && (
-                                    <Button
-                                        type="button"
-                                        variant="secondary"
-                                        onClick={async () => {
-                                            try {
-                                                const enrollmentPayload = {
-                                                    institution_name: studyForm.institution_name,
-                                                    program_name: studyForm.program_name,
-                                                    valid_from: studyForm.valid_from,
-                                                    valid_until: studyForm.valid_until,
-                                                    matricula_file: studyForm.matricula_file,
-                                                };
-                                                await registerStudyEnrollment(enrollmentPayload);
-                                                showToast("Matrícula enviada. Estado: esperando validación.", "success");
-                                                const refreshed = await getMyStudyEnrollments();
-                                                const items = Array.isArray(refreshed?.data) ? refreshed.data : [];
-                                                const activeItems = items.filter((item) => String(item?.status || "").toLowerCase() === "active");
-                                                setStudyEnrollments(items);
-                                                setSelectedStudyEnrollmentId(activeItems[0] ? String(activeItems[0].id) : "");
-                                            } catch (error) {
-                                                showToast(error.response?.data?.message || error.message || "No se pudo registrar matrícula", "error");
-                                            }
-                                        }}
-                                        disabled={!hasStudyForm}
-                                        className="w-full"
-                                    >
-                                        Subir matrícula para validación
-                                    </Button>
-                                )}
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    onClick={handleRegisterStudyEnrollment}
+                                    disabled={!hasStudyForm || submittingStudyEnrollment}
+                                    className="w-full"
+                                >
+                                    {submittingStudyEnrollment
+                                        ? "Enviando matrícula..."
+                                        : activeEnrollments.length > 0
+                                            ? "Subir otra matrícula para validación"
+                                            : "Subir matrícula para validación"}
+                                </Button>
                             </div>
                         )}
 
@@ -1184,12 +1221,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             }`}
                     >
                         <p className={`text-sm font-medium ${canSubmit ? "text-emerald-900" : "text-red-900"}`}>
-                            DÃ­as solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
+                            Días solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
                         </p>
                         <p className={`text-xs ${canSubmit ? "text-emerald-700" : "text-red-700"}`}>
                             {canSubmit
-                                ? `QuedarÃ­an ${remaining - days} dÃ­as disponibles`
-                                : `No tienes suficientes dÃ­as. Solo tienes ${remaining} dÃ­as disponibles.`}
+                                ? `Quedarían ${remaining - days} días disponibles`
+                                : `No tienes suficientes días. Solo tienes ${remaining} días disponibles.`}
                         </p>
                     </div>
                 )}
@@ -1307,7 +1344,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         <AnimatePresence>
             {open && (
                 <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
-                    <LoadingOverlay message={loading ? "Enviando solicitud..." : ""} />
+                    <LoadingOverlay
+                        message={
+                            loading
+                                ? "Enviando solicitud..."
+                                : submittingStudyEnrollment
+                                    ? "Enviando matrícula para validación..."
+                                    : ""
+                        }
+                    />
                     <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
                     <div className="fixed inset-0 overflow-y-auto">
                         <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">

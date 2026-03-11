@@ -144,6 +144,9 @@ El area Comercial y Demanda opera sobre cinco capas:
   - tokens de consentimiento y validacion por codigo
   - checklist de calidad para revision de backoffice/calidad
   - registro de adjuntos y versionado de payload
+- Regla UI validada:
+  - `ClientRequestReview.jsx` y `ClientRequestManagement.jsx` deben activar loader global visible en aprobar, rechazar, guardar checklist y cargar detalle de solicitud, manteniendolo hasta completar backend y refresco posterior.
+  - cuando una accion cambia el estado o checklist de `client_requests`, las vistas y widgets relacionados deben refrescarse automaticamente sin recarga manual de pagina.
 
 ### 4.3 Modulo `business-case`
 - Responsabilidad: evaluacion de factibilidad tecnica/economica y datos operativos.
@@ -181,6 +184,12 @@ El area Comercial y Demanda opera sobre cinco capas:
 ### 4.6 Modulo `comercial` (legacy)
 - Estado: directorio presente en backend con archivos `.jsx` vacios y sin montaje en `app.js`.
 - Impacto: no participa en la ejecucion real del backend.
+
+### 4.7 Flujos frontend de cronogramas comerciales
+- `ScheduleApprovalWidget.jsx`, `ScheduleCard.jsx`, `ScheduleDetailModal.jsx` y `RejectScheduleModal.jsx` conforman el flujo de aprobacion/rechazo de cronogramas mensuales para jefaturas comerciales.
+- Regla UI validada:
+  - ver detalle, aprobar y rechazar deben mostrar loader global visible y bloquear acciones repetidas mientras la operacion sigue en curso.
+  - las vistas que consumen `schedules` deben refrescarse automaticamente cuando una accion aprueba, rechaza, envia o modifica un cronograma.
 
 ## 5. Modelo de datos
 ### 5.1 Entidades principales del area

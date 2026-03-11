@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { FiArrowLeft, FiCheck, FiRefreshCw, FiX } from "react-icons/fi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import { useUI } from "../../../core/ui/useUI";
 import { useApi } from "../../../core/hooks/useApi";
 import {
@@ -81,7 +82,7 @@ const formatValue = (value) => {
 const ClientRequestReview = () => {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
   const { data, loading, execute: fetchRequest } = useApi(getClientRequestById, {
     errorMsg: "No se pudo cargar la solicitud",
@@ -100,6 +101,14 @@ const ClientRequestReview = () => {
   useEffect(() => {
     refresh();
   }, [id]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.CLIENT_REQUESTS,
+    () => {
+      refresh();
+    },
+    [id],
+  );
 
   const requestDetail = data?.data || data?.result || data?.payload || data || {};
   const payload = requestDetail?.payload || requestDetail?.data || requestDetail;
@@ -137,6 +146,7 @@ const ClientRequestReview = () => {
     }
 
     setProcessing(action);
+    showLoader(action === "approve" ? "Aprobando solicitud de cliente..." : "Rechazando solicitud de cliente...");
     try {
       await processClientRequest(id, action, reason);
       showToast(action === "approve" ? "Solicitud aprobada" : "Solicitud rechazada", "success");
@@ -145,6 +155,7 @@ const ClientRequestReview = () => {
       console.error(error);
       showToast("No se pudo procesar la solicitud", "error");
     } finally {
+      hideLoader();
       setProcessing(null);
     }
   };
@@ -164,6 +175,7 @@ const ClientRequestReview = () => {
     const draft = checklistDraft[item.key] || {};
     const nextStatus = draft.status || (item.required ? "pending" : "not_applicable");
     setSavingChecklistItem(item.key);
+    showLoader("Guardando revisión de calidad...");
     try {
       await updateClientRequestQualityChecklist(id, {
         item_key: item.key,
@@ -179,6 +191,7 @@ const ClientRequestReview = () => {
         "error",
       );
     } finally {
+      hideLoader();
       setSavingChecklistItem(null);
     }
   };

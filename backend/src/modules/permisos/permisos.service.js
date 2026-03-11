@@ -130,6 +130,150 @@ async function getUserIdentity(userId) {
   }
 }
 
+async function attachCancellationActors(row) {
+  if (!row) return row;
+  const [requestedBy, reviewedBy, cancelledBy] = await Promise.all([
+    getUserIdentity(row.cancellation_requested_by_user_id).catch(() => null),
+    getUserIdentity(row.cancellation_reviewed_by_user_id).catch(() => null),
+    getUserIdentity(row.cancelled_by_user_id).catch(() => null),
+  ]);
+
+  return {
+    ...row,
+    cancellation_requested_by_name:
+      requestedBy?.fullname || row.cancellation_requested_by_email || null,
+    cancellation_reviewed_by_name:
+      reviewedBy?.fullname || row.cancellation_reviewed_by_email || null,
+    cancelled_by_name: cancelledBy?.fullname || row.cancelled_by_email || null,
+  };
+}
+
+function buildCancellationVerification(row) {
+  const normalizedStatus = normalizeStatusText(row?.status);
+  if (!["cancelled", "cancelado"].includes(normalizedStatus)) return null;
+
+  const directCancellation = !row?.cancellation_requested_at;
+  return {
+    mode: directCancellation ? "direct_cancel" : "approved_request",
+    mode_label: directCancellation ? "Cancelación directa" : "Solicitud de cancelación aprobada",
+    requested_at: row?.cancellation_requested_at || null,
+    requested_at_label: directCancellation ? "No aplica (cancelación directa)" : "No disponible",
+    requested_by:
+      row?.cancellation_requested_by_name ||
+      row?.cancellation_requested_by_email ||
+      (directCancellation ? "No aplica (cancelación directa)" : "No disponible"),
+    request_reason:
+      row?.cancellation_request_reason || row?.cancellation_reason || null,
+    resolved_at: row?.cancelled_at || row?.cancellation_reviewed_at || null,
+    resolved_by_label: directCancellation ? "Cancelado por" : "Cancelación aprobada por",
+    resolved_by:
+      (directCancellation
+        ? row?.cancelled_by_name || row?.cancelled_by_email
+        : row?.cancellation_reviewed_by_name ||
+          row?.cancellation_reviewed_by_email ||
+          row?.cancelled_by_name ||
+          row?.cancelled_by_email) || "No disponible",
+    final_reason:
+      row?.cancellation_reason ||
+      row?.cancellation_review_reason ||
+      row?.cancellation_request_reason ||
+      null,
+    review_reason: row?.cancellation_review_reason || null,
+  };
+}
+
+async function refreshLegalArtifactsForSolicitud(row) {
+  if (!row?.id) return row;
+
+  const hydratedRow = await attachCancellationActors(row);
+  let verificationToken = hydratedRow.legal_verification_token || null;
+  if (!verificationToken) {
+    verificationToken = generateLegalVerificationToken();
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET legal_verification_token = $2,
+              legal_verification_created_at = COALESCE(legal_verification_created_at, NOW()),
+              updated_at = NOW()
+        WHERE id = $1`,
+      [hydratedRow.id, verificationToken]
+    );
+  }
+
+  const requesterIdentity = await getUserIdentity(hydratedRow.user_id).catch(() => null);
+  const approverIdentity = await getUserIdentity(hydratedRow.approver_user_id).catch(() => null);
+  const approverName =
+    hydratedRow.aprobacion_final_por ||
+    approverIdentity?.fullname ||
+    hydratedRow.approver_email ||
+    hydratedRow.approver_role ||
+    "No disponible";
+
+  const signaturesBySolicitud = await getSignaturesBySolicitudIds([hydratedRow.id]);
+  const signatures = signaturesBySolicitud.get(String(hydratedRow.id)) || [];
+  const solicitudSignature =
+    signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.SOLICITUD) || null;
+  const finalSignature =
+    signatures.find((item) => item.stage === WORKFLOW_SIGNATURE_STAGES.APROBACION_FINAL) || null;
+  const workflowSummary = buildWorkflowSignatureSummary(signatures);
+  const legalVerificationUrl = buildLegalVerificationUrl(verificationToken);
+
+  const pdfPayload = {
+    ...hydratedRow,
+    user_fullname:
+      requesterIdentity?.fullname || hydratedRow.user_fullname || hydratedRow.user_email,
+    user_document_id: requesterIdentity?.cedula || "",
+    approver_fullname: approverName,
+    approver_document_id: approverIdentity?.cedula || "",
+    aprobacion_final_por: approverName,
+    firma_solicitante_texto: buildPdfSignatureText(
+      solicitudSignature,
+      requesterIdentity?.fullname || hydratedRow.user_fullname || hydratedRow.user_email
+    ),
+    firma_aprobador_texto: buildPdfSignatureText(finalSignature, approverName),
+    firma_workflow_estado: workflowSummary?.estado || "pendiente",
+    firma_solicitante_at: solicitudSignature?.signed_at || null,
+    firma_aprobador_at: finalSignature?.signed_at || null,
+    firma_solicitante_hash: solicitudSignature?.signature_hash_sha256 || null,
+    firma_aprobador_hash: finalSignature?.signature_hash_sha256 || null,
+    firma_aprobador_prev_hash: finalSignature?.previous_signature_hash_sha256 || null,
+    legal_verification_token: verificationToken,
+    legal_verification_url: legalVerificationUrl,
+    workflow_signature_summary: workflowSummary,
+  };
+
+  const pdfUrl = await generateFRH10(pdfPayload);
+  const legalPdfUrl = await generateFirmaLegalValidationPdf({
+    solicitud: {
+      ...pdfPayload,
+      approver_fullname: approverName,
+    },
+    signatures,
+    verification: {
+      token: verificationToken,
+      url: legalVerificationUrl,
+    },
+  });
+
+  if (pdfUrl || legalPdfUrl) {
+    await db.query(
+      `UPDATE permisos_vacaciones
+          SET pdf_generado_url = COALESCE($2, pdf_generado_url),
+              pdf_validacion_legal_url = COALESCE($3, pdf_validacion_legal_url),
+              updated_at = NOW()
+        WHERE id = $1`,
+      [hydratedRow.id, pdfUrl, legalPdfUrl]
+    );
+  }
+
+  return {
+    ...pdfPayload,
+    pdf_generado_url: pdfUrl || hydratedRow.pdf_generado_url || null,
+    pdf_validacion_legal_url: legalPdfUrl || hydratedRow.pdf_validacion_legal_url || null,
+    firmas_workflow: signatures,
+    firma_avanzada_resumen: workflowSummary,
+  };
+}
+
 async function getHireDate(userId) {
   if (!userId) return null;
   const { rows } = await db.query(
@@ -487,7 +631,7 @@ async function attachWorkflowSignatures(rows = []) {
   const signaturesBySolicitud = await getSignaturesBySolicitudIds(ids);
   return rows.map((row) => {
     const normalizedStatus = String(row?.status || "").toLowerCase();
-    if (["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus)) {
+    if (["rejected", "rechazado"].includes(normalizedStatus)) {
       return {
         ...row,
         firmas_workflow: [],
@@ -735,11 +879,7 @@ async function ensureTable() {
       `CREATE INDEX IF NOT EXISTS idx_permisos_matriculas_user_status
        ON permisos_estudios_matriculas (user_id, status, valid_until DESC)`
     );
-    await db.query(
-      `CREATE UNIQUE INDEX IF NOT EXISTS ux_permisos_matriculas_active_user
-       ON permisos_estudios_matriculas (user_id)
-       WHERE status = 'active'`
-    );
+    await db.query(`DROP INDEX IF EXISTS ux_permisos_matriculas_active_user`);
     await db.query(`
       CREATE TABLE IF NOT EXISTS permisos_vacaciones_firmas (
         id BIGSERIAL PRIMARY KEY,
@@ -824,6 +964,7 @@ async function ensureTable() {
 async function getActiveStudyEnrollment({ userId, date = null }) {
   if (!userId) return null;
   await ensureTable();
+  await expireStudyEnrollmentsIfNeeded({ userId });
   const normalizedDate = normalizeDateOnly(date || new Date());
   const { rows } = await db.query(
     `SELECT *
@@ -839,9 +980,22 @@ async function getActiveStudyEnrollment({ userId, date = null }) {
   return rows[0] || null;
 }
 
+async function expireStudyEnrollmentsIfNeeded({ userId = null } = {}) {
+  await db.query(
+    `UPDATE permisos_estudios_matriculas
+        SET status = 'expired',
+            updated_at = NOW()
+      WHERE status = 'active'
+        AND valid_until < CURRENT_DATE
+        AND ($1::int IS NULL OR user_id = $1)`,
+    [userId]
+  );
+}
+
 async function listMyStudyEnrollments({ userId }) {
   if (!userId) return [];
   await ensureTable();
+  await expireStudyEnrollmentsIfNeeded({ userId });
   const { rows } = await db.query(
     `SELECT *
        FROM permisos_estudios_matriculas
@@ -856,8 +1010,11 @@ async function listPendingStudyEnrollments({ approver }) {
   await ensureTable();
   const roleCandidates = getApproverRoleCandidates(approver);
   const { rows } = await db.query(
-    `SELECT m.*
+    `SELECT
+        m.*,
+        COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), m.user_email) AS user_fullname
        FROM permisos_estudios_matriculas m
+       LEFT JOIN users u ON u.id = m.user_id
       WHERE m.status = 'pending_validation'
         AND (
           (m.approver_user_id IS NOT NULL AND m.approver_user_id = $1)
@@ -978,9 +1135,9 @@ async function reviewStudyEnrollment({ id, approver, decision, reason }) {
     err.status = 400;
     throw err;
   }
-  const reviewReason = String(reason || "").trim();
-  if (!reviewReason) {
-    const err = new Error("Debes registrar el motivo de la decisión");
+  const reviewReason = String(reason || "").trim() || null;
+  if (normalizedDecision === "reject" && !reviewReason) {
+    const err = new Error("Debes registrar el motivo del rechazo");
     err.status = 400;
     throw err;
   }
@@ -1015,13 +1172,6 @@ async function reviewStudyEnrollment({ id, approver, decision, reason }) {
 
   let updated = null;
   if (normalizedDecision === "approve") {
-    await db.query(
-      `UPDATE permisos_estudios_matriculas
-          SET status = 'expired', updated_at = NOW()
-        WHERE user_id = $1
-          AND status = 'active'`,
-      [enrollment.user_id]
-    );
     const { rows: approvedRows } = await db.query(
       `UPDATE permisos_estudios_matriculas
           SET status = 'active',
@@ -1239,7 +1389,6 @@ async function createSolicitud({ body, user, meta }) {
       if (!payload.fecha_fin) payload.fecha_fin = normalizeDateOnly(payload.fecha_fin_hora);
     }
 
-    // Calcular dÃ­as si no vienen
     if (!payload.duracion_dias && payload.fecha_inicio && payload.fecha_fin) {
       const start = new Date(payload.fecha_inicio);
       const end = new Date(payload.fecha_fin);
@@ -1274,7 +1423,7 @@ async function createSolicitud({ body, user, meta }) {
 
     if (allowanceInfo.eligible && !allowanceInfo.missingHireDate) {
       if (Number(payload.duracion_dias || 0) > Math.max(remaining, 0)) {
-        const err = new Error("No tienes dÃ­as disponibles para enviar esta solicitud de vacaciones.");
+        const err = new Error("No tienes días disponibles para enviar esta solicitud de vacaciones.");
         err.status = 400;
         throw err;
       }
@@ -1877,7 +2026,7 @@ async function getLegalVerificationByToken(token) {
   const normalizedStatus = String(rows[0]?.status || "").toLowerCase();
   if (normalizedStatus === "rejected" || normalizedStatus === "rechazado") return null;
   const enriched = await attachWorkflowSignatures([rows[0]]);
-  const row = enriched[0] || rows[0];
+  const row = await attachCancellationActors(enriched[0] || rows[0]);
   return {
     id: row.id,
     tipo_solicitud: row.tipo_solicitud,
@@ -1892,6 +2041,7 @@ async function getLegalVerificationByToken(token) {
     legal_verification_url: buildLegalVerificationUrl(row.legal_verification_token || token),
     firmas_workflow: row.firmas_workflow || [],
     firma_avanzada_resumen: row.firma_avanzada_resumen || null,
+    cancellation: buildCancellationVerification(row),
   };
 }
 
@@ -2103,6 +2253,14 @@ async function cancelarSolicitud({ id, actor, reason }) {
     );
     updated = cancelledRows[0];
     try {
+      updated = await refreshLegalArtifactsForSolicitud(updated);
+    } catch (legalRefreshError) {
+      logger.warn(
+        { legalRefreshError, solicitudId: updated?.id },
+        "No se pudo regenerar evidencia legal al cancelar la solicitud"
+      );
+    }
+    try {
       if (updated?.user_id && Number(updated.user_id) !== Number(actorId)) {
         await notificationManager.sendNotification({
           userId: updated.user_id,
@@ -2200,6 +2358,14 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
       [id, actorId, actor?.email || null, reviewReason]
     );
     updated = approvedRows[0];
+    try {
+      updated = await refreshLegalArtifactsForSolicitud(updated);
+    } catch (legalRefreshError) {
+      logger.warn(
+        { legalRefreshError, solicitudId: updated?.id },
+        "No se pudo regenerar evidencia legal al aprobar la cancelación"
+      );
+    }
   } else {
     const { rows: rejectedRows } = await db.query(
       `UPDATE permisos_vacaciones

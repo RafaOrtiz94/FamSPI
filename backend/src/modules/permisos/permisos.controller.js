@@ -329,7 +329,7 @@ async function verifyLegalToken(req, res) {
       if (responseAsJson) return res.status(400).json({ ok: false, message: "Token requerido" });
       return res.status(400).type("html").send(
         renderVerificationHtml({
-          title: "VerificaciÃ³n legal invÃ¡lida",
+          title: "Verificación legal inválida",
           subtitle: "FamSign",
           status: "pending",
           sourceType: "Permisos/Vacaciones",
@@ -338,7 +338,7 @@ async function verifyLegalToken(req, res) {
     }
     const result = await permisosService.getLegalVerificationByToken(token);
     if (!result) {
-      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificaciÃ³n no encontrado" });
+      if (responseAsJson) return res.status(404).json({ ok: false, message: "Token de verificación no encontrado" });
       return res.status(404).type("html").send(
         renderVerificationHtml({
           title: "Token no encontrado",
@@ -352,7 +352,7 @@ async function verifyLegalToken(req, res) {
     if (responseAsJson) return res.json({ ok: true, data: result });
     return res.type("html").send(
       renderVerificationHtml({
-        title: "VerificaciÃ³n legal completada",
+        title: "Verificación legal completada",
         subtitle: "FamSign",
         status: result?.status,
         id: result?.id,
@@ -361,6 +361,7 @@ async function verifyLegalToken(req, res) {
         aprobacionFinalAt: result?.aprobacion_final_at,
         token: result?.legal_verification_token || token,
         workflow: result?.firma_avanzada_resumen || null,
+        cancellation: result?.cancellation || null,
         sourceType: "Permisos/Vacaciones",
       })
     );
@@ -371,7 +372,7 @@ async function verifyLegalToken(req, res) {
     }
     return res.status(500).type("html").send(
       renderVerificationHtml({
-        title: "Error de verificaciÃ³n",
+        title: "Error de verificación",
         subtitle: "FamSign",
         status: "pending",
         sourceType: "Permisos/Vacaciones",

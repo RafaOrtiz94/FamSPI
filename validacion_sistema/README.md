@@ -17,6 +17,11 @@ Base documental para revision, trazabilidad y validacion del SPI.
 - Ejecucion del paquete inicial: `validacion_sistema/informes/informe_ejecucion_paso_03_accesos_criticos.md`
 - Ajuste de cancelacion permisos/vacaciones: `validacion_sistema/informes/informe_ajuste_cancelacion_permisos_vacaciones_2026-03-10.md`
 - Ajuste del widget de aprobacion permisos/vacaciones: `validacion_sistema/informes/informe_ajuste_widget_aprobacion_permisos_vacaciones_2026-03-10.md`
+- Ajuste de multiples matriculas activas: `validacion_sistema/informes/informe_ajuste_multiples_matriculas_activas_2026-03-10.md`
+- Ajuste de cancelacion documental y QR legal: `validacion_sistema/informes/informe_ajuste_cancelacion_documental_qr_2026-03-10.md`
+- Ajuste de validacion de matriculas pendientes: `validacion_sistema/informes/informe_ajuste_validacion_matriculas_pendientes_2026-03-10.md`
+- Ajuste de loaders en aprobaciones y rechazos: `validacion_sistema/informes/informe_ajuste_loaders_aprobaciones_2026-03-10.md`
+- Ajuste de refresco automatico por cambio de estado: `validacion_sistema/informes/informe_ajuste_refresco_automatico_estados_2026-03-10.md`
 
 ## Regla de trabajo
 Antes de implementar un cambio:
@@ -33,3 +38,8 @@ Antes de implementar un cambio:
 - `validacion_sistema/informes/informe_ejecucion_paso_03_accesos_criticos.md`
 - `validacion_sistema/informes/informe_ajuste_cancelacion_permisos_vacaciones_2026-03-10.md`
 - `validacion_sistema/informes/informe_ajuste_widget_aprobacion_permisos_vacaciones_2026-03-10.md`
+- `validacion_sistema/informes/informe_ajuste_multiples_matriculas_activas_2026-03-10.md`
+- `validacion_sistema/informes/informe_ajuste_cancelacion_documental_qr_2026-03-10.md`
+- `validacion_sistema/informes/informe_ajuste_validacion_matriculas_pendientes_2026-03-10.md`
+- `validacion_sistema/informes/informe_ajuste_loaders_aprobaciones_2026-03-10.md`
+- `validacion_sistema/informes/informe_ajuste_refresco_automatico_estados_2026-03-10.md`

@@ -82,6 +82,7 @@ El modulo Vacaciones se implementa principalmente en backend/src/modules/vacacio
 - RN-VACA-004: Las integraciones externas del modulo deben ejecutarse con tolerancia a fallos y trazabilidad de incidencias.
 - RN-VACA-005: [Funcionalidad detectada en el sistema] Se identifican reglas implicitas implementadas en servicios/controladores que deben formalizarse en el FRS.
 - RN-VACA-006: En la revision de una cancelacion pendiente, el motivo es obligatorio solo cuando el aprobador rechaza la cancelacion; si la aprueba, la observacion adicional es opcional.
+- RN-VACA-007: Si una solicitud aprobada queda cancelada, la verificacion legal publica por token debe reflejar el estado cancelado con motivo, fecha/hora de solicitud de cancelacion y quien la aprobo o ejecuto.
 
 ## 10. Dependencias con otros modulos
 - Notificaciones

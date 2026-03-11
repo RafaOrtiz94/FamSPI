@@ -9,6 +9,7 @@ import Button from "../../../../core/ui/components/Button";
 import PermisoVacacionModal from "../modals/PermisoVacacionModal";
 import { AprobacionPermisosView } from "..";
 import { useUI } from "../../../../core/ui/UIContext";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 
@@ -44,10 +45,10 @@ const PermisosPage = () => {
         return diff >= 0 ? diff + 1 : 0;
     };
 
-    const loadSummary = async () => {
+    const loadSummary = async ({ silent = false } = {}) => {
         if (isGerenciaGeneral) return;
-        
-        setLoadingSummary(true);
+
+        if (!silent) setLoadingSummary(true);
         try {
             const [mineResp, summaryResp] = await Promise.all([
                 getMisSolicitudes(),
@@ -66,13 +67,21 @@ const PermisosPage = () => {
             console.error("Error loading vacation summary:", error);
             showToast("No se pudo cargar el resumen de vacaciones", "warning");
         } finally {
-            setLoadingSummary(false);
+            if (!silent) setLoadingSummary(false);
         }
     };
 
     useEffect(() => {
         loadSummary();
     }, [isGerenciaGeneral]);
+
+    useScopedAutoUpdate(
+        [DATA_UPDATE_SCOPES.PERMISOS, DATA_UPDATE_SCOPES.VACACIONES],
+        () => {
+            loadSummary({ silent: true });
+        },
+        [isGerenciaGeneral],
+    );
 
     const vacationStats = useMemo(() => {
         const totals = {

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 
 const normalizeStatus = (status = "") => {
@@ -42,8 +43,8 @@ const PermisosGlobalRequestsWidget = () => {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const load = async () => {
-    setLoading(true);
+  const load = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const response = await getResumenColaboradores();
       const collaborators = Array.isArray(response?.data) ? response.data : [];
@@ -91,13 +92,20 @@ const PermisosGlobalRequestsWidget = () => {
       console.error("Error cargando solicitudes globales:", error);
       showToast("No se pudo cargar el resumen global de solicitudes", "warning");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     load();
   }, []);
+
+  useScopedAutoUpdate(
+    [DATA_UPDATE_SCOPES.PERMISOS, DATA_UPDATE_SCOPES.VACACIONES],
+    () => {
+      load({ silent: true });
+    },
+  );
 
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();

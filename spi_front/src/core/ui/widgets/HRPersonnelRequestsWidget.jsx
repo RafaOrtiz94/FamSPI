@@ -7,11 +7,14 @@ import Button from "../components/Button";
 import Modal from "../components/Modal";
 import { formatDateSafe } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../auth/AuthContext";
+import { useUI } from "../UIContext";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../api";
 import { getPersonnelRequests, updatePersonnelRequestStatus } from "../../api/personnelRequestsApi";
 
 const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { showLoader, hideLoader } = useUI();
   const role = (user?.role || user?.role_name || user?.rol || "").toLowerCase();
   const canApprove = role === "gerencia_general";
   const [requests, setRequests] = useState([]);
@@ -41,8 +44,8 @@ const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
     }, base);
   }, [requests]);
 
-  const loadRequests = async () => {
-    setLoading(true);
+  const loadRequests = async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const filters = { pageSize: 10 };
       if (filterStatus !== "all") {
@@ -54,13 +57,21 @@ const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
       console.error("Error cargando solicitudes:", error);
       toast.error("Error al cargar solicitudes de personal");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     loadRequests();
   }, [filterStatus]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.PERSONNEL_REQUESTS,
+    () => {
+      loadRequests({ silent: true });
+    },
+    [filterStatus],
+  );
 
   const getStatusBadge = (status) => {
     const badges = {
@@ -107,6 +118,7 @@ const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
       return;
     }
     setActionLoading(true);
+    showLoader(status === "aprobada" ? "Aprobando solicitud de personal..." : "Rechazando solicitud de personal...");
     try {
       await updatePersonnelRequestStatus(selectedRequest.id, status, actionNotes.trim() || null);
       toast.success(status === "aprobada" ? "Solicitud aprobada" : "Solicitud rechazada");
@@ -116,6 +128,7 @@ const HRPersonnelRequestsWidget = ({ onReviewRequest }) => {
       console.error("Error actualizando solicitud:", error);
       toast.error(error.response?.data?.message || "No se pudo actualizar la solicitud");
     } finally {
+      hideLoader();
       setActionLoading(false);
     }
   };

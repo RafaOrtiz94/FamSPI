@@ -233,6 +233,75 @@ class EventEmitter {
 
 export const eventEmitter = new EventEmitter();
 
+export const DATA_UPDATE_SCOPES = Object.freeze({
+  REQUESTS: "requests",
+  CLIENT_REQUESTS: "client-requests",
+  ATTENDANCE: "attendance",
+  BUSINESS_CASE: "business-case",
+  PERMISOS: "permisos",
+  VACACIONES: "vacaciones",
+  PERSONNEL_REQUESTS: "personnel-requests",
+  SCHEDULES: "schedules",
+  VIATICOS: "viaticos",
+});
+
+const normalizeUpdateUrl = (url = "") =>
+  String(url || "")
+    .trim()
+    .toLowerCase()
+    .split("?")[0];
+
+const resolveDataUpdateScopes = (url = "") => {
+  const normalized = normalizeUpdateUrl(url);
+  const scopes = [];
+
+  if (normalized.includes("/requests/new-client")) {
+    scopes.push(DATA_UPDATE_SCOPES.CLIENT_REQUESTS);
+  } else if (normalized.includes("/requests")) {
+    scopes.push(DATA_UPDATE_SCOPES.REQUESTS);
+  }
+
+  if (normalized.includes("/attendance")) scopes.push(DATA_UPDATE_SCOPES.ATTENDANCE);
+  if (normalized.includes("/business-case")) scopes.push(DATA_UPDATE_SCOPES.BUSINESS_CASE);
+  if (normalized.includes("/permisos")) scopes.push(DATA_UPDATE_SCOPES.PERMISOS);
+  if (normalized.includes("/vacaciones")) scopes.push(DATA_UPDATE_SCOPES.VACACIONES);
+  if (normalized.includes("/personnel-requests")) scopes.push(DATA_UPDATE_SCOPES.PERSONNEL_REQUESTS);
+  if (normalized.includes("/schedules")) scopes.push(DATA_UPDATE_SCOPES.SCHEDULES);
+  if (normalized.includes("/viaticos")) scopes.push(DATA_UPDATE_SCOPES.VIATICOS);
+
+  return Array.from(new Set(scopes));
+};
+
+export const emitDataUpdate = (scope, payload = {}, delay = 300) => {
+  if (!scope) return;
+  eventEmitter.emitDebounced(
+    "data-updated",
+    {
+      scope,
+      timestamp: Date.now(),
+      ...payload,
+    },
+    delay,
+  );
+};
+
+const emitResponseDataUpdates = (response) => {
+  const method = String(response?.config?.method || "").toLowerCase();
+  if (!["post", "put", "patch", "delete"].includes(method)) return;
+
+  const endpoint = normalizeUpdateUrl(response?.config?.url);
+  const scopes = resolveDataUpdateScopes(endpoint);
+  scopes.forEach((scope) => emitDataUpdate(scope, { endpoint, method }));
+};
+
+api.interceptors.response.use(
+  (response) => {
+    emitResponseDataUpdates(response);
+    return response;
+  },
+  (error) => Promise.reject(error),
+);
+
 // ==========================================================
 // 🔄 Funciones de actualización automática optimizadas
 // ==========================================================
@@ -348,16 +417,71 @@ export const stopAutoUpdates = () => {
 };
 
 // Hook de React para suscripción a eventos
-export const useAutoUpdate = (callback, dependencies = []) => {
-  React.useEffect(() => {
-    const unsubscribe = eventEmitter.on('auto-update', callback);
-    return unsubscribe;
-  }, [callback, ...dependencies]);
+export const useAutoUpdate = (callback) => {
+  const callbackRef = React.useRef(callback);
 
   React.useEffect(() => {
-    const unsubscribe = eventEmitter.on('data-updated', callback);
+    callbackRef.current = callback;
+  }, [callback]);
+
+  React.useEffect(() => {
+    const handleAutoUpdate = (payload) => {
+      if (typeof callbackRef.current === "function") {
+        callbackRef.current(payload);
+      }
+    };
+    const unsubscribe = eventEmitter.on('auto-update', handleAutoUpdate);
     return unsubscribe;
-  }, [callback, ...dependencies]);
+  }, []);
+
+  React.useEffect(() => {
+    const handleDataUpdate = (payload) => {
+      if (typeof callbackRef.current === "function") {
+        callbackRef.current(payload);
+      }
+    };
+    const unsubscribe = eventEmitter.on('data-updated', handleDataUpdate);
+    return unsubscribe;
+  }, []);
+};
+
+export const useScopedAutoUpdate = (scopes, callback) => {
+  const callbackRef = React.useRef(callback);
+  const scopeKey = (Array.isArray(scopes) ? scopes.filter(Boolean) : [scopes].filter(Boolean)).join("|");
+
+  React.useEffect(() => {
+    callbackRef.current = callback;
+  }, [callback]);
+
+  React.useEffect(() => {
+    const scopeList = scopeKey ? scopeKey.split("|").filter(Boolean) : [];
+
+    const handleAutoUpdate = (payload) => {
+      if (typeof callbackRef.current === "function") {
+        callbackRef.current(payload);
+      }
+    };
+
+    const handleDataUpdate = (payload) => {
+      const payloadScopes = Array.isArray(payload?.scope)
+        ? payload.scope.filter(Boolean)
+        : [payload?.scope].filter(Boolean);
+
+      if (!scopeList.length || !payloadScopes.length || payloadScopes.some((scope) => scopeList.includes(scope))) {
+        if (typeof callbackRef.current === "function") {
+          callbackRef.current(payload);
+        }
+      }
+    };
+
+    const unsubscribeAuto = eventEmitter.on("auto-update", handleAutoUpdate);
+    const unsubscribeData = eventEmitter.on("data-updated", handleDataUpdate);
+
+    return () => {
+      unsubscribeAuto();
+      unsubscribeData();
+    };
+  }, [scopeKey]);
 };
 
 // ==========================================================

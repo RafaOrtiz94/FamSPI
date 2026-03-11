@@ -11,6 +11,7 @@ import {
 } from "../../../core/api/viaticosApi";
 import { useUI } from "../../../core/ui/UIContext";
 import { useAuth } from "../../../core/auth/AuthContext";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pendiente" },
@@ -60,7 +61,7 @@ const normalizeRoles = (user) => {
 };
 
 const ViaticosWorkspace = () => {
-  const { showToast } = useUI();
+  const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
   const range = useMemo(() => currentMonthRange(), []);
   const roleList = useMemo(() => normalizeRoles(user), [user]);
@@ -96,8 +97,8 @@ const ViaticosWorkspace = () => {
   const [docDrafts, setDocDrafts] = useState({});
   const [reports, setReports] = useState({});
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  const loadData = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     try {
       const params = {
         start_date: filters.start_date,
@@ -134,13 +135,21 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo cargar viáticos", "error");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [filters.end_date, filters.start_date, filters.status, isFinance, roleList, showToast]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.VIATICOS,
+    () => {
+      loadData({ silent: true });
+    },
+    [loadData],
+  );
 
   const summary = useMemo(() => {
     return allowances.reduce(
@@ -176,6 +185,7 @@ const ViaticosWorkspace = () => {
   const handleSaveAllowance = async (allowance) => {
     const draft = drafts[allowance.id] || {};
     setSavingId(`save-${allowance.id}`);
+    showLoader("Guardando viático...");
     try {
       await upsertViatico({
         source_type: allowance.source_type,
@@ -196,6 +206,7 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo actualizar", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
@@ -212,6 +223,7 @@ const ViaticosWorkspace = () => {
     }
 
     setSavingId("manual");
+    showLoader("Registrando viático...");
     try {
       await upsertViatico({
         ...manualDraft,
@@ -238,6 +250,7 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo crear la solicitud", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
@@ -245,6 +258,7 @@ const ViaticosWorkspace = () => {
   const handleCreateFromCandidate = async (item) => {
     const key = `${item.source_type}:${item.source_id}`;
     setSavingId(`candidate-${key}`);
+    showLoader("Creando viático desde visita...");
     try {
       await upsertViatico({
         source_type: item.source_type,
@@ -257,6 +271,7 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo crear viático", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
@@ -265,6 +280,15 @@ const ViaticosWorkspace = () => {
     if (!isFinance) return;
     const draft = drafts[allowance.id] || {};
     setSavingId(`status-${allowance.id}`);
+    showLoader(
+      status === "approved"
+        ? "Aprobando viático..."
+        : status === "rejected"
+        ? "Rechazando viático..."
+        : status === "paid"
+        ? "Marcando viático como pagado..."
+        : "Actualizando estado del viático..."
+    );
     try {
       await updateViaticoStatus(allowance.id, {
         status,
@@ -277,6 +301,7 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo actualizar el estado", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
@@ -318,6 +343,7 @@ const ViaticosWorkspace = () => {
     }
 
     setSavingId(`doc-${allowanceId}`);
+    showLoader("Subiendo documento de viático...");
     try {
       const base64 = await readFileAsDataURL(draft.file);
       await addViaticoDocument(allowanceId, {
@@ -338,12 +364,14 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo cargar documento", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
 
   const handleBuildReport = async (allowanceId) => {
     setSavingId(`report-${allowanceId}`);
+    showLoader("Generando reporte de viático...");
     try {
       const report = await getViaticoReport(allowanceId);
       setReports((prev) => ({ ...prev, [allowanceId]: report }));
@@ -351,6 +379,7 @@ const ViaticosWorkspace = () => {
     } catch (error) {
       showToast(error?.response?.data?.message || "No se pudo generar reporte", "error");
     } finally {
+      hideLoader();
       setSavingId(null);
     }
   };
@@ -607,4 +636,3 @@ const ViaticosWorkspace = () => {
 };
 
 export default ViaticosWorkspace;
-

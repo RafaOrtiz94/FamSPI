@@ -48,7 +48,7 @@ const Section6Deliveries = ({ data, updateData }) => {
                             />
                             <div>
                                 <p className="font-medium text-gray-900">Parcial - Tiempo</p>
-                                <p className="text-xs text-gray-500">Entregas parciales segÃºn cronograma definido</p>
+                                <p className="text-xs text-gray-500">Entregas parciales según cronograma definido</p>
                             </div>
                         </label>
 
@@ -63,7 +63,7 @@ const Section6Deliveries = ({ data, updateData }) => {
                             />
                             <div>
                                 <p className="font-medium text-gray-900">Parcial - A Necesidad</p>
-                                <p className="text-xs text-gray-500">Entregas parciales segÃºn necesidad del laboratorio</p>
+                                <p className="text-xs text-gray-500">Entregas parciales según necesidad del laboratorio</p>
                             </div>
                         </label>
                     </div>
@@ -103,7 +103,7 @@ const Section6Deliveries = ({ data, updateData }) => {
                                 : 'Parcial - A Necesidad'}
                     </p>
                     <p>
-                        <strong>Determinación Efectiva:</strong> {delData.effective_determination ? 'SÃ­' : 'No'}
+                        <strong>Determinación Efectiva:</strong> {delData.effective_determination ? 'Sí' : 'No'}
                     </p>
                 </div>
             </div>

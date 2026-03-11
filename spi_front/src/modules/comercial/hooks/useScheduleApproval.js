@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import {
   fetchPendingSchedules,
   approveSchedule,
@@ -14,8 +15,8 @@ export const useScheduleApproval = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const loadPending = useCallback(async () => {
-    setLoading(true);
+  const loadPending = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       const data = await fetchPendingSchedules();
@@ -23,19 +24,19 @@ export const useScheduleApproval = () => {
     } catch (err) {
       setError(err.message || "No se pudieron cargar los cronogramas pendientes");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
-  const loadTeamSchedules = useCallback(async () => {
-    setLoading(true);
+  const loadTeamSchedules = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setLoading(true);
     setError(null);
     try {
       setTeamSchedules(await fetchTeamSchedules());
     } catch (err) {
       setError(err.message || "No se pudo cargar la vista de equipo");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -88,6 +89,16 @@ export const useScheduleApproval = () => {
     loadTeamSchedules();
     loadAnalytics();
   }, [loadPending, loadTeamSchedules, loadAnalytics]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.SCHEDULES,
+    () => {
+      loadPending({ silent: true });
+      loadTeamSchedules({ silent: true });
+      loadAnalytics();
+    },
+    [loadPending, loadTeamSchedules, loadAnalytics],
+  );
 
   return {
     pending,

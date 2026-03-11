@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import Button from "../../../../core/ui/components/Button";
 import Modal from "../../../../core/ui/components/Modal";
 
-const RejectScheduleModal = ({ open, onClose, onConfirm }) => {
+const RejectScheduleModal = ({ open, onClose, onConfirm, loading = false, disabled = false }) => {
   const [reason, setReason] = useState("");
 
   useEffect(() => {
@@ -23,10 +23,15 @@ const RejectScheduleModal = ({ open, onClose, onConfirm }) => {
           className="w-full border rounded-lg p-3"
         />
         <div className="flex justify-end gap-2">
-          <Button variant="ghost" onClick={onClose}>
+          <Button variant="ghost" onClick={onClose} disabled={disabled}>
             Cancelar
           </Button>
-          <Button variant="danger" disabled={!reason.trim()} onClick={() => onConfirm(reason)}>
+          <Button
+            variant="danger"
+            disabled={disabled || !reason.trim()}
+            loading={loading}
+            onClick={() => onConfirm(reason)}
+          >
             Confirmar Rechazo
           </Button>
         </div>

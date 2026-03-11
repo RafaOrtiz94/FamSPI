@@ -44,15 +44,13 @@ const toBufferFromBase64 = (base64String) => {
   try {
     return Buffer.from(base64String, "base64");
   } catch (err) {
-    const error = new Error("Documento invÃ¡lido o corrupto");
+    const error = new Error("Documento invá¡lido o corrupto");
     error.status = 400;
     throw error;
   }
 };
 
-/**
- * Funciones helper para mejorar legibilidad y separaciÃ³n de responsabilidades
- */
+
 const validateSignatureRequest = (body) => {
   const { document_base64, consent } = body || {};
 
@@ -198,10 +196,10 @@ exports.signDocument = asyncHandler(async (req, res) => {
     // 3. Crear sello institucional y QR
     const { sealId, qrId } = await createSealAndQR(client, documentId, authorizedRole, req.user.role, req.user.id);
 
-    // 4. Obtener informaciÃ³n del sello y QR
+
     const sealInfo = await getSealAndQRInfo(client, sealId);
 
-    // 5. Generar cÃ³digo QR
+
     const { verificationUrl, qrImage } = await generateQRCode(sealInfo.verification_token);
 
     // 6. Bloquear documento
@@ -250,17 +248,14 @@ exports.signDocument = asyncHandler(async (req, res) => {
   }
 });
 
-/**
- * GET /api/verificar/:token
- * VerificaciÃ³n pÃºblica de documentos firmados
- */
+
 exports.verifyDocument = [
   verificationLimiter,
   asyncHandler(async (req, res) => {
     const { token } = req.params;
 
     try {
-      // Buscar informaciÃ³n de verificaciÃ³n
+
       const result = await db.query(`
         SELECT dvi.*,
                CASE WHEN dvi.chain_status = 'VERIFIED' THEN true ELSE false END as is_valid,
@@ -272,7 +267,7 @@ exports.verifyDocument = [
       if (result.rows.length === 0) {
         return res.status(404).json({
           ok: false,
-          message: "Token de verificaciÃ³n no encontrado o expirado"
+          message: "Token de verificación no encontrado o expirado"
         });
       }
 
@@ -322,16 +317,12 @@ exports.verifyDocument = [
       });
 
     } catch (err) {
-      logger.error({ err }, "âŒ Error en verificaciÃ³n de documento");
+      logger.error({ err }, "Error en verificación de documento");
       res.status(500).json({ ok: false, message: "Error interno del servidor" });
     }
   })
 ];
 
-/**
- * GET /api/documents/:documentId/audit-trail
- * Consulta el trail de auditorÃ­a completo de un documento
- */
 exports.getDocumentAuditTrail = asyncHandler(async (req, res) => {
   const { documentId } = req.params;
 
@@ -372,13 +363,10 @@ exports.getDocumentAuditTrail = asyncHandler(async (req, res) => {
   }
 });
 
-/**
- * GET /api/signature/dashboard
- * Dashboard de mÃ©tricas de firmas
- */
+
 exports.getSignatureDashboard = asyncHandler(async (req, res) => {
   try {
-    // Obtener mÃ©tricas generales
+
     const metricsResult = await db.query(`
       SELECT
         COUNT(CASE WHEN signature_status = 'SIGNED' THEN 1 END) as signed_documents,
@@ -391,7 +379,6 @@ exports.getSignatureDashboard = asyncHandler(async (req, res) => {
 
     const metrics = metricsResult.rows[0];
 
-    // Obtener distribuciÃ³n por estados
     const statusResult = await db.query(`
       SELECT signature_status, COUNT(*) as count
       FROM documents

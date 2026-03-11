@@ -29,7 +29,8 @@ const UIContext = createContext();
 export const UIProvider = ({ children }) => {
   // ======= Estado general =======
   const [toast, setToast] = useState(null); // { message, type }
-  const [loading, setLoading] = useState(false); // loader global
+  const [loadingCount, setLoadingCount] = useState(0); // loader global
+  const [loadingMessage, setLoadingMessage] = useState("Procesando...");
   const [confirm, setConfirm] = useState(null); // { message, onConfirm }
   const [theme, setTheme] = useState(
     localStorage.getItem("theme") || "light"
@@ -77,8 +78,19 @@ export const UIProvider = ({ children }) => {
   };
 
   // ======= Loader =======
-  const showLoader = useCallback(() => setLoading(true), []);
-  const hideLoader = useCallback(() => setLoading(false), []);
+  const showLoader = useCallback((message = "Procesando...") => {
+    setLoadingMessage(String(message || "Procesando..."));
+    setLoadingCount((prev) => prev + 1);
+  }, []);
+  const hideLoader = useCallback(() => {
+    setLoadingCount((prev) => {
+      const next = Math.max(0, prev - 1);
+      if (next === 0) {
+        setLoadingMessage("Procesando...");
+      }
+      return next;
+    });
+  }, []);
 
   // ======= Contexto =======
   const value = {
@@ -117,10 +129,10 @@ export const UIProvider = ({ children }) => {
       )}
 
       {/* Loader Global */}
-      {loading && (
+      {loadingCount > 0 && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex flex-col items-center justify-center">
           <FiLoader className="animate-spin text-5xl text-white mb-2" />
-          <p className="text-white text-sm">Procesando...</p>
+          <p className="text-white text-sm">{loadingMessage || "Procesando..."}</p>
         </div>
       )}
 

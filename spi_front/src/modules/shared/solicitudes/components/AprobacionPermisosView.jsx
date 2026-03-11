@@ -3,6 +3,7 @@ import { FiCheck, FiX, FiClock, FiFileText, FiEye, FiDownload } from "react-icon
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { getPendientes, aprobarParcial, aprobarFinal, rechazar } from "../../../../core/api/permisosApi";
 
 /**
@@ -12,20 +13,21 @@ import { getPendientes, aprobarParcial, aprobarFinal, rechazar } from "../../../
  * 2. Pendientes de aprobación final (con justificantes subidos)
  */
 const AprobacionPermisosView = ({ compact = false }) => {
-    const { showToast } = useUI();
+    const { showToast, showLoader, hideLoader } = useUI();
     const [stage, setStage] = useState("pending"); // 'pending' o 'pending_final'
     const [solicitudes, setSolicitudes] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedSolicitud, setSelectedSolicitud] = useState(null);
     const [showRejectModal, setShowRejectModal] = useState(false);
     const [rejectReason, setRejectReason] = useState("");
+    const [actionLoading, setActionLoading] = useState(null);
 
     useEffect(() => {
         loadSolicitudes();
     }, [stage]);
 
-    const loadSolicitudes = async () => {
-        setLoading(true);
+    const loadSolicitudes = async ({ silent = false } = {}) => {
+        if (!silent) setLoading(true);
         try {
             const response = await getPendientes(stage);
             if (response.ok) {
@@ -35,39 +37,62 @@ const AprobacionPermisosView = ({ compact = false }) => {
             console.error("Error loading solicitudes:", error);
             showToast("Error al cargar solicitudes", "error");
         } finally {
-            setLoading(false);
+            if (!silent) setLoading(false);
+        }
+    };
+
+    useScopedAutoUpdate(
+        [DATA_UPDATE_SCOPES.PERMISOS, DATA_UPDATE_SCOPES.VACACIONES],
+        () => {
+            loadSolicitudes({ silent: true });
+        },
+        [stage],
+    );
+
+    const runActionWithLoader = async (loadingKey, message, action) => {
+        setActionLoading(loadingKey);
+        showLoader(message);
+        try {
+            return await action();
+        } finally {
+            hideLoader();
+            setActionLoading(null);
         }
     };
 
     const handleAprobarParcial = async (id) => {
-        try {
-            const response = await aprobarParcial(id);
-            if (response.ok) {
-                const nextStatus = String(response?.data?.status || "").toLowerCase();
-                if (nextStatus === "approved") {
-                    showToast("Solicitud aprobada definitivamente.", "success");
-                } else {
-                    showToast("Solicitud aprobada parcialmente. El colaborador debe subir justificantes.", "success");
+        await runActionWithLoader(id, "Aprobando solicitud...", async () => {
+            try {
+                const response = await aprobarParcial(id);
+                if (response.ok) {
+                    const nextStatus = String(response?.data?.status || "").toLowerCase();
+                    if (nextStatus === "approved") {
+                        showToast("Solicitud aprobada definitivamente.", "success");
+                    } else {
+                        showToast("Solicitud aprobada parcialmente. El colaborador debe subir justificantes.", "success");
+                    }
+                    await loadSolicitudes();
                 }
-                loadSolicitudes();
+            } catch (error) {
+                console.error("Error approving:", error);
+                showToast(error.response?.data?.message || "Error al aprobar", "error");
             }
-        } catch (error) {
-            console.error("Error approving:", error);
-            showToast(error.response?.data?.message || "Error al aprobar", "error");
-        }
+        });
     };
 
     const handleAprobarFinal = async (id) => {
-        try {
-            const response = await aprobarFinal(id);
-            if (response.ok) {
-                showToast("Solicitud aprobada definitivamente. PDF generado.", "success");
-                loadSolicitudes();
+        await runActionWithLoader(id, "Aprobando solicitud...", async () => {
+            try {
+                const response = await aprobarFinal(id);
+                if (response.ok) {
+                    showToast("Solicitud aprobada definitivamente. PDF generado.", "success");
+                    await loadSolicitudes();
+                }
+            } catch (error) {
+                console.error("Error approving:", error);
+                showToast(error.response?.data?.message || "Error al aprobar", "error");
             }
-        } catch (error) {
-            console.error("Error approving:", error);
-            showToast(error.response?.data?.message || "Error al aprobar", "error");
-        }
+        });
     };
 
     const handleRechazar = async () => {
@@ -76,19 +101,21 @@ const AprobacionPermisosView = ({ compact = false }) => {
             return;
         }
 
-        try {
-            const response = await rechazar(selectedSolicitud.id, rejectReason);
-            if (response.ok) {
-                showToast("Solicitud rechazada", "success");
-                setShowRejectModal(false);
-                setSelectedSolicitud(null);
-                setRejectReason("");
-                loadSolicitudes();
+        await runActionWithLoader(selectedSolicitud.id, "Rechazando solicitud...", async () => {
+            try {
+                const response = await rechazar(selectedSolicitud.id, rejectReason);
+                if (response.ok) {
+                    showToast("Solicitud rechazada", "success");
+                    setShowRejectModal(false);
+                    setSelectedSolicitud(null);
+                    setRejectReason("");
+                    await loadSolicitudes();
+                }
+            } catch (error) {
+                console.error("Error rejecting:", error);
+                showToast(error.response?.data?.message || "Error al rechazar", "error");
             }
-        } catch (error) {
-            console.error("Error rejecting:", error);
-            showToast(error.response?.data?.message || "Error al rechazar", "error");
-        }
+        });
     };
 
     const getStatusBadge = (status) => {
@@ -308,7 +335,9 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                             className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-medium text-emerald-700 shadow-sm border border-emerald-200 hover:border-emerald-300 transition-colors"
                                         >
                                             <FiDownload className="w-3 h-3" />
-                                            Descargar F.RH-10
+                                            {["cancelled", "cancelado"].includes(String(solicitud.status || "").toLowerCase())
+                                                ? "Descargar F.RH-10 cancelado"
+                                                : "Descargar F.RH-10"}
                                         </a>
                                     </div>
                                 </div>
@@ -327,7 +356,9 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                             className="inline-flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-medium text-slate-700 shadow-sm border border-slate-200 hover:border-slate-300 transition-colors"
                                         >
                                             <FiDownload className="w-3 h-3" />
-                                            Descargar validación legal
+                                            {["cancelled", "cancelado"].includes(String(solicitud.status || "").toLowerCase())
+                                                ? "Descargar validación legal cancelada"
+                                                : "Descargar validación legal"}
                                         </a>
                                     </div>
                                 </div>
@@ -343,6 +374,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                                     ? handleAprobarFinal(solicitud.id)
                                                     : handleAprobarParcial(solicitud.id)
                                             }
+                                            disabled={!!actionLoading}
                                             className={compact ? "flex-1 text-xs py-2" : actionButton}
                                         >
                                             <FiCheck className="w-4 h-4 mr-2" />
@@ -356,6 +388,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                                 setSelectedSolicitud(solicitud);
                                                 setShowRejectModal(true);
                                             }}
+                                            disabled={!!actionLoading}
                                             className={compact ? "flex-1 text-xs py-2 bg-red-50 text-red-700 hover:bg-red-100" : `${actionButton} bg-red-50 text-red-700 hover:bg-red-100`}
                                         >
                                             <FiX className="w-4 h-4 mr-2" />
@@ -369,6 +402,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                         <Button
                                             variant="primary"
                                             onClick={() => handleAprobarFinal(solicitud.id)}
+                                            disabled={!!actionLoading}
                                             className={compact ? "flex-1 text-xs py-2 bg-green-600 hover:bg-green-700" : `${actionButton} bg-green-600 hover:bg-green-700`}
                                         >
                                             <FiCheck className="w-4 h-4 mr-2" />
@@ -380,6 +414,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                                 setSelectedSolicitud(solicitud);
                                                 setShowRejectModal(true);
                                             }}
+                                            disabled={!!actionLoading}
                                             className={compact ? "flex-1 text-xs py-2 bg-red-50 text-red-700 hover:bg-red-100" : `${actionButton} bg-red-50 text-red-700 hover:bg-red-100`}
                                         >
                                             <FiX className="w-4 h-4 mr-2" />
@@ -412,11 +447,13 @@ const AprobacionPermisosView = ({ compact = false }) => {
                             <Button
                                 variant="secondary"
                                 onClick={() => {
+                                    if (actionLoading) return;
                                     setShowRejectModal(false);
                                     setSelectedSolicitud(null);
                                     setRejectReason("");
                                 }}
                                 className={actionButton}
+                                disabled={!!actionLoading}
                             >
                                 Cancelar
                             </Button>
@@ -424,7 +461,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
                                 variant="primary"
                                 onClick={handleRechazar}
                                 className="flex-1 bg-red-600 hover:bg-red-700"
-                                disabled={!rejectReason.trim()}
+                                disabled={!rejectReason.trim() || !!actionLoading}
                             >
                                 Confirmar Rechazo
                             </Button>

@@ -13,10 +13,12 @@ import {
     FiLink
 } from 'react-icons/fi';
 import { getClientRequests, processClientRequest, getClientRequestById } from '../../../core/api/requestsApi';
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from '../../../core/api';
 import Modal from '../../../core/ui/components/Modal';
-import { toast } from 'react-hot-toast';
+import { useUI } from '../../../core/ui/useUI';
 
 const ClientRequestManagement = () => {
+    const { showToast, showLoader, hideLoader } = useUI();
     const [requests, setRequests] = useState([]);
     const [loading, setLoading] = useState(true);
     const [selectedRequest, setSelectedRequest] = useState(null);
@@ -48,11 +50,11 @@ const ClientRequestManagement = () => {
             setTotalCount(data.count || 0);
         } catch (error) {
             console.error('Error cargando solicitudes:', error);
-            toast.error('Error al cargar solicitudes');
+            showToast('Error al cargar solicitudes', 'error');
         } finally {
             if (!silent) setLoading(false);
         }
-    }, [page, pageSize, searchQuery, statusFilter]);
+    }, [page, pageSize, searchQuery, showToast, statusFilter]);
 
     useEffect(() => {
         loadRequests();
@@ -66,14 +68,25 @@ const ClientRequestManagement = () => {
         return () => clearInterval(interval);
     }, [loadRequests]);
 
+    useScopedAutoUpdate(
+        DATA_UPDATE_SCOPES.CLIENT_REQUESTS,
+        () => {
+            loadRequests(true);
+        },
+        [loadRequests],
+    );
+
     const handleViewDetails = async (request) => {
+        showLoader('Cargando detalle de solicitud...');
         try {
             const fullRequest = await getClientRequestById(request.id);
             setSelectedRequest(fullRequest);
             setShowDetailModal(true);
         } catch (error) {
             console.error('Error cargando detalles:', error);
-            toast.error('Error al cargar detalles');
+            showToast('Error al cargar detalles', 'error');
+        } finally {
+            hideLoader();
         }
     };
 
@@ -93,39 +106,43 @@ const ClientRequestManagement = () => {
 
         try {
             setProcessing(true);
+            showLoader('Aprobando solicitud de cliente...');
             await processClientRequest(selectedRequest.id, 'approve', null);
 
-            toast.success(`✅ Solicitud de ${selectedRequest.commercial_name} aprobada exitosamente`);
+            showToast(`Solicitud de ${selectedRequest.commercial_name} aprobada exitosamente`, 'success');
             setShowApproveModal(false);
             setSelectedRequest(null);
-            loadRequests(); // Recargar lista
+            await loadRequests(); // Recargar lista
         } catch (error) {
             console.error('Error aprobando solicitud:', error);
-            toast.error('Error al aprobar solicitud');
+            showToast('Error al aprobar solicitud', 'error');
         } finally {
+            hideLoader();
             setProcessing(false);
         }
     };
 
     const handleReject = async () => {
         if (!selectedRequest || !rejectionReason.trim()) {
-            toast.error('Debes especificar un motivo de rechazo');
+            showToast('Debes especificar un motivo de rechazo', 'error');
             return;
         }
 
         try {
             setProcessing(true);
+            showLoader('Rechazando solicitud de cliente...');
             await processClientRequest(selectedRequest.id, 'reject', rejectionReason);
 
-            toast.success(`❌ Solicitud de ${selectedRequest.commercial_name} rechazada`);
+            showToast(`Solicitud de ${selectedRequest.commercial_name} rechazada`, 'success');
             setShowRejectModal(false);
             setSelectedRequest(null);
             setRejectionReason('');
-            loadRequests(); // Recargar lista
+            await loadRequests(); // Recargar lista
         } catch (error) {
             console.error('Error rechazando solicitud:', error);
-            toast.error('Error al rechazar solicitud');
+            showToast('Error al rechazar solicitud', 'error');
         } finally {
+            hideLoader();
             setProcessing(false);
         }
     };

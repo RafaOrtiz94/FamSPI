@@ -14,6 +14,11 @@ function formatDateTime(value) {
   return `${date.toLocaleString("es-EC")} (UTC ${date.toISOString()})`;
 }
 
+function formatOptionalDateTime(value, fallback = "No aplica") {
+  if (!value) return fallback;
+  return formatDateTime(value);
+}
+
 function shouldRespondJson(req) {
   const format = String(req?.query?.format || "").toLowerCase();
   if (format === "json") return true;
@@ -32,12 +37,15 @@ function renderVerificationHtml({
   aprobacionFinalAt = null,
   token = null,
   workflow = null,
+  cancellation = null,
   sourceType = "Solicitud",
 }) {
   const normalizedStatus = String(status || "").toLowerCase();
   const statusLabel =
     normalizedStatus === "approved" || normalizedStatus === "aprobado"
       ? "Aprobado"
+      : normalizedStatus === "cancelled" || normalizedStatus === "cancelado"
+      ? "Cancelado"
       : normalizedStatus === "rejected" || normalizedStatus === "rechazado"
       ? "Rechazado"
       : "En proceso";
@@ -45,6 +53,8 @@ function renderVerificationHtml({
   const statusColor =
     statusLabel === "Aprobado"
       ? "#166534"
+      : statusLabel === "Cancelado"
+      ? "#9a3412"
       : statusLabel === "Rechazado"
       ? "#991b1b"
       : "#92400e";
@@ -64,6 +74,26 @@ function renderVerificationHtml({
             ? `${escapeHtml(workflow?.aprobacion?.signer_name || "Firmado")} - ${escapeHtml(formatDateTime(workflow?.aprobacion?.signed_at))}`
             : "Pendiente"
         }</p>
+      </div>
+    `
+    : "";
+
+  const cancellationHtml = cancellation
+    ? `
+      <div class="section">
+        <h3>Cancelación</h3>
+        <p><strong>Modalidad:</strong> ${escapeHtml(cancellation.mode_label || "No disponible")}</p>
+        <p><strong>Fecha solicitud:</strong> ${escapeHtml(formatOptionalDateTime(cancellation.requested_at, cancellation.requested_at_label || "No aplica"))}</p>
+        <p><strong>Solicitado por:</strong> ${escapeHtml(cancellation.requested_by || "No aplica")}</p>
+        <p><strong>Motivo solicitud:</strong> ${escapeHtml(cancellation.request_reason || "No disponible")}</p>
+        <p><strong>${escapeHtml(cancellation.resolved_by_label || "Resuelto por")}:</strong> ${escapeHtml(cancellation.resolved_by || "No disponible")}</p>
+        <p><strong>Fecha resolución:</strong> ${escapeHtml(formatOptionalDateTime(cancellation.resolved_at))}</p>
+        <p><strong>Motivo final:</strong> ${escapeHtml(cancellation.final_reason || "No disponible")}</p>
+        ${
+          cancellation.review_reason
+            ? `<p><strong>Observación de revisión:</strong> ${escapeHtml(cancellation.review_reason)}</p>`
+            : ""
+        }
       </div>
     `
     : "";
@@ -94,7 +124,7 @@ function renderVerificationHtml({
   <main class="wrap">
     <section class="card">
       <h1>${escapeHtml(title)}</h1>
-      <p class="muted">${escapeHtml(subtitle)} - Consulta pÃºblica de verificación legal</p>
+      <p class="muted">${escapeHtml(subtitle)} - Consulta pública de verificación legal</p>
       <span class="badge">${escapeHtml(statusLabel)}</span>
       <div class="grid">
         <div class="row"><span class="k">Tipo</span><span class="v">${escapeHtml(sourceType)}</span></div>
@@ -104,6 +134,7 @@ function renderVerificationHtml({
         <div class="row"><span class="k">Fecha aprobación</span><span class="v">${escapeHtml(formatDateTime(aprobacionFinalAt))}</span></div>
         <div class="row"><span class="k">Token</span><span class="v">${escapeHtml(token || "No disponible")}</span></div>
       </div>
+      ${cancellationHtml}
       ${workflowHtml}
       <p class="foot">Documento validado por SPI Fam - FamSign</p>
     </section>
@@ -116,5 +147,4 @@ module.exports = {
   shouldRespondJson,
   renderVerificationHtml,
 };
-
 

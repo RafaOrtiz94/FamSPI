@@ -856,7 +856,7 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
 
     const status = requestQuery.rows[0].status;
     if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('El perfil solo puede actualizarse cuando la solicitud estÃ¡ aprobada');
+        throw new Error('El perfil solo puede actualizarse cuando la solicitud esté aprobada');
     }
 
     const query = `
@@ -900,7 +900,7 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
 
     const status = requestQuery.rows[0].status;
     if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('Solo puedes subir documentos cuando la solicitud estÃ¡ aprobada');
+        throw new Error('Solo puedes subir documentos cuando la solicitud esté aprobada');
     }
 
     let folderId = requestQuery.rows[0].drive_folder_id;

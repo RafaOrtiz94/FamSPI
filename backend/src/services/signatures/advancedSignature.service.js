@@ -3,16 +3,9 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
 
-/**
- * Servicio: AdvancedSignatureService
- * ----------------------------------------------
- * Gestiona FamSign sin certificados externos.
- * Valida identidad (OAuth corporativo), voluntad (consentimiento expreso)
- * y genera una huella criptogrÃ¡fica del acto de firma.
- */
 class AdvancedSignatureService {
   /**
-   * Ejecuta FamSign para una versiÃ³n de documento.
+
    * @param {Object} params
    * @param {Object} params.documentHash
    * @param {Object} params.user
@@ -40,7 +33,7 @@ class AdvancedSignatureService {
     }
 
     if (!consentText || typeof consentText !== "string" || consentText.trim().length === 0) {
-      const err = new Error("Se requiere manifestaciÃ³n expresa de consentimiento");
+      const err = new Error("Se requiere manifestación expresa de consentimiento");
       err.status = 400;
       throw err;
     }
@@ -83,7 +76,7 @@ class AdvancedSignatureService {
         [document.id, documentHash.id]
       );
       if (existingSig.rows.length) {
-        const err = new Error("Ya existe un FamSign para esta versiÃ³n");
+        const err = new Error("Ya existe un FamSign para esta versión");
         err.status = 409;
         throw err;
       }
@@ -136,7 +129,7 @@ class AdvancedSignatureService {
         },
       });
 
-      // Bloquear documento para impedir re-firmas; se usa signed o locked segÃºn disponibilidad
+      // Bloquear documento para impedir re-firmas; se usa signed o locked según disponibilidad
       if ("locked" in document) {
         await pgClient.query(`UPDATE documents SET locked = TRUE, updated_at = now() WHERE id = $1`, [
           document.id,

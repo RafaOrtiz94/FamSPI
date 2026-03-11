@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { FiRefreshCw } from "react-icons/fi";
+import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../core/api";
 import { useApi } from "../../../core/hooks/useApi";
 import { getClientRequests } from "../../../core/api/requestsApi";
 import { useNavigate } from "react-router-dom";
@@ -19,6 +20,14 @@ const ClientRequests = () => {
   useEffect(() => {
     loadRequests();
   }, [loadRequests]);
+
+  useScopedAutoUpdate(
+    DATA_UPDATE_SCOPES.CLIENT_REQUESTS,
+    () => {
+      loadRequests();
+    },
+    [loadRequests],
+  );
 
   const handleFilterChange = (e) => {
     const { name, value } = e.target;
