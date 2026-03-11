@@ -8,7 +8,7 @@ const logger = require("../../config/logger");
  * Registra eventos encadenados mediante hash para garantizar
  * trazabilidad y evitar alteraciones (append-only). Cada nuevo evento
  * enlaza el hash previo cumpliendo con los principios de integridad y
- * rendición de cuentas exigidos por la LOPDP.
+ * rendici�n de cuentas exigidos por la LOPDP.
  */
 class ImmutableSignatureLogger {
   /**
@@ -53,15 +53,27 @@ class ImmutableSignatureLogger {
       };
 
       await pgClient.query(
-        `INSERT INTO document_signature_logs (document_id, event_type, event_payload, event_hash)
-         VALUES ($1, $2, $3, $4)`,
-        [documentId, eventType, insertPayload, eventHash]
+        `INSERT INTO document_signature_logs (
+           document_id,
+           event_type,
+           event_data,
+           event_hash,
+           event_description
+         )
+         VALUES ($1, $2, $3, $4, $5)`,
+        [
+          documentId,
+          eventType,
+          insertPayload,
+          eventHash,
+          `Evento ${eventType} registrado`,
+        ]
       );
 
       if (shouldRelease) await pgClient.query("COMMIT");
       return { event_hash: eventHash };
     } catch (error) {
-      logger.error({ error }, "❌ Error registrando log inmutable");
+      logger.error({ error }, "Error registrando log inmutable");
       if (shouldRelease) await pgClient.query("ROLLBACK");
       throw error;
     } finally {

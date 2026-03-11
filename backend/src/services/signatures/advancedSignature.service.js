@@ -4,37 +4,16 @@ const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
 
 class AdvancedSignatureService {
-  /**
-
-   * @param {Object} params
-   * @param {Object} params.documentHash
-   * @param {Object} params.user
-   * @param {string} params.consentText
-   * @param {string} params.roleAtSign
-   * @param {string} params.ip
-   * @param {string} params.userAgent
-   * @param {string} params.sessionId
-   * @param {import('pg').PoolClient} params.client
-   */
-  async signDocument({
-    documentHash,
-    user,
-    consentText,
-    roleAtSign,
-    ip,
-    userAgent,
-    sessionId,
-    client,
-  }) {
+  async signDocument({ documentHash, user, roleAtSign, ip, userAgent, sessionId, client }) {
     if (!user?.id) {
       const err = new Error("Usuario no autenticado");
       err.status = 401;
       throw err;
     }
 
-    if (!consentText || typeof consentText !== "string" || consentText.trim().length === 0) {
-      const err = new Error("Se requiere manifestación expresa de consentimiento");
-      err.status = 400;
+    if (!user?.email) {
+      const err = new Error("El usuario autenticado no tiene email para registrar la firma");
+      err.status = 422;
       throw err;
     }
 
@@ -52,7 +31,7 @@ class AdvancedSignatureService {
     }
 
     try {
-      const docRes = await pgClient.query(`SELECT * FROM documents WHERE id=$1`, [documentHash.document_id]);
+      const docRes = await pgClient.query(`SELECT * FROM documents WHERE id = $1`, [documentHash.document_id]);
       const document = docRes.rows[0];
       if (!document) {
         const err = new Error("Documento no encontrado");
@@ -60,9 +39,7 @@ class AdvancedSignatureService {
         throw err;
       }
 
-      const lockedFlag =
-        ("locked" in document && document.locked === true) ||
-        ("signed" in document && document.signed === true);
+      const lockedFlag = document.is_locked === true || document.signed === true;
       if (lockedFlag) {
         const err = new Error("Documento bloqueado para nuevas firmas");
         err.status = 409;
@@ -76,7 +53,7 @@ class AdvancedSignatureService {
         [document.id, documentHash.id]
       );
       if (existingSig.rows.length) {
-        const err = new Error("Ya existe un FamSign para esta versión");
+        const err = new Error("Ya existe una firma avanzada para esta version");
         err.status = 409;
         throw err;
       }
@@ -84,7 +61,7 @@ class AdvancedSignatureService {
       const signedAt = new Date();
       const signatureHash = crypto
         .createHash("sha256")
-        .update(`${documentHash.hash_value}${user.id}${signedAt.toISOString()}${sessionId}`)
+        .update(`${documentHash.hash_sha256}${user.id}${signedAt.toISOString()}${sessionId}`)
         .digest("hex");
 
       const insertRes = await pgClient.query(
@@ -92,25 +69,32 @@ class AdvancedSignatureService {
           document_id,
           document_hash_id,
           signer_user_id,
-          role_at_sign,
-          consent_text,
+          signer_role,
+          signature_type,
+          signer_name,
+          signer_email,
+          signer_department,
+          signed_at,
           ip_address,
           user_agent,
           session_id,
-          signed_at,
-          signature_hash
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+          auth_method,
+          signature_hash,
+          is_valid
+        ) VALUES ($1,$2,$3,$4,'ADVANCED',$5,$6,$7,$8,$9,$10,$11,'OAUTH_CORPORATE',$12,TRUE)
         RETURNING *`,
         [
           document.id,
           documentHash.id,
           user.id,
           roleAtSign || user.role || null,
-          consentText.trim(),
+          user.fullname || user.name || user.email,
+          user.email,
+          user.department || null,
+          signedAt,
           ip || null,
           userAgent || null,
           sessionId,
-          signedAt,
           signatureHash,
         ]
       );
@@ -121,24 +105,25 @@ class AdvancedSignatureService {
         eventType: "DOCUMENT_SIGNED",
         eventPayload: {
           signer_user_id: user.id,
-          role_at_sign: roleAtSign || user.role || null,
-          consent_text: consentText.trim(),
+          signer_role: roleAtSign || user.role || null,
+          signer_email: user.email,
           document_hash_id: documentHash.id,
           signed_at: signedAt.toISOString(),
           signature_hash: signatureHash,
         },
       });
 
-      // Bloquear documento para impedir re-firmas; se usa signed o locked según disponibilidad
-      if ("locked" in document) {
-        await pgClient.query(`UPDATE documents SET locked = TRUE, updated_at = now() WHERE id = $1`, [
-          document.id,
-        ]);
-      } else if ("signed" in document) {
-        await pgClient.query(`UPDATE documents SET signed = TRUE, updated_at = now() WHERE id = $1`, [
-          document.id,
-        ]);
-      }
+      await pgClient.query(
+        `UPDATE documents
+         SET is_locked = TRUE,
+             signed = TRUE,
+             locked_at = NOW(),
+             locked_by = $2,
+             signature_status = 'SIGNED',
+             updated_at = NOW()
+         WHERE id = $1`,
+        [document.id, user.id]
+      );
 
       await immutableLogger.appendEvent({
         client: pgClient,
@@ -155,7 +140,7 @@ class AdvancedSignatureService {
       return insertRes.rows[0];
     } catch (error) {
       if (shouldRelease) await pgClient.query("ROLLBACK");
-      logger.error({ error }, "âŒ Error en FamSign");
+      logger.error({ error }, "Error en firma avanzada");
       throw error;
     } finally {
       if (shouldRelease) pgClient.release();
@@ -164,4 +149,3 @@ class AdvancedSignatureService {
 }
 
 module.exports = new AdvancedSignatureService();
-

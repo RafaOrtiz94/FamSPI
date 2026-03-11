@@ -223,7 +223,7 @@ async function listDocuments({ role }) {
   const { rows } = await db.query(
     `SELECT d.id, d.section_code, d.name, d.status, d.uploaded_at, d.uploaded_by, d.metadata,
             s.allowed_roles, s.area,
-            u.email AS uploader_email, u.nombre_completo AS uploader_name
+            u.email AS uploader_email, COALESCE(u.fullname, u.name, u.email) AS uploader_name
        FROM audit_documents d
        JOIN audit_sections s ON s.code = d.section_code
        LEFT JOIN users u ON u.id = d.uploaded_by
@@ -326,7 +326,7 @@ async function uploadDocument({ user, section_code, file }) {
     datos_nuevos: saved,
   });
 
-  return mapDocument({ ...saved, uploader_email: user?.email, uploader_name: user?.nombre_completo });
+  return mapDocument({ ...saved, uploader_email: user?.email, uploader_name: user?.fullname || user?.name || user?.email || null });
 }
 
 async function updateDocumentStatus({ user, id, status }) {
@@ -486,3 +486,4 @@ module.exports = {
   isAuditActive,
   assertAllowedSection,
 };
+

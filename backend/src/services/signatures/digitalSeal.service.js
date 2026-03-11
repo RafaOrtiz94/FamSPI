@@ -2,31 +2,11 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
 
-// Helper function for UUID generation
-const generateUUID = () => {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-};
-
-/**
- * Servicio: DigitalSealService
- * ----------------------------------------------
- * Aplica sello institucional (no personal) posterior a la firma
- * avanzada. Cumple la función de sellado corporativo exigida para
- * representación institucional y facilita la verificación vía token QR.
- */
 class DigitalSealService {
-  /**
-   * @param {Object} params
-   * @param {Object} params.documentHash
-   * @param {string} params.authorizedRole
-   * @param {import('pg').PoolClient} params.client
-   */
   async applySeal({ documentHash, authorizedRole, client }) {
     const pgClient = client || (await db.getClient());
     let shouldRelease = false;
+
     if (!client) {
       shouldRelease = true;
       await pgClient.query("BEGIN");
@@ -40,31 +20,36 @@ class DigitalSealService {
       }
 
       const existingSeal = await pgClient.query(
-        `SELECT id FROM document_seals WHERE document_hash_id = $1 AND active = TRUE LIMIT 1`,
+        `SELECT id FROM document_seals WHERE document_hash_id = $1 AND is_active = TRUE LIMIT 1`,
         [documentHash.id]
       );
       if (existingSeal.rows.length) {
-        const err = new Error("Ya existe un sello activo para esta versión");
+        const err = new Error("Ya existe un sello activo para esta version");
         err.status = 409;
         throw err;
       }
 
-      const year = new Date().getFullYear();
-      const sequence = Math.floor(Math.random() * 9000 + 1000);
-      const sealCode = `SPI-${year}-ADV-${sequence}`;
-      const verificationToken = generateUUID();
-
-      const insertRes = await pgClient.query(
-        `INSERT INTO document_seals (
-          document_hash_id,
-          seal_code,
-          authorized_role,
-          verification_token,
-          active
-        ) VALUES ($1,$2,$3,$4,TRUE)
-        RETURNING *`,
-        [documentHash.id, sealCode, authorizedRole, verificationToken]
+      const authorizedUserId = Number.isInteger(documentHash.calculated_by) ? documentHash.calculated_by : null;
+      const sealResult = await pgClient.query(
+        `SELECT * FROM create_document_seal_and_qr($1, $2, $3)`,
+        [documentHash.document_id, authorizedRole, authorizedUserId]
       );
+
+      const sealRow = sealResult.rows[0];
+      if (!sealRow?.seal_id) {
+        const err = new Error("No se pudo generar el sello institucional");
+        err.status = 500;
+        throw err;
+      }
+
+      const detailsResult = await pgClient.query(
+        `SELECT ds.*, dqc.verification_token, dqc.qr_url, dqc.id AS qr_id
+         FROM document_seals ds
+         LEFT JOIN document_qr_codes dqc ON dqc.seal_id = ds.id
+         WHERE ds.id = $1`,
+        [sealRow.seal_id]
+      );
+      const seal = detailsResult.rows[0];
 
       await immutableLogger.appendEvent({
         client: pgClient,
@@ -72,16 +57,22 @@ class DigitalSealService {
         eventType: "SEAL_APPLIED",
         eventPayload: {
           document_hash_id: documentHash.id,
-          seal_code: sealCode,
+          seal_id: sealRow.seal_id,
+          qr_id: sealRow.qr_id || seal?.qr_id || null,
           authorized_role: authorizedRole,
+          verification_token: seal?.verification_token || null,
         },
       });
 
       if (shouldRelease) await pgClient.query("COMMIT");
-      return insertRes.rows[0];
+      return {
+        ...seal,
+        id: sealRow.seal_id,
+        qr_id: sealRow.qr_id || seal?.qr_id || null,
+      };
     } catch (error) {
       if (shouldRelease) await pgClient.query("ROLLBACK");
-      logger.error({ error }, "❌ Error aplicando sello digital");
+      logger.error({ error }, "Error aplicando sello digital");
       throw error;
     } finally {
       if (shouldRelease) pgClient.release();

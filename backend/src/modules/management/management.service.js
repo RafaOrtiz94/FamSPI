@@ -3,9 +3,9 @@ const db = require("../../config/db");
 const getStats = async () => {
   const [countAll, countApproved, countRejected, avgTime] = await Promise.all([
     db.query("SELECT COUNT(*) FROM requests"),
-    db.query("SELECT COUNT(*) FROM requests WHERE status='approved'"),
-    db.query("SELECT COUNT(*) FROM requests WHERE status='rejected'"),
-    db.query("SELECT ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600),2) AS avg_hours FROM requests WHERE status IN ('approved','completed')"),
+    db.query("SELECT COUNT(*) FROM requests WHERE status='aprobado'"),
+    db.query("SELECT COUNT(*) FROM requests WHERE status='rechazado'"),
+    db.query("SELECT ROUND(AVG(EXTRACT(EPOCH FROM (updated_at - created_at))/3600),2) AS avg_hours FROM requests WHERE status IN ('aprobado')"),
   ]);
 
   const perType = await db.query(`
@@ -43,7 +43,7 @@ const listRequests = async ({ page, pageSize, status, area }) => {
 
   const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
   const query = `
-    SELECT r.*, rt.title AS tipo, u.nombre_completo AS solicitante
+    SELECT r.*, rt.title AS tipo, COALESCE(u.fullname, u.name, u.email) AS solicitante
     FROM requests r
     JOIN request_types rt ON r.request_type_id = rt.id
     JOIN users u ON u.id = r.requester_id
@@ -57,7 +57,30 @@ const listRequests = async ({ page, pageSize, status, area }) => {
 
 const getTrace = async (id) => {
   const logs = await db.query(
-    `SELECT * FROM audit_logs WHERE (data->>'request_id')::INT = $1 ORDER BY created_at ASC`,
+    `SELECT
+       id,
+       usuario_id,
+       usuario_email,
+       rol,
+       modulo,
+       accion,
+       descripcion,
+       datos_anteriores,
+       datos_nuevos,
+       ip,
+       user_agent,
+       fecha,
+       duracion_ms,
+       request_id,
+       mantenimiento_id,
+       inventario_id,
+       auto,
+       creado_en
+     FROM auditoria.logs
+     WHERE request_id = $1
+        OR (datos_nuevos->>'request_id')::INT = $1
+        OR (datos_anteriores->>'request_id')::INT = $1
+     ORDER BY creado_en ASC`,
     [id]
   );
   return logs.rows;
@@ -65,7 +88,7 @@ const getTrace = async (id) => {
 
 const getDocuments = async (id) => {
   const [attachments, versions] = await Promise.all([
-    db.query("SELECT * FROM attachments WHERE request_id=$1", [id]),
+    db.query("SELECT * FROM request_attachments WHERE request_id=$1", [id]),
     db.query("SELECT * FROM request_versions WHERE request_id=$1", [id]),
   ]);
   return { attachments: attachments.rows, versions: versions.rows };

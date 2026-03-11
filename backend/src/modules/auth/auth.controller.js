@@ -437,30 +437,7 @@ const me = async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: "Usuario no encontrado" });
     const payload = rows[0];
 
-    // 🆕 Auto clock-in: Register entry time if not already done today
-    try {
-      const today = new Date().toISOString().split("T")[0];
-      const existingAttendance = await db.query(
-        "SELECT id, entry_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
-        [payload.id, today]
-      );
-
-      if (existingAttendance.rows.length === 0 || !existingAttendance.rows[0].entry_time) {
-        await db.query(
-          `
-          INSERT INTO user_attendance_records (user_id, date, entry_time)
-          VALUES ($1, $2, NOW())
-          ON CONFLICT (user_id, date) 
-          DO UPDATE SET entry_time = NOW(), updated_at = NOW()
-          `,
-          [payload.id, today]
-        );
-        logger.info(`[AUTO-ATTENDANCE] Clock in: ${email} at ${new Date().toISOString()}`);
-      }
-    } catch (attendanceErr) {
-      // Don't fail the login if attendance fails
-      logger.warn({ attendanceErr }, "⚠️ Auto clock-in failed, but login continues");
-    }
+    // /auth/me solo retorna datos de sesion y perfil.
 
     const meta = resolveRoleMeta(payload.role);
     const avatarUrl = (() => {
@@ -532,12 +509,11 @@ const refreshToken = async (req, res) => {
     });
 
     if (!updated) {
-      await createSession({
+      logger.warn("refreshToken rechazado: no existe una sesion activa asociada al token entregado", {
+        userId: u.id,
         email: u.email,
-        ip: req.headers["x-forwarded-for"]?.split(",")[0] || req.ip,
-        userAgent: req.headers["user-agent"],
-        refreshToken: newRefreshToken,
       });
+      return res.status(401).json({ ok: false, message: "Sesion no valida para refresco." });
     }
 
     return res.status(200).json({
