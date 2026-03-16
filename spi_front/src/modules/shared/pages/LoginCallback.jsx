@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import { FiLoader } from "react-icons/fi";
 import { handleGoogleCallback } from "../../../core/api/authApi";
 import { useAuth } from "../../../core/auth/AuthContext";
+import { clockIn, getTodayAttendance } from "../../../core/api/attendanceApi";
 
 /**
  * LoginCallback.jsx
@@ -41,6 +42,14 @@ const LoginCallback = () => {
         const ok = await refresh();
         if (!ok) throw new Error("No se pudo sincronizar sesión.");
 
+        try {
+          const attendance = await getTodayAttendance();
+          if (!attendance?.data?.entry_time) {
+            await clockIn(null);
+          }
+        } catch (attendanceErr) {
+          console.warn("No se pudo garantizar la entrada automatica en login:", attendanceErr?.message || attendanceErr);
+        }
         window.history.replaceState(null, "", window.location.pathname);
 
         // 3️⃣ Acceder al usuario directamente desde AuthContext
@@ -118,3 +127,5 @@ const LoginCallback = () => {
 };
 
 export default LoginCallback;
+
+

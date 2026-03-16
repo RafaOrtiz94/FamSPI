@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect } from "react";
-import { FiX, FiCalendar, FiClock, FiFileText } from "react-icons/fi";
+import { FiX, FiCalendar, FiClock, FiFileText, FiChevronDown, FiChevronUp } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
@@ -32,12 +32,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [pendingVacationDays, setPendingVacationDays] = useState(0);
     const [rejectedVacationDays, setRejectedVacationDays] = useState(0);
     const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
+    const [calamidadDuracionTipo, setCalamidadDuracionTipo] = useState("dias"); // 'horas' o 'dias'
     const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
     const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
     const [studyEnrollments, setStudyEnrollments] = useState([]);
     const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
     const [loadingStudyEnrollment, setLoadingStudyEnrollment] = useState(false);
     const [submittingStudyEnrollment, setSubmittingStudyEnrollment] = useState(false);
+    const [studySectionOpen, setStudySectionOpen] = useState(true);
     const [studyForm, setStudyForm] = useState({
         institution_name: "",
         program_name: "",
@@ -46,12 +48,21 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         matricula_file: null,
     });
     const [recoveryPlanRows, setRecoveryPlanRows] = useState([]);
-    const usesPermisoHoras = (permiso, saludTipo) =>
-        permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
-    const usesPermisoDateTime = (permiso, saludTipo) =>
-        permiso === "estudios" || permiso === "personal" || (permiso === "salud" && saludTipo === "horas");
-    const usesSimplifiedHourlyPermiso = (permiso) =>
-        permiso === "estudios" || permiso === "personal";
+    const usesPermisoHoras = (permiso, saludTipo, calamidadTipo) =>
+        permiso === "estudios" ||
+        permiso === "personal" ||
+        (permiso === "salud" && saludTipo === "horas") ||
+        (permiso === "calamidad" && calamidadTipo === "horas");
+    const usesPermisoDateTime = (permiso, saludTipo, calamidadTipo) =>
+        permiso === "estudios" ||
+        permiso === "personal" ||
+        (permiso === "salud" && saludTipo === "horas") ||
+        (permiso === "calamidad" && calamidadTipo === "horas");
+    const usesSimplifiedHourlyPermiso = (permiso, saludTipo, calamidadTipo) =>
+        permiso === "estudios" ||
+        permiso === "personal" ||
+        (permiso === "salud" && saludTipo === "horas") ||
+        (permiso === "calamidad" && calamidadTipo === "horas");
     const extractDatePart = (value) =>
         typeof value === "string" && value.includes("T") ? value.split("T")[0] : value || "";
     const toIsoDateTime = (value) => {
@@ -75,6 +86,24 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
         const pad = (value) => String(value).padStart(2, "0");
         return `${end.getFullYear()}-${pad(end.getMonth() + 1)}-${pad(end.getDate())}T${pad(end.getHours())}:${pad(end.getMinutes())}`;
+    };
+    const getLocalTimePart = (dateTimeValue) => {
+        if (!dateTimeValue || typeof dateTimeValue !== "string") return "";
+        const [, timePart = ""] = dateTimeValue.split("T");
+        return normalizeTimeText(timePart.slice(0, 5));
+    };
+    const mergeDateAndTime = (datePart, timePart) => {
+        if (!datePart || !timePart) return "";
+        const normalizedTime = normalizeTimeText(timePart);
+        if (!normalizedTime) return "";
+        return `${datePart}T${normalizedTime}`;
+    };
+    const getHourOptionsByPermiso = (permiso) => {
+        if (permiso === "estudios") return ["0.5", "1", "1.5", "2", "2.5", "3"];
+        if (permiso === "personal") return ["0.5", "1", "1.5", "2"];
+        if (permiso === "salud") return ["0.5", "1", "1.5", "2", "2.5", "3", "4", "5", "6", "7", "8"];
+        if (permiso === "calamidad") return ["0.5", "1", "1.5", "2", "2.5", "3", "4", "5", "6", "7", "8"];
+        return [];
     };
     const formatDisplayDate = (value) => {
         if (!value) return "";
@@ -130,6 +159,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const days = Number(formData.duracion_dias || 0);
         if (Number.isFinite(days) && days > 0) return Math.round(((days * 8) + Number.EPSILON) * 100) / 100;
         return 0;
+    };
+    const getPermisoHourLimit = (permiso) => {
+        if (permiso === "estudios") return 3;
+        if (permiso === "personal") return 2;
+        return null;
     };
 
     const canBeRecoverableByRule = () => {
@@ -188,6 +222,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     }, [tipoPermiso]);
 
     useEffect(() => {
+        if (tipoPermiso !== "calamidad") {
+            setCalamidadDuracionTipo("dias");
+            setSubtipoCalamidad("");
+        }
+    }, [tipoPermiso]);
+
+    useEffect(() => {
         if (!canBeRecoverableByRule()) {
             setRecoveryPlanRows([]);
         }
@@ -240,8 +281,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     useEffect(() => {
         const shouldAutoCalculateHours =
             tipoSolicitud === "permiso" &&
-            usesPermisoDateTime(tipoPermiso, saludDuracionTipo) &&
-            !usesSimplifiedHourlyPermiso(tipoPermiso);
+            usesPermisoDateTime(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo) &&
+            !usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
         if (!shouldAutoCalculateHours) return;
 
         const nextHoras = calculateHoursBetween(formData.fecha_inicio_hora, formData.fecha_fin_hora);
@@ -256,13 +297,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         tipoSolicitud,
         tipoPermiso,
         saludDuracionTipo,
+        calamidadDuracionTipo,
         formData.fecha_inicio_hora,
         formData.fecha_fin_hora,
     ]);
 
     useEffect(() => {
         const shouldAutoCalculateEnd =
-            tipoSolicitud === "permiso" && usesSimplifiedHourlyPermiso(tipoPermiso);
+            tipoSolicitud === "permiso" && usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
         if (!shouldAutoCalculateEnd) return;
 
         const nextEnd = addHoursToLocalDateTime(formData.fecha_inicio_hora, formData.duracion_horas);
@@ -278,8 +320,41 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     }, [
         tipoSolicitud,
         tipoPermiso,
+        saludDuracionTipo,
+        calamidadDuracionTipo,
         formData.fecha_inicio_hora,
         formData.duracion_horas,
+    ]);
+
+    useEffect(() => {
+        const shouldAutoCalculateDays =
+            tipoSolicitud === "permiso" &&
+            ((tipoPermiso === "salud" && saludDuracionTipo === "dias") ||
+                (tipoPermiso === "calamidad" && calamidadDuracionTipo === "dias"));
+        if (!shouldAutoCalculateDays) return;
+
+        let nextDays = "";
+        if (formData.fecha_inicio && formData.fecha_fin) {
+            const start = new Date(`${extractDatePart(formData.fecha_inicio)}T00:00:00`);
+            const end = new Date(`${extractDatePart(formData.fecha_fin)}T00:00:00`);
+            if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end >= start) {
+                nextDays = String(Math.round((end - start) / (1000 * 60 * 60 * 24)) + 1);
+            }
+        }
+        setFormData((prev) => {
+            if (String(prev.duracion_dias || "") === String(nextDays || "")) return prev;
+            return {
+                ...prev,
+                duracion_dias: nextDays,
+            };
+        });
+    }, [
+        tipoSolicitud,
+        tipoPermiso,
+        saludDuracionTipo,
+        calamidadDuracionTipo,
+        formData.fecha_inicio,
+        formData.fecha_fin,
     ]);
 
     const loadVacationSummary = async () => {
@@ -432,6 +507,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
             if (tipoSolicitud === "permiso") {
                 payload.tipo_permiso = tipoPermiso;
+                const rawRequestedHours = Number(formData.duracion_horas || 0);
+                const uiHourLimit = getPermisoHourLimit(tipoPermiso);
+                if (Number.isFinite(rawRequestedHours) && rawRequestedHours > 0 && uiHourLimit !== null && rawRequestedHours > uiHourLimit) {
+                    throw new Error(
+                        tipoPermiso === "estudios"
+                            ? "El permiso por estudios no puede exceder 3 horas."
+                            : "El permiso por asuntos personales no puede exceder 2 horas."
+                    );
+                }
                 if (tipoPermiso === "salud") {
                     if (!subtipoSalud) {
                         throw new Error("Debes seleccionar el subtipo de permiso por salud.");
@@ -444,16 +528,25 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     }
                     payload.study_enrollment_id = Number(selectedStudyEnrollmentId);
                 }
-                const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+                const shouldUseDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
                 if (shouldUseDateTime) {
-                    const computedEndValue = usesSimplifiedHourlyPermiso(tipoPermiso)
+                    const computedEndValue = usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo)
                         ? addHoursToLocalDateTime(formData.fecha_inicio_hora, formData.duracion_horas)
                         : formData.fecha_fin_hora;
+                    if (!computedEndValue) {
+                        throw new Error("Debes ingresar una fecha/hora de inicio y una duración válida.");
+                    }
+                    if (
+                        usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo) &&
+                        extractDatePart(computedEndValue) !== extractDatePart(formData.fecha_inicio_hora)
+                    ) {
+                        throw new Error("El permiso debe iniciar y terminar el mismo día.");
+                    }
                     payload.fecha_inicio_hora = toIsoDateTime(formData.fecha_inicio_hora);
                     payload.fecha_fin_hora = toIsoDateTime(computedEndValue);
                     payload.fecha_inicio = extractDatePart(formData.fecha_inicio_hora);
                     payload.fecha_fin = extractDatePart(computedEndValue);
-                    payload.duracion_horas = usesSimplifiedHourlyPermiso(tipoPermiso)
+                    payload.duracion_horas = usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo)
                         ? Number(formData.duracion_horas || 0)
                         : calculateHoursBetween(formData.fecha_inicio_hora, computedEndValue);
                     payload.duracion_dias = "";
@@ -468,6 +561,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     payload.duracion_dias = "";
                 }
                 if (tipoPermiso === "salud" && saludDuracionTipo === "dias") {
+                    payload.duracion_horas = "";
+                }
+                if (tipoPermiso === "calamidad" && calamidadDuracionTipo === "horas") {
+                    payload.duracion_dias = "";
+                }
+                if (tipoPermiso === "calamidad" && calamidadDuracionTipo === "dias") {
                     payload.duracion_horas = "";
                 }
 
@@ -608,22 +707,65 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const renderPermisoForm = () => {
         const isSalud = tipoPermiso === "salud";
-        const usesHoras = usesPermisoHoras(tipoPermiso, saludDuracionTipo);
-        const usesDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
-        const usesSimplifiedHours = usesSimplifiedHourlyPermiso(tipoPermiso);
+        const usesHoras = usesPermisoHoras(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
+        const usesDateTime = usesPermisoDateTime(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
+        const usesSimplifiedHours = usesSimplifiedHourlyPermiso(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
         const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
         const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
+        const simplifiedStartDate = usesSimplifiedHours
+            ? extractDatePart(formData.fecha_inicio_hora || formData.fecha_inicio)
+            : "";
+        const simplifiedStartTime = usesSimplifiedHours
+            ? (getLocalTimePart(formData.fecha_inicio_hora) || "08:00")
+            : "";
+        const simplifiedHourOptions = getHourOptionsByPermiso(tipoPermiso);
+        const computedEndValue = usesSimplifiedHours
+            ? addHoursToLocalDateTime(formData.fecha_inicio_hora, formData.duracion_horas)
+            : endValue;
         const invalidDateRange =
             !usesSimplifiedHours &&
             Boolean(startValue && endValue) &&
             new Date(endValue).getTime() <= new Date(startValue).getTime();
         const hasDates = usesSimplifiedHours
-            ? Boolean(startValue && formData.duracion_horas)
+            ? Boolean(startValue && computedEndValue)
             : Boolean(startValue && endValue);
+        const crossesDayInSimplifiedHours =
+            usesSimplifiedHours &&
+            Boolean(startValue && computedEndValue) &&
+            extractDatePart(startValue) !== extractDatePart(computedEndValue);
         const hasDuration = Boolean(usesHoras ? formData.duracion_horas : formData.duracion_dias);
         const isAutoHours = usesHoras && usesDateTime;
         const needsEnrollment = tipoPermiso === "estudios";
         const requiresActiveEnrollmentSelection = needsEnrollment && !selectedStudyEnrollmentId;
+        const permisoHoursLimit = getPermisoHourLimit(tipoPermiso);
+        const enteredHours = Number(formData.duracion_horas || 0);
+        const exceedsPermisoHourLimit =
+            usesHoras &&
+            permisoHoursLimit !== null &&
+            Number.isFinite(enteredHours) &&
+            enteredHours > permisoHoursLimit;
+        const enteredHealthDays = Number(formData.duracion_dias || 0);
+        const hasHealthDaysValue = Number.isFinite(enteredHealthDays) && enteredHealthDays > 0;
+        const healthCertificationNote =
+            subtipoSalud === "enfermedad_certificada"
+                ? saludDuracionTipo === "horas"
+                    ? {
+                        tone: "blue",
+                        title: "Requisito documental para enfermedad certificada",
+                        body: "Si el permiso por salud se registra por horas, el sistema mantiene justificación con certificado médico y no requiere validación del IESS por no superar tres días.",
+                    }
+                    : hasHealthDaysValue && enteredHealthDays > 3
+                        ? {
+                            tone: "amber",
+                            title: "Validación requerida en IESS",
+                            body: "Si la enfermedad certificada supera 3 días, el certificado debe validarse en el IESS para continuar con el trámite.",
+                        }
+                        : {
+                            tone: "blue",
+                            title: "Requisito documental para enfermedad certificada",
+                            body: "Si la enfermedad certificada es de 3 días o menos, no requiere certificado del IESS validado.",
+                        }
+                : null;
         const activeEnrollments = studyEnrollments.filter((item) => String(item?.status || "").toLowerCase() === "active");
         const pendingEnrollments = studyEnrollments.filter((item) => String(item?.status || "").toLowerCase() === "pending_validation");
         const hasStudyForm =
@@ -697,7 +839,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 </div>
 
                 {tipoPermiso === "calamidad" && (
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                         <label className="block text-sm font-medium text-gray-700">Tipo de Calamidad</label>
                         <input
                             type="text"
@@ -707,124 +849,171 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
                             required
                         />
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Duración</label>
+                            <select
+                                value={calamidadDuracionTipo}
+                                onChange={(e) => setCalamidadDuracionTipo(e.target.value)}
+                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                            >
+                                <option value="dias">Días</option>
+                                <option value="horas">Horas</option>
+                            </select>
+                        </div>
                     </div>
                 )}
 
                 {tipoPermiso && (
                     <>
                         {tipoPermiso === "estudios" && (
-                            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
-                                <p className="text-xs font-semibold text-indigo-900">
-                                    Matrícula para permisos por educación
-                                </p>
-                                {loadingStudyEnrollment ? (
-                                    <p className="text-xs text-indigo-700">Validando matrícula activa...</p>
-                                ) : (
-                                    <>
-                                        <div className="space-y-2">
-                                            {activeEnrollments.length > 0 ? (
-                                                <>
-                                                    <p className="text-xs text-indigo-700">
-                                                        Selecciona una matrícula activa para habilitar la solicitud.
-                                                    </p>
-                                                    <select
-                                                        value={selectedStudyEnrollmentId}
-                                                        onChange={(e) => setSelectedStudyEnrollmentId(e.target.value)}
-                                                        className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                                    >
-                                                        <option value="">Selecciona matrícula activa</option>
-                                                        {activeEnrollments.map((item) => (
-                                                            <option key={item.id} value={item.id}>
-                                                                {item.institution_name} - vence {String(item.valid_until).slice(0, 10)}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                    <p className="text-[11px] text-indigo-700">
-                                                        Puedes seguir usando una matrícula activa o subir otra adicional para validación.
-                                                    </p>
-                                                </>
-                                            ) : (
-                                                <p className="text-xs text-indigo-700">
-                                                    No tienes matrícula activa. Debes subir una matrícula y esperar validación del jefe inmediato.
-                                                </p>
-                                            )}
-                                        </div>
+                            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 space-y-3">
+                                <button
+                                    type="button"
+                                    onClick={() => setStudySectionOpen((prev) => !prev)}
+                                    className="w-full flex items-start justify-between gap-3 text-left"
+                                >
+                                    <div>
+                                        <p className="text-sm font-semibold text-sky-950">
+                                            Información de matrícula académica
+                                        </p>
+                                        <p className="text-xs text-sky-800 mt-1">
+                                            Este bloque identifica y valida la matrícula que respalda el permiso por estudios.
+                                        </p>
+                                    </div>
+                                    {studySectionOpen ? (
+                                        <FiChevronUp className="w-5 h-5 text-sky-700 shrink-0" />
+                                    ) : (
+                                        <FiChevronDown className="w-5 h-5 text-sky-700 shrink-0" />
+                                    )}
+                                </button>
 
-                                        {pendingEnrollments.length > 0 && (
-                                            <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
-                                                <p className="text-xs text-amber-800">
+                                {studySectionOpen && (
+                                    <>
+                                        {loadingStudyEnrollment ? (
+                                            <p className="text-xs text-sky-800">Validando matrícula activa...</p>
+                                        ) : (
+                                            <>
+                                                <div className="space-y-2">
                                                     {activeEnrollments.length > 0 ? (
                                                         <>
-                                                            Tienes matrícula en <strong>esperando validación</strong>. Puedes seguir usando una matrícula activa mientras se revisa la nueva.
+                                                            <p className="text-xs text-sky-800">
+                                                                Selecciona una matrícula activa para habilitar la solicitud.
+                                                            </p>
+                                                            <select
+                                                                value={selectedStudyEnrollmentId}
+                                                                onChange={(e) => setSelectedStudyEnrollmentId(e.target.value)}
+                                                                className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                            >
+                                                                <option value="">Selecciona matrícula activa</option>
+                                                                {activeEnrollments.map((item) => (
+                                                                    <option key={item.id} value={item.id}>
+                                                                        {item.institution_name} - vence {String(item.valid_until).slice(0, 10)}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                            <p className="text-[11px] text-sky-800">
+                                                                Puedes seguir usando una matrícula activa o cargar otra adicional para validación.
+                                                            </p>
                                                         </>
                                                     ) : (
-                                                        <>
-                                                            Tienes matrícula en <strong>esperando validación</strong>. No puedes pedir permisos por estudios hasta su aprobación.
-                                                        </>
+                                                        <p className="text-xs text-sky-800">
+                                                            No tienes matrícula activa. Debes cargar una matrícula y esperar validación del jefe inmediato.
+                                                        </p>
                                                     )}
-                                                </p>
-                                            </div>
-                                        )}
+                                                </div>
 
-                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                            <input
-                                                type="text"
-                                                placeholder="Institución"
-                                                value={studyForm.institution_name}
-                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, institution_name: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                            />
-                                            <input
-                                                type="text"
-                                                placeholder="Programa"
-                                                value={studyForm.program_name}
-                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, program_name: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                            />
-                                            <input
-                                                type="date"
-                                                value={studyForm.valid_from}
-                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_from: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                            />
-                                            <input
-                                                type="date"
-                                                value={studyForm.valid_until}
-                                                onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_until: e.target.value }))}
-                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                            />
-                                            <input
-                                                type="file"
-                                                accept=".pdf,.png,.jpg,.jpeg"
-                                                onChange={(e) =>
-                                                    setStudyForm((prev) => ({
-                                                        ...prev,
-                                                        matricula_file: e.target.files?.[0] || null,
-                                                    }))
-                                                }
-                                                className="w-full px-3 py-2 border border-indigo-200 rounded-lg focus:ring-2 focus:ring-indigo-500 sm:col-span-2"
-                                            />
-                                        </div>
+                                                {pendingEnrollments.length > 0 && (
+                                                    <div className="rounded-md border border-amber-300 bg-amber-50 p-2">
+                                                        <p className="text-xs text-amber-800">
+                                                            {activeEnrollments.length > 0 ? (
+                                                                <>
+                                                                    Tienes matrícula en <strong>esperando validación</strong>. Puedes seguir usando una matrícula activa mientras se revisa la nueva.
+                                                                </>
+                                                            ) : (
+                                                                <>
+                                                                    Tienes matrícula en <strong>esperando validación</strong>. No puedes pedir permisos por estudios hasta su aprobación.
+                                                                </>
+                                                            )}
+                                                        </p>
+                                                    </div>
+                                                )}
+
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-sky-900 mb-1">Institución</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Nombre de la institución"
+                                                            value={studyForm.institution_name}
+                                                            onChange={(e) => setStudyForm((prev) => ({ ...prev, institution_name: e.target.value }))}
+                                                            className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-sky-900 mb-1">Programa o carrera</label>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Nombre del programa"
+                                                            value={studyForm.program_name}
+                                                            onChange={(e) => setStudyForm((prev) => ({ ...prev, program_name: e.target.value }))}
+                                                            className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-sky-900 mb-1">Fecha de inicio de la matrícula</label>
+                                                        <input
+                                                            type="date"
+                                                            value={studyForm.valid_from}
+                                                            onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_from: e.target.value }))}
+                                                            className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                        />
+                                                    </div>
+                                                    <div>
+                                                        <label className="block text-xs font-medium text-sky-900 mb-1">Fecha de fin de la matrícula</label>
+                                                        <input
+                                                            type="date"
+                                                            value={studyForm.valid_until}
+                                                            onChange={(e) => setStudyForm((prev) => ({ ...prev, valid_until: e.target.value }))}
+                                                            className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                        />
+                                                    </div>
+                                                    <div className="sm:col-span-2">
+                                                        <label className="block text-xs font-medium text-sky-900 mb-1">Documento de matrícula</label>
+                                                        <input
+                                                            type="file"
+                                                            accept=".pdf,.png,.jpg,.jpeg"
+                                                            onChange={(e) =>
+                                                                setStudyForm((prev) => ({
+                                                                    ...prev,
+                                                                    matricula_file: e.target.files?.[0] || null,
+                                                                }))
+                                                            }
+                                                            className="w-full px-3 py-2 border border-sky-200 rounded-lg focus:ring-2 focus:ring-sky-500 bg-white"
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                        <Button
+                                            type="button"
+                                            variant="secondary"
+                                            onClick={handleRegisterStudyEnrollment}
+                                            disabled={!hasStudyForm || submittingStudyEnrollment}
+                                            className="w-full"
+                                        >
+                                            {submittingStudyEnrollment
+                                                ? "Enviando matrícula..."
+                                                : activeEnrollments.length > 0
+                                                    ? "Cargar otra matrícula para validación"
+                                                    : "Cargar matrícula para validación"}
+                                        </Button>
                                     </>
                                 )}
-                                <Button
-                                    type="button"
-                                    variant="secondary"
-                                    onClick={handleRegisterStudyEnrollment}
-                                    disabled={!hasStudyForm || submittingStudyEnrollment}
-                                    className="w-full"
-                                >
-                                    {submittingStudyEnrollment
-                                        ? "Enviando matrícula..."
-                                        : activeEnrollments.length > 0
-                                            ? "Subir otra matrícula para validación"
-                                            : "Subir matrícula para validación"}
-                                </Button>
                             </div>
                         )}
 
                         {isSalud && (
-                            <div>
+                            <div className="space-y-3">
                                 <label className="block text-sm font-medium text-gray-700 mb-2">Subtipo salud</label>
                                 <select
                                     value={subtipoSalud}
@@ -845,6 +1034,31 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     <option value="dias">Días</option>
                                     <option value="horas">Horas</option>
                                 </select>
+                                {healthCertificationNote && (
+                                    <div
+                                        className={`rounded-lg border p-3 ${healthCertificationNote.tone === "amber"
+                                            ? "border-amber-300 bg-amber-50"
+                                            : "border-blue-200 bg-blue-50"
+                                            }`}
+                                    >
+                                        <p
+                                            className={`text-xs font-semibold ${healthCertificationNote.tone === "amber"
+                                                ? "text-amber-900"
+                                                : "text-blue-900"
+                                                }`}
+                                        >
+                                            {healthCertificationNote.title}
+                                        </p>
+                                        <p
+                                            className={`text-xs mt-1 ${healthCertificationNote.tone === "amber"
+                                                ? "text-amber-800"
+                                                : "text-blue-800"
+                                                }`}
+                                        >
+                                            {healthCertificationNote.body}
+                                        </p>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -972,78 +1186,187 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha desde</label>
-                                <input
-                                    type={usesDateTime ? "datetime-local" : "date"}
-                                    value={startValue}
-                                    onChange={(e) => {
-                                        const value = e.target.value;
-                                        setFormData((prev) => ({
-                                            ...prev,
-                                            ...(usesDateTime
-                                                ? { fecha_inicio_hora: value, fecha_inicio: extractDatePart(value) }
-                                                : { fecha_inicio: value }),
-                                        }));
-                                    }}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                    required
-                                    disabled={requiresActiveEnrollmentSelection}
-                                />
-                            </div>
+                        {usesSimplifiedHours ? (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Fecha</label>
+                                    <input
+                                        type="date"
+                                        value={simplifiedStartDate}
+                                        onChange={(e) => {
+                                            const nextDate = e.target.value;
+                                            const nextStartDateTime = mergeDateAndTime(nextDate, simplifiedStartTime || "08:00");
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                fecha_inicio: nextDate,
+                                                fecha_inicio_hora: nextStartDateTime,
+                                            }));
+                                        }}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        required
+                                        disabled={requiresActiveEnrollmentSelection}
+                                    />
+                                </div>
 
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
-                                <input
-                                    type={usesDateTime ? "datetime-local" : "date"}
-                                    value={endValue}
-                                    onChange={(e) =>
-                                        !usesSimplifiedHours &&
-                                        setFormData({
-                                            ...formData,
-                                            ...(usesDateTime
-                                                ? { fecha_fin_hora: e.target.value, fecha_fin: extractDatePart(e.target.value) }
-                                                : { fecha_fin: e.target.value }),
-                                        })
-                                    }
-                                    min={startValue || undefined}
-                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                    required
-                                    readOnly={usesSimplifiedHours}
-                                    disabled={requiresActiveEnrollmentSelection || usesSimplifiedHours}
-                                />
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Hora inicio</label>
+                                    <input
+                                        type="time"
+                                        step="900"
+                                        value={simplifiedStartTime}
+                                        onChange={(e) => {
+                                            const nextTime = e.target.value;
+                                            const baseDate = simplifiedStartDate || extractDatePart(formData.fecha_inicio) || "";
+                                            const nextStartDateTime = mergeDateAndTime(baseDate, nextTime);
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                fecha_inicio: baseDate || prev.fecha_inicio,
+                                                fecha_inicio_hora: nextStartDateTime,
+                                            }));
+                                        }}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        required
+                                        disabled={requiresActiveEnrollmentSelection}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Duración (horas)</label>
+                                    <select
+                                        value={formData.duracion_horas || ""}
+                                        onChange={(e) =>
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                duracion_horas: e.target.value,
+                                            }))
+                                        }
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-white"
+                                        required
+                                        disabled={requiresActiveEnrollmentSelection}
+                                    >
+                                        <option value="">Selecciona duración</option>
+                                        {simplifiedHourOptions.map((hoursOption) => (
+                                            <option key={hoursOption} value={hoursOption}>
+                                                {hoursOption} h
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Fecha/hora fin (automática)</label>
+                                    <input
+                                        type="text"
+                                        value={computedEndValue ? formatDisplayDate(computedEndValue) : ""}
+                                        className="w-full px-4 py-2 border border-gray-200 bg-gray-50 rounded-lg text-gray-700"
+                                        readOnly
+                                        disabled
+                                    />
+                                </div>
                             </div>
-                        </div>
+                        ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Fecha desde</label>
+                                    <input
+                                        type={usesDateTime ? "datetime-local" : "date"}
+                                        value={startValue}
+                                        onChange={(e) => {
+                                            const value = e.target.value;
+                                            setFormData((prev) => ({
+                                                ...prev,
+                                                ...(usesDateTime
+                                                    ? { fecha_inicio_hora: value, fecha_inicio: extractDatePart(value) }
+                                                    : { fecha_inicio: value }),
+                                            }));
+                                        }}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        required
+                                        disabled={requiresActiveEnrollmentSelection}
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-2">Fecha hasta</label>
+                                    <input
+                                        type={usesDateTime ? "datetime-local" : "date"}
+                                        value={endValue}
+                                        onChange={(e) =>
+                                            setFormData({
+                                                ...formData,
+                                                ...(usesDateTime
+                                                    ? { fecha_fin_hora: e.target.value, fecha_fin: extractDatePart(e.target.value) }
+                                                    : { fecha_fin: e.target.value }),
+                                            })
+                                        }
+                                        min={startValue || undefined}
+                                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                        required
+                                        disabled={requiresActiveEnrollmentSelection}
+                                    />
+                                </div>
+                            </div>
+                        )}
                         {usesDateTime && invalidDateRange && (
                             <p className="text-xs text-red-600">La fecha/hora de fin debe ser posterior a la de inicio.</p>
                         )}
+                        {crossesDayInSimplifiedHours && (
+                            <p className="text-xs text-red-600">El permiso debe iniciar y terminar el mismo día.</p>
+                        )}
 
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                                {usesHoras ? (isAutoHours ? "Horas (calculadas automáticamente)" : "Horas") : "Días"}
-                            </label>
-                            <input
-                                type="number"
-                                step={usesHoras ? "0.5" : "1"}
-                                value={usesHoras ? formData.duracion_horas : formData.duracion_dias}
-                                onChange={(e) => !isAutoHours &&
-                                    setFormData({
-                                        ...formData,
-                                        [usesHoras ? "duracion_horas" : "duracion_dias"]: e.target.value,
-                                    })
-                                }
-                                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
-                                required
-                                readOnly={isAutoHours || requiresActiveEnrollmentSelection}
-                                disabled={requiresActiveEnrollmentSelection}
-                                min="0.5"
-                                max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
-                            />
-                        </div>
+                        {!usesSimplifiedHours && (
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-2">
+                                    {usesHoras
+                                        ? (isAutoHours ? "Horas (calculadas automáticamente)" : "Horas")
+                                        : ((tipoPermiso === "salud" || tipoPermiso === "calamidad")
+                                            ? "Días (calculados automáticamente)"
+                                            : "Días")}
+                                </label>
+                                <input
+                                    type="number"
+                                    step={usesHoras ? "0.5" : "1"}
+                                    value={usesHoras ? formData.duracion_horas : formData.duracion_dias}
+                                    onChange={(e) => !isAutoHours &&
+                                        setFormData({
+                                            ...formData,
+                                            [usesHoras ? "duracion_horas" : "duracion_dias"]: e.target.value,
+                                        })
+                                    }
+                                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+                                    required
+                                    readOnly={isAutoHours || requiresActiveEnrollmentSelection || (tipoPermiso === "salud" && saludDuracionTipo === "dias")}
+                                    disabled={requiresActiveEnrollmentSelection}
+                                    min="0.5"
+                                    max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
+                                />
+                            </div>
+                        )}
                         {usesSimplifiedHours && (
                             <p className="text-xs text-gray-500">
                                 El sistema calculará automáticamente la fecha/hora de fin a partir de la hora de inicio y la duración indicada.
+                            </p>
+                        )}
+                        {tipoPermiso === "salud" && saludDuracionTipo === "dias" && (
+                            <p className="text-xs text-gray-500">
+                                El sistema calculará automáticamente los días del permiso a partir de la fecha de inicio y la fecha de fin.
+                            </p>
+                        )}
+                        {tipoPermiso === "calamidad" && calamidadDuracionTipo === "dias" && (
+                            <p className="text-xs text-gray-500">
+                                El sistema calculará automáticamente los días del permiso a partir de la fecha de inicio y la fecha de fin.
+                            </p>
+                        )}
+                        {tipoPermiso === "calamidad" && calamidadDuracionTipo === "horas" && (
+                            <p className="text-xs text-gray-500">
+                                El sistema calculará automáticamente la fecha/hora de fin a partir de la hora de inicio y la duración indicada.
+                            </p>
+                        )}
+                        {exceedsPermisoHourLimit && (
+                            <p className="text-xs text-red-600">
+                                {tipoPermiso === "estudios"
+                                    ? "Límite excedido: por estudios solo se permiten hasta 3 horas."
+                                    : "Límite excedido: por asuntos personales solo se permiten hasta 2 horas."}
                             </p>
                         )}
 
@@ -1086,6 +1409,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                     !hasDates ||
                                     !hasDuration ||
                                     invalidDateRange ||
+                                    crossesDayInSimplifiedHours ||
+                                    exceedsPermisoHourLimit ||
                                     (needsEnrollment && !selectedStudyEnrollmentId)
                                 }
                             >
@@ -1303,7 +1628,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
     const renderStep3 = () => {
         const usesDateTime =
-            tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo);
+            tipoSolicitud === "permiso" && usesPermisoDateTime(tipoPermiso, saludDuracionTipo, calamidadDuracionTipo);
         const startValue = usesDateTime ? formData.fecha_inicio_hora : formData.fecha_inicio;
         const endValue = usesDateTime ? formData.fecha_fin_hora : formData.fecha_fin;
         const vacationTimeRange =

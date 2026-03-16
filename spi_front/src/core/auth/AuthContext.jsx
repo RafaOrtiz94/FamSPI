@@ -2,9 +2,11 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   getProfile,
+  getAccessToken,
   refreshAccessToken,
   logout,
   hasRefreshToken,
+  clearTokens,
 } from "../api/authApi";
 
 /**
@@ -41,9 +43,7 @@ export const AuthProvider = ({ children }) => {
     clearSessionTimer();
     setUser(null);
     setIsAuthenticated(false);
-    localStorage.removeItem("accessToken");
-    localStorage.removeItem("refreshToken");
-    localStorage.removeItem("user");
+    clearTokens();
     redirectToLogin();
   };
 
@@ -98,8 +98,8 @@ export const AuthProvider = ({ children }) => {
   };
 
   const ensureActiveSession = async () => {
-    const accessToken = localStorage.getItem("accessToken");
-    const refreshToken = localStorage.getItem("refreshToken");
+    const accessToken = getAccessToken();
+    const refreshToken = hasRefreshToken();
 
     if (!accessToken) {
       if (isAuthenticated) {
@@ -133,15 +133,36 @@ export const AuthProvider = ({ children }) => {
      🚀 Sincronizar sesión desde tokens locales o refresh
   ============================================================ */
   const refresh = async () => {
-    if (!hasRefreshToken()) {
-      setLoading(false);
-      return false;
-    }
-
     try {
+      const activeAccessToken = getAccessToken();
+      const activeExp = activeAccessToken ? decodeJwtExp(activeAccessToken) : null;
+      const nowSeconds = Math.floor(Date.now() / 1000);
+
+      if (!activeAccessToken && !hasRefreshToken()) {
+        setUser(null);
+        setIsAuthenticated(false);
+        clearTokens();
+        return false;
+      }
+
+      if (activeAccessToken && (!activeExp || activeExp > nowSeconds)) {
+        const profile = await getProfile();
+        setUser(profile);
+        setIsAuthenticated(true);
+        localStorage.setItem("user", JSON.stringify(profile));
+        scheduleSessionExpiry();
+        return profile;
+      }
+
+      if (!hasRefreshToken()) {
+        setUser(null);
+        setIsAuthenticated(false);
+        clearTokens();
+        return false;
+      }
+
       const newAccess = await refreshAccessToken();
       if (!newAccess) return false;
-
       const profile = await getProfile();
       setUser(profile);
       setIsAuthenticated(true);
@@ -191,7 +212,13 @@ export const AuthProvider = ({ children }) => {
   useEffect(() => {
     const init = async () => {
       const storedUser = localStorage.getItem("user");
-      if (storedUser) {
+      const activeAccessToken = getAccessToken();
+      const activeExp = activeAccessToken ? decodeJwtExp(activeAccessToken) : null;
+      const nowSeconds = Math.floor(Date.now() / 1000);
+      const hasValidAccessToken =
+        Boolean(activeAccessToken) && (!activeExp || activeExp > nowSeconds);
+
+      if (storedUser && hasValidAccessToken) {
         setUser(JSON.parse(storedUser));
         setIsAuthenticated(true);
         setLoading(false);
@@ -199,6 +226,9 @@ export const AuthProvider = ({ children }) => {
         refresh();
         scheduleSessionExpiry();
       } else {
+        if (storedUser && !hasRefreshToken() && !activeAccessToken) {
+          localStorage.removeItem("user");
+        }
         await refresh();
       }
     };

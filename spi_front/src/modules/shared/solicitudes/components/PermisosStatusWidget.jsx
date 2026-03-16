@@ -111,8 +111,16 @@ const RECOVERY_COORDINATION_LABELS = {
   not_required: "No requiere coordinación",
   pending_approver_proposal: "Pendiente propuesta del jefe inmediato",
   pending_requester_acceptance: "Pendiente aceptación del solicitante",
-  agreed: "Tramos acordados",
+  agreed: "Coordinación aprobada y cerrada",
   finalized_by_approver: "Tramos definidos por jefe inmediato",
+};
+
+const getRecoveryCoordinationLabel = (solicitud = {}) => {
+  const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
+  if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
+    return "Sin acuerdo; cargado a vacaciones";
+  }
+  return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
 };
 
 const estimateRequestedHoursFromSolicitud = (solicitud = {}) => {
@@ -663,6 +671,21 @@ const PermisosStatusWidget = () => {
         100
     ) / 100;
   const isRecoveryPlanComplete = requestedRecoveryHours > 0 && plannedRecoveryHours >= requestedRecoveryHours;
+  const selectedRecoveryStatus = String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase();
+  const canSelectedUserApproveRecovery =
+    Boolean(selectedSolicitud) &&
+    ["pending_requester_acceptance", "pending_approver_proposal"].includes(selectedRecoveryStatus) &&
+    ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
+      canCurrentUserActAsAssignedApprover(selectedSolicitud));
+  const canSelectedRequesterCounterPropose =
+    selectedRecoveryStatus === "pending_requester_acceptance" &&
+    userId &&
+    selectedSolicitud?.user_id &&
+    Number(userId) === Number(selectedSolicitud.user_id);
+  const canSelectedApproverFinalize =
+    selectedRecoveryStatus === "pending_approver_proposal" &&
+    canCurrentUserActAsAssignedApprover(selectedSolicitud) &&
+    Number(selectedSolicitud?.recovery_coordination_round || 0) > 0;
 
   const pendientesDeJustificante = useMemo(
     () =>
@@ -872,11 +895,13 @@ const PermisosStatusWidget = () => {
     const isApproverOfSolicitud = canCurrentUserActAsAssignedApprover(solicitud);
     const canEditRecovery =
       Boolean(solicitud?.es_recuperable) &&
-      coordinationStatus !== "finalized_by_approver" &&
+      !["agreed", "finalized_by_approver"].includes(coordinationStatus) &&
       !["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus) &&
       (isRequesterOfSolicitud || isApproverOfSolicitud);
-    const canRequesterAcceptProposal =
-      isRequesterOfSolicitud && coordinationStatus === "pending_requester_acceptance" && recoveryPlan.length > 0;
+    const canApproveRecoveryProposal =
+      (isRequesterOfSolicitud || isApproverOfSolicitud) &&
+      ["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus) &&
+      recoveryPlan.length > 0;
     const canApproverFinalize =
       isApproverOfSolicitud &&
       coordinationStatus === "pending_approver_proposal" &&
@@ -984,8 +1009,18 @@ const PermisosStatusWidget = () => {
               )}
             </div>
             <p className="text-[11px] text-emerald-800 mt-1">
-              Estado: {RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required}
+              Estado: {getRecoveryCoordinationLabel(solicitud)}
             </p>
+            {solicitud?.charged_to_vacation && (
+              <p className="text-[11px] text-amber-800 mt-1">
+                Descuento aplicado a vacaciones:
+                {" "}
+                {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
+                {Number(solicitud?.charged_vacation_days || 0)
+                  ? ` (${Number(solicitud.charged_vacation_days)} día(s))`
+                  : ""}
+              </p>
+            )}
             {recoveryPlan.length > 0 ? (
               <div className="mt-1 space-y-1">
                 {recoveryPlan.slice(0, 4).map((row, idx) => (
@@ -1001,11 +1036,11 @@ const PermisosStatusWidget = () => {
             ) : (
               <p className="text-[11px] text-emerald-800 mt-1">Sin tramos definidos aún.</p>
             )}
-            {(canRequesterAcceptProposal || canApproverFinalize) && (
+            {(canApproveRecoveryProposal || canApproverFinalize) && (
               <div className="mt-2">
-                {canRequesterAcceptProposal && (
+                {canApproveRecoveryProposal && (
                   <p className="text-[11px] text-emerald-800">
-                    Tienes una propuesta del jefe pendiente de tu aprobación o ajuste.
+                    Existe una propuesta de coordinación pendiente. Cualquiera de las dos partes puede aprobarla y cerrarla.
                   </p>
                 )}
                 {canApproverFinalize && (
@@ -1882,11 +1917,16 @@ const PermisosStatusWidget = () => {
                     {plannedRecoveryHours}h{requestedRecoveryHours > 0 ? ` / ${requestedRecoveryHours}h` : ""}
                   </p>
                   <div className="flex items-center gap-2">
-                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
-                      "pending_requester_acceptance" &&
-                      userId &&
-                      selectedSolicitud?.user_id &&
-                      Number(userId) === Number(selectedSolicitud.user_id) && (
+                    {canSelectedUserApproveRecovery && (
+                        <Button
+                          variant="primary"
+                          onClick={() => handleSaveRecoveryPlan("accept")}
+                          disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
+                        >
+                          Aprobar y cerrar
+                        </Button>
+                      )}
+                    {canSelectedRequesterCounterPropose && (
                         <Button
                           variant="secondary"
                           onClick={() => handleSaveRecoveryPlan("propose")}
@@ -1895,31 +1935,13 @@ const PermisosStatusWidget = () => {
                           Proponer nueva
                         </Button>
                       )}
-                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
-                      "pending_approver_proposal" &&
-                      userId &&
-                      selectedSolicitud?.approver_user_id &&
-                      Number(userId) === Number(selectedSolicitud.approver_user_id) &&
-                      Number(selectedSolicitud?.recovery_coordination_round || 0) > 0 && (
+                    {canSelectedApproverFinalize && (
                         <Button
                           variant="secondary"
                           onClick={() => handleSaveRecoveryPlan("finalize")}
                           disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
                         >
                           Definir definitivo
-                        </Button>
-                      )}
-                    {String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase() ===
-                      "pending_requester_acceptance" &&
-                      userId &&
-                      selectedSolicitud?.user_id &&
-                      Number(userId) === Number(selectedSolicitud.user_id) && (
-                        <Button
-                          variant="primary"
-                          onClick={() => handleSaveRecoveryPlan("accept")}
-                          disabled={actionLoading === `recovery-${selectedSolicitud?.id}`}
-                        >
-                          Aprobar propuesta
                         </Button>
                       )}
                     <Button

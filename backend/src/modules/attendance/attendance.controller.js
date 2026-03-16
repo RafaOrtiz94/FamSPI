@@ -11,6 +11,21 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { normalizeDateTime, toNumberOrZero, normalizeRow } = require("../../utils/normalizers");
+const { getBusinessDate, ensureDailyClockIn } = require("./attendance.utils");
+
+const ATTENDANCE_LOCATION_TARGETS = Object.freeze({
+  entry: { timeColumn: "entry_time", locationColumn: "entry_location" },
+  lunch_start: { timeColumn: "lunch_start_time", locationColumn: "lunch_start_location" },
+  lunch_end: { timeColumn: "lunch_end_time", locationColumn: "lunch_end_location" },
+  exit: { timeColumn: "exit_time", locationColumn: "exit_location" },
+});
+
+const EXCEPTION_LOCATION_TARGETS = Object.freeze({
+  start: { timeColumn: "start_time", locationColumn: "start_location" },
+  arrival: { timeColumn: "arrival_time", locationColumn: "arrival_location" },
+  departure: { timeColumn: "departure_time", locationColumn: "departure_location" },
+  return: { timeColumn: "return_time", locationColumn: "return_location" },
+});
 
 /**
  * 🕐 Clock In - Record entry time
@@ -26,43 +41,23 @@ const clockIn = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const ensured = await ensureDailyClockIn({ userId, location: location || null, timestamp: now });
 
-    // Check if already clocked in today
-    const existing = await db.query(
-      "SELECT id, entry_time FROM user_attendance_records WHERE user_id = $1 AND date = $2",
-      [userId, today]
-    );
-
-    if (existing.rows.length > 0 && existing.rows[0].entry_time) {
+    if (!ensured.created) {
       return res.status(400).json({
         ok: false,
         message: "Ya has marcado entrada hoy",
-        data: existing.rows[0],
+        data: ensured.data,
       });
     }
-
-    // Insert or update record
-    // We use a safe query that works even if columns don't exist yet (if migration failed), 
-    // but ideally migration is run. Assuming migration ran:
-    const result = await db.query(
-      `
-      INSERT INTO user_attendance_records (user_id, date, entry_time, entry_location)
-      VALUES ($1, $2, $3, $4)
-      ON CONFLICT (user_id, date) 
-      DO UPDATE SET entry_time = $3, entry_location = $4, updated_at = NOW()
-      RETURNING *;
-      `,
-      [userId, today, now, location || null]
-    );
 
     logger.info(`[ATTENDANCE] Clock in: ${email} at ${now.toISOString()} loc: ${location}`);
 
     return res.status(200).json({
       ok: true,
       message: "Entrada registrada correctamente",
-      data: result.rows[0],
+      data: ensured.data,
     });
   } catch (err) {
     logger.error({ err }, "❌ Error en clock-in");
@@ -87,8 +82,8 @@ const clockOutLunch = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const today = getBusinessDate(now);
 
     // Check if record exists
     const existing = await db.query(
@@ -152,8 +147,8 @@ const clockInLunch = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const today = getBusinessDate(now);
 
     // Check if record exists
     const existing = await db.query(
@@ -217,8 +212,8 @@ const clockOut = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const today = getBusinessDate(now);
 
     // Check if record exists
     const existing = await db.query(
@@ -475,7 +470,7 @@ const getToday = async (req, res) => {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
+    const today = getBusinessDate();
 
     const result = await db.query(
       "SELECT * FROM user_attendance_records WHERE user_id = $1 AND date = $2",
@@ -600,6 +595,103 @@ const getRange = async (req, res) => {
 };
 
 /**
+ * 📍 Sync Attendance/Exception Location - Attach location after the mark was saved
+ * POST /api/attendance/location-sync
+ * Body: { target: "entry|lunch_start|lunch_end|exit|start|arrival|departure|return", location: "lat,lng" }
+ */
+const syncLocation = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const target = String(req.body?.target || "").trim().toLowerCase();
+    const location = String(req.body?.location || "").trim();
+
+    if (!userId) {
+      return res.status(401).json({ ok: false, message: "No autorizado" });
+    }
+
+    if (!target || !location) {
+      return res.status(400).json({ ok: false, message: "Target y location son requeridos" });
+    }
+
+    if (ATTENDANCE_LOCATION_TARGETS[target]) {
+      const { timeColumn, locationColumn } = ATTENDANCE_LOCATION_TARGETS[target];
+      const today = getBusinessDate();
+      const result = await db.query(
+        `
+        UPDATE user_attendance_records
+           SET ${locationColumn} = COALESCE(NULLIF(${locationColumn}, ''), $3),
+               updated_at = NOW()
+         WHERE user_id = $1
+           AND date = $2
+           AND ${timeColumn} IS NOT NULL
+         RETURNING *;
+        `,
+        [userId, today, location]
+      );
+
+      if (!result.rows[0]) {
+        return res.status(404).json({
+          ok: false,
+          message: "No existe un registro de asistencia compatible para sincronizar ubicacion",
+        });
+      }
+
+      logger.info(`[ATTENDANCE] Location synced: ${email} target=${target}`);
+
+      return res.status(200).json({
+        ok: true,
+        message: "Ubicacion sincronizada correctamente",
+        data: result.rows[0],
+      });
+    }
+
+    if (EXCEPTION_LOCATION_TARGETS[target]) {
+      const { timeColumn, locationColumn } = EXCEPTION_LOCATION_TARGETS[target];
+      const result = await db.query(
+        `
+        UPDATE attendance_exceptions
+           SET ${locationColumn} = COALESCE(NULLIF(${locationColumn}, ''), $2),
+               updated_at = NOW()
+         WHERE id = (
+           SELECT id
+             FROM attendance_exceptions
+            WHERE user_id = $1
+              AND ${timeColumn} IS NOT NULL
+            ORDER BY COALESCE(${timeColumn}, created_at) DESC, id DESC
+            LIMIT 1
+         )
+         RETURNING *;
+        `,
+        [userId, location]
+      );
+
+      if (!result.rows[0]) {
+        return res.status(404).json({
+          ok: false,
+          message: "No existe una salida inesperada compatible para sincronizar ubicacion",
+        });
+      }
+
+      logger.info(`[ATTENDANCE] Exception location synced: ${email} target=${target}`);
+
+      return res.status(200).json({
+        ok: true,
+        message: "Ubicacion sincronizada correctamente",
+        data: result.rows[0],
+      });
+    }
+
+    return res.status(400).json({ ok: false, message: "Target de ubicacion invalido" });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en sync-location");
+    return res.status(500).json({
+      ok: false,
+      message: "Error sincronizando ubicacion",
+    });
+  }
+};
+
+/**
  * ⏰ Mark Overtime - Register additional work time
  * POST /api/attendance/overtime
  * Body: { hours: number, reason: string, location: string }
@@ -621,8 +713,8 @@ const markOvertime = async (req, res) => {
       return res.status(400).json({ ok: false, message: "Razón requerida para overtime" });
     }
 
-    const today = new Date().toISOString().split("T")[0];
     const now = new Date();
+    const today = getBusinessDate(now);
 
     // Insert overtime record
     const result = await db.query(
@@ -714,6 +806,7 @@ module.exports = {
   getToday,
   getUserAttendance,
   getRange,
+  syncLocation,
   markOvertime,
   getOvertimeRecords,
 };

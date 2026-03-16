@@ -11,6 +11,7 @@ const notificationManager = require("../notifications/notificationManager");
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
+const HOURS_PER_VACATION_DAY = 8;
 const TEMPLATE_PATH = path.join(__dirname, "../../data/plantillas/Vacation_Format.docx");
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 
@@ -229,7 +230,52 @@ async function computeTakenDays(userId, year) {
         AND EXTRACT(YEAR FROM start_date) = $2`,
     [userId, year]
   );
-  return parseInt(rows[0]?.total || 0, 10);
+  const vacationDays = Number(rows[0]?.total || 0);
+  const chargedDays = await computeChargedVacationDays({ userId, year, statuses: ["approved", "aprobado"] });
+  return Math.round(((vacationDays + chargedDays) + Number.EPSILON) * 100) / 100;
+}
+
+async function computeChargedVacationDays({ userId, userEmail, year, statuses = [] }) {
+  const yearValue = Number(year);
+  if (!Number.isFinite(yearValue)) return 0;
+
+  let query = `
+    SELECT charged_vacation_days, charged_vacation_hours, duracion_horas, duracion_dias
+      FROM permisos_vacaciones
+     WHERE charged_to_vacation = true
+       AND EXTRACT(YEAR FROM fecha_inicio) = $1
+  `;
+  const values = [yearValue];
+
+  if (Array.isArray(statuses) && statuses.length > 0) {
+    query += ` AND LOWER(COALESCE(status, '')) = ANY($2)`;
+    values.push(statuses.map((status) => String(status || "").trim().toLowerCase()));
+  }
+
+  if (userId) {
+    query += ` AND user_id = $${values.length + 1}`;
+    values.push(userId);
+  } else if (userEmail) {
+    query += ` AND LOWER(user_email) = LOWER($${values.length + 1})`;
+    values.push(userEmail);
+  } else {
+    return 0;
+  }
+
+  const { rows } = await db.query(query, values);
+  return Math.round(
+    (rows.reduce((acc, row) => {
+      const explicitDays = Number(row?.charged_vacation_days || 0);
+      if (Number.isFinite(explicitDays) && explicitDays > 0) return acc + explicitDays;
+      const explicitHours = Number(row?.charged_vacation_hours || row?.duracion_horas || 0);
+      if (Number.isFinite(explicitHours) && explicitHours > 0) {
+        return acc + explicitHours / HOURS_PER_VACATION_DAY;
+      }
+      const explicitRequestDays = Number(row?.duracion_dias || 0);
+      if (Number.isFinite(explicitRequestDays) && explicitRequestDays > 0) return acc + explicitRequestDays;
+      return acc;
+    }, 0) + Number.EPSILON) * 100
+  ) / 100;
 }
 
 async function ensureDrivePath(user) {
@@ -521,7 +567,13 @@ async function summary(user, includeAll = false) {
         WHERE requester_id=$1 AND status='pendiente' AND EXTRACT(YEAR FROM start_date)=$2`,
       [user.id, year]
     );
-    const pending = parseInt(pendingRows[0]?.total || 0, 10);
+    const pending = Number(pendingRows[0]?.total || 0);
+    const chargedFromPermisos = await computeChargedVacationDays({
+      userId: user.id,
+      userEmail: user.email,
+      year,
+      statuses: ["approved", "aprobado"],
+    });
     const totalAllowance = allowanceInfo.allowance + historicalBalance;
 
     return {
@@ -536,6 +588,7 @@ async function summary(user, includeAll = false) {
       missing_hire_date: allowanceInfo.missingHireDate,
       taken,
       pending,
+      charged_from_permisos: chargedFromPermisos,
       remaining:
         !allowanceInfo.missingHireDate && !allowanceInfo.eligible
           ? totalAllowance - taken - pending
@@ -564,19 +617,28 @@ async function summary(user, includeAll = false) {
       userEmail: r.email,
       year: new Date().getFullYear(),
     });
+    const chargedFromPermisos = await computeChargedVacationDays({
+      userId: r.user_id,
+      userEmail: r.email,
+      year: new Date().getFullYear(),
+      statuses: ["approved", "aprobado"],
+    });
     const totalAllowance = allowanceInfo.allowance + historicalBalance;
+    const taken = Number(r.taken || 0) + chargedFromPermisos;
     return {
       ...r,
       ...allowanceInfo,
       allowance: totalAllowance,
       allowance_base: allowanceInfo.allowance,
       carry_over: historicalBalance,
+      charged_from_permisos: chargedFromPermisos,
+      taken,
       missing_hire_date: allowanceInfo.missingHireDate,
       remaining:
         !allowanceInfo.missingHireDate && !allowanceInfo.eligible
-          ? totalAllowance - Number(r.taken || 0) - Number(r.pending || 0)
+          ? totalAllowance - taken - Number(r.pending || 0)
           : Math.max(
-              totalAllowance - Number(r.taken || 0) - Number(r.pending || 0),
+              totalAllowance - taken - Number(r.pending || 0),
               0
             ),
     };

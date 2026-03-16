@@ -11,6 +11,7 @@ const { uploadStudyEnrollmentDocument } = require("./permisos.drive");
 const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
+const HOURS_PER_VACATION_DAY = 8;
 const WORKFLOW_SIGNATURE_STAGES = {
   SOLICITUD: "solicitud",
   APROBACION_PARCIAL: "aprobacion_parcial",
@@ -292,11 +293,17 @@ async function getVacationConsumption({ userId, userEmail, year }) {
 
   let query = `
     SELECT
-      COALESCE(SUM(CASE WHEN status IN ('approved','aprobado') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS approved,
-      COALESCE(SUM(CASE WHEN status IN ('pending','pendiente','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END), 0) AS pending
+      tipo_solicitud,
+      status,
+      duracion_dias,
+      duracion_horas,
+      fecha_inicio,
+      fecha_fin,
+      charged_to_vacation,
+      charged_vacation_days,
+      charged_vacation_hours
     FROM permisos_vacaciones
-    WHERE tipo_solicitud = 'vacaciones'
-      AND EXTRACT(YEAR FROM fecha_inicio) = $1
+    WHERE EXTRACT(YEAR FROM fecha_inicio) = $1
   `;
   const values = [yearValue];
   if (userId) {
@@ -310,9 +317,29 @@ async function getVacationConsumption({ userId, userEmail, year }) {
   }
 
   const { rows } = await db.query(query, values);
+  let approved = 0;
+  let pending = 0;
+
+  rows.forEach((row) => {
+    const status = normalizeStatusText(row?.status);
+    const isApproved = ["approved", "aprobado"].includes(status);
+    const isPending = ["pending", "pendiente", "pending_final", "partially_approved"].includes(status);
+
+    if (row?.tipo_solicitud === "vacaciones") {
+      const days = calculateVacationDays(row);
+      if (isApproved) approved += days;
+      if (isPending) pending += days;
+      return;
+    }
+
+    if (row?.charged_to_vacation && isApproved) {
+      approved += getChargedVacationDays(row);
+    }
+  });
+
   return {
-    approved: Number(rows[0]?.approved || 0),
-    pending: Number(rows[0]?.pending || 0),
+    approved: roundToTwo(approved),
+    pending: roundToTwo(pending),
   };
 }
 
@@ -415,6 +442,12 @@ function calculateDurationHours(startValue, endValue) {
   return Math.round(hours * 100) / 100;
 }
 
+function roundToTwo(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return 0;
+  return Math.round((numeric + Number.EPSILON) * 100) / 100;
+}
+
 function addHoursToDateTime(startValue, hoursValue) {
   const start = new Date(startValue);
   const hours = Number(hoursValue || 0);
@@ -465,6 +498,47 @@ function buildWorkdayDateTime(dateValue, timeValue) {
   }
   if (!dateOnly) return null;
   return `${dateOnly}T${timeValue}:00`;
+}
+
+function buildSolicitudCalendarEventInput(solicitud = {}) {
+  const isVacation = solicitud?.tipo_solicitud === "vacaciones";
+  const startDateTime = isVacation
+    ? buildWorkdayDateTime(solicitud?.fecha_inicio, "09:00") || solicitud?.fecha_inicio_hora || null
+    : solicitud?.fecha_inicio_hora || null;
+  const endDateTime = isVacation
+    ? buildWorkdayDateTime(solicitud?.fecha_fin, "18:00") || solicitud?.fecha_fin_hora || null
+    : solicitud?.fecha_fin_hora || null;
+
+  return {
+    userEmail: solicitud?.user_email,
+    summary: buildTimeOffCalendarSummary({
+      tipoSolicitud: solicitud?.tipo_solicitud,
+      tipoPermiso: solicitud?.tipo_permiso,
+      userFullname: solicitud?.user_fullname,
+    }),
+    description: buildTimeOffCalendarDescription({
+      solicitudId: solicitud?.id,
+      tipoSolicitud: solicitud?.tipo_solicitud,
+      tipoPermiso: solicitud?.tipo_permiso,
+      status: solicitud?.status,
+    }),
+    startDate: solicitud?.fecha_inicio,
+    endDate: solicitud?.fecha_fin,
+    startDateTime,
+    endDateTime,
+    reminderMinutesBefore: isVacation ? 1440 : 30,
+  };
+}
+
+async function createSolicitudCalendarEvent(solicitud, warningMessage) {
+  try {
+    await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
+  } catch (calendarError) {
+    logger.warn(
+      { calendarError, solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
+      warningMessage
+    );
+  }
 }
 
 function isAutoFinalPermisoType(tipoPermiso) {
@@ -543,12 +617,31 @@ function normalizeRecoveryPlan(input) {
 
 function estimateRequestedHours(solicitud = {}) {
   const hours = Number(solicitud?.duracion_horas || 0);
-  if (Number.isFinite(hours) && hours > 0) return Math.round((hours + Number.EPSILON) * 100) / 100;
+  if (Number.isFinite(hours) && hours > 0) return roundToTwo(hours);
   const days = Number(solicitud?.duracion_dias || 0);
   if (Number.isFinite(days) && days > 0) {
-    return Math.round(((days * 8) + Number.EPSILON) * 100) / 100;
+    return roundToTwo(days * HOURS_PER_VACATION_DAY);
   }
   return 0;
+}
+
+function getChargedVacationDays(row = {}) {
+  if (!row?.charged_to_vacation) return 0;
+  const explicitDays = Number(row?.charged_vacation_days || 0);
+  if (Number.isFinite(explicitDays) && explicitDays > 0) return roundToTwo(explicitDays);
+  const explicitHours = Number(row?.charged_vacation_hours || 0);
+  if (Number.isFinite(explicitHours) && explicitHours > 0) {
+    return roundToTwo(explicitHours / HOURS_PER_VACATION_DAY);
+  }
+  return roundToTwo(estimateRequestedHours(row) / HOURS_PER_VACATION_DAY);
+}
+
+function buildVacationCharge(row = {}) {
+  const hours = estimateRequestedHours(row);
+  return {
+    hours,
+    days: roundToTwo(hours / HOURS_PER_VACATION_DAY),
+  };
 }
 
 function buildSignatureSnapshot(solicitud = {}) {
@@ -808,6 +901,11 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS aprobacion_final_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_user_id INTEGER");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS approver_email TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_to_vacation BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_vacation_hours DECIMAL(8,2)");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_vacation_days DECIMAL(8,2)");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_to_vacation_at TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_to_vacation_reason TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_token TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_created_at TIMESTAMPTZ");
@@ -1280,7 +1378,15 @@ async function createSolicitud({ body, user, meta }) {
   if (payload.tipo_solicitud === "permiso") {
     const isEstudios = payload.tipo_permiso === "estudios";
     const isPersonal = payload.tipo_permiso === "personal";
-    const isSimpleHourlyPermiso = isEstudios || isPersonal;
+    const isSaludByHours =
+      payload.tipo_permiso === "salud" &&
+      Number(payload.duracion_horas || 0) > 0 &&
+      !Number(payload.duracion_dias || 0);
+    const isCalamidadByHours =
+      payload.tipo_permiso === "calamidad" &&
+      Number(payload.duracion_horas || 0) > 0 &&
+      !Number(payload.duracion_dias || 0);
+    const isSimpleHourlyPermiso = isEstudios || isPersonal || isSaludByHours || isCalamidadByHours;
     if (
       isSimpleHourlyPermiso &&
       payload.fecha_inicio_hora &&
@@ -1298,7 +1404,7 @@ async function createSolicitud({ body, user, meta }) {
     }
     const hasDateTimeRange = Boolean(payload.fecha_inicio_hora && payload.fecha_fin_hora);
     const shouldAutoCalculateHours =
-      (isEstudios || isPersonal || payload.tipo_permiso === "salud") && hasDateTimeRange;
+      (isEstudios || isPersonal || payload.tipo_permiso === "salud" || payload.tipo_permiso === "calamidad") && hasDateTimeRange;
     if (shouldAutoCalculateHours) {
       const durationHours = calculateDurationHours(payload.fecha_inicio_hora, payload.fecha_fin_hora);
       if (!durationHours) {
@@ -1309,8 +1415,34 @@ async function createSolicitud({ body, user, meta }) {
       payload.duracion_horas = durationHours;
       payload.duracion_dias = "";
     }
+    if (isSimpleHourlyPermiso) {
+      const requestedHours = Number(payload.duracion_horas || 0);
+      if (!Number.isFinite(requestedHours) || requestedHours <= 0) {
+        const err = new Error("Debes indicar una duración válida en horas para este permiso.");
+        err.status = 400;
+        throw err;
+      }
+      const startDay = normalizeDateOnly(payload.fecha_inicio_hora);
+      const endDay = normalizeDateOnly(payload.fecha_fin_hora);
+      if (startDay && endDay && startDay !== endDay) {
+        const err = new Error("El permiso debe iniciar y terminar el mismo día.");
+        err.status = 400;
+        throw err;
+      }
+    }
+    // Guardrail de negocio en backend: no depender de validaciones de UI.
+    if (isEstudios && Number(payload.duracion_horas || 0) > 3) {
+      const err = new Error("El permiso por estudios no puede exceder 3 horas.");
+      err.status = 400;
+      throw err;
+    }
+    if (isPersonal && Number(payload.duracion_horas || 0) > 2) {
+      const err = new Error("El permiso por asuntos personales no puede exceder 2 horas.");
+      err.status = 400;
+      throw err;
+    }
     if (
-      payload.tipo_permiso === "salud" &&
+      (payload.tipo_permiso === "salud" || payload.tipo_permiso === "calamidad") &&
       !payload.duracion_dias &&
       !payload.duracion_horas &&
       payload.fecha_inicio &&
@@ -1362,7 +1494,7 @@ async function createSolicitud({ body, user, meta }) {
         throw err;
       }
       payload.study_enrollment_id = enrollmentId;
-      validation = { valid: true, justificantes_requeridos: [], es_recuperable: true };
+      validation = await validatePermisoRequest(payload);
     } else if (isPersonal) {
       validation = await validatePermisoRequest(payload);
       validation.justificantes_requeridos = [];
@@ -1674,32 +1806,10 @@ async function aprobarParcial({ id, approver, meta }) {
     );
   }
 
-  try {
-    await createTimeOffEvent({
-      userEmail: rows[0]?.user_email,
-      summary: buildTimeOffCalendarSummary({
-        tipoSolicitud: rows[0]?.tipo_solicitud,
-        tipoPermiso: rows[0]?.tipo_permiso,
-        userFullname: rows[0]?.user_fullname,
-      }),
-      description: buildTimeOffCalendarDescription({
-        solicitudId: rows[0]?.id,
-        tipoSolicitud: rows[0]?.tipo_solicitud,
-        tipoPermiso: rows[0]?.tipo_permiso,
-        status: rows[0]?.status,
-      }),
-      startDate: rows[0]?.fecha_inicio,
-      endDate: rows[0]?.fecha_fin,
-      startDateTime: rows[0]?.fecha_inicio_hora,
-      endDateTime: rows[0]?.fecha_fin_hora,
-      reminderMinutesBefore: 30,
-    });
-  } catch (calendarError) {
-    logger.warn(
-      { calendarError, solicitudId: rows[0]?.id, userEmail: rows[0]?.user_email },
-      shouldAutoFinal
-        ? "No se pudo crear evento de calendario en aprobacion definitiva de permiso"
-        : "No se pudo crear evento de calendario en aprobacion parcial de permiso"
+  if (shouldAutoFinal) {
+    await createSolicitudCalendarEvent(
+      rows[0],
+      "No se pudo crear evento de calendario en aprobación definitiva automática del permiso"
     );
   }
 
@@ -1991,36 +2101,12 @@ async function aprobarFinal({ id, approver, meta }) {
     );
   }
 
-  if (update.rows[0]?.tipo_solicitud === "vacaciones") {
-    const startDateTime = buildWorkdayDateTime(update.rows[0]?.fecha_inicio, "09:00");
-    const endDateTime = buildWorkdayDateTime(update.rows[0]?.fecha_fin, "18:00");
-    try {
-      await createTimeOffEvent({
-        userEmail: update.rows[0]?.user_email,
-        summary: buildTimeOffCalendarSummary({
-          tipoSolicitud: update.rows[0]?.tipo_solicitud,
-          tipoPermiso: update.rows[0]?.tipo_permiso,
-          userFullname: update.rows[0]?.user_fullname,
-        }),
-        description: buildTimeOffCalendarDescription({
-          solicitudId: update.rows[0]?.id,
-          tipoSolicitud: update.rows[0]?.tipo_solicitud,
-          tipoPermiso: update.rows[0]?.tipo_permiso,
-          status: update.rows[0]?.status,
-        }),
-        startDate: update.rows[0]?.fecha_inicio,
-        endDate: update.rows[0]?.fecha_fin,
-        startDateTime: startDateTime || update.rows[0]?.fecha_inicio_hora,
-        endDateTime: endDateTime || update.rows[0]?.fecha_fin_hora,
-        reminderMinutesBefore: 1440,
-      });
-    } catch (calendarError) {
-      logger.warn(
-        { calendarError, solicitudId: update.rows[0]?.id, userEmail: update.rows[0]?.user_email },
-        "No se pudo crear evento de calendario en aprobacion final de vacaciones"
-      );
-    }
-  }
+  await createSolicitudCalendarEvent(
+    update.rows[0],
+    update.rows[0]?.tipo_solicitud === "vacaciones"
+      ? "No se pudo crear evento de calendario en aprobación final de vacaciones"
+      : "No se pudo crear evento de calendario en aprobación final del permiso"
+  );
 
   const enriched = await attachWorkflowSignatures([update.rows[0]]);
   const responseRow = enriched[0] || update.rows[0];
@@ -2508,22 +2594,27 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
   }
 
   const currentCoordinationStatus = normalizeRecoveryCoordinationStatus(solicitud.recovery_coordination_status);
-  if (currentCoordinationStatus === "finalized_by_approver") {
-    const err = new Error("El plan de recuperación ya fue definido de forma definitiva por el jefe inmediato.");
+  if (["agreed", "finalized_by_approver"].includes(currentCoordinationStatus)) {
+    const err = new Error(
+      currentCoordinationStatus === "agreed"
+        ? "La coordinación de recuperación ya fue aprobada y cerrada."
+        : "El plan de recuperación ya fue definido de forma definitiva por el jefe inmediato."
+    );
     err.status = 409;
     throw err;
   }
   let nextCoordinationStatus = currentCoordinationStatus;
   let nextRound = Number(solicitud.recovery_coordination_round || 0);
+  let vacationCharge = null;
 
   if (recoveryAction === "accept") {
-    if (!isRequester) {
-      const err = new Error("Solo el solicitante puede aprobar la propuesta de recuperación");
+    if (!isRequester && !isApprover) {
+      const err = new Error("No autorizado para aprobar la propuesta de recuperación");
       err.status = 403;
       throw err;
     }
-    if (currentCoordinationStatus !== "pending_requester_acceptance") {
-      const err = new Error("No hay propuesta pendiente de aceptación del solicitante");
+    if (!["pending_requester_acceptance", "pending_approver_proposal"].includes(currentCoordinationStatus)) {
+      const err = new Error("No existe una coordinación pendiente de aprobación");
       err.status = 409;
       throw err;
     }
@@ -2535,6 +2626,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       throw err;
     }
     nextCoordinationStatus = "finalized_by_approver";
+    vacationCharge = buildVacationCharge(solicitud);
   } else {
     if (isApprover) {
       nextCoordinationStatus = "pending_requester_acceptance";
@@ -2552,6 +2644,11 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
             recovery_plan_updated_by_user_id = $4,
             recovery_coordination_status = $5,
             recovery_coordination_round = $6,
+            charged_to_vacation = CASE WHEN $7 THEN true ELSE COALESCE(charged_to_vacation, false) END,
+            charged_vacation_hours = CASE WHEN $7 THEN $8 ELSE charged_vacation_hours END,
+            charged_vacation_days = CASE WHEN $7 THEN $9 ELSE charged_vacation_days END,
+            charged_to_vacation_at = CASE WHEN $7 THEN NOW() ELSE charged_to_vacation_at END,
+            charged_to_vacation_reason = CASE WHEN $7 THEN 'no_recovery_agreement' ELSE charged_to_vacation_reason END,
             updated_at = NOW()
       WHERE id = $1
       RETURNING *`,
@@ -2562,6 +2659,9 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       actorId,
       nextCoordinationStatus,
       nextRound,
+      recoveryAction === "finalize",
+      vacationCharge?.hours || null,
+      vacationCharge?.days || null,
     ]
   );
   const updated = updatedRows[0];
@@ -2582,9 +2682,9 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
     if (notifyTo && Number(notifyTo) !== Number(actorId)) {
       const actionMessage =
         recoveryAction === "accept"
-          ? "El solicitante aprobó la propuesta de recuperación."
+          ? "La propuesta de recuperación fue aprobada y la coordinación quedó cerrada."
           : recoveryAction === "finalize"
-          ? "El jefe inmediato definió de forma definitiva los tramos de recuperación."
+          ? `No hubo acuerdo en la recuperación y el permiso se cargó a vacaciones (${vacationCharge?.hours || 0}h).`
           : isApprover
           ? "El jefe inmediato propuso tramos de recuperación para revisión del solicitante."
           : "El solicitante propuso ajustes al plan de recuperación.";
@@ -2601,6 +2701,9 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
           recovery_plan_total_hours: updated.recovery_plan_total_hours,
           recovery_coordination_status: updated.recovery_coordination_status,
           recovery_action: recoveryAction,
+          charged_to_vacation: Boolean(updated?.charged_to_vacation),
+          charged_vacation_hours: updated?.charged_vacation_hours || null,
+          charged_vacation_days: updated?.charged_vacation_days || null,
         },
       });
     }
@@ -2673,9 +2776,15 @@ async function listarPorUsuario({ user }) {
   );
 
   const vacationRows = rows.filter((row) => row.tipo_solicitud === "vacaciones");
+  const chargedPermissionRows = rows.filter(
+    (row) => row.tipo_solicitud !== "vacaciones" && row.charged_to_vacation === true
+  );
   const approvedVacationDays = vacationRows
     .filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase()))
-    .reduce((acc, row) => acc + calculateVacationDays(row), 0);
+    .reduce((acc, row) => acc + calculateVacationDays(row), 0) +
+    chargedPermissionRows
+      .filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase()))
+      .reduce((acc, row) => acc + getChargedVacationDays(row), 0);
   const pendingVacationDays = vacationRows
     .filter((row) =>
       ["pending", "pendiente", "pending_final", "partially_approved"].includes(
@@ -2719,6 +2828,9 @@ async function listarPorUsuario({ user }) {
     approved_days: approvedVacationDays,
     pending_days: pendingVacationDays,
     rejected_days: rejectedVacationDays,
+    charged_from_permisos_days: roundToTwo(
+      chargedPermissionRows.reduce((acc, row) => acc + getChargedVacationDays(row), 0)
+    ),
     requested_count: vacationRows.length,
     approved_count: vacationRows.filter((row) => ["approved", "aprobado"].includes(String(row.status || "").toLowerCase())).length,
     pending_count: vacationRows.filter((row) =>
@@ -2840,6 +2952,9 @@ async function listarResumenColaboradores() {
         status,
         duracion_dias,
         duracion_horas,
+        charged_to_vacation,
+        charged_vacation_hours,
+        charged_vacation_days,
         justificacion_requerida,
         justificantes_urls,
         fecha_inicio,
@@ -2951,6 +3066,9 @@ async function listarResumenColaboradores() {
       if (status === "approved" || status === "aprobado") {
         record.permisos.aprobacion_completa += 1;
         record.permisos.aprobados += 1;
+        if (row.charged_to_vacation) {
+          record.vacaciones.dias_aprobados += getChargedVacationDays(row);
+        }
       } else if (status === "partially_approved") {
         record.permisos.aprobacion_parcial += 1;
       } else if (status === "pending" || status === "pending_final" || status === "pendiente") {
@@ -2965,6 +3083,9 @@ async function listarResumenColaboradores() {
         fecha_fin: row.fecha_fin,
         duracion_horas: row.duracion_horas,
         duracion_dias: row.duracion_dias,
+        charged_to_vacation: row.charged_to_vacation,
+        charged_vacation_hours: row.charged_vacation_hours,
+        charged_vacation_days: row.charged_vacation_days,
         justificacion_requerida: row.justificacion_requerida,
         justificantes_urls: row.justificantes_urls,
         created_at: row.created_at,

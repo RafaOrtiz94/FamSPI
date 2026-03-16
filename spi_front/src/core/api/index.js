@@ -49,6 +49,15 @@ let accessToken = localStorage.getItem("accessToken") || null;
 let refreshToken = localStorage.getItem("refreshToken") || null;
 let refreshPromise = null;
 
+const syncTokensFromStorage = () => {
+  if (!accessToken) {
+    accessToken = localStorage.getItem("accessToken") || null;
+  }
+  if (!refreshToken) {
+    refreshToken = localStorage.getItem("refreshToken") || null;
+  }
+};
+
 /** Guarda tokens en memoria + localStorage */
 export const setTokens = (access, refresh) => {
   if (access) {
@@ -70,7 +79,15 @@ export const clearTokens = () => {
   localStorage.removeItem("user");
 };
 
-export const getAccessToken = () => accessToken;
+export const getAccessToken = () => {
+  syncTokensFromStorage();
+  return accessToken;
+};
+
+export const getRefreshToken = () => {
+  syncTokensFromStorage();
+  return refreshToken;
+};
 
 const redirectToLogin = () => {
   if (!window.location.pathname.startsWith("/login")) {
@@ -89,7 +106,8 @@ const handleSessionExpiration = () => {
 };
 
 const refreshAccessTokenSingleFlight = async () => {
-  if (!refreshToken) {
+  const activeRefreshToken = getRefreshToken();
+  if (!activeRefreshToken) {
     throw new Error("No refresh token");
   }
 
@@ -99,11 +117,11 @@ const refreshAccessTokenSingleFlight = async () => {
       .post(
         `${cleanBaseUrl}/auth/refresh`,
         {},
-        { headers: { "x-refresh-token": refreshToken } },
+        { headers: { "x-refresh-token": activeRefreshToken } },
       )
       .then((res) => {
         const newAccess = res.data?.accessToken;
-        const newRefresh = res.data?.refreshToken || refreshToken;
+        const newRefresh = res.data?.refreshToken || activeRefreshToken;
         if (!newAccess) {
           throw new Error("Refresh sin access token");
         }
@@ -123,8 +141,9 @@ const refreshAccessTokenSingleFlight = async () => {
 // ==========================================================
 api.interceptors.request.use(
   (config) => {
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+    const activeAccessToken = getAccessToken();
+    if (activeAccessToken) {
+      config.headers.Authorization = `Bearer ${activeAccessToken}`;
     }
     return config;
   },
@@ -138,11 +157,13 @@ api.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error?.config || {};
+    const activeAccessToken = getAccessToken();
+    const activeRefreshToken = getRefreshToken();
 
     if (
       error.response?.status === 401 &&
       !originalRequest._retry &&
-      refreshToken &&
+      activeRefreshToken &&
       !String(originalRequest.url || "").includes("/auth/refresh")
     ) {
       originalRequest._retry = true;
@@ -158,7 +179,7 @@ api.interceptors.response.use(
       }
     }
 
-    if (error.response?.status === 401 && accessToken && !refreshToken) {
+    if (error.response?.status === 401 && activeAccessToken && !activeRefreshToken) {
       console.warn("⚠️ Sesión inválida sin refresh token, redirigiendo a login");
       handleSessionExpiration();
     }
@@ -169,12 +190,9 @@ api.interceptors.response.use(
 
 api.interceptors.request.use(
   async (config) => {
-    if (!accessToken) {
-      const stored = localStorage.getItem("accessToken");
-      if (stored) accessToken = stored;
-    }
-    if (accessToken) {
-      config.headers.Authorization = `Bearer ${accessToken}`;
+    const activeAccessToken = getAccessToken();
+    if (activeAccessToken) {
+      config.headers.Authorization = `Bearer ${activeAccessToken}`;
     }
     return config;
   },
@@ -507,4 +525,4 @@ export const logout = async () => {
 };
 
 export default api;
-export const hasRefreshToken = () => Boolean(refreshToken);
+export const hasRefreshToken = () => Boolean(getRefreshToken());

@@ -118,8 +118,37 @@ function validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fec
   };
 }
 
-function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias }) {
-  const diasNum = Number(duracion_dias || 0);
+function validatePermisoCalamidad({ subtipo_calamidad, duracion_dias, duracion_horas, fecha_inicio, fecha_fin }) {
+  if (!fecha_inicio || !fecha_fin) {
+    throw new Error("Las fechas de inicio y fin son obligatorias para el permiso por calamidad");
+  }
+
+  const start = new Date(fecha_inicio);
+  const end = new Date(fecha_fin);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    throw new Error("Las fechas de inicio o fin no son válidas para el permiso por calamidad");
+  }
+  if (end < start) {
+    throw new Error("La fecha de fin no puede ser anterior a la fecha de inicio");
+  }
+
+  const horasNum = Number(duracion_horas || 0);
+  const diasNumInput = Number(duracion_dias || 0);
+  const hasHoras = Number.isFinite(horasNum) && horasNum > 0;
+  const hasDiasInput = Number.isFinite(diasNumInput) && diasNumInput > 0;
+  let diasNum = diasNumInput;
+
+  if (!hasHoras && !hasDiasInput) {
+    const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+    diasNum = diff >= 0 ? diff + 1 : 0;
+  } else if (hasHoras && !hasDiasInput) {
+    diasNum = 0;
+  }
+
+  if (!hasHoras && !(Number.isFinite(diasNum) && diasNum > 0)) {
+    throw new Error("Debe indicar horas o días para el permiso por calamidad");
+  }
+
   const normalized = String(subtipo_calamidad || "").trim().toLowerCase();
   if (!normalized) {
     throw new Error("Debe indicar el tipo de calamidad");
@@ -154,7 +183,13 @@ async function validatePermisoRequest(data) {
     case "salud":
       return validatePermisoSalud({ duracion_dias, duracion_horas, fecha_inicio, fecha_fin, subtipo_salud: data.subtipo_salud });
     case "calamidad":
-      return validatePermisoCalamidad({ subtipo_calamidad: data.subtipo_calamidad, duracion_dias });
+      return validatePermisoCalamidad({
+        subtipo_calamidad: data.subtipo_calamidad,
+        duracion_dias,
+        duracion_horas,
+        fecha_inicio,
+        fecha_fin,
+      });
     default:
       throw new Error("Tipo de permiso no válido");
   }

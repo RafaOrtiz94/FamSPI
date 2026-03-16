@@ -29,6 +29,7 @@ const { isOffHours } = require("../../utils/offHoursPolicy");
 const { getGeoLocation } = require("../../utils/geoip");
 const { notifyTIAboutOffHoursLogin } = require("../../modules/notifications/notifications.service");
 const { logAction } = require("../../utils/audit");
+const { ensureDailyClockIn } = require("../attendance/attendance.utils");
 // Use crypto.randomUUID() (Node.js 18+ native)
 const { randomUUID } = require('crypto');
 
@@ -302,6 +303,26 @@ const googleCallback = async (req, res) => {
       });
     } catch (sessionErr) {
       logger.warn("⚠️ No se pudo registrar la sesión en user_sessions: %s", sessionErr.message);
+    }
+
+    try {
+      const attendanceResult = await ensureDailyClockIn({
+        userId: user.id,
+        location: null,
+        timestamp: new Date(),
+      });
+
+      logger.info("✅ Asistencia sincronizada durante login", {
+        userId: user.id,
+        email: user.email,
+        created: attendanceResult.created,
+        attendanceDate: attendanceResult.date,
+      });
+    } catch (attendanceErr) {
+      logger.warn("⚠️ No se pudo registrar asistencia automática en login: %s", attendanceErr.message, {
+        userId: user.id,
+        email: user.email,
+      });
     }
 
     // 🔐 Seguridad: Verificar login fuera de horario

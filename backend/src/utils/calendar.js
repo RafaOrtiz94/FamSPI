@@ -120,6 +120,14 @@ async function createEventInUserPrimaryCalendar({ userEmail, requestBody }) {
   return { id: data.id, htmlLink: data.htmlLink, calendarId: "primary", delegatedUser };
 }
 
+async function createEventInConfiguredCalendar({ requestBody }) {
+  const { data } = await calendar.events.insert({
+    calendarId: DEFAULT_CALENDAR_ID,
+    requestBody,
+  });
+  return { id: data.id, htmlLink: data.htmlLink, calendarId: DEFAULT_CALENDAR_ID, delegatedUser: null };
+}
+
 async function createTimeOffEvent({
   userEmail,
   summary,
@@ -143,31 +151,43 @@ async function createTimeOffEvent({
   });
 
   try {
-    const result = await createEventInUserPrimaryCalendar({ userEmail, requestBody });
+    const primaryResult = await createEventInUserPrimaryCalendar({ userEmail, requestBody });
     logger.info(
       {
         userEmail,
-        calendarId: result.calendarId,
-        eventId: result.id,
+        calendarId: primaryResult.calendarId,
+        eventId: primaryResult.id,
       },
       "[CALENDAR] Evento de tiempo fuera creado en calendario del usuario"
     );
-    return result;
+    return {
+      primaryEvent: primaryResult,
+      sharedEvent: null,
+      id: primaryResult.id,
+      htmlLink: primaryResult.htmlLink,
+      calendarId: primaryResult.calendarId,
+      delegatedUser: primaryResult.delegatedUser,
+    };
   } catch (primaryError) {
     logger.warn(
       { err: primaryError, userEmail },
       "[CALENDAR] No se pudo crear evento en calendario primario del usuario. Se usa fallback."
     );
-    const fallbackBody = {
-      ...requestBody,
-      attendees: userEmail ? [{ email: userEmail }] : undefined,
-    };
-    const { data } = await calendar.events.insert({
-      calendarId: DEFAULT_CALENDAR_ID,
-      requestBody: fallbackBody,
-    });
-    return { id: data.id, htmlLink: data.htmlLink, calendarId: DEFAULT_CALENDAR_ID, delegatedUser: null };
   }
+
+  const fallbackBody = {
+    ...requestBody,
+    attendees: userEmail ? [{ email: userEmail }] : undefined,
+  };
+  const fallbackResult = await createEventInConfiguredCalendar({ requestBody: fallbackBody });
+  return {
+    primaryEvent: null,
+    sharedEvent: null,
+    id: fallbackResult.id,
+    htmlLink: fallbackResult.htmlLink,
+    calendarId: fallbackResult.calendarId,
+    delegatedUser: null,
+  };
 }
 
 module.exports = {

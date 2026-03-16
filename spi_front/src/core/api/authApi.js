@@ -1,5 +1,11 @@
-import api from "./index";
-import { API_BASE_URL } from "./index";
+import api, {
+  API_BASE_URL,
+  setTokens as setApiTokens,
+  clearTokens as clearApiTokens,
+  getAccessToken as getApiAccessToken,
+  getRefreshToken as getApiRefreshToken,
+  hasRefreshToken as hasApiRefreshToken,
+} from "./index";
 
 /**
  * ==========================================================
@@ -15,19 +21,16 @@ import { API_BASE_URL } from "./index";
 /* ==========================================================
    📦 Helpers de tokens
    ========================================================== */
-export const getAccessToken = () => localStorage.getItem("accessToken");
-export const getRefreshToken = () => localStorage.getItem("refreshToken");
-export const hasRefreshToken = () => Boolean(getRefreshToken());
+export const getAccessToken = () => getApiAccessToken();
+export const getRefreshToken = () => getApiRefreshToken();
+export const hasRefreshToken = () => hasApiRefreshToken();
 
 export const setTokens = (accessToken, refreshToken) => {
-  if (accessToken) localStorage.setItem("accessToken", accessToken);
-  if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
+  setApiTokens(accessToken, refreshToken);
 };
 
 export const clearTokens = () => {
-  localStorage.removeItem("accessToken");
-  localStorage.removeItem("refreshToken");
-  localStorage.removeItem("user");
+  clearApiTokens();
 };
 
 /* ==========================================================

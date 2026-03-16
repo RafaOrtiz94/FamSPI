@@ -1,6 +1,5 @@
 // src/core/api/attendanceApi.js
 import api from "./index";
-import { getAccessToken } from "./authApi";
 
 /**
  * ==========================================================
@@ -17,13 +16,9 @@ import { getAccessToken } from "./authApi";
  * Clock In - Record entry time
  */
 export const clockIn = async (location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/clock-in",
-        { location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { location }
     );
 
     return data;
@@ -33,13 +28,9 @@ export const clockIn = async (location = null) => {
  * Clock Out for Lunch - Record lunch start time
  */
 export const clockOutLunch = async (location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/clock-out-lunch",
-        { location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { location }
     );
 
     return data;
@@ -49,13 +40,9 @@ export const clockOutLunch = async (location = null) => {
  * Clock In from Lunch - Record lunch end time
  */
 export const clockInLunch = async (location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/clock-in-lunch",
-        { location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { location }
     );
 
     return data;
@@ -65,13 +52,21 @@ export const clockInLunch = async (location = null) => {
  * Clock Out - Record exit time
  */
 export const clockOut = async (location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/clock-out",
-        { location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { location }
+    );
+
+    return data;
+};
+
+/**
+ * Attach location to an already saved attendance or exception mark
+ */
+export const syncAttendanceLocation = async (target, location) => {
+    const { data } = await api.post(
+        "/attendance/location-sync",
+        { target, location }
     );
 
     return data;
@@ -81,13 +76,9 @@ export const clockOut = async (location = null) => {
  * Register Exception (Salida Inesperada)
  */
 export const registerException = async (type, description, location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/exception",
-        { type, description, location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { type, description, location }
     );
 
     return data;
@@ -97,13 +88,9 @@ export const registerException = async (type, description, location = null) => {
  * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
  */
 export const updateExceptionStatus = async (status, location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/exception/status",
-        { status, location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { status, location }
     );
 
     return data;
@@ -113,12 +100,7 @@ export const updateExceptionStatus = async (status, location = null) => {
  * Get active exception for current user
  */
 export const getActiveException = async () => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
-    const { data } = await api.get("/attendance/exception/active", {
-        headers: { Authorization: `Bearer ${token}` },
-    });
+    const { data } = await api.get("/attendance/exception/active");
 
     return data;
 };
@@ -127,12 +109,7 @@ export const getActiveException = async () => {
  * Get Today's Attendance - For current user
  */
 export const getTodayAttendance = async () => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
-    const { data } = await api.get("/attendance/today", {
-        headers: { Authorization: `Bearer ${token}` },
-    });
+    const { data } = await api.get("/attendance/today");
 
     return data;
 };
@@ -141,12 +118,7 @@ export const getTodayAttendance = async () => {
  * Get User Attendance - For specific date
  */
 export const getUserAttendance = async (userId, date) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
-    const { data } = await api.get(`/attendance/user/${userId}?date=${date}`, {
-        headers: { Authorization: `Bearer ${token}` },
-    });
+    const { data } = await api.get(`/attendance/user/${userId}?date=${date}`);
 
     return data;
 };
@@ -155,17 +127,12 @@ export const getUserAttendance = async (userId, date) => {
  * Get Attendance Range - For reporting
  */
 export const getAttendanceRange = async (startDate, endDate, userId = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     let url = `/attendance/range?start=${startDate}&end=${endDate}`;
     if (userId) {
         url += `&userId=${userId}`;
     }
 
-    const { data } = await api.get(url, {
-        headers: { Authorization: `Bearer ${token}` },
-    });
+    const { data } = await api.get(url);
 
     return data;
 };
@@ -174,13 +141,9 @@ export const getAttendanceRange = async (startDate, endDate, userId = null) => {
  * Download Attendance PDF
  */
 export const downloadAttendancePDF = async (userId, startDate, endDate) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const response = await api.get(
         `/attendance/pdf/${userId}?start=${startDate}&end=${endDate}`,
         {
-            headers: { Authorization: `Bearer ${token}` },
             responseType: "blob",
         }
     );
@@ -204,13 +167,9 @@ export const downloadAttendancePDF = async (userId, startDate, endDate) => {
  * Body: { hours: number, reason: string, location: string }
  */
 export const markOvertime = async (hours, reason, location = null) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
     const { data } = await api.post(
         "/attendance/overtime",
-        { hours, reason, location },
-        { headers: { Authorization: `Bearer ${token}` } }
+        { hours, reason, location }
     );
 
     return data;
@@ -221,13 +180,7 @@ export const markOvertime = async (hours, reason, location = null) => {
  * GET /api/attendance/overtime?start=YYYY-MM-DD&end=YYYY-MM-DD
  */
 export const getOvertimeRecords = async (startDate, endDate) => {
-    const token = getAccessToken();
-    if (!token) throw new Error("No hay token activo");
-
-    const { data } = await api.get(
-        `/attendance/overtime?start=${startDate}&end=${endDate}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-    );
+    const { data } = await api.get(`/attendance/overtime?start=${startDate}&end=${endDate}`);
 
     return data;
 };
