@@ -1,4 +1,4 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
 backend/node_modules/
 spi_front/node_modules/
@@ -17,17 +17,25 @@ spi_front/build/
 # OS noise
 .DS_Store
 Thumbs.db
-# Archivos de configuración sensible
+
+# Sensitive environment files
 .env
 .env.local
 .env.*.local
 backend/.env
 spi_front/.env
 
-# Credenciales de Backend
-backend\src\data\dashboard-spi-3d9bca86a1bb.json
-backend/src/data/dashboard-spi-3d9bca86a1bb.json
-/Mapeador_Sheets
-/Mapeador_Sheets
+# Temporary secrets and local probes
+/db_pass.txt
+/temp_db_url.txt
+/temp_jwt_secret.txt
+/temp_refresh_secret.txt
+
+# Service account credentials and local copies
+backend/src/data/dashboard-*.json
+backend/src/data/service-account*.json
+!backend/src/data/service-account.example.json
+
+# Optional local assets
 /Mapeador_Sheets
 Mapeador_Sheets/excel_mapper.py

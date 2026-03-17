@@ -1,121 +1,169 @@
-# DOCUMENTO DE ESPECIFICACION FUNCIONAL DEL SISTEMA (FRS)
-## Area: Gobierno, Seguridad y Cumplimiento
+﻿# FRS - AREA 01 GOBIERNO, SEGURIDAD Y CUMPLIMIENTO
 
 ## 1. Introduccion
-Este documento especifica el comportamiento funcional detallado del area de Gobierno, Seguridad y Cumplimiento del Sistema de Procesos Internos (SPI), derivado de la URS aprobable por area.
+Este FRS describe el comportamiento funcional verificable de los modulos del area 01 a partir del codigo actual.
 
-## 2. Referencias
-- URS base: `validacion_sistema/URS/areas/area_01_gobierno_seguridad.md`
-- Modulos fuente: `auth`, `security`, `auditoria`, `audit-prep`, `approvals`, `management`, `signature`
+## 2. Alcance funcional real
+- `auth`: Google OAuth, JWT, refresh, logout, sesiones, LOPDP interna.
+- `security`: consulta/revision/export de logins fuera de horario.
+- `auditoria`: listado, detalle y export CSV.
+- `audit-prep`: status, secciones, documentos, accesos externos.
+- `approvals`: cola pendiente y decision del flujo tecnico.
+- `management`: metricas, requests, trace y documents para gerencia.
+- `signature`: firma, verificacion, audit trail y dashboard.
 
-## 3. Objetivo funcional
-Definir funciones, reglas, validaciones e interfaces para garantizar autenticacion, autorizacion, trazabilidad, aprobaciones y formalizacion de procesos.
+## 3. Requerimientos funcionales detallados
+### FR-GSC-001 Autenticacion federada
+- URS asociado: `REQ-GSC-001`
+- Endpoint: `GET /api/v1/auth/google`, `GET /api/v1/auth/google/callback`
+- Entradas: `code` OAuth en callback.
+- Proceso:
+  1. Intercambia `code` por tokens Google.
+  2. Obtiene `userinfo`.
+  3. Crea o actualiza usuario en `users`.
+  4. Genera JWT de acceso y refresh.
+  5. Inserta sesion en `user_sessions`.
+  6. Ejecuta deteccion off-hours y log de auditoria.
+  7. Redirige al frontend con tokens.
+- Salida: redireccion al frontend o redireccion con `error=*`.
 
-## 4. Alcance funcional detallado
-- Gestion de autenticacion y sesiones.
-- Control de acceso por rol y permiso.
-- Registro y consulta de auditoria.
-- Ejecucion de aprobaciones por niveles.
-- Firma y cierre formal de hitos documentales.
+### FR-GSC-002 Perfil y sesion actual
+- URS asociado: `REQ-GSC-002`, `REQ-GSC-003`
+- Endpoint: `GET /api/v1/auth/me`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
+- Entradas: JWT y/o `x-refresh-token`.
+- Proceso:
+  - `me`: consulta `users`, `departments`, `user_profile`.
+  - `refresh`: valida refresh token y exige coincidencia con sesion activa.
+  - `logout`: cierra sesiones activas por email o refresh token.
+- Salida: perfil, tokens renovados o confirmacion de cierre.
 
-## 5. Actores y perfiles
-- Usuario interno autenticado.
-- Aprobador de area.
-- Administrador TI/Seguridad.
-- Auditor interno/externo.
+### FR-GSC-003 LOPDP interna
+- URS asociado: `REQ-GSC-003`
+- Endpoint: `POST /api/v1/auth/lopdp/accept`
+- Entradas: `signature_base64`, `pdf_base64`, `accepted`, `notes`.
+- Proceso:
+  1. Valida aceptacion y archivos.
+  2. Crea carpeta/persona/evidencias en Drive.
+  3. Actualiza `users`.
+  4. Inserta fila en `user_lopdp_consents`.
+- Salida: usuario actualizado.
 
-## 6. Componentes funcionales involucrados
-- Backend: modulos `auth`, `security`, `auditoria`, `audit-prep`, `approvals`, `management`, `signature`.
-- Frontend: componentes de autenticacion, gestion de sesiones, aprobaciones y consulta de auditoria.
-- Datos: usuarios, sesiones, consentimientos, bitacoras y estados de aprobacion/firma.
+### FR-GSC-004 Monitoreo de seguridad off-hours
+- URS asociado: `REQ-GSC-004`, `REQ-GSC-005`
+- Endpoints:
+  - `GET /api/v1/security/offhours-logins`
+  - `GET /api/v1/security/offhours-logins/:id/timeline`
+  - `POST /api/v1/security/offhours-logins/:id/review`
+  - `GET /api/v1/security/offhours-logins/export`
+- Proceso:
+  - lee `auditoria.logs` filtrando `modulo='auth'` y `accion='offhours_login'`
+  - enriquece con `notifications`, `users`, `departments`
+  - marca revision sobre `notifications`
+  - exporta CSV/JSON saneado
+- Restriccion: acceso solo TI.
 
-## 7. Especificaciones funcionales
-### FR-GSC-001 Autenticacion de usuarios
-- Descripcion: El sistema valida credenciales o flujo federado y entrega contexto de sesion.
-- Entradas: credenciales o token de proveedor externo.
-- Salidas: sesion activa, token valido o rechazo.
-- Reglas: usuario activo, credenciales vigentes, politicas de seguridad habilitadas.
+### FR-GSC-005 Consulta de auditoria
+- URS asociado: `REQ-GSC-006`
+- Endpoints:
+  - `GET /api/v1/auditoria`
+  - `GET /api/v1/auditoria/:id`
+  - `GET /api/v1/auditoria/export/csv`
+- Proceso:
+  - filtra por usuario, modulo, accion, request, mantenimiento, inventario, fecha y `auto`
+  - pagina resultados
+  - exporta CSV a demanda
 
-### FR-GSC-002 Gestion de sesion y renovacion
-- Descripcion: El sistema controla ciclo de sesion, renovacion y cierre seguro.
-- Entradas: token vigente, solicitud de refresh o logout.
-- Salidas: token renovado, sesion invalidada o error de autenticacion.
-- Reglas: tiempo de expiracion, control de sesiones concurrentes, revocacion.
+### FR-GSC-006 Preparacion de auditoria
+- URS asociado: `REQ-GSC-007`, `REQ-GSC-008`, `REQ-GSC-009`, `REQ-GSC-010`
+- Endpoints:
+  - `GET/PUT /api/v1/audit-prep/status`
+  - `GET/POST /api/v1/audit-prep/sections`
+  - `GET/POST/PATCH /api/v1/audit-prep/documents*`
+  - `GET/POST/DELETE /api/v1/audit-prep/external-access*`
+- Proceso:
+  - mantiene `audit_settings`
+  - filtra `audit_sections` por rol
+  - crea carpetas en Drive y registra `audit_documents`
+  - limita accesos externos activos a dos
 
-### FR-GSC-003 Autorizacion por rol y permiso
-- Descripcion: El sistema determina si una accion esta permitida para el actor.
-- Entradas: identidad autenticada, accion solicitada, recurso.
-- Salidas: autorizacion concedida o denegada.
-- Reglas: matriz rol-permiso, segregacion de funciones.
+### FR-GSC-007 Aprobaciones operativas soportadas
+- URS asociado: `REQ-GSC-011`, `REQ-GSC-012`
+- Endpoints:
+  - `GET /api/v1/approvals/pending`
+  - `POST /api/v1/approvals/:id/approve`
+  - `POST /api/v1/approvals/:id/reject`
+- Proceso:
+  - lista pendientes desde `requests`
+  - aprueba o rechaza via `requests.service.updateRequestStatus`
+  - registra decision en `request_approvals`
+  - dispara correo
+- Observacion: el alcance actual es tecnico/servicio, no corporativo transversal.
 
-### FR-GSC-004 Registro de auditoria
-- Descripcion: El sistema registra eventos criticos de acceso, cambio y aprobacion.
-- Entradas: evento de negocio, actor, timestamp, contexto.
-- Salidas: traza persistida y consultable.
-- Reglas: no repudio, inmutabilidad logica, trazabilidad por proceso.
+### FR-GSC-008 Gestion gerencial
+- URS asociado: `REQ-GSC-013`, `REQ-GSC-014`
+- Endpoints:
+  - `GET /api/v1/management/stats`
+  - `GET /api/v1/management/requests`
+  - `GET /api/v1/management/trace/:id`
+  - `GET /api/v1/management/documents/:id`
+- Proceso:
+  - agrega estadisticas de `requests`
+  - lista solicitudes con `request_types` y `users`
+  - consulta trazabilidad en `auditoria.logs`
+  - consulta adjuntos y versiones en `request_attachments` y `request_versions`
 
-### FR-GSC-005 Flujo de aprobaciones
-- Descripcion: El sistema gestiona estados de aprobacion por niveles.
-- Entradas: solicitud de aprobacion, actor aprobador, decision.
-- Salidas: estado actualizado, historial de decision.
-- Reglas: orden jerarquico, responsable habilitado, comentarios obligatorios cuando aplique.
+### FR-GSC-009 Firma y verificacion documental
+- URS asociado: `REQ-GSC-015`, `REQ-GSC-016`, `REQ-GSC-017`
+- Endpoints reales montados bajo `/api`:
+  - `POST /api/documents/:documentId/sign`
+  - `POST /api/signature/documents/:documentId/sign`
+  - `GET /api/verificar/:token`
+  - `GET /api/verify/:token`
+  - `GET /api/signature/verificar/:token`
+  - `GET /api/signature/verify/:token`
+  - `GET /api/documents/:documentId/audit-trail`
+  - `GET /api/signature/documents/:documentId/audit-trail`
+  - `GET /api/dashboard`
+  - `GET /api/signature/dashboard`
+- Proceso:
+  1. valida payload de firma.
+  2. calcula hash y actualiza `document_hashes`.
+  3. inserta `document_signatures_advanced`.
+  4. ejecuta `create_document_seal_and_qr`.
+  5. bloquea el documento.
+  6. expone verificacion por token y dashboard.
 
-### FR-GSC-006 Firma de hitos
-- Descripcion: El sistema formaliza cierre de procesos o documentos con firma.
-- Entradas: entidad aprobada, actor firmante, evidencia requerida.
-- Salidas: estado firmado, sello de tiempo, rastro de firma.
-- Reglas: prerequisito de aprobacion completa.
+## 4. Validaciones funcionales relevantes
+- `auth/refresh` rechaza refresh token si no corresponde a una sesion activa.
+- `security` solo admite roles TI.
+- `audit-prep` valida MIME y peso de archivo.
+- `audit-prep` valida seccion permitida por rol.
+- `signature` exige `signer_email` desde usuario autenticado y `session_id` para trazabilidad.
 
-### FR-GSC-007 Consulta de trazabilidad
-- Descripcion: El sistema permite consultar cadena de eventos de control.
-- Entradas: filtros por proceso, usuario, fecha y tipo de evento.
-- Salidas: bitacora filtrada y exportable segun permisos.
-- Reglas: visibilidad segun rol.
+## 5. Flujos principales
+### Flujo A - Login
+1. Usuario accede a `/auth/google`.
+2. Google devuelve `code`.
+3. Backend crea/actualiza usuario.
+4. Backend genera JWT y sesion.
+5. Backend registra auditoria de login y posible evento off-hours.
+6. Frontend recibe tokens y continua carga de sesion.
 
-### FR-GSC-008 Bloqueo de operaciones no autorizadas
-- Descripcion: El sistema rechaza cualquier operacion sin autorizacion valida.
-- Entradas: solicitud API/UI sin credencial valida o permiso.
-- Salidas: respuesta de rechazo estandar.
-- Reglas: politica deny-by-default.
+### Flujo B - Revision off-hours
+1. TI consulta cola de eventos.
+2. Backend consulta `auditoria.logs` y `notifications`.
+3. TI revisa evento.
+4. Backend marca notificacion como leida y registra accion de revision.
 
-## 8. Validaciones de negocio y datos
-- El usuario debe existir y estar activo para autenticarse.
-- Las acciones administrativas requieren permiso explicito.
-- Toda aprobacion debe registrar actor, fecha y decision.
-- No se permite firma sin estado previo aprobado.
+### Flujo C - Firma
+1. Usuario autenticado envia documento base64.
+2. Backend calcula hash.
+3. Backend inserta firma avanzada.
+4. Backend crea sello y QR.
+5. Documento queda bloqueado.
+6. El token puede verificarse por endpoints publicos.
 
-## 9. Seguridad y control
-- Autenticacion obligatoria para recursos protegidos.
-- Autorizacion centralizada por permisos.
-- Registro de auditoria para acciones criticas.
-- Proteccion de datos sensibles en transito y almacenamiento.
-
-## 10. Manejo de errores y excepciones
-- `401`: sesion inexistente, expirada o credenciales invalidas.
-- `403`: actor autenticado sin permiso suficiente.
-- `409`: conflicto de estado de aprobacion/firma.
-- `422`: validaciones de datos de entrada incumplidas.
-- `500`: error interno con registro de evento tecnico.
-
-## 11. Interfaces e integraciones
-- Integracion con proveedor de autenticacion federada cuando aplica.
-- Integracion con notificaciones para eventos de aprobacion/rechazo.
-- Integracion con modulo documental para evidencias firmadas.
-
-## 12. Matriz de trazabilidad URS -> FRS -> Prueba
-| URS | FRS | Caso de prueba funcional |
-|---|---|---|
-| REQ-GSC-001 | FR-GSC-001 | Login valido/invalido y verificacion de sesion |
-| REQ-GSC-002 | FR-GSC-002 | Renovar token y cerrar sesion en multiples escenarios |
-| REQ-GSC-003 | FR-GSC-003 | Ejecutar accion con/sin permiso por rol |
-| REQ-GSC-004 | FR-GSC-004 | Ejecutar accion critica y verificar auditoria |
-| REQ-GSC-005 | FR-GSC-005 | Aprobar/rechazar solicitud y validar estados |
-| REQ-GSC-006 | FR-GSC-006 | Firmar documento con prerequisitos cumplidos |
-| REQ-GSC-007 | FR-GSC-007 | Consultar historial filtrado por proceso |
-| REQ-GSC-008 | FR-GSC-008 | Intentar operacion sin permiso y validar bloqueo |
-
-## 13. Criterios de aceptacion del area
-- 100% de funciones criticas con control de acceso activo.
-- 100% de acciones criticas con traza auditada.
-- Flujos de aprobacion y firma ejecutables sin saltos de estado.
-- Errores de seguridad respondidos de forma consistente.
+## 6. Restricciones y limites observados
+- `approvals` no segmenta la cola por aprobador real; expone un conjunto general de pendientes dentro del alcance de roles habilitados.
+- `management/requests` devuelve `rowCount` del lote y no un total real global.
+- `signature` depende de funciones y vistas SQL especificas (`create_document_seal_and_qr`, `track_qr_access`, `document_verification_info`).

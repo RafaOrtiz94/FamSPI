@@ -1,4 +1,4 @@
-# DICCIONARIO DE DATOS
+﻿# DICCIONARIO DE DATOS
 
 ## Area 01: Gobierno, Seguridad y Cumplimiento
 
@@ -50,13 +50,13 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 |---|---|---|---|---|
 | id | integer | NO | nextval('auditoria.logs_id_seq'::regclass) |  |
 | usuario_id | integer | YES |  |  |
-| usuario_email | character varying | YES |  | Correo del usuario que realizó la acción |
+| usuario_email | character varying | YES |  | Correo del usuario que realizÃ³ la acciÃ³n |
 | rol | character varying | YES |  |  |
-| modulo | character varying | YES |  | Módulo afectado (auth, solicitudes, mantenimientos, etc.) |
-| accion | character varying | YES |  | Tipo de acción (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
-| descripcion | text | YES |  | Descripción amigable de la acción realizada |
+| modulo | character varying | YES |  | MÃ³dulo afectado (auth, solicitudes, mantenimientos, etc.) |
+| accion | character varying | YES |  | Tipo de acciÃ³n (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
+| descripcion | text | YES |  | DescripciÃ³n amigable de la acciÃ³n realizada |
 | datos_anteriores | jsonb | YES |  | JSON con los datos antes del cambio |
-| datos_nuevos | jsonb | YES |  | JSON con los datos después del cambio |
+| datos_nuevos | jsonb | YES |  | JSON con los datos despuÃ©s del cambio |
 | ip | character varying | YES |  |  |
 | user_agent | text | YES |  |  |
 | fecha | timestamp without time zone | YES | CURRENT_TIMESTAMP | Fecha y hora del evento registrado |
@@ -570,7 +570,7 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 | legacy_purchase_id | uuid | YES |  | Reverse mapping to legacy purchase for debugging |
 | drive_comercial_folder_id | text | YES |  | Google Drive folder ID for the main "Comercial" folder at root level |
 | drive_user_folder_id | text | YES |  | Google Drive folder ID for the user-specific folder within "Comercial" |
-| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "Inspección de Ambiente") |
+| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "InspecciÃ³n de Ambiente") |
 | drive_request_folder_id | text | YES |  | Google Drive folder ID for the specific request folder (REQ-xxxx) |
 | origin_department_id | integer | YES |  |  |
 | origin_department_name | text | YES |  |  |
@@ -739,7 +739,7 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 | can_sign_documents | boolean | YES | false | Whether user has permission to sign documents |
 | signature_role | character varying | YES |  | Role for signature authorization (DPD, Manager, etc.) |
 | signature_certificate_id | character varying | YES |  | ID of digital certificate for qualified signatures |
-| active | boolean | NO | true | Indica si el usuario está activo en el sistema. Los usuarios inactivos no pueden acceder. |
+| active | boolean | NO | true | Indica si el usuario estÃ¡ activo en el sistema. Los usuarios inactivos no pueden acceder. |
 
 - Indices visibles:
   - idx_users_active: CREATE INDEX idx_users_active ON public.users USING btree (active)
@@ -748,13 +748,13 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
   - users_pkey: CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)
 
 ## 5. Hallazgos de consistencia codigo vs base real
-- `security` no tiene evidencia de tablas `security_offhours_whitelist` ni `security_jobs_log` en la base vigente; el codigo auxiliar que las referencia no esta alineado con Neon.
-- `management.service.js` referencia `audit_logs` y `attachments`, pero en la base real existen `auditoria.logs` y `request_attachments`.
-- `audit-prep.service.js` usa `users.nombre_completo`, pero en la base real `users` expone `name` y `fullname`.
-- `signature.controller.js` inserta `consent_text` en `document_signatures_advanced`, pero esa columna no existe en la base real.
-- `document_signatures_advanced` exige `signer_email NOT NULL`; el flujo backend de firma debe poblarlo desde el usuario autenticado.
-- `requests.status` en Neon esta restringido a `pendiente`, `en_revision`, `aprobado`, `rechazado`, `cancelado`; cualquier codigo que espere estados en ingles queda desalineado.
-- `auth/me` toca `user_attendance_records`; esa tabla es una dependencia transversal y no una entidad nuclear del area 01.
+- `security` core esta alineado con `auditoria.logs`, `notifications` y `user_sessions`; las tablas auxiliares esperadas por `security.whitelist.js` y `security.siem.js` no forman parte del flujo core verificado.
+- `management.service.js` ya usa `auditoria.logs`, `request_attachments` y `request_versions`.
+- `audit-prep.service.js` ya no depende de `users.nombre_completo`; usa `fullname`, `name` o `email` segun disponibilidad.
+- `signature.controller.js` y `services/signatures/*` ya trabajan con `signer_email` y no insertan `consent_text` sobre `document_signatures_advanced`.
+- `signature` mantiene dependencia fuerte de `create_document_seal_and_qr`, `track_qr_access` y `document_verification_info`; estos objetos deben existir en el entorno.
+- `auth/me` ya no toca `user_attendance_records`, pero `auth.googleCallback` sigue ejecutando `ensureDailyClockIn()` como side effect transversal.
+- `approvals` sigue limitado a la cola tecnica soportada por `requests` y `request_approvals`; no implementa un motor transversal de aprobaciones por area.
 
 ## 6. Conclusion
-El area 01 dispone de un modelo de datos real suficiente para autenticacion, auditoria, preparacion de auditoria, aprobaciones, documentos y firma; sin embargo, persisten discrepancias relevantes entre codigo y base vigente en los modulos `security`, `management`, `audit-prep` y `signature`.
+El area 01 dispone de un modelo de datos real suficiente para autenticacion, seguridad off-hours, auditoria, preparacion de auditoria, aprobaciones tecnicas, trazabilidad gerencial y firma documental. Tras la revalidacion actual, las discrepancias mas relevantes ya no estan en tablas o columnas incorrectas del flujo core, sino en alcance funcional de `approvals`, totalizacion/trazabilidad robusta en `management`, acoplamiento transversal de `auth` y dependencia SQL especializada de `signature`.

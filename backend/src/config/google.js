@@ -1,37 +1,32 @@
-// src/config/google.js
-
+﻿const fs = require("fs");
 const { google } = require("googleapis");
 const logger = require("./logger");
-const {
-  googleDelegatedUser,
-  googleKeyPath,
-} = require("../utils/googleCredentials");
+const { googleDelegatedUser, googleKeyPath } = require("../utils/googleCredentials");
 
-// ===============================================================
-// 🔐 Cargar clave JSON de la Service Account
-// ===============================================================
-const fs = require("fs");
 let key = null;
 try {
   if (process.env.GSA_KEY_JSON) {
     key = JSON.parse(process.env.GSA_KEY_JSON);
-    logger.info("✅ Credencial de Service Account cargada desde GSA_KEY_JSON");
+    logger.info("Credencial de Service Account cargada desde GSA_KEY_JSON");
   } else if (process.env.GSA_KEY_JSON_BASE64) {
     key = JSON.parse(Buffer.from(process.env.GSA_KEY_JSON_BASE64, "base64").toString("utf8"));
-    logger.info("✅ Credencial de Service Account cargada desde GSA_KEY_JSON_BASE64");
-  } else if (fs.existsSync(googleKeyPath)) {
+    logger.info("Credencial de Service Account cargada desde GSA_KEY_JSON_BASE64");
+  } else if (googleKeyPath && fs.existsSync(googleKeyPath)) {
     key = require(googleKeyPath);
-    logger.info("✅ Credencial de Service Account cargada desde archivo", { path: googleKeyPath });
+    logger.info("Credencial de Service Account cargada desde archivo", { path: googleKeyPath });
   } else {
-    logger.warn("⚠️ Archivo de clave de Service Account no encontrado. Las funcionalidades de Google (Drive, Gmail, etc.) estarán deshabilitadas.", { path: googleKeyPath });
+    logger.warn(
+      "No se encontro credencial de Service Account. Las funcionalidades de Google quedaran deshabilitadas.",
+      { path: googleKeyPath || null }
+    );
   }
 } catch (err) {
-  logger.warn("⚠️ No se pudo cargar la clave de la Service Account. Las funcionalidades de Google (Drive, Gmail, etc.) estarán deshabilitadas.", { path: googleKeyPath, error: err.message });
+  logger.warn(
+    "No se pudo cargar la credencial de Service Account. Las funcionalidades de Google quedaran deshabilitadas.",
+    { path: googleKeyPath || null, error: err.message }
+  );
 }
 
-// ===============================================================
-// 📌 Scopes permitidos en tu dominio Workspace (actualizado)
-// ===============================================================
 const scopes = [
   "https://www.googleapis.com/auth/drive",
   "https://www.googleapis.com/auth/drive.file",
@@ -42,11 +37,8 @@ const scopes = [
   "https://www.googleapis.com/auth/calendar",
 ];
 
-// ===============================================================
-// 👤 Impersonación obligatoria (Domain-wide Delegation)
-// ===============================================================
 if (!googleDelegatedUser) {
-  logger.warn("⚠️ GOOGLE_SUBJECT no definido. La delegación de dominio para Google APIs no funcionará.");
+  logger.warn("GOOGLE_SUBJECT no definido. La delegacion de dominio para Google APIs no funcionara.");
 }
 
 let jwtClient = null;
@@ -58,17 +50,13 @@ if (key && googleDelegatedUser) {
       scopes,
       subject: googleDelegatedUser,
     });
-    logger.info("✅ Google JWT Client inicializado correctamente");
+    logger.info("Google JWT Client inicializado correctamente");
   } catch (err) {
-    logger.error("❌ Error inicializando Google JWT Client:", err.message);
+    logger.error("Error inicializando Google JWT Client:", err.message);
   }
 } else {
-  logger.warn("⏸️ Google JWT Client NO inicializado (faltan credenciales o subject)");
+  logger.warn("Google JWT Client no inicializado; faltan credenciales o subject");
 }
-
-// ===============================================================
-// 🔧 Clientes Google API
-// ===============================================================
 
 function createDelegatedJwtClient(subject) {
   return new google.auth.JWT({
@@ -85,22 +73,19 @@ const gmail = google.gmail({ version: "v1", auth: jwtClient });
 const calendar = google.calendar({ version: "v3", auth: jwtClient });
 const sheets = google.sheets({ version: "v4", auth: jwtClient });
 
-// ===============================================================
-// 🧪 Test opcional
-// ===============================================================
 async function testGoogleAuth() {
   try {
     const res = await drive.files.list({ pageSize: 1 });
-    logger.info(`✅ Google Drive OK → ${res.data.files?.[0]?.name || "sin archivos"}`);
+    logger.info(`Google Drive OK -> ${res.data.files?.[0]?.name || "sin archivos"}`);
   } catch (error) {
-    logger.error("❌ Error autenticando Google:", error.response?.data || error.message);
+    logger.error("Error autenticando Google:", error.response?.data || error.message);
   }
 }
 
 if (process.env.ENABLE_GOOGLE_SELF_TEST === "true") {
   testGoogleAuth();
 } else {
-  logger.info("🔕 testGoogleAuth deshabilitado");
+  logger.info("testGoogleAuth deshabilitado");
 }
 
 module.exports = { drive, docs, gmail, calendar, sheets, jwtClient, createDelegatedJwtClient };

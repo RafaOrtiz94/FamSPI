@@ -1,7 +1,6 @@
-const path = require("path");
+﻿const path = require("path");
 const logger = require("../config/logger");
 
-const DEFAULT_KEY_FILE = "dashboard-spi-3d9bca86a1bb.json";
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function extractEmail(value = "") {
@@ -11,28 +10,31 @@ function extractEmail(value = "") {
   return (match ? match[1] : trimmed).trim();
 }
 
-const rawSubject = process.env.GOOGLE_SUBJECT
-  ? process.env.GOOGLE_SUBJECT.trim()
-  : "";
-
+const rawSubject = process.env.GOOGLE_SUBJECT ? process.env.GOOGLE_SUBJECT.trim() : "";
 let googleDelegatedUser = null;
 
 if (!rawSubject) {
   logger.info(
-    "GOOGLE_SUBJECT no definido; se usará la service account directamente para Google APIs."
+    "GOOGLE_SUBJECT no definido; se usara la service account directamente para Google APIs."
   );
 } else if (!emailRegex.test(rawSubject)) {
   logger.warn(
-    `GOOGLE_SUBJECT inválido ("${rawSubject}"), se ignorará la delegación de dominio.`
+    `GOOGLE_SUBJECT invalido (\"${rawSubject}\"), se ignorara la delegacion de dominio.`
   );
 } else {
   googleDelegatedUser = rawSubject;
-  logger.info(`GOOGLE_SUBJECT configurado → ${googleDelegatedUser}`);
+  logger.info(`GOOGLE_SUBJECT configurado -> ${googleDelegatedUser}`);
 }
 
 const googleKeyPath = process.env.GSA_KEY_PATH
   ? path.resolve(process.env.GSA_KEY_PATH)
-  : path.join(__dirname, "../data", DEFAULT_KEY_FILE);
+  : null;
+
+if (!googleKeyPath) {
+  logger.info(
+    "GSA_KEY_PATH no definido; solo se intentaran credenciales inline mediante GSA_KEY_JSON o GSA_KEY_JSON_BASE64."
+  );
+}
 
 function resolveDelegatedUser(candidateEmail) {
   const email = extractEmail(candidateEmail);

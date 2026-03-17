@@ -562,12 +562,23 @@ async function summary(user, includeAll = false) {
       userEmail: user.email,
       year,
     });
-    const { rows: pendingRows } = await db.query(
-      `SELECT COALESCE(SUM(days),0) as total FROM vacaciones_solicitudes
-        WHERE requester_id=$1 AND status='pendiente' AND EXTRACT(YEAR FROM start_date)=$2`,
+    const { rows: summaryRows } = await db.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN days ELSE 0 END),0) AS approved,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending') THEN days ELSE 0 END),0) AS pending,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN days ELSE 0 END),0) AS rejected,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN days ELSE 0 END),0) AS cancelled,
+         COALESCE(SUM(days),0) AS requested
+       FROM vacaciones_solicitudes
+      WHERE requester_id=$1 AND EXTRACT(YEAR FROM start_date)=$2`,
       [user.id, year]
     );
-    const pending = Number(pendingRows[0]?.total || 0);
+    const summaryRow = summaryRows[0] || {};
+    const approved = Number(summaryRow.approved || 0);
+    const pending = Number(summaryRow.pending || 0);
+    const rejected = Number(summaryRow.rejected || 0);
+    const cancelled = Number(summaryRow.cancelled || 0);
+    const requested = Number(summaryRow.requested || 0);
     const chargedFromPermisos = await computeChargedVacationDays({
       userId: user.id,
       userEmail: user.email,
@@ -587,7 +598,11 @@ async function summary(user, includeAll = false) {
       accrued_this_year: allowanceInfo.accruedThisYear,
       missing_hire_date: allowanceInfo.missingHireDate,
       taken,
+      approved,
       pending,
+      rejected,
+      cancelled,
+      requested,
       charged_from_permisos: chargedFromPermisos,
       remaining:
         !allowanceInfo.missingHireDate && !allowanceInfo.eligible
@@ -599,8 +614,11 @@ async function summary(user, includeAll = false) {
   const { rows } = await db.query(
     `SELECT u.id as user_id, u.fullname, u.email, d.name as department,
             MAX(cp.profile->'laboral'->>'fecha_ingreso') as fecha_ingreso,
-            COALESCE(SUM(CASE WHEN v.status='aprobado' THEN v.days ELSE 0 END),0) as taken,
-            COALESCE(SUM(CASE WHEN v.status='pendiente' THEN v.days ELSE 0 END),0) as pending
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN v.days ELSE 0 END),0) as approved,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN v.days ELSE 0 END),0) as pending,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN v.days ELSE 0 END),0) as rejected,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN v.days ELSE 0 END),0) as cancelled,
+            COALESCE(SUM(v.days),0) as requested
        FROM users u
        LEFT JOIN vacaciones_solicitudes v ON v.requester_id = u.id
        LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
@@ -624,7 +642,8 @@ async function summary(user, includeAll = false) {
       statuses: ["approved", "aprobado"],
     });
     const totalAllowance = allowanceInfo.allowance + historicalBalance;
-    const taken = Number(r.taken || 0) + chargedFromPermisos;
+    const approved = Number(r.approved || 0);
+    const taken = approved + chargedFromPermisos;
     return {
       ...r,
       ...allowanceInfo,
@@ -632,7 +651,11 @@ async function summary(user, includeAll = false) {
       allowance_base: allowanceInfo.allowance,
       carry_over: historicalBalance,
       charged_from_permisos: chargedFromPermisos,
+      approved,
       taken,
+      rejected: Number(r.rejected || 0),
+      cancelled: Number(r.cancelled || 0),
+      requested: Number(r.requested || 0),
       missing_hire_date: allowanceInfo.missingHireDate,
       remaining:
         !allowanceInfo.missingHireDate && !allowanceInfo.eligible

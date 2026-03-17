@@ -1,28 +1,24 @@
-console.log("🎬 Bootstrapping SPI FAM API [Cloud Run Mode]...");
+﻿console.log("Bootstrapping SPI FAM API [Cloud Run Mode]...");
 
 if (process.env.NODE_ENV !== "production") {
   require("dotenv").config();
   require("dotenv").config({ path: "./.env.jobs" });
 }
 
-// ======================================================
-// 🛡️  Cloud Run Safe Error Handling (DEFINIR ANTES DE NADA)
-// ======================================================
 const isProduction = process.env.NODE_ENV === "production";
 
 process.on("unhandledRejection", (err) => {
-  console.error("🛡️ [FATAL] Promesa no manejada:", err);
+  console.error("[FATAL] Promesa no manejada:", err);
   if (isProduction) process.exit(1);
 });
 
 process.on("uncaughtException", (err) => {
-  console.error("🛡️ [FATAL] Excepción no capturada:", err);
+  console.error("[FATAL] Excepcion no capturada:", err);
   if (isProduction) process.exit(1);
 });
 
 const app = require("./app");
 const logger = require("./config/logger");
-//const { checkDbSchema } = require("./utils/dbHealth");
 
 const { startReminderScheduler } = require("./modules/mantenimientos/mantenimiento.scheduler");
 const { startExpiredReservationsJob } = require("./jobs/checkExpiredReservations");
@@ -34,18 +30,17 @@ const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosR
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
+const ENABLE_JOBS = process.env.ENABLE_JOBS === "true" || ENV !== "production";
+const JOB_EXECUTION_MODE = ENABLE_JOBS ? "in_process" : "external_scheduler";
 
-console.log(`🔌 Intentando escuchar en el puerto ${PORT}...`);
-
-const ENABLE_JOBS =
-  process.env.ENABLE_JOBS === "true" ||
-  (ENV !== "production");
+console.log(`Intentando escuchar en el puerto ${PORT}...`);
 
 const server = app.listen(PORT, "0.0.0.0", async () => {
-  logger.info(`🚀 SPI FAM API running on port ${PORT} [${ENV}]`);
+  logger.info(`SPI FAM API running on port ${PORT} [${ENV}]`);
+  logger.info({ job_execution_mode: JOB_EXECUTION_MODE }, "Modo de ejecucion de jobs");
 
   if (ENABLE_JOBS) {
-    logger.info("⏰ Jobs internos habilitados");
+    logger.info("Jobs internos habilitados");
     startReminderScheduler();
     startExpiredReservationsJob();
     startBusinessCasePreflowExpiryJob();
@@ -54,23 +49,19 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     startPermisosRecoveryCoordinationExpiryJob();
     startDatabaseBackupJob();
   } else {
-    logger.info("⏸️ Jobs deshabilitados (usar Cloud Scheduler)");
+    logger.info("Jobs internos deshabilitados; usar scheduler externo");
   }
 });
 
-// Graceful shutdown solo para señales del sistema
 const gracefulShutdown = (signal) => {
-  logger.info(`🧹 Señal recibida: ${signal}, cerrando servidor gracefulmente`);
+  logger.info(`Senal recibida: ${signal}, cerrando servidor de forma controlada`);
 
   server.close(() => {
-    logger.info("✅ Servidor cerrado correctamente");
-    // En Cloud Run, NO usamos process.exit() - el contenedor se maneja automáticamente
+    logger.info("Servidor cerrado correctamente");
   });
 
-  // Timeout de seguridad para Cloud Run
   setTimeout(() => {
-    logger.warn(`⏰ Timeout de ${signal}, forzando cierre`);
-    // Cloud Run maneja la terminación del contenedor
+    logger.warn(`Timeout de cierre para ${signal}`);
   }, 10000).unref();
 };
 

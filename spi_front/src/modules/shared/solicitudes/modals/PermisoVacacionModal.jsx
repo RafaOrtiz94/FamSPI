@@ -32,6 +32,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
     const [approvedVacationDays, setApprovedVacationDays] = useState(0);
     const [pendingVacationDays, setPendingVacationDays] = useState(0);
     const [rejectedVacationDays, setRejectedVacationDays] = useState(0);
+    const [cancelledVacationDays, setCancelledVacationDays] = useState(0);
     const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
     const [calamidadDuracionTipo, setCalamidadDuracionTipo] = useState("dias"); // 'horas' o 'dias'
     const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
@@ -385,11 +386,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
             const rejectedDays = vacationRows
                 .filter((req) => ["rejected", "rechazado"].includes(normalizeStatus(req)))
                 .reduce((acc, req) => acc + calculateDays(req), 0);
-            const requestedDays = approvedDays + pendingDays + rejectedDays;
+            const cancelledDays = vacationRows
+                .filter((req) => ["cancelled", "cancelado"].includes(normalizeStatus(req)))
+                .reduce((acc, req) => acc + calculateDays(req), 0);
+            const requestedDays = approvedDays + pendingDays + rejectedDays + cancelledDays;
 
             setApprovedVacationDays(approvedDays);
             setPendingVacationDays(pendingDays);
             setRejectedVacationDays(rejectedDays);
+            setCancelledVacationDays(cancelledDays);
             setRequestedVacationDays(requestedDays);
 
             const vacationsSummary = mineResp?.summary?.vacaciones || {};
@@ -400,6 +405,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 pending: Number(vacationsSummary.pending_days ?? pendingDays),
                 approved: Number(vacationsSummary.approved_days ?? approvedDays),
                 rejected: Number(vacationsSummary.rejected_days ?? rejectedDays),
+                cancelled: Number(vacationsSummary.cancelled_days ?? cancelledDays),
                 requested: Number(vacationsSummary.requested_days ?? requestedDays),
                 eligible: vacationsSummary.eligible,
                 eligible_from: vacationsSummary.eligible_from,
@@ -423,6 +429,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         setApprovedVacationDays(0);
         setPendingVacationDays(0);
         setRejectedVacationDays(0);
+        setCancelledVacationDays(0);
         setFormData({
             fecha_inicio: "",
             fecha_fin: "",
@@ -1432,6 +1439,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const summaryPending = vacationSummary?.pending ?? 0;
         const summaryRejected = vacationSummary?.rejected ?? 0;
         const summaryRequested = vacationSummary?.requested ?? 0;
+        const summaryCancelled = vacationSummary?.cancelled ?? 0;
         const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
             ? toNumber(summaryRemaining)
             : toNumber(summaryAllowance) - toNumber(summaryTaken) - toNumber(summaryPending);
@@ -1448,10 +1456,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const usedDisplay = summaryHasUsage ? toNumber(summaryTaken) : approvedVacationDays;
         const requestedDisplay = summaryHasUsage ? toNumber(summaryRequested) : requestedVacationDays;
         const rejectedDisplay = summaryHasUsage ? toNumber(summaryRejected) : rejectedVacationDays;
+        const cancelledDisplay = summaryHasUsage ? toNumber(summaryCancelled) : cancelledVacationDays;
         const remainingVacationDisplay = formatVacationDaysHours(remaining);
         const requestedVacationDisplay = formatVacationDaysHours(requestedDisplay);
         const approvedVacationDisplay = formatVacationDaysHours(usedDisplay);
         const rejectedVacationDisplay = formatVacationDaysHours(rejectedDisplay);
+        const cancelledVacationDisplay = formatVacationDaysHours(cancelledDisplay);
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
         const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
         const allowMissingHireDate = vacationSummary?.missing_hire_date;
@@ -1462,7 +1472,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                 <h3 className="text-lg font-semibold text-gray-900">Solicitud de Vacaciones</h3>
 
                 {vacationSummary && (
-                    <div className="grid grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                         <div className="p-3 bg-green-50 rounded-lg text-center">
                             <p className="text-xs text-green-600 font-medium">Disponibles</p>
                             <p className="text-xl font-bold text-green-700">{remainingVacationDisplay.shortText}</p>
@@ -1478,6 +1488,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         <div className="p-3 bg-rose-50 rounded-lg text-center">
                             <p className="text-xs text-rose-600 font-medium">Rechazados</p>
                             <p className="text-xl font-bold text-rose-700">{rejectedVacationDisplay.shortText}</p>
+                        </div>
+                        <div className="p-3 bg-slate-50 rounded-lg text-center">
+                            <p className="text-xs text-slate-600 font-medium">Cancelados</p>
+                            <p className="text-xl font-bold text-slate-700">{cancelledVacationDisplay.shortText}</p>
                         </div>
                     </div>
                 )}

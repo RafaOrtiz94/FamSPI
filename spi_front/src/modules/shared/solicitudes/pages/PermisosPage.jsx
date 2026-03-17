@@ -167,12 +167,15 @@ const PermisosPage = () => {
             requested: 0,
             approved: 0,
             rejected: 0,
+            cancelled: 0,
         };
         vacationRequests.forEach((req) => {
             const days = calculateDays(req);
+            const status = String(req?.status || "").trim().toLowerCase();
             totals.requested += days;
-            if (req.status === "approved") totals.approved += days;
-            if (req.status === "rejected") totals.rejected += days;
+            if (["approved", "aprobado"].includes(status)) totals.approved += days;
+            if (["rejected", "rechazado"].includes(status)) totals.rejected += days;
+            if (["cancelled", "cancelado"].includes(status)) totals.cancelled += days;
         });
         return totals;
     }, [vacationRequests]);
@@ -189,6 +192,7 @@ const PermisosPage = () => {
     const requestedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.requested), [vacationStats.requested]);
     const approvedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.approved), [vacationStats.approved]);
     const rejectedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.rejected), [vacationStats.rejected]);
+    const cancelledVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.cancelled), [vacationStats.cancelled]);
 
     const isTalentRole = useMemo(() => {
         const normalizeRole = (value) =>
@@ -305,7 +309,7 @@ const PermisosPage = () => {
             )}
 
             {!isGerenciaGeneral && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
                     <Card className="p-4 border border-emerald-200 bg-emerald-50">
                         <p className="text-xs font-semibold uppercase text-emerald-700">Disponibles</p>
                         <p className="text-2xl font-bold text-emerald-800">
@@ -333,6 +337,13 @@ const PermisosPage = () => {
                             {loadingSummary ? "..." : rejectedVacationDisplay.shortText}
                         </p>
                         <p className="text-xs text-rose-700/80">{rejectedVacationDisplay.decimalText}</p>
+                    </Card>
+                    <Card className="p-4 border border-slate-200 bg-slate-50">
+                        <p className="text-xs font-semibold uppercase text-slate-700">Cancelados</p>
+                        <p className="text-2xl font-bold text-slate-800">
+                            {loadingSummary ? "..." : cancelledVacationDisplay.shortText}
+                        </p>
+                        <p className="text-xs text-slate-700/80">{cancelledVacationDisplay.decimalText}</p>
                     </Card>
                 </div>
             )}
