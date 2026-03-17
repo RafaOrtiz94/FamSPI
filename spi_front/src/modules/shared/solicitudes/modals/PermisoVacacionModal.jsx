@@ -11,6 +11,7 @@ import {
     getMyStudyEnrollments,
 } from "../../../../core/api/permisosApi";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
 /**
  * Modal unificado para solicitudes de permisos y vacaciones
@@ -1447,6 +1448,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
         const usedDisplay = summaryHasUsage ? toNumber(summaryTaken) : approvedVacationDays;
         const requestedDisplay = summaryHasUsage ? toNumber(summaryRequested) : requestedVacationDays;
         const rejectedDisplay = summaryHasUsage ? toNumber(summaryRejected) : rejectedVacationDays;
+        const remainingVacationDisplay = formatVacationDaysHours(remaining);
+        const requestedVacationDisplay = formatVacationDaysHours(requestedDisplay);
+        const approvedVacationDisplay = formatVacationDaysHours(usedDisplay);
+        const rejectedVacationDisplay = formatVacationDaysHours(rejectedDisplay);
         const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
         const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
         const allowMissingHireDate = vacationSummary?.missing_hire_date;
@@ -1460,19 +1465,19 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="grid grid-cols-4 gap-3">
                         <div className="p-3 bg-green-50 rounded-lg text-center">
                             <p className="text-xs text-green-600 font-medium">Disponibles</p>
-                            <p className="text-xl font-bold text-green-700">{remaining}</p>
+                            <p className="text-xl font-bold text-green-700">{remainingVacationDisplay.shortText}</p>
                         </div>
                         <div className="p-3 bg-blue-50 rounded-lg text-center">
                             <p className="text-xs text-blue-600 font-medium">Solicitados</p>
-                            <p className="text-xl font-bold text-blue-700">{requestedDisplay}</p>
+                            <p className="text-xl font-bold text-blue-700">{requestedVacationDisplay.shortText}</p>
                         </div>
                         <div className="p-3 bg-amber-50 rounded-lg text-center">
                             <p className="text-xs text-amber-600 font-medium">Aprobados</p>
-                            <p className="text-xl font-bold text-amber-700">{usedDisplay}</p>
+                            <p className="text-xl font-bold text-amber-700">{approvedVacationDisplay.shortText}</p>
                         </div>
                         <div className="p-3 bg-rose-50 rounded-lg text-center">
                             <p className="text-xs text-rose-600 font-medium">Rechazados</p>
-                            <p className="text-xl font-bold text-rose-700">{rejectedDisplay}</p>
+                            <p className="text-xl font-bold text-rose-700">{rejectedVacationDisplay.shortText}</p>
                         </div>
                     </div>
                 )}
@@ -1481,7 +1486,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                         <p className="text-xs text-amber-700">
                             Estás cerca de completar tus vacaciones. Te quedan{" "}
-                            <strong>{remaining}</strong> días disponibles.
+                            <strong>{remainingVacationDisplay.text}</strong> disponibles.
                         </p>
                     </div>
                 )}
@@ -1597,8 +1602,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                         </p>
                         <p className={`text-xs ${canSubmit ? "text-emerald-700" : "text-red-700"}`}>
                             {canSubmit
-                                ? `Quedarían ${remaining - days} días disponibles`
-                                : `No tienes suficientes días. Solo tienes ${remaining} días disponibles.`}
+                                ? `Quedarían ${formatVacationDaysHours(remaining - days).text} disponibles`
+                                : `No tienes suficientes días. Solo tienes ${remainingVacationDisplay.text} disponibles.`}
                         </p>
                     </div>
                 )}

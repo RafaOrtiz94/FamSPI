@@ -30,6 +30,7 @@ const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflo
 const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
+const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -50,6 +51,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     startBusinessCasePreflowExpiryJob();
     startBusinessCaseDeterminationsGateExpiryJob();
     startBusinessCaseSheetGenerationQueueJob();
+    startPermisosRecoveryCoordinationExpiryJob();
     startDatabaseBackupJob();
   } else {
     logger.info("⏸️ Jobs deshabilitados (usar Cloud Scheduler)");

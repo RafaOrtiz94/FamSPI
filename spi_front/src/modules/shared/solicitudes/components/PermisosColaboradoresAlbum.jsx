@@ -5,6 +5,7 @@ import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
 const formatDate = (dateStr) => {
   if (!dateStr) return "-";
@@ -189,15 +190,15 @@ return (
                     </p>
                     <div className="grid grid-cols-3 gap-1 text-[10px] text-emerald-700/80">
                       <div>
-                        <p className="font-semibold text-emerald-700">{row.vacaciones.dias_disponibles}</p>
+                        <p className="font-semibold text-emerald-700">{formatVacationDaysHours(row.vacaciones.dias_disponibles).shortText}</p>
                         <p className="text-[9px] uppercase tracking-wide">Asignados</p>
                       </div>
                       <div>
-                        <p className="font-semibold text-emerald-700">{row.vacaciones.dias_aprobados}</p>
+                        <p className="font-semibold text-emerald-700">{formatVacationDaysHours(row.vacaciones.dias_aprobados).shortText}</p>
                         <p className="text-[9px] uppercase tracking-wide">Ocupados</p>
                       </div>
                       <div>
-                        <p className="font-semibold text-emerald-700">{row.vacaciones.dias_restantes}</p>
+                        <p className="font-semibold text-emerald-700">{formatVacationDaysHours(row.vacaciones.dias_restantes).shortText}</p>
                         <p className="text-[9px] uppercase tracking-wide">Restantes</p>
                       </div>
                     </div>
@@ -269,7 +270,7 @@ return (
                     <p className="text-xs font-medium text-blue-500 uppercase tracking-wide">Asignados</p>
                     <span className="bg-blue-100 text-blue-600 text-[10px] px-1.5 py-0.5 rounded font-medium">Vacaciones</span>
                   </div>
-                  <p className="text-2xl font-bold text-blue-700">{active.vacaciones.dias_disponibles}</p>
+                  <p className="text-2xl font-bold text-blue-700">{formatVacationDaysHours(active.vacaciones.dias_disponibles).shortText}</p>
                 </div>
 
                 <div className="bg-emerald-50/50 rounded-2xl p-4 border border-emerald-100/50">
@@ -277,7 +278,7 @@ return (
                     <p className="text-xs font-medium text-emerald-600 uppercase tracking-wide">Restantes</p>
                     <span className="bg-emerald-100 text-emerald-700 text-[10px] px-1.5 py-0.5 rounded font-medium">Vacaciones</span>
                   </div>
-                  <p className="text-2xl font-bold text-emerald-700">{active.vacaciones.dias_restantes}</p>
+                  <p className="text-2xl font-bold text-emerald-700">{formatVacationDaysHours(active.vacaciones.dias_restantes).shortText}</p>
                   <p className="text-xs text-emerald-600/70 mt-1">
                     {activeVacacionesSummary.totalDays} días solicitados
                   </p>

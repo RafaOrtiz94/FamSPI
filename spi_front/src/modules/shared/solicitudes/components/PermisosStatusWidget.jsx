@@ -16,6 +16,7 @@ import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { STATUS_META, getTipoLabel, formatDateShort, hasJustificantes } from "../utils/solicitudesHelpers";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
   getMisSolicitudes,
   getPendientes,
@@ -129,6 +130,28 @@ const getRecoveryCoordinationLabel = (solicitud = {}) => {
     return "Sin acuerdo; cargado a vacaciones";
   }
   return RECOVERY_COORDINATION_LABELS[coordinationStatus] || RECOVERY_COORDINATION_LABELS.not_required;
+};
+
+const addDaysToDateOnly = (value, days = 0) => {
+  const normalized = normalizeDateOnly(value);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const base = new Date(year, month - 1, day);
+  if (Number.isNaN(base.getTime())) return null;
+  base.setDate(base.getDate() + Number(days || 0));
+  const outYear = base.getFullYear();
+  const outMonth = String(base.getMonth() + 1).padStart(2, "0");
+  const outDay = String(base.getDate()).padStart(2, "0");
+  return `${outYear}-${outMonth}-${outDay}`;
+};
+
+const getRecoveryCoordinationDeadline = (solicitud = {}) => {
+  const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
+  if (!["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus)) {
+    return null;
+  }
+  return addDaysToDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora, 3);
 };
 
 const estimateRequestedHoursFromSolicitud = (solicitud = {}) => {
@@ -966,6 +989,8 @@ const PermisosStatusWidget = () => {
         : signatureSummary?.estado === "parcial"
         ? "text-amber-700 border-amber-200 bg-amber-50"
         : "text-slate-600 border-slate-200 bg-slate-50";
+    const recoveryCoordinationDeadline = getRecoveryCoordinationDeadline(solicitud);
+    const chargedVacationDisplay = formatVacationDaysHours(Number(solicitud?.charged_vacation_days || 0));
 
     return (
       <motion.div
@@ -1051,13 +1076,18 @@ const PermisosStatusWidget = () => {
             <p className="text-[11px] text-emerald-800 mt-1">
               Estado: {getRecoveryCoordinationLabel(solicitud)}
             </p>
+            {recoveryCoordinationDeadline && (
+              <p className="text-[11px] text-emerald-800 mt-1">
+                Coordinar hasta: {formatDateShort(recoveryCoordinationDeadline)}
+              </p>
+            )}
             {solicitud?.charged_to_vacation && (
               <p className="text-[11px] text-amber-800 mt-1">
                 Descuento aplicado a vacaciones:
                 {" "}
                 {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
                 {Number(solicitud?.charged_vacation_days || 0)
-                  ? ` (${Number(solicitud.charged_vacation_days)} día(s))`
+                  ? ` (${chargedVacationDisplay.text})`
                   : ""}
               </p>
             )}

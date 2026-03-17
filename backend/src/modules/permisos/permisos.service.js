@@ -12,6 +12,7 @@ const ANNUAL_ALLOWANCE = 15;
 const MAX_ANNUAL_ALLOWANCE = 30;
 const ONE_YEAR_MS = 365 * 24 * 60 * 60 * 1000;
 const HOURS_PER_VACATION_DAY = 8;
+const RECOVERY_COORDINATION_TIMEOUT_DAYS = 3;
 const WORKFLOW_SIGNATURE_STAGES = {
   SOLICITUD: "solicitud",
   APROBACION_PARCIAL: "aprobacion_parcial",
@@ -448,6 +449,15 @@ function roundToTwo(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
+function addDaysToDateOnly(value, days = 0) {
+  const normalized = normalizeDateOnly(value);
+  if (!normalized) return null;
+  const date = new Date(`${normalized}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return date.toISOString().slice(0, 10);
+}
+
 function addHoursToDateTime(startValue, hoursValue) {
   const start = new Date(startValue);
   const hours = Number(hoursValue || 0);
@@ -641,6 +651,82 @@ function buildVacationCharge(row = {}) {
   return {
     hours,
     days: roundToTwo(hours / HOURS_PER_VACATION_DAY),
+  };
+}
+
+function getRecoveryCoordinationDeadlineDate(row = {}) {
+  const startDate = normalizeDateOnly(row?.fecha_inicio || row?.fecha_inicio_hora);
+  if (!startDate) return null;
+  return addDaysToDateOnly(startDate, RECOVERY_COORDINATION_TIMEOUT_DAYS);
+}
+
+function isRecoveryCoordinationPending(status) {
+  return ["pending_approver_proposal", "pending_requester_acceptance"].includes(
+    normalizeRecoveryCoordinationStatus(status)
+  );
+}
+
+async function settleExpiredRecoveryCoordination(row = {}) {
+  if (!row?.id) return row;
+  if (!row?.es_recuperable) return row;
+  const normalizedSolicitudStatus = normalizeStatusText(row?.status);
+  if (!["approved", "aprobado"].includes(normalizedSolicitudStatus)) return row;
+  if (!isRecoveryCoordinationPending(row?.recovery_coordination_status)) return row;
+
+  const deadlineDate = getRecoveryCoordinationDeadlineDate(row);
+  const today = getCurrentDateInAppTimezone();
+  if (!deadlineDate || !today || today <= deadlineDate) return row;
+
+  const vacationCharge = buildVacationCharge(row);
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET recovery_coordination_status = 'finalized_by_approver',
+            charged_to_vacation = true,
+            charged_vacation_hours = COALESCE(charged_vacation_hours, $2),
+            charged_vacation_days = COALESCE(charged_vacation_days, $3),
+            charged_to_vacation_at = COALESCE(charged_to_vacation_at, NOW()),
+            charged_to_vacation_reason = COALESCE(charged_to_vacation_reason, 'no_recovery_agreement'),
+            updated_at = NOW()
+      WHERE id = $1
+        AND COALESCE(es_recuperable, false) = true
+        AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+        AND LOWER(COALESCE(recovery_coordination_status, '')) IN ('pending_approver_proposal', 'pending_requester_acceptance')
+      RETURNING *`,
+    [row.id, vacationCharge.hours, vacationCharge.days]
+  );
+  return rows[0] || row;
+}
+
+async function settleExpiredRecoveryCoordinationRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const settled = [];
+  for (const row of rows) {
+    settled.push(await settleExpiredRecoveryCoordination(row));
+  }
+  return settled;
+}
+
+async function processExpiredRecoveryCoordinations() {
+  const { rows } = await db.query(
+    `SELECT *
+       FROM permisos_vacaciones
+      WHERE COALESCE(es_recuperable, false) = true
+        AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+        AND LOWER(COALESCE(recovery_coordination_status, '')) IN ('pending_approver_proposal', 'pending_requester_acceptance')`
+  );
+
+  if (!rows.length) {
+    return { scanned: 0, settled: 0 };
+  }
+
+  const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
+  const settledCount = settledRows.reduce((acc, row) => {
+    return acc + (normalizeRecoveryCoordinationStatus(row?.recovery_coordination_status) === "finalized_by_approver" && row?.charged_to_vacation ? 1 : 0);
+  }, 0);
+
+  return {
+    scanned: rows.length,
+    settled: settledCount,
   };
 }
 
@@ -2265,7 +2351,7 @@ async function cancelarSolicitud({ id, actor, reason }) {
   }
 
   const { rows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
-  const solicitud = rows[0];
+  const solicitud = await settleExpiredRecoveryCoordination(rows[0]);
   if (!solicitud) {
     const err = new Error("Solicitud no encontrada");
     err.status = 404;
@@ -2744,7 +2830,8 @@ async function listarPendientes({ stage, approver }) {
       stage === "approved",
     ]
   );
-  return attachWorkflowSignatures(rows);
+  const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
+  return attachWorkflowSignatures(settledRows);
 }
 
 async function listarPorUsuario({ user }) {
@@ -2765,7 +2852,9 @@ async function listarPorUsuario({ user }) {
     [email]
   );
 
-  const summary = rows.reduce(
+  const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
+
+  const summary = settledRows.reduce(
     (acc, row) => {
       const status = row.status || "pending";
       acc.status[status] = (acc.status[status] || 0) + 1;
@@ -2775,8 +2864,8 @@ async function listarPorUsuario({ user }) {
     { total: 0, status: {} }
   );
 
-  const vacationRows = rows.filter((row) => row.tipo_solicitud === "vacaciones");
-  const chargedPermissionRows = rows.filter(
+  const vacationRows = settledRows.filter((row) => row.tipo_solicitud === "vacaciones");
+  const chargedPermissionRows = settledRows.filter(
     (row) => row.tipo_solicitud !== "vacaciones" && row.charged_to_vacation === true
   );
   const approvedVacationDays = vacationRows
@@ -2839,7 +2928,7 @@ async function listarPorUsuario({ user }) {
     rejected_count: vacationRows.filter((row) => ["rejected", "rechazado"].includes(String(row.status || "").toLowerCase())).length,
   };
 
-  const data = await attachWorkflowSignatures(rows);
+  const data = await attachWorkflowSignatures(settledRows);
   return { data, summary };
 }
 
@@ -2849,7 +2938,8 @@ async function getSolicitudById(id) {
     `SELECT * FROM permisos_vacaciones WHERE id = $1`,
     [id]
   );
-  const data = await attachWorkflowSignatures(rows);
+  const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
+  const data = await attachWorkflowSignatures(settledRows);
   return data[0] || null;
 }
 
@@ -3011,7 +3101,9 @@ async function listarResumenColaboradores() {
     });
   }
 
-  rows.forEach((row) => {
+  const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
+
+  settledRows.forEach((row) => {
     const key = row.user_email || `user-${row.id}`;
     if (!collaborators.has(key)) {
       collaborators.set(key, {
@@ -3126,6 +3218,7 @@ module.exports = {
   listMyStudyEnrollments,
   listPendingStudyEnrollments,
   reviewStudyEnrollment,
+  processExpiredRecoveryCoordinations,
   getLegalVerificationByToken,
   getLegalCoverage,
 };

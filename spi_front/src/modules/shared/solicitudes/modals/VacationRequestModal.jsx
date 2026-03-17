@@ -5,6 +5,7 @@ import Button from "../../../../core/ui/components/Button";
 import { Dialog } from "@headlessui/react";
 import { useUI } from "../../../../core/ui/UIContext";
 import api from "../../../../core/api";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
 /**
  * VacationRequestModal
@@ -56,6 +57,10 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
 
     const days = calculateDays();
     const remaining = summary?.remaining || 0;
+    const allowanceDisplay = formatVacationDaysHours(summary?.allowance || 0);
+    const remainingDisplay = formatVacationDaysHours(remaining);
+    const takenDisplay = formatVacationDaysHours(summary?.taken || 0);
+    const pendingDisplay = formatVacationDaysHours(summary?.pending || 0);
     const missingHireDate = summary?.missing_hire_date;
     const isAdvance = summary?.eligible === false && !missingHireDate;
     const eligibleFrom = summary?.eligible_from || null;
@@ -70,7 +75,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
         }
 
         if (!missingHireDate && !isAdvance && days > remaining) {
-            showToast(`Solo tienes ${remaining} días disponibles`, "error");
+            showToast(`Solo tienes ${remainingDisplay.text} disponibles`, "error");
             return;
         }
 
@@ -160,19 +165,19 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                                 <div className="grid grid-cols-4 gap-4">
                                                     <div className="p-4 bg-blue-50 rounded-lg text-center">
                                                         <p className="text-xs text-blue-600 font-medium mb-1">Asignados</p>
-                                                        <p className="text-2xl font-bold text-blue-700">{summary.allowance}</p>
+                                                        <p className="text-2xl font-bold text-blue-700">{allowanceDisplay.shortText}</p>
                                                     </div>
                                                     <div className="p-4 bg-green-50 rounded-lg text-center">
                                                         <p className="text-xs text-green-600 font-medium mb-1">Disponibles</p>
-                                                        <p className="text-2xl font-bold text-green-700">{summary.remaining}</p>
+                                                        <p className="text-2xl font-bold text-green-700">{remainingDisplay.shortText}</p>
                                                     </div>
                                                     <div className="p-4 bg-amber-50 rounded-lg text-center">
                                                         <p className="text-xs text-amber-600 font-medium mb-1">Usados</p>
-                                                        <p className="text-2xl font-bold text-amber-700">{summary.taken}</p>
+                                                        <p className="text-2xl font-bold text-amber-700">{takenDisplay.shortText}</p>
                                                     </div>
                                                     <div className="p-4 bg-purple-50 rounded-lg text-center">
                                                         <p className="text-xs text-purple-600 font-medium mb-1">Pendientes</p>
-                                                        <p className="text-2xl font-bold text-purple-700">{summary.pending}</p>
+                                                        <p className="text-2xl font-bold text-purple-700">{pendingDisplay.shortText}</p>
                                                     </div>
                                                 </div>
                                                 {summary?.eligible === false && !missingHireDate && (
@@ -194,7 +199,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                                         <div>
                                                             <p className="text-sm font-medium text-amber-900">Pocos días disponibles</p>
                                                             <p className="text-xs text-amber-700">
-                                                                Te quedan <strong>{remaining}</strong> días disponibles para este período.
+                                                                Te quedan <strong>{remainingDisplay.text}</strong> disponibles para este período.
                                                             </p>
                                                         </div>
                                                     </div>
@@ -279,7 +284,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                                         Días solicitados: <span className="text-lg font-bold">{days}</span>
                                                     </p>
                                                     <p className="text-xs text-emerald-700">
-                                                        Quedarían {remaining - days} días disponibles
+                                                        Quedarían {formatVacationDaysHours(remaining - days).text} disponibles
                                                     </p>
                                                 </div>
                                             </div>
@@ -290,7 +295,7 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
                                             <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
                                                 <FiAlertCircle className="w-5 h-5 text-red-600" />
                                                 <p className="text-sm text-red-700">
-                                                    No tienes suficientes días disponibles. Solo tienes {remaining} días.
+                                                    No tienes suficientes días disponibles. Solo tienes {remainingDisplay.text}.
                                                 </p>
                                             </div>
                                         )}
@@ -334,3 +339,4 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
 };
 
 export default VacationRequestModal;
+

@@ -5,6 +5,7 @@ import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
 const PermisosColaboradoresWidget = () => {
   const { showToast } = useUI();
@@ -113,19 +114,19 @@ const PermisosColaboradoresWidget = () => {
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <div className="p-3 bg-blue-50 rounded-lg">
                   <p className="text-xs text-blue-600">Dias asignados</p>
-                  <p className="text-lg font-semibold text-blue-800">{row.vacaciones.dias_disponibles}</p>
+                  <p className="text-lg font-semibold text-blue-800">{formatVacationDaysHours(row.vacaciones.dias_disponibles).shortText}</p>
                 </div>
                 <div className="p-3 bg-emerald-50 rounded-lg">
                   <p className="text-xs text-emerald-600">Dias restantes</p>
-                  <p className="text-lg font-semibold text-emerald-800">{row.vacaciones.dias_restantes}</p>
+                  <p className="text-lg font-semibold text-emerald-800">{formatVacationDaysHours(row.vacaciones.dias_restantes).shortText}</p>
                 </div>
                 <div className="p-3 bg-amber-50 rounded-lg">
                   <p className="text-xs text-amber-600">Dias aprobados</p>
-                  <p className="text-lg font-semibold text-amber-800">{row.vacaciones.dias_aprobados}</p>
+                  <p className="text-lg font-semibold text-amber-800">{formatVacationDaysHours(row.vacaciones.dias_aprobados).shortText}</p>
                 </div>
                 <div className="p-3 bg-rose-50 rounded-lg">
                   <p className="text-xs text-rose-600">Dias pendientes</p>
-                  <p className="text-lg font-semibold text-rose-800">{row.vacaciones.dias_pendientes}</p>
+                  <p className="text-lg font-semibold text-rose-800">{formatVacationDaysHours(row.vacaciones.dias_pendientes).shortText}</p>
                 </div>
               </div>
 

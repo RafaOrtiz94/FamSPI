@@ -9,6 +9,7 @@ const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCaseP
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
 const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
+const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -113,6 +114,23 @@ router.post('/business-case/determinations-gate/expiry', async (_req, res) => {
         console.error('Error en job de expiracion determinaciones:', error);
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion de determinaciones',
+            details: error.message
+        });
+    }
+});
+
+router.post('/permisos/recovery/expiry', async (_req, res) => {
+    try {
+        const result = await runPermisosRecoveryCoordinationExpiry();
+        res.json({
+            success: true,
+            message: 'Expiraciones de coordinacion de recuperacion procesadas',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de expiracion de coordinacion de recuperacion:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de expiracion de coordinacion de recuperacion',
             details: error.message
         });
     }

@@ -7,6 +7,7 @@ import { useUI } from "../../../../core/ui/UIContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
 const PermisosStatusWidget = lazy(() => import("../components/PermisosStatusWidget"));
 const PermisosColaboradoresWidget = lazy(() => import("../components/PermisosColaboradoresWidget"));
@@ -184,6 +185,10 @@ const PermisosPage = () => {
         }
         return Math.max(0, allowance - vacationStats.approved);
     }, [vacationSummary, vacationStats.approved, vacationStats.requested]);
+    const remainingVacationDisplay = useMemo(() => formatVacationDaysHours(remainingDays), [remainingDays]);
+    const requestedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.requested), [vacationStats.requested]);
+    const approvedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.approved), [vacationStats.approved]);
+    const rejectedVacationDisplay = useMemo(() => formatVacationDaysHours(vacationStats.rejected), [vacationStats.rejected]);
 
     const isTalentRole = useMemo(() => {
         const normalizeRole = (value) =>
@@ -304,30 +309,30 @@ const PermisosPage = () => {
                     <Card className="p-4 border border-emerald-200 bg-emerald-50">
                         <p className="text-xs font-semibold uppercase text-emerald-700">Disponibles</p>
                         <p className="text-2xl font-bold text-emerald-800">
-                            {loadingSummary ? "..." : remainingDays}
+                            {loadingSummary ? "..." : remainingVacationDisplay.shortText}
                         </p>
-                        <p className="text-xs text-emerald-700/80">Dias restantes</p>
+                        <p className="text-xs text-emerald-700/80">{remainingVacationDisplay.decimalText}</p>
                     </Card>
                     <Card className="p-4 border border-blue-200 bg-blue-50">
                         <p className="text-xs font-semibold uppercase text-blue-700">Solicitados</p>
                         <p className="text-2xl font-bold text-blue-800">
-                            {loadingSummary ? "..." : vacationStats.requested}
+                            {loadingSummary ? "..." : requestedVacationDisplay.shortText}
                         </p>
-                        <p className="text-xs text-blue-700/80">Dias solicitados</p>
+                        <p className="text-xs text-blue-700/80">{requestedVacationDisplay.decimalText}</p>
                     </Card>
                     <Card className="p-4 border border-green-200 bg-green-50">
                         <p className="text-xs font-semibold uppercase text-green-700">Aprobados</p>
                         <p className="text-2xl font-bold text-green-800">
-                            {loadingSummary ? "..." : vacationStats.approved}
+                            {loadingSummary ? "..." : approvedVacationDisplay.shortText}
                         </p>
-                        <p className="text-xs text-green-700/80">Dias aprobados</p>
+                        <p className="text-xs text-green-700/80">{approvedVacationDisplay.decimalText}</p>
                     </Card>
                     <Card className="p-4 border border-rose-200 bg-rose-50">
                         <p className="text-xs font-semibold uppercase text-rose-700">Rechazados</p>
                         <p className="text-2xl font-bold text-rose-800">
-                            {loadingSummary ? "..." : vacationStats.rejected}
+                            {loadingSummary ? "..." : rejectedVacationDisplay.shortText}
                         </p>
-                        <p className="text-xs text-rose-700/80">Dias rechazados</p>
+                        <p className="text-xs text-rose-700/80">{rejectedVacationDisplay.decimalText}</p>
                     </Card>
                 </div>
             )}
@@ -341,7 +346,7 @@ const PermisosPage = () => {
                     <div className="p-4 text-sm text-blue-700">
                         Aun no cumples un año de trabajo. Tus dias de vacaciones se acreditaran desde{" "}
                         <strong>{vacationSummary.eligible_from || "la fecha de aniversario"}</strong>. Puedes solicitar
-                        vacaciones adelantadas; saldo actual: <strong>{remainingDays}</strong> dias.
+                        vacaciones adelantadas; saldo actual: <strong>{remainingVacationDisplay.text}</strong>.
                     </div>
                 </Card>
             )}
@@ -354,7 +359,7 @@ const PermisosPage = () => {
                 <Card className="border border-amber-200 bg-amber-50">
                     <div className="p-4 text-sm text-amber-700">
                         Estas cerca de completar tus dias de vacaciones. Te quedan{" "}
-                        <strong>{Math.max(remainingDays, 0)}</strong> dias disponibles.
+                        <strong>{formatVacationDaysHours(Math.max(remainingDays, 0)).text}</strong> disponibles.
                     </div>
                 </Card>
             )}
