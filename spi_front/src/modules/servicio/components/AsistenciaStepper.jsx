@@ -11,7 +11,7 @@ const STEPS = [
   {
     id: "orden",
     title: "Datos de la Orden",
-    description: "Informaciè´¸n bè°©sica de la orden de asistencia",
+    description: "Informacion basica de la orden de asistencia",
   },
   {
     id: "asistentes",
@@ -21,11 +21,11 @@ const STEPS = [
   {
     id: "asistencia",
     title: "Control de Asistencia",
-    description: "Registro de asistencia por dé“†a",
+    description: "Registro de asistencia por dia",
   },
   {
     id: "certificacion",
-    title: "Certificaciè´¸n y Firma",
+    title: "Certificacion y Firma",
     description: "Firma digital del especialista",
   },
 ];
@@ -142,33 +142,33 @@ const AsistenciaStepper = () => {
         return;
       }
       if (!data.Num_Orden?.trim() || !data.ORDCliente?.trim() || !data.ORDEquipo?.trim() || !data.ORDResponsable?.trim()) {
-        showToast("Debe completar todos los datos bé†©icos de la orden", "error");
+        showToast("Debe completar todos los datos basicos de la orden", "error");
         setIsGeneratingPDF(false);
         return;
       }
       // Prepare data for PDF generation
       const attendanceData = {
-        // 1é””å¿Šå„¯ DATOS GENERALES DEL ENTRENAMIENTO
+        // 1. DATOS GENERALES DEL ENTRENAMIENTO
         Num_Orden: data.Num_Orden,
         ORDFecha: data.ORDFecha,
         ORDCliente: data.ORDCliente,
         ORDEquipo: data.ORDEquipo,
         ORDSerie: data.ORDSerie,
         ORDResponsable: data.ORDResponsable,
-        // 2é””å¿Šå„¯ TABLA DE ASISTENCIA (Hasta 7 asistentes)
+        // 2. TABLA DE ASISTENCIA (Hasta 7 asistentes)
         ...attendees.reduce((acc, attendee, index) => {
           const num = index + 1;
           acc[`Nombres_Apellidos${num}`] = attendee.nombre;
           acc[`Cargo${num}`] = attendee.cargo;
-          acc[`Correo_Electrè´¸nico${num}`] = attendee.email;
+          acc[`Correo_Electr\u00F3nico${num}`] = attendee.email;
           return acc;
         }, {}),
-        // 3é””å¿Šå„¯ ASISTENCIA POR Dè„¥A
+        // 3. ASISTENCIA POR DIA
         ...attendees.reduce((acc, attendee, index) => {
           const num = index + 1;
-          acc[`Dia_1_${num}`] = attendee.asistencia.dia1 ? "é‰æ—“ç¬" : "";
-          acc[`Dia_2_${num}`] = attendee.asistencia.dia2 ? "é‰æ—“ç¬" : "";
-          acc[`Dia_3_${num}`] = attendee.asistencia.dia3 ? "é‰æ—“ç¬" : "";
+          acc[`Dia_1_${num}`] = attendee.asistencia.dia1 ? "X" : "";
+          acc[`Dia_2_${num}`] = attendee.asistencia.dia2 ? "X" : "";
+          acc[`Dia_3_${num}`] = attendee.asistencia.dia3 ? "X" : "";
           return acc;
         }, {}),
       };
@@ -187,7 +187,7 @@ const AsistenciaStepper = () => {
             base64: result.documentBase64,
             name: "Lista_Asistencia_" + (attendanceData.Num_Orden || "documento") + ".pdf",
           });
-          showToast("Documento generado. Procede a la firma electré«‡ica avanzada.", "info");
+          showToast("Documento generado. Procede a la firma electronica avanzada.", "info");
         } else {
           setIsCompleted(true);
           setCompletionData(result);
@@ -254,18 +254,18 @@ const AsistenciaStepper = () => {
                 Datos de la Orden
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Informaciè´¸n bè°©sica de la orden de asistencia al entrenamiento
+                Informacion basica de la orden de asistencia al entrenamiento
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Nç…¤mero de Orden *
+                  Numero de Orden *
                 </label>
                 <input
                   type="text"
                   placeholder="ORD-2025-001"
-                  {...register("Num_Orden", { required: "El nç…¤mero de orden es obligatorio" })}
+                  {...register("Num_Orden", { required: "El numero de orden es obligatorio" })}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
                 {errors.Num_Orden && (
@@ -319,7 +319,7 @@ const AsistenciaStepper = () => {
                 </label>
                 <input
                   type="text"
-                  placeholder="Nç…¤mero de serie (opcional)"
+                  placeholder="Numero de serie (opcional)"
                   {...register("ORDSerie")}
                   className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
                 />
@@ -402,7 +402,7 @@ const AsistenciaStepper = () => {
                         </label>
                         <input
                           type="text"
-                          placeholder="Cargo o posiciè´¸n"
+                          placeholder="Cargo o posicion"
                           value={attendee.cargo}
                           onChange={(e) => updateAttendee(attendee.id, 'cargo', e.target.value)}
                           className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
@@ -410,7 +410,7 @@ const AsistenciaStepper = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-gray-700 mb-1">
-                          Correo Electrè´¸nico
+                          Correo Electronico
                         </label>
                         <input
                           type="email"
@@ -440,7 +440,7 @@ const AsistenciaStepper = () => {
                 Control de Asistencia
               </h3>
               <p className="text-sm text-gray-500 mt-1">
-                Registro de asistencia por dé“†a para cada asistente
+                Registro de asistencia por dia para cada asistente
               </p>
             </div>
             <Card className="p-4">
@@ -449,9 +449,9 @@ const AsistenciaStepper = () => {
                   <thead>
                     <tr className="bg-gray-100">
                       <th className="border border-gray-300 px-4 py-2 text-left">Asistente</th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">Dé“†a 1</th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">Dé“†a 2</th>
-                      <th className="border border-gray-300 px-4 py-2 text-center">Dé“†a 3</th>
+                      <th className="border border-gray-300 px-4 py-2 text-center">Dia 1</th>
+                      <th className="border border-gray-300 px-4 py-2 text-center">Dia 2</th>
+                      <th className="border border-gray-300 px-4 py-2 text-center">Dia 3</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -501,24 +501,24 @@ const AsistenciaStepper = () => {
               )}
               <div className="mt-4 p-3 bg-blue-50 rounded-lg">
                 <p className="text-sm text-blue-800">
-                  <strong>Nota:</strong> Cada asistente debe tener al menos una marca de asistencia (é‰æ—“ç¬) en alguno de los dé“†as.
+                  <strong>Nota:</strong> Cada asistente debe tener al menos una marca de asistencia (X) en alguno de los dias.
                 </p>
               </div>
             </Card>
           </div>
         );
-      case 3: // Certificaciè´¸n y Firma
+      case 3: // Certificacion y Firma
         return (
           <div className="space-y-6">
             <div className="text-center">
               <h3 className="text-lg font-semibold text-gray-900">
-                Certificaciè´¸n y Firma
+                Certificacion y Firma
               </h3>
               <p className="text-sm text-gray-500 mt-1">
                 FamSign para validar la lista de asistencia
               </p>
             </div>
-            {/* InformaciÃ³n importante sobre FamSign */}
+            {/* Informacion importante sobre FamSign */}
             <Card className="p-4 bg-yellow-50 border-yellow-200">
               <div className="flex items-start gap-3">
                 <div className="flex-shrink-0">
@@ -530,29 +530,29 @@ const AsistenciaStepper = () => {
                 <div>
                   <h4 className="font-medium text-yellow-900 mb-1">FamSign</h4>
                   <p className="text-sm text-yellow-800">
-                    Esta lista de asistencia serè°© firmada digitalmente con sello institucional y cè´¸digo QR verificable,
-                    cumpliendo con la Ley de Comercio Electrè´¸nico del Ecuador.
+                    Esta lista de asistencia sera firmada digitalmente con sello institucional y codigo QR verificable,
+                    cumpliendo con la Ley de Comercio Electronico del Ecuador.
                   </p>
                 </div>
               </div>
             </Card>
             <Card className="p-4 bg-blue-50 border-blue-200">
-              <h4 className="font-medium text-blue-900 mb-2">Certificaciè´¸n Legal</h4>
+              <h4 className="font-medium text-blue-900 mb-2">Certificacion Legal</h4>
               <p className="text-sm text-blue-800 mb-3">
                 "Con la presente certifico que: He supervisado el entrenamiento y registrado correctamente
-                la asistencia de los participantes segç…¤n los procedimientos establecidos."
+                la asistencia de los participantes segun los procedimientos establecidos."
               </p>
               <p className="text-xs text-blue-700">
-                Esta certificaciè´¸n tendrè°© valor legal equivalente a una firma manuscrita segç…¤n la legislaciè´¸n ecuatoriana.
+                Esta certificacion tendra valor legal equivalente a una firma manuscrita segun la legislacion ecuatoriana.
               </p>
             </Card>
-            {/* InformaciÃ³n sobre FamSign */}
+            {/* Informacion sobre FamSign */}
             <Card className="p-4 bg-green-50 border-green-200">
-              <h4 className="font-medium text-green-900 mb-2">Â¿QuÃ© incluye FamSign?</h4>
+              <h4 className="font-medium text-green-900 mb-2">Que incluye FamSign?</h4>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-green-800">Hash criptogrè°©fico SHA-256</span>
+                  <span className="text-green-800">Hash criptografico SHA-256</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -560,7 +560,7 @@ const AsistenciaStepper = () => {
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-green-800">Cè´¸digo QR verificable</span>
+                  <span className="text-green-800">Codigo QR verificable</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 bg-green-500 rounded-full"></div>
@@ -615,7 +615,7 @@ const AsistenciaStepper = () => {
               <FiCheckCircle className="w-8 h-8 text-green-600" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">
-              éš†Lista de Asistencia Completada!
+              Lista de Asistencia Completada!
             </h1>
             <p className="text-sm text-gray-500 mt-2">
               La lista de asistencia ha sido registrada correctamente
@@ -661,9 +661,9 @@ const AsistenciaStepper = () => {
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Ubicaciè´¸n en Drive</label>
+                  <label className="block text-sm font-medium text-gray-700">Ubicacion en Drive</label>
                   <p className="text-sm text-gray-600 mt-1">
-                    Servicio TèŒ…cnico / Entrenamiento / [Num_Orden]-[Cliente]-[Fecha]
+                    Servicio Tecnico / Entrenamiento / [Num_Orden]-[Cliente]-[Fecha]
                   </p>
                 </div>
                 <div>
@@ -678,7 +678,7 @@ const AsistenciaStepper = () => {
         </Card>
         {signingDoc && (
           <Card className="p-4 mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Firma Electré«‡ica Avanzada</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Firma electronica avanzada</h3>
             <DocumentSigner
               documentId={signingDoc.id}
               initialDocument={{ name: signingDoc.name, base64: signingDoc.base64 }}
@@ -722,7 +722,7 @@ const AsistenciaStepper = () => {
         </Card>
         {signingDoc && (
           <Card className="p-4 mb-6">
-            <h3 className="text-lg font-semibold text-gray-900 mb-3">Firma Electré«‡ica Avanzada</h3>
+            <h3 className="text-lg font-semibold text-gray-900 mb-3">Firma electronica avanzada</h3>
             <DocumentSigner
               documentId={signingDoc.id}
               initialDocument={{ name: signingDoc.name, base64: signingDoc.base64 }}

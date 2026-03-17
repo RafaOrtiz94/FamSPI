@@ -34,7 +34,11 @@ export const normalizeUIGuidanceResponse = (response) => {
         canPromoteStage: data.permissions?.canPromoteStage ?? true,
         canAddObservations: data.permissions?.canAddObservations ?? true,
         canBlockSections: data.permissions?.canBlockSections ?? false,
-        canUnblockSections: data.permissions?.canUnblockSections ?? false
+        canUnblockSections: data.permissions?.canUnblockSections ?? false,
+        canRequestPreflowReopen: data.permissions?.canRequestPreflowReopen ?? false,
+        canResolvePreflowReopen: data.permissions?.canResolvePreflowReopen ?? false,
+        canDecideFeasibility: data.permissions?.canDecideFeasibility ?? false,
+        workspaceClosed: data.permissions?.workspaceClosed ?? false,
       },
       featureFlags: {
         autosave: data.featureFlags?.autosave || {},
@@ -52,7 +56,18 @@ export const normalizeUIGuidanceResponse = (response) => {
     return {
       businessCase: null,
       sectionOwnership: { rules: {} },
-      permissions: { canEdit: true, canCompleteSections: true, canPromoteStage: true, canAddObservations: true },
+      permissions: {
+        canEdit: true,
+        canCompleteSections: true,
+        canPromoteStage: true,
+        canAddObservations: true,
+        canBlockSections: false,
+        canUnblockSections: false,
+        canRequestPreflowReopen: false,
+        canResolvePreflowReopen: false,
+        canDecideFeasibility: false,
+        workspaceClosed: false,
+      },
       featureFlags: { autosave: {} },
       observationData: null,
       workflowState: { currentStage: 'draft', availableTransitions: [] }
@@ -466,6 +481,16 @@ export const lockSection = async (businessCaseId, section) => {
 
 export const unlockSection = async (businessCaseId, section) => {
   const { data } = await api.post(`/business-case/${businessCaseId}/sections/${section}/unlock`);
+  return data.data || data;
+};
+
+export const requestBusinessCasePreflowReopen = async (businessCaseId, payload = {}) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/preflow/reopen-request`, payload);
+  return data.data || data;
+};
+
+export const resolveBusinessCasePreflowReopen = async (businessCaseId, payload = {}) => {
+  const { data } = await api.post(`/business-case/${businessCaseId}/preflow/reopen-decision`, payload);
   return data.data || data;
 };
 

@@ -174,15 +174,15 @@ const DispatchWorkspaceSection = ({ onSave = () => {} }) => {
   return (
     <div className="space-y-6 p-4 sm:p-6">
       <div className="flex flex-col gap-2">
-        <h2 className="text-xl font-bold text-gray-900">Workspace de Cálculos y Despacho</h2>
+        <h2 className="text-xl font-bold text-gray-900">Cantidades Maximas</h2>
         <p className="text-sm text-gray-600">
-          Jefe Comercial define cantidades/precios de negociación y Jefe Operaciones controla el despacho por elemento.
+          Jefe Comercial define las cantidades maximas por elemento. Jefe Operaciones mantiene el control operativo de despacho sobre la misma base.
         </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
         <StatCard title="Elementos" value={summary?.totalItems ?? 0} />
-        <StatCard title="Cant. plan comercial" value={summary?.totalPlannedQty ?? 0} />
+        <StatCard title="Cant. maxima comercial" value={summary?.totalPlannedQty ?? 0} />
         <StatCard title="Cant. a despachar" value={summary?.totalOpsDispatchQty ?? 0} />
         <StatCard title="Cant. despachada" value={summary?.totalOpsDispatchedQty ?? 0} />
         <StatCard title="Avance despacho" value={`${Math.round((summary?.completionRatio || 0) * 100)}%`} />
@@ -200,7 +200,7 @@ const DispatchWorkspaceSection = ({ onSave = () => {} }) => {
                   <th className="text-left px-3 py-2 font-semibold">Tipo</th>
                   <th className="text-left px-3 py-2 font-semibold">Elemento</th>
                   <th className="text-right px-3 py-2 font-semibold">Cant. anual BC</th>
-                  <th className="text-right px-3 py-2 font-semibold">Cant. plan comercial</th>
+                  <th className="text-right px-3 py-2 font-semibold">Cant. maxima comercial</th>
                   <th className="text-right px-3 py-2 font-semibold">Precio unitario</th>
                   <th className="text-left px-3 py-2 font-semibold">Nota comercial</th>
                   <th className="text-right px-3 py-2 font-semibold">Cant. a despachar</th>
@@ -350,3 +350,4 @@ const StatCard = ({ title, value }) => (
 );
 
 export default DispatchWorkspaceSection;
+

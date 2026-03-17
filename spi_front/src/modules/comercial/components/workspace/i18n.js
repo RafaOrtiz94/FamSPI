@@ -133,14 +133,24 @@ export const WORKSPACE_TEXTS = {
       warnings: ['La sincronizacion genera el documento oficial en Drive y Sheets']
     },
     dispatch_workspace: {
-      title: 'Workspace de Despacho',
-      description: 'Plan comercial de cantidades y control operativo de elementos a despachar',
+      title: 'Cantidades Maximas',
+      description: 'Definicion comercial de cantidades maximas y control operativo de elementos a despachar',
       tips: [
-        'Jefe Comercial define cantidad objetivo y precio por elemento',
+        'Jefe Comercial define la cantidad maxima por elemento',
         'Jefe Operaciones registra cantidades a despachar y avance despachado',
         'Use observaciones para trazabilidad de cambios en cada item'
       ],
       warnings: ['Debe existir consumo anual para que los elementos aparezcan en este workspace']
+    },
+    feasibility: {
+      title: 'Factibilidad',
+      description: 'Decision final del Business Case para cierre y continuidad en compras',
+      tips: [
+        'Sincronice primero el Sheet oficial desde la seccion de Sincronizacion',
+        'ACP Comercial o Jefe Comercial deben registrar la decision final',
+        'Si no es factible, seleccione la alternativa comercial que continuara en compras'
+      ],
+      warnings: ['La decision de factibilidad cierra el Business Case y bloquea nuevas ediciones']
     }
   },
 

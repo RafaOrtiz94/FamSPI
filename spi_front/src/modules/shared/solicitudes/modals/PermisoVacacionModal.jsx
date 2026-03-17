@@ -1357,11 +1357,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
                                 El sistema calculará automáticamente los días del permiso a partir de la fecha de inicio y la fecha de fin.
                             </p>
                         )}
-                        {tipoPermiso === "calamidad" && calamidadDuracionTipo === "horas" && (
-                            <p className="text-xs text-gray-500">
-                                El sistema calculará automáticamente la fecha/hora de fin a partir de la hora de inicio y la duración indicada.
-                            </p>
-                        )}
                         {exceedsPermisoHourLimit && (
                             <p className="text-xs text-red-600">
                                 {tipoPermiso === "estudios"

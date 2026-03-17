@@ -535,7 +535,7 @@ const AttendanceWidget = () => {
                         exit={{ scale: 0.5, opacity: 0 }}
                         className="fixed inset-0 flex items-center justify-center pointer-events-none z-50"
                     >
-                        <div className="text-4xl font-bold text-blue-600">Â¡Listo!</div>
+                        <div className="text-4xl font-bold text-blue-600">¡Listo!</div>
                     </motion.div>
                 )}
             </AnimatePresence>

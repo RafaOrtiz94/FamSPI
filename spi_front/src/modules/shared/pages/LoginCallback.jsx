@@ -6,6 +6,13 @@ import { handleGoogleCallback } from "../../../core/api/authApi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { clockIn, getTodayAttendance } from "../../../core/api/attendanceApi";
 
+const getLocalDateKey = (date = new Date()) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
 /**
  * LoginCallback.jsx
  * ------------------------------------------------------------
@@ -42,20 +49,26 @@ const LoginCallback = () => {
         const ok = await refresh();
         if (!ok) throw new Error("No se pudo sincronizar sesión.");
 
+        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+
         try {
+          const todayKey = getLocalDateKey(new Date());
+          const attendanceSyncKey = `attendance-login-sync:${stored?.id || stored?.email || "anon"}:${todayKey}`;
           const attendance = await getTodayAttendance();
-          if (!attendance?.data?.entry_time) {
+          if (attendance?.data?.entry_time) {
+            sessionStorage.setItem(attendanceSyncKey, "done");
+          } else if (!sessionStorage.getItem(attendanceSyncKey)) {
             await clockIn(null);
+            sessionStorage.setItem(attendanceSyncKey, "done");
           }
         } catch (attendanceErr) {
           console.warn("No se pudo garantizar la entrada automatica en login:", attendanceErr?.message || attendanceErr);
         }
         window.history.replaceState(null, "", window.location.pathname);
 
-        // 3️⃣ Acceder al usuario directamente desde AuthContext
-        const stored = JSON.parse(localStorage.getItem("user") || "{}");
+        // Acceder al usuario directamente desde AuthContext
 
-        // 🆕 Check if user has signature - redirect to signature page if not
+        // Check if user has signature - redirect to signature page if not
         if (!stored.has_signature) {
           console.log("⚠️ Usuario sin firma registrada, redirigiendo a captura de firma");
           navigate("/first-login-signature", { replace: true });

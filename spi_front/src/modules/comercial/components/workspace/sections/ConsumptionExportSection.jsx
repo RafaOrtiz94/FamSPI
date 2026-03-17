@@ -188,15 +188,18 @@ const ConsumptionExportSection = ({ businessCase }) => {
     try {
       setLoadingPreview(true);
       setPreviewError(null);
-      const catalogRes = await api.get(`/business-case/${bcId}/investments/catalog`);
-      const catalogItems = Array.isArray(catalogRes?.data?.data) ? catalogRes.data.data : [];
-      setPreview(buildLocalPreview({ businessCase, catalogItems }));
+      const previewRes = await api.get(`/business-case/${bcId}/sheets/preview`);
+      const serverPreview = previewRes?.data?.data || null;
+      if (!serverPreview) {
+        throw new Error("La previsualizacion de Sheets no devolvio datos");
+      }
+      setPreview(serverPreview);
     } catch (error) {
       setPreview(buildLocalPreview({ businessCase, catalogItems: [] }));
       setPreviewError(
         error?.response?.data?.message ||
           error?.message ||
-          "No se pudo actualizar la vista previa con inversiones",
+          "No se pudo actualizar la vista previa real de Sheets",
       );
     } finally {
       setLoadingPreview(false);
@@ -270,6 +273,8 @@ const ConsumptionExportSection = ({ businessCase }) => {
 
   const fieldRows = useMemo(() => Object.entries(preview?.fields || {}), [preview?.fields]);
   const inversionRows = useMemo(() => toInversionRows(preview?.inversiones || {}), [preview?.inversiones]);
+  const equipmentTabRows = useMemo(() => Array.isArray(preview?.equipment_tabs) ? preview.equipment_tabs : [], [preview?.equipment_tabs]);
+  const maxQuantityRows = useMemo(() => Array.isArray(preview?.max_quantities) ? preview.max_quantities : [], [preview?.max_quantities]);
   const metadataLast = businessCase?.modern_bc_metadata?.bc_sheet_generation?.last || null;
   const lastSync = useMemo(
     () =>
@@ -356,7 +361,7 @@ const ConsumptionExportSection = ({ businessCase }) => {
         </div>
       ) : (
         <>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 xl:grid-cols-5 gap-3">
             <div className="bg-white border border-gray-100 rounded-xl p-4">
               <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Version mapping</p>
               <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.mapping_version || "-"}</p>
@@ -369,12 +374,20 @@ const ConsumptionExportSection = ({ businessCase }) => {
               <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Inversiones</p>
               <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.summary?.inversiones_count ?? inversionRows.length}</p>
             </div>
+            <div className="bg-white border border-gray-100 rounded-xl p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Pestanas equipo</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.summary?.equipment_tabs_count ?? equipmentTabRows.length}</p>
+            </div>
+            <div className="bg-white border border-gray-100 rounded-xl p-4">
+              <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Cantidades maximas</p>
+              <p className="text-sm font-semibold text-gray-900 mt-1">{preview?.summary?.max_quantities_count ?? maxQuantityRows.length}</p>
+            </div>
           </div>
 
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5 space-y-4">
             <h3 className="text-base font-semibold text-gray-900">Vista previa de datos a sincronizar</h3>
             <p className="text-xs text-gray-500">
-              Esta vista muestra el payload consolidado que se enviara al WebApp para llenar el formato BC.
+              Esta vista muestra el payload consolidado que se sincronizara en el Google Sheet oficial del Business Case.
             </p>
 
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
@@ -437,6 +450,70 @@ const ConsumptionExportSection = ({ businessCase }) => {
                   </div>
                 )}
               </div>
+            </div>
+
+            <div className="border border-gray-100 rounded-xl">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800">Pestanas de equipos propuestas</p>
+                <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">{equipmentTabRows.length}</span>
+              </div>
+              {equipmentTabRows.length === 0 ? (
+                <div className="p-4 text-sm text-gray-500">No hay equipos propuestos listos para sincronizar.</div>
+              ) : (
+                <div className="max-h-[260px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Pestana</th>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Equipos vinculados</th>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Items</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {equipmentTabRows.map((tab) => (
+                        <tr key={tab.sheet_name}>
+                          <td className="px-4 py-2 text-gray-700 font-medium">{tab.sheet_name}</td>
+                          <td className="px-4 py-2 text-gray-600">{Array.isArray(tab.equipment_names) ? tab.equipment_names.join(", ") || "-" : "-"}</td>
+                          <td className="px-4 py-2 text-gray-600">{Array.isArray(tab.items) ? tab.items.length : 0}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="border border-gray-100 rounded-xl">
+              <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800">Cantidades maximas por elemento</p>
+                <span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-700">{maxQuantityRows.length}</span>
+              </div>
+              {maxQuantityRows.length === 0 ? (
+                <div className="p-4 text-sm text-gray-500">No hay cantidades maximas consolidadas para sincronizar.</div>
+              ) : (
+                <div className="max-h-[320px] overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 sticky top-0">
+                      <tr>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Equipo</th>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Elemento</th>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Cant. anual</th>
+                        <th className="text-left px-4 py-2 text-xs text-gray-500 font-semibold">Cant. maxima</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {maxQuantityRows.map((item) => (
+                        <tr key={item.item_key}>
+                          <td className="px-4 py-2 text-gray-700">{item.equipment_name || "-"}</td>
+                          <td className="px-4 py-2 text-gray-600">{item.item_name || "-"}</td>
+                          <td className="px-4 py-2 text-gray-600">{item.annual_qty ?? "-"}</td>
+                          <td className="px-4 py-2 text-gray-600">{item.planned_qty ?? "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </>

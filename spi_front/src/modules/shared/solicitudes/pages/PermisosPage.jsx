@@ -1,17 +1,94 @@
-import React, { useEffect, useMemo, useState } from "react";
-import PermisosStatusWidget from "../components/PermisosStatusWidget";
-import PermisosColaboradoresWidget from "../components/PermisosColaboradoresWidget";
-import PermisosGlobalRequestsWidget from "../components/PermisosGlobalRequestsWidget";
-import PermisosColaboradoresAlbum from "../components/PermisosColaboradoresAlbum";
-import { FiCalendar } from "react-icons/fi";
+﻿import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { FiCalendar, FiCheckSquare, FiGlobe, FiUsers } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import PermisoVacacionModal from "../modals/PermisoVacacionModal";
-import { AprobacionPermisosView } from "..";
 import { useUI } from "../../../../core/ui/UIContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
+
+const PermisosStatusWidget = lazy(() => import("../components/PermisosStatusWidget"));
+const PermisosColaboradoresWidget = lazy(() => import("../components/PermisosColaboradoresWidget"));
+const PermisosGlobalRequestsWidget = lazy(() => import("../components/PermisosGlobalRequestsWidget"));
+const PermisosColaboradoresAlbum = lazy(() => import("../components/PermisosColaboradoresAlbum"));
+const AprobacionPermisosView = lazy(() => import("../components/AprobacionPermisosView"));
+
+const SECTION_META = {
+    collaborators: {
+        title: "Colaboradores",
+        subtitle: "Talento Humano",
+        description: "Resumen por colaborador con carga independiente para no saturar la página principal.",
+        icon: FiUsers,
+        tone: "emerald",
+    },
+    global: {
+        title: "Solicitudes globales",
+        subtitle: "Seguimiento",
+        description: "Consulta consolidada de solicitudes sin mezclarla con la gestión personal diaria.",
+        icon: FiGlobe,
+        tone: "amber",
+    },
+    gerencia_album: {
+        title: "Álbum de colaboradores",
+        subtitle: "Gerencia",
+        description: "Navegación por tarjetas para revisar disponibilidad y detalle por colaborador.",
+        icon: FiUsers,
+        tone: "indigo",
+    },
+    gerencia_approvals: {
+        title: "Aprobaciones",
+        subtitle: "Gerencia",
+        description: "Pendientes finales en una vista separada para evitar sobrecarga visual.",
+        icon: FiCheckSquare,
+        tone: "rose",
+    },
+};
+
+const SECTION_TONES = {
+    blue: {
+        selected: "border-blue-500 bg-blue-50 shadow-blue-100",
+        idle: "border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/50",
+        icon: "bg-blue-600 text-white",
+        subtitle: "text-blue-700",
+    },
+    emerald: {
+        selected: "border-emerald-500 bg-emerald-50 shadow-emerald-100",
+        idle: "border-gray-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50",
+        icon: "bg-emerald-600 text-white",
+        subtitle: "text-emerald-700",
+    },
+    amber: {
+        selected: "border-amber-500 bg-amber-50 shadow-amber-100",
+        idle: "border-gray-200 bg-white hover:border-amber-300 hover:bg-amber-50/50",
+        icon: "bg-amber-500 text-white",
+        subtitle: "text-amber-700",
+    },
+    indigo: {
+        selected: "border-indigo-500 bg-indigo-50 shadow-indigo-100",
+        idle: "border-gray-200 bg-white hover:border-indigo-300 hover:bg-indigo-50/50",
+        icon: "bg-indigo-600 text-white",
+        subtitle: "text-indigo-700",
+    },
+    rose: {
+        selected: "border-rose-500 bg-rose-50 shadow-rose-100",
+        idle: "border-gray-200 bg-white hover:border-rose-300 hover:bg-rose-50/50",
+        icon: "bg-rose-600 text-white",
+        subtitle: "text-rose-700",
+    },
+};
+
+const SectionLoader = ({ label }) => (
+    <Card className="border border-gray-200 shadow-sm">
+        <div className="p-8 text-center space-y-2">
+            <div className="inline-block h-8 w-8 animate-spin rounded-full border-b-2 border-blue-600" />
+            <p className="text-sm font-medium text-gray-700">Cargando {label}...</p>
+            <p className="text-xs text-gray-500">
+                Se monta solo la vista activa para reducir carga visual y tiempo de refresco.
+            </p>
+        </div>
+    </Card>
+);
 
 const PermisosPage = () => {
     const { showToast } = useUI();
@@ -21,6 +98,7 @@ const PermisosPage = () => {
     const [vacationSummary, setVacationSummary] = useState(null);
     const [vacationRequests, setVacationRequests] = useState([]);
     const [loadingSummary, setLoadingSummary] = useState(false);
+    const [activeSection, setActiveSection] = useState("mine");
 
     const isGerenciaGeneral = useMemo(() => {
         const normalizeRole = (value) =>
@@ -114,11 +192,7 @@ const PermisosPage = () => {
                 .toLowerCase()
                 .replace(/[\s-]+/g, "_");
 
-        const candidates = [
-            user?.role,
-            user?.scope,
-            user?.role_name,
-        ].map(normalizeRole);
+        const candidates = [user?.role, user?.scope, user?.role_name].map(normalizeRole);
 
         return candidates.some((role) =>
             ["talento_humano", "jefe_talento_humano", "jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(role)
@@ -136,17 +210,65 @@ const PermisosPage = () => {
         return candidates.some((role) => ["jefe_ti", "jefe_financiero"].includes(role));
     }, [user]);
 
+    const availableSections = useMemo(() => {
+        if (isGerenciaGeneral) return ["gerencia_album", "gerencia_approvals"];
+
+        const sections = [];
+        if (isTalentRole) sections.push("collaborators");
+        if (canViewGlobalRequestsWidget) sections.push("global");
+        return sections;
+    }, [isGerenciaGeneral, isTalentRole, canViewGlobalRequestsWidget]);
+
+    useEffect(() => {
+        if (activeSection !== "mine" && !availableSections.includes(activeSection)) {
+            setActiveSection(availableSections[0] || "mine");
+        }
+    }, [activeSection, availableSections]);
     const containerClass = isGerenciaGeneral ? "p-4 max-w-7xl mx-auto space-y-4" : "p-6 max-w-7xl mx-auto space-y-6";
+
+    const renderActiveSection = () => {
+        switch (activeSection) {
+            case "mine":
+                return (
+                    <Suspense fallback={<SectionLoader label="mis solicitudes" />}>
+                        <PermisosStatusWidget />
+                    </Suspense>
+                );
+            case "collaborators":
+                return (
+                    <Suspense fallback={<SectionLoader label="colaboradores" />}>
+                        <PermisosColaboradoresWidget />
+                    </Suspense>
+                );
+            case "global":
+                return (
+                    <Suspense fallback={<SectionLoader label="solicitudes globales" />}>
+                        <PermisosGlobalRequestsWidget />
+                    </Suspense>
+                );
+            case "gerencia_album":
+                return (
+                    <Suspense fallback={<SectionLoader label="álbum de colaboradores" />}>
+                        <PermisosColaboradoresAlbum compact />
+                    </Suspense>
+                );
+            case "gerencia_approvals":
+                return (
+                    <Suspense fallback={<SectionLoader label="aprobaciones" />}>
+                        <AprobacionPermisosView compact />
+                    </Suspense>
+                );
+            default:
+                return null;
+        }
+    };
 
     return (
         <div className={containerClass}>
-            {/* Header */}
             <div className="rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white shadow">
-                <h1 className="text-2xl font-bold">
-                    Permisos y Vacaciones
-                </h1>
+                <h1 className="text-2xl font-bold">Permisos y Vacaciones</h1>
                 <p className="text-sm opacity-90 mt-1">
-                    Gestiona solicitudes, aprobaciones y justificantes en un solo flujo.
+                    Gestiona solicitudes, aprobaciones y justificantes sin cargar todas las vistas al mismo tiempo.
                 </p>
             </div>
 
@@ -246,17 +368,44 @@ const PermisosPage = () => {
                 </Card>
             )}
 
-            {isGerenciaGeneral ? (
-                <>
-                    <PermisosColaboradoresAlbum compact />
-                    <AprobacionPermisosView compact />
-                </>
-            ) : (
-                <PermisosStatusWidget />
-            )}
+            <section className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {availableSections.map((sectionId) => {
+                        const meta = SECTION_META[sectionId];
+                        const tone = SECTION_TONES[meta.tone] || SECTION_TONES.blue;
+                        const Icon = meta.icon;
+                        const isActive = activeSection === sectionId;
 
-            {!isGerenciaGeneral && isTalentRole && <PermisosColaboradoresWidget />}
-            {!isGerenciaGeneral && canViewGlobalRequestsWidget && <PermisosGlobalRequestsWidget />}
+                        return (
+                            <button
+                                key={sectionId}
+                                type="button"
+                                onClick={() => setActiveSection(sectionId)}
+                                className={`text-left rounded-2xl border p-4 shadow-sm transition-all ${isActive ? tone.selected : tone.idle}`}
+                            >
+                                <div className="flex items-start gap-3">
+                                    <div className={`h-11 w-11 rounded-2xl flex items-center justify-center shrink-0 ${tone.icon}`}>
+                                        <Icon size={20} />
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className={`text-[11px] font-bold uppercase tracking-wider ${tone.subtitle}`}>
+                                            {meta.subtitle}
+                                        </p>
+                                        <h3 className="text-base font-semibold text-gray-900 mt-1">
+                                            {meta.title}
+                                        </h3>
+                                        <p className="text-sm text-gray-500 mt-2 leading-relaxed">
+                                            {meta.description}
+                                        </p>
+                                    </div>
+                                </div>
+                            </button>
+                        );
+                    })}
+                </div>
+
+                {renderActiveSection()}
+            </section>
 
             {!isGerenciaGeneral && (
                 <PermisoVacacionModal
@@ -270,3 +419,4 @@ const PermisosPage = () => {
 };
 
 export default PermisosPage;
+

@@ -11,6 +11,11 @@ const bcRequirementsService = require("./bcRequirements.service");
 const bcDeliveriesService = require("./bcDeliveries.service");
 const { ensureBusinessCaseDriveFolderById } = require("./businessCaseDriveFolder.service");
 const {
+  loadTemplateDefinition,
+  buildSheetPayloads,
+  syncBusinessCaseToGoogleSheet,
+} = require("./businessCaseSheetSyncLocal.service");
+const {
   validateGenerationRequest,
   buildSignedWebAppPayload,
   DEFAULT_MAPPING_VERSION,
@@ -38,6 +43,7 @@ const WEBAPP_TIMEOUT_MS = Number(process.env.BC_SHEET_WEBAPP_TIMEOUT_MS || 12000
 const CIRCUIT_FAILURE_THRESHOLD = Number(process.env.BC_SHEET_CIRCUIT_FAILURE_THRESHOLD || 5);
 const CIRCUIT_RESET_MS = Number(process.env.BC_SHEET_CIRCUIT_RESET_MS || 60000);
 const MAX_ATTEMPTS_DEFAULT = Number(process.env.BC_SHEET_MAX_ATTEMPTS || 3);
+const SHEET_PROVIDER = String(process.env.BC_SHEET_PROVIDER || "local").trim().toLowerCase();
 const DELIVERY_TYPE_LABELS = Object.freeze({
   total: "Total",
   partial_time: "Parcial - Tiempo",
@@ -304,6 +310,37 @@ async function getEquipmentNamesMapByIds(ids = []) {
   return map;
 }
 
+async function getEquipmentCatalogMapByIds(ids = []) {
+  const cleanIds = Array.from(
+    new Set(
+      (Array.isArray(ids) ? ids : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+    ),
+  );
+  if (!cleanIds.length) return new Map();
+
+  const { rows } = await db.query(
+    `
+    SELECT id, name, code, model
+    FROM equipment_models
+    WHERE id = ANY($1::int[])
+    `,
+    [cleanIds],
+  );
+
+  const map = new Map();
+  rows.forEach((row) => {
+    map.set(Number(row.id), {
+      id: Number(row.id),
+      name: row.name || null,
+      code: row.code || null,
+      model: row.model || null,
+    });
+  });
+  return map;
+}
+
 function buildInversionesPayload(investments = []) {
   const out = {};
   const safeInvestments = Array.isArray(investments) ? investments : [];
@@ -323,6 +360,62 @@ function buildInversionesPayload(investments = []) {
   return out;
 }
 
+async function getMaximumQuantitiesByBusinessCaseId(businessCaseId) {
+  try {
+    const { rows } = await db.query(
+      `
+      SELECT
+        c.item_key,
+        c.item_id,
+        c.name AS item_name,
+        c.item_type,
+        c.source,
+        c.equipment_id,
+        c.equipment_name,
+        c.annual_qty,
+        d.planned_qty,
+        d.ops_dispatch_qty,
+        d.ops_dispatched_qty,
+        d.unit_price
+      FROM bc_consumption_items c
+      LEFT JOIN bc_dispatch_items d
+        ON d.business_case_id = c.business_case_id
+       AND d.item_key = c.item_key
+      WHERE c.business_case_id = $1
+      ORDER BY COALESCE(c.equipment_name, ''), c.name
+      `,
+      [businessCaseId],
+    );
+    return rows;
+  } catch (error) {
+    if (String(error?.code || "") === "42P01" && /bc_dispatch_items/i.test(String(error?.message || ""))) {
+      const { rows } = await db.query(
+        `
+        SELECT
+          item_key,
+          item_id,
+          name AS item_name,
+          item_type,
+          source,
+          equipment_id,
+          equipment_name,
+          annual_qty,
+          NULL::numeric AS planned_qty,
+          NULL::numeric AS ops_dispatch_qty,
+          NULL::numeric AS ops_dispatched_qty,
+          NULL::numeric AS unit_price
+        FROM bc_consumption_items
+        WHERE business_case_id = $1
+        ORDER BY COALESCE(equipment_name, ''), name
+        `,
+        [businessCaseId],
+      );
+      return rows;
+    }
+    throw error;
+  }
+}
+
 async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
   const metadata = toObject(bcRow?.modern_bc_metadata);
   const generalData = toObject(metadata.general_data);
@@ -340,6 +433,8 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     deliveries,
     investments,
     equipmentNamesMap,
+    equipmentCatalogMap,
+    maximumQuantities,
   ] = await Promise.all([
     bcLabEnvironmentService.getLabEnvironment(businessCaseId),
     bcEquipmentDetailsService.getEquipmentDetails(businessCaseId),
@@ -348,6 +443,10 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     bcDeliveriesService.getDeliveries(businessCaseId),
     investmentsService.getCatalogWithSelections(businessCaseId),
     getEquipmentNamesMapByIds([primaryId, backupId]),
+    getEquipmentCatalogMapByIds(
+      equipmentPairs.flatMap((pair) => [pair?.primary_id, pair?.backup_id]),
+    ),
+    getMaximumQuantitiesByBusinessCaseId(businessCaseId),
   ]);
 
   const lisInterfaces = lisIntegration?.id
@@ -450,10 +549,71 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     !Array.isArray(input.inversiones) &&
     Object.keys(input.inversiones).length > 0;
 
+  const selectedEquipmentRecords = Array.from(
+    new Map(
+      equipmentPairs
+        .flatMap((pair) => [pair?.primary_id, pair?.backup_id])
+        .map((rawId) => Number(rawId))
+        .filter((value) => Number.isInteger(value) && value > 0)
+        .map((id) => [id, equipmentCatalogMap.get(id)])
+        .filter(([, value]) => Boolean(value)),
+    ).values(),
+  );
+  const fallbackEquipmentRecords = !selectedEquipmentRecords.length
+    ? Array.from(
+        new Map(
+          (Array.isArray(maximumQuantities) ? maximumQuantities : [])
+            .map((row) => ({
+              id: Number(row.equipment_id),
+              name: row.equipment_name || null,
+              code: null,
+              model: null,
+            }))
+            .filter((row) => Number.isInteger(row.id) && row.id > 0)
+            .map((row) => [row.id, row]),
+        ).values(),
+      )
+    : [];
+
+  const sheetContext = {
+    deadline_months: requirements?.deadline_months ?? null,
+    projected_deadline_months: requirements?.projected_deadline_months ?? null,
+    modality: null,
+  };
+
+  const preparedMaximumQuantities = (Array.isArray(maximumQuantities) ? maximumQuantities : []).map((row) => ({
+    item_key: row.item_key,
+    item_id: row.item_id,
+    item_name: row.item_name,
+    item_type: row.item_type,
+    source: row.source,
+    equipment_id: row.equipment_id,
+    equipment_name: row.equipment_name,
+    annual_qty: row.annual_qty === null || row.annual_qty === undefined ? null : Number(row.annual_qty),
+    planned_qty: row.planned_qty === null || row.planned_qty === undefined ? null : Number(row.planned_qty),
+    ops_dispatch_qty: row.ops_dispatch_qty === null || row.ops_dispatch_qty === undefined ? null : Number(row.ops_dispatch_qty),
+    ops_dispatched_qty:
+      row.ops_dispatched_qty === null || row.ops_dispatched_qty === undefined ? null : Number(row.ops_dispatched_qty),
+    unit_price: row.unit_price === null || row.unit_price === undefined ? null : Number(row.unit_price),
+  }));
+
+  const equipmentTabs = buildSheetPayloads({
+    template: loadTemplateDefinition(),
+    equipmentRecords: selectedEquipmentRecords.length ? selectedEquipmentRecords : fallbackEquipmentRecords,
+    payload: {
+      fields,
+      max_quantities: preparedMaximumQuantities,
+      sheet_context: sheetContext,
+    },
+  });
+
   return {
     ...input,
     fields,
     inversiones: hasManualInversiones ? input.inversiones : buildInversionesPayload(investments),
+    max_quantities: preparedMaximumQuantities,
+    equipment_tabs: equipmentTabs,
+    sheet_context: sheetContext,
   };
 }
 
@@ -462,6 +622,9 @@ function buildPayloadHash(payload) {
     mapping_version: payload.mapping_version,
     fields: payload.fields || {},
     inversiones: payload.inversiones || {},
+    max_quantities: payload.max_quantities || [],
+    equipment_tabs: payload.equipment_tabs || [],
+    sheet_context: payload.sheet_context || {},
   });
 }
 
@@ -599,6 +762,9 @@ async function enqueueGenerationJob({
           mapping_version: normalized.mapping_version,
           fields: normalized.fields,
           inversiones: normalized.inversiones || {},
+          max_quantities: normalized.max_quantities || [],
+          equipment_tabs: normalized.equipment_tabs || [],
+          sheet_context: normalized.sheet_context || {},
         }),
         Math.max(1, MAX_ATTEMPTS_DEFAULT),
         correlationId,
@@ -684,7 +850,11 @@ async function getGenerationPreview({ businessCaseId, input = {} }) {
       summary: {
         fields_count: Object.keys(normalized.fields || {}).length,
         inversiones_count: Object.keys(inversiones).length,
+        equipment_tabs_count: Array.isArray(normalized.equipment_tabs) ? normalized.equipment_tabs.length : 0,
+        max_quantities_count: Array.isArray(normalized.max_quantities) ? normalized.max_quantities.length : 0,
       },
+      equipment_tabs: Array.isArray(normalized.equipment_tabs) ? normalized.equipment_tabs : [],
+      max_quantities: Array.isArray(normalized.max_quantities) ? normalized.max_quantities : [],
       last_generation: lastGeneration
         ? {
             job_id: lastGeneration.job_id || null,
@@ -915,7 +1085,7 @@ async function persistSheetResultInBusinessCase({
       sheet_id: webAppResponse.sheetId,
       sheet_url: webAppResponse.url,
       generated_at: webAppResponse.timestamp || nowIso,
-      provider: "apps_script_webapp",
+      provider: webAppResponse.provider || "apps_script_webapp",
       updated_at: nowIso,
     };
 
@@ -1070,12 +1240,29 @@ async function processSingleJob(job) {
     const payload = job.request_payload && typeof job.request_payload === "object"
       ? job.request_payload
       : {};
+    const bcRow = await assertBusinessCaseExists(job.business_case_id);
+    const refreshedPayload = await buildAutoGenerationInput({
+      businessCaseId: job.business_case_id,
+      bcRow,
+      input: payload,
+    });
     const outputFolderId = await resolveOutputFolderIdForJob(job);
+    const previousSheetMeta = toObject(bcRow?.modern_bc_metadata)?.bc_sheet_generation?.last || {};
+    const previousSheetId = previousSheetMeta?.provider === "google_sheets_local"
+      ? previousSheetMeta.sheet_id || null
+      : null;
     const enrichedPayload = {
-      ...payload,
+      ...refreshedPayload,
       output_folder_id: outputFolderId,
     };
-    const webAppResponse = await callAppsScriptWebApp(enrichedPayload, context);
+    const webAppResponse = SHEET_PROVIDER === "webapp"
+      ? await callAppsScriptWebApp(enrichedPayload, context)
+      : await syncBusinessCaseToGoogleSheet({
+          businessCase: bcRow,
+          outputFolderId,
+          payload: enrichedPayload,
+          previousSheetId,
+        });
 
     await persistSheetResultInBusinessCase({
       businessCaseId: job.business_case_id,

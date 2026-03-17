@@ -72,14 +72,20 @@ const SectionNavigator = ({
     {
       id: "consumption_export",
       title: "Sincronizacion",
-      description: "Generacion y sincronizacion del formato BC en Sheets",
+      description: "Creacion y sincronizacion del Sheet oficial del Business Case",
       icon: "EXP"
     },
     {
       id: "dispatch_workspace",
-      title: "Despacho Operativo",
-      description: "Cantidades comerciales y control de despacho",
+      title: "Cantidades Maximas",
+      description: "Cantidades maximas comerciales y control operativo por elemento",
       icon: "OPS"
+    },
+    {
+      id: "feasibility",
+      title: "Factibilidad",
+      description: "Decision final del BC para cierre y continuidad en compras",
+      icon: "FAC"
     }
   ];
 

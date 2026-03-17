@@ -7,6 +7,8 @@ import {
   normalizeUIGuidanceResponse,
   createAutosaveManager,
   recordSectionCompletion,
+  requestBusinessCasePreflowReopen,
+  resolveBusinessCasePreflowReopen,
 } from "../../../core/api/businessCaseApi";
 import { useUI } from "../../../core/ui/UIContext";
 import { recordBusinessCaseTelemetry } from "../../../core/utils/businessCaseTelemetry";
@@ -31,8 +33,21 @@ const WORKSPACE_SECTION_ORDER = [
   "investments",
   "consumption_export",
   "dispatch_workspace",
+  "feasibility",
 ];
 const LEGACY_DEV_SECTIONS = new Set(["prices", "calculations", "rentability"]);
+const SECTION_LABELS = {
+  general: "Datos Generales",
+  lab: "Entorno Laboratorio",
+  requirement: "Condiciones del BC",
+  equipment: "Equipamiento",
+  lis: "Integracion LIS",
+  determinations: "Determinaciones",
+  investments: "Inversiones",
+  consumption_export: "Sincronizacion",
+  dispatch_workspace: "Cantidades Maximas",
+  feasibility: "Factibilidad",
+};
 
 const getVisibleSectionsByRole = (role = "") => {
   const config = resolveRoleSectionConfig(String(role || "").toLowerCase());
@@ -63,6 +78,19 @@ const BusinessCaseWorkspace = () => {
     open: false,
     sectionLabel: "",
   });
+  const [reopenRequestState, setReopenRequestState] = useState({
+    open: false,
+    reason: "",
+    sections: [],
+    submitting: false,
+  });
+  const [reopenDecisionState, setReopenDecisionState] = useState({
+    open: false,
+    additionalHours: "",
+    notes: "",
+    sections: [],
+    submitting: false,
+  });
   const workspaceShellClass = "min-h-screen bg-gray-50 px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:py-6";
   const workspaceContainerClass = "mx-auto w-full max-w-[1440px] space-y-5 lg:space-y-6";
 
@@ -77,6 +105,18 @@ const BusinessCaseWorkspace = () => {
     }
     setSelectedSection(sectionId);
   };
+
+  const refreshWorkspaceState = useCallback(async () => {
+    if (!bcId) return null;
+    const [guidanceData, businessCaseData] = await Promise.all([
+      getUIGuidance(bcId),
+      getBusinessCase(bcId),
+    ]);
+    const normalized = normalizeUIGuidanceResponse(guidanceData);
+    setUiGuidance(normalized);
+    setBusinessCase(businessCaseData);
+    return normalized;
+  }, [bcId]);
 
   const requestSectionConfirm = useCallback((section) => {
     const sectionLabel = String(section || "seccion").replace(/_/g, " ");
@@ -111,14 +151,7 @@ const BusinessCaseWorkspace = () => {
           showToast("Puedes seguir editando esta seccion antes de continuar.", "info");
         }
       }
-      // Refresh UI guidance and business case to rehydrate saved fields
-      const [data, businessCaseData] = await Promise.all([
-        getUIGuidance(bcId),
-        getBusinessCase(bcId)
-      ]);
-      const normalizedUIGuidance = normalizeUIGuidanceResponse(data);
-      setUiGuidance(normalizedUIGuidance);
-      setBusinessCase(businessCaseData);
+      const normalizedUIGuidance = await refreshWorkspaceState();
       if (sectionCompleted && options?.section) {
         const userRole = normalizedUIGuidance?.permissions?.userRole || "comercial";
         const nextSection = getNextSectionId(options.section, userRole);
@@ -143,7 +176,7 @@ const BusinessCaseWorkspace = () => {
         success: false,
       });
     }
-  }, [bcId, requestSectionConfirm, showToast, uiGuidance]);
+  }, [bcId, refreshWorkspaceState, requestSectionConfirm, showToast, uiGuidance]);
 
 
   // Initialize autosave manager and fetch data on mount and when bcId changes
@@ -230,14 +263,98 @@ const BusinessCaseWorkspace = () => {
     if (!bcId) return;
 
     try {
-      const data = await getUIGuidance(bcId);
-      setUiGuidance(normalizeUIGuidanceResponse(data));
+      await refreshWorkspaceState();
       showToast("Datos actualizados", "success");
     } catch (err) {
       console.error("Failed to refresh UI guidance:", err);
       showToast(getApiErrorMessage(err, "Error actualizando datos"), "error");
     }
   };
+
+  const visibleSections = getVisibleSectionsByRole(uiGuidance?.permissions?.userRole || "comercial");
+  const pendingReopenRequest = uiGuidance?.preflow?.extensionRequest || null;
+
+  const openReopenRequestModal = useCallback(() => {
+    const defaultSections = visibleSections.includes(selectedSection) ? [selectedSection] : [];
+    setReopenRequestState({
+      open: true,
+      reason: "",
+      sections: defaultSections,
+      submitting: false,
+    });
+  }, [selectedSection, visibleSections]);
+
+  const closeReopenRequestModal = useCallback(() => {
+    setReopenRequestState({ open: false, reason: "", sections: [], submitting: false });
+  }, []);
+
+  const openReopenDecisionModal = useCallback(() => {
+    setReopenDecisionState({
+      open: true,
+      additionalHours: "",
+      notes: "",
+      sections: Array.isArray(pendingReopenRequest?.sections) ? pendingReopenRequest.sections : [],
+      submitting: false,
+    });
+  }, [pendingReopenRequest?.sections]);
+
+  const closeReopenDecisionModal = useCallback(() => {
+    setReopenDecisionState({ open: false, additionalHours: "", notes: "", sections: [], submitting: false });
+  }, []);
+
+  const toggleRequestSection = useCallback((sectionId) => {
+    setReopenRequestState((prev) => ({
+      ...prev,
+      sections: prev.sections.includes(sectionId)
+        ? prev.sections.filter((item) => item !== sectionId)
+        : [...prev.sections, sectionId],
+    }));
+  }, []);
+
+  const toggleDecisionSection = useCallback((sectionId) => {
+    setReopenDecisionState((prev) => ({
+      ...prev,
+      sections: prev.sections.includes(sectionId)
+        ? prev.sections.filter((item) => item !== sectionId)
+        : [...prev.sections, sectionId],
+    }));
+  }, []);
+
+  const submitReopenRequest = useCallback(async () => {
+    if (!bcId) return;
+    setReopenRequestState((prev) => ({ ...prev, submitting: true }));
+    try {
+      await requestBusinessCasePreflowReopen(bcId, {
+        reason: reopenRequestState.reason,
+        sections: reopenRequestState.sections,
+      });
+      await refreshWorkspaceState();
+      closeReopenRequestModal();
+      showToast("Solicitud enviada a Jefe Comercial", "success");
+    } catch (err) {
+      setReopenRequestState((prev) => ({ ...prev, submitting: false }));
+      showToast(getApiErrorMessage(err, "No se pudo solicitar la reapertura"), "error");
+    }
+  }, [bcId, closeReopenRequestModal, refreshWorkspaceState, reopenRequestState.reason, reopenRequestState.sections, showToast]);
+
+  const submitReopenDecision = useCallback(async (approved) => {
+    if (!bcId) return;
+    setReopenDecisionState((prev) => ({ ...prev, submitting: true }));
+    try {
+      await resolveBusinessCasePreflowReopen(bcId, {
+        approved,
+        additional_hours: approved ? reopenDecisionState.additionalHours : 0,
+        notes: reopenDecisionState.notes,
+        sections: reopenDecisionState.sections,
+      });
+      await refreshWorkspaceState();
+      closeReopenDecisionModal();
+      showToast(approved ? "Solicitud aprobada" : "Solicitud rechazada", "success");
+    } catch (err) {
+      setReopenDecisionState((prev) => ({ ...prev, submitting: false }));
+      showToast(getApiErrorMessage(err, "No se pudo resolver la solicitud"), "error");
+    }
+  }, [bcId, closeReopenDecisionModal, refreshWorkspaceState, reopenDecisionState.additionalHours, reopenDecisionState.notes, reopenDecisionState.sections, showToast]);
 
   // Show picker when no bcId is provided
   if (!bcId) {
@@ -367,7 +484,12 @@ const BusinessCaseWorkspace = () => {
         </div>
       </div>
 
-      <CaseHeader uiGuidance={uiGuidance} onRefresh={handleRefresh} />
+      <CaseHeader
+        uiGuidance={uiGuidance}
+        onRefresh={handleRefresh}
+        onOpenReopenRequest={openReopenRequestModal}
+        onOpenReopenDecision={openReopenDecisionModal}
+      />
 
       <div className="space-y-6">
         <WorkspaceContent
@@ -416,6 +538,127 @@ const BusinessCaseWorkspace = () => {
             </Button>
             <Button variant="primary" onClick={() => resolveSectionConfirm(true)}>
               Continuar y bloquear
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={reopenRequestState.open}
+        onClose={reopenRequestState.submitting ? undefined : closeReopenRequestModal}
+        title="Solicitar reapertura de etapa"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            La solicitud se enviara a Jefe Comercial para decidir si amplia la ventana y que secciones quedaran nuevamente editables.
+          </p>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Motivo</label>
+            <textarea
+              rows={4}
+              value={reopenRequestState.reason}
+              onChange={(event) => setReopenRequestState((prev) => ({ ...prev, reason: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              placeholder="Describe que necesitas corregir o completar."
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-medium text-slate-700">Secciones a reabrir</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {visibleSections.map((sectionId) => (
+                <label key={sectionId} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={reopenRequestState.sections.includes(sectionId)}
+                    onChange={() => toggleRequestSection(sectionId)}
+                  />
+                  <span>{SECTION_LABELS[sectionId] || sectionId}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={closeReopenRequestModal} disabled={reopenRequestState.submitting}>
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={submitReopenRequest}
+              disabled={!reopenRequestState.reason.trim() || reopenRequestState.submitting}
+            >
+              Enviar solicitud
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={reopenDecisionState.open}
+        onClose={reopenDecisionState.submitting ? undefined : closeReopenDecisionModal}
+        title="Gestionar solicitud de reapertura"
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
+            <p><span className="font-semibold">Solicitante:</span> {pendingReopenRequest?.requestedByEmail || "N/D"}</p>
+            <p className="mt-1"><span className="font-semibold">Etapa:</span> {pendingReopenRequest?.phaseLabel || "N/D"} ({pendingReopenRequest?.roleLabel || "N/D"})</p>
+            <p className="mt-1"><span className="font-semibold">Motivo:</span> {pendingReopenRequest?.reason || "Sin detalle"}</p>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Horas adicionales</label>
+            <input
+              type="number"
+              min="1"
+              value={reopenDecisionState.additionalHours}
+              onChange={(event) => setReopenDecisionState((prev) => ({ ...prev, additionalHours: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              placeholder="Ej. 12"
+            />
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Notas</label>
+            <textarea
+              rows={3}
+              value={reopenDecisionState.notes}
+              onChange={(event) => setReopenDecisionState((prev) => ({ ...prev, notes: event.target.value }))}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-500"
+              placeholder="Opcional"
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-medium text-slate-700">Secciones a reabrir</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {visibleSections.map((sectionId) => (
+                <label key={sectionId} className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={reopenDecisionState.sections.includes(sectionId)}
+                    onChange={() => toggleDecisionSection(sectionId)}
+                  />
+                  <span>{SECTION_LABELS[sectionId] || sectionId}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" onClick={closeReopenDecisionModal} disabled={reopenDecisionState.submitting}>
+              Cancelar
+            </Button>
+            <button
+              type="button"
+              onClick={() => submitReopenDecision(false)}
+              disabled={reopenDecisionState.submitting}
+              className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-semibold text-rose-700"
+            >
+              Rechazar
+            </button>
+            <Button
+              variant="primary"
+              onClick={() => submitReopenDecision(true)}
+              disabled={!String(reopenDecisionState.additionalHours || "").trim() || reopenDecisionState.submitting}
+            >
+              Aprobar y ampliar tiempo
             </Button>
           </div>
         </div>

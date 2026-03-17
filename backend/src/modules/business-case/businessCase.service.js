@@ -215,7 +215,10 @@ async function saveFeasibilityDecision(
     calculations: calculations || null,
   };
   feasibility.requires_change_approval = false;
-  feasibility.closed = !is_feasible;
+  feasibility.closed = true;
+  feasibility.closed_at = nowIso;
+  feasibility.closed_by_email = user?.email || null;
+  feasibility.closed_by_id = user?.id || null;
 
   metadata.feasibility = feasibility;
   await db.query(

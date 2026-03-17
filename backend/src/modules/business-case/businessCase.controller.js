@@ -142,10 +142,11 @@ const SECTION_ALIASES = {
   investments: "investments",
   prices: "prices",
   dispatch_workspace: "dispatch_workspace",
+  feasibility: "feasibility",
 };
 
 const REVIEW_ROLES = ["acp_comercial", "backoffice_comercial"];
-const LOCK_ROLES = ["acp_comercial", "backoffice_comercial"];
+const LOCK_ROLES = ["acp_comercial", "backoffice_comercial", "jefe_comercial"];
 const PHASE1_SECTIONS = ["general", "lab", "equipment", "lis", "determinations", "requirement"];
 const PRE_BC_DURATION_HOURS = 48;
 const DETERMINATIONS_UPLOAD_MAIL_ROLES = [
@@ -300,6 +301,15 @@ async function failIdempotentWrite(session, error) {
 
 function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+}
+
+function normalizeSectionList(sections = []) {
+  if (!Array.isArray(sections)) return [];
+  return [...new Set(
+    sections
+      .map((section) => String(section || "").trim().toLowerCase())
+      .filter(Boolean),
+  )];
 }
 
 async function getUsersByRoles(roles = []) {
@@ -2250,6 +2260,19 @@ async function getUIGuidance(req, res) {
     const hasInvestmentsData = Array.isArray(investmentSelections) && investmentSelections.some((i) => i.selected);
 
     const userRole = (req.user?.role || req.user?.scope || req.user?.role_name || 'comercial').toLowerCase();
+    const feasibilityData =
+      bc?.modern_bc_metadata && typeof bc.modern_bc_metadata === "object" && !Array.isArray(bc.modern_bc_metadata)
+        ? (bc.modern_bc_metadata.feasibility && typeof bc.modern_bc_metadata.feasibility === "object" && !Array.isArray(bc.modern_bc_metadata.feasibility)
+          ? bc.modern_bc_metadata.feasibility
+          : {})
+        : {};
+    const feasibilityDecision =
+      feasibilityData?.decision && typeof feasibilityData.decision === "object" && !Array.isArray(feasibilityData.decision)
+        ? feasibilityData.decision
+        : null;
+    const hasFeasibilityExport = Boolean(feasibilityData?.export_excel?.at);
+    const hasFeasibilityDecision = Boolean(feasibilityDecision?.decided_at);
+    const workspaceClosedByFeasibility = Boolean(feasibilityData?.closed || hasFeasibilityDecision);
     const lockMap = await BusinessCaseDataOwnership.getLockStatus(id);
     const determinationsGate = determinationsGateService.buildGateInfo({
       businessCase: bc,
@@ -2270,6 +2293,11 @@ async function getUIGuidance(req, res) {
         dispatchWorkspaceComplete,
         hasDispatchWorkspaceData,
         "dispatch_workspace",
+      ),
+      feasibility: completionRule(
+        hasFeasibilityDecision,
+        hasFeasibilityExport || hasFeasibilityDecision,
+        "feasibility",
       ),
       rentability: completionRule(false, false, "rentability"),
     };
@@ -2296,6 +2324,20 @@ async function getUIGuidance(req, res) {
       stat_document_expired: determinationsGate.isExpired,
       determinations_editor_roles: determinationsGate.editors,
     };
+    ownershipRules.feasibility.canUserEdit = !workspaceClosedByFeasibility;
+    ownershipRules.feasibility.metadata = {
+      ...(ownershipRules.feasibility.metadata || {}),
+      exported_at: feasibilityData?.export_excel?.at || null,
+      status: feasibilityData?.status || null,
+      closed: workspaceClosedByFeasibility,
+      decision: feasibilityDecision,
+    };
+
+    if (workspaceClosedByFeasibility) {
+      Object.keys(ownershipRules).forEach((sectionKey) => {
+        ownershipRules[sectionKey].canUserEdit = false;
+      });
+    }
 
     const ruleEntries = Object.values(ownershipRules);
     const completionSummary = {
@@ -2313,16 +2355,28 @@ async function getUIGuidance(req, res) {
       completionSummary,
     };
     const preflow = preflowService.buildPreflowInfo(bc, ownershipRules);
+    const canResolvePreflowReopen = ['jefe_comercial', 'gerencia', 'gerencia_general'].includes(userRole);
+    const canRequestPreflowReopen = Boolean(
+      preflow?.isActive &&
+      preflow?.isExpired &&
+      preflow?.activeRole &&
+      String(preflow.activeRole).toLowerCase() === userRole,
+    );
+    const canDecideFeasibility = ["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"].includes(userRole);
 
     // Get permissions based on user role
     const permissions = {
       userRole: userRole,
-      canEdit: true, // Default to true for all roles
-      canCompleteSections: true,
-      canPromoteStage: ['gerencia', 'jefe_comercial', 'jefe_operaciones'].includes(userRole),
+      canEdit: !workspaceClosedByFeasibility,
+      canCompleteSections: !workspaceClosedByFeasibility,
+      canPromoteStage: !workspaceClosedByFeasibility && ['gerencia', 'jefe_comercial', 'jefe_operaciones'].includes(userRole),
       canAddObservations: true,
-      canBlockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole),
-      canUnblockSections: ['acp_comercial', 'backoffice_comercial'].includes(userRole)
+      canBlockSections: !workspaceClosedByFeasibility && LOCK_ROLES.includes(userRole),
+      canUnblockSections: !workspaceClosedByFeasibility && LOCK_ROLES.includes(userRole),
+      canRequestPreflowReopen: !workspaceClosedByFeasibility && canRequestPreflowReopen,
+      canResolvePreflowReopen,
+      canDecideFeasibility: canDecideFeasibility && !workspaceClosedByFeasibility,
+      workspaceClosed: workspaceClosedByFeasibility,
     };
     const autosaveFlags = await featureFlagsService.getAutosaveFlagsForRole(userRole);
 
@@ -2339,6 +2393,12 @@ async function getUIGuidance(req, res) {
         requirements: requirementData,
         deliveries: deliveryData,
         determinations_gate: determinationsGate,
+        feasibility: {
+          ...feasibilityData,
+          hasExport: hasFeasibilityExport,
+          hasDecision: hasFeasibilityDecision,
+          closed: workspaceClosedByFeasibility,
+        },
       },
       observationData: null, // No observations for now
       workflowState: {
@@ -2741,6 +2801,65 @@ async function unlockSection(req, res) {
   }
 }
 
+async function requestPreflowReopen(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason, sections = [] } = req.body || {};
+    const result = await preflowService.requestPreflowReopen({
+      businessCaseId: id,
+      actorUser: req.user,
+      reason,
+      sections: normalizeSectionList(sections),
+    });
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const preflow = preflowService.buildPreflowInfo(businessCase, {}, new Date());
+    res.json({
+      ok: true,
+      data: {
+        request: result.request,
+        preflow,
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error requesting Business Case preflow reopen");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
+async function resolvePreflowReopen(req, res) {
+  try {
+    const { id } = req.params;
+    const {
+      approved,
+      additional_hours = 0,
+      notes = "",
+      sections = [],
+    } = req.body || {};
+    const result = await preflowService.resolvePreflowReopen({
+      businessCaseId: id,
+      actorUser: req.user,
+      approved: Boolean(approved),
+      additionalHours: additional_hours,
+      notes,
+      sections: normalizeSectionList(sections),
+    });
+    const businessCase = await businessCaseService.getBusinessCaseById(id);
+    const preflow = preflowService.buildPreflowInfo(businessCase, {}, new Date());
+    res.json({
+      ok: true,
+      data: {
+        approved: result.approved,
+        deadlineAt: result.deadlineAt,
+        request: result.request,
+        preflow,
+      },
+    });
+  } catch (error) {
+    logger.error({ error: error.message }, "Error resolving Business Case preflow reopen");
+    res.status(error.status || 500).json({ ok: false, message: error.message });
+  }
+}
+
 /**
  * Record section completion
  */
@@ -2751,7 +2870,7 @@ async function recordSectionCompletion(req, res) {
     const user = req.user;
 
     // Validate section exists
-    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'requirement', 'investments', 'prices', 'calculations', 'dispatch_workspace', 'rentability'];
+    const validSections = ['general', 'lab', 'equipment', 'lis', 'determinations', 'requirement', 'investments', 'prices', 'calculations', 'dispatch_workspace', 'feasibility', 'rentability'];
     if (!validSections.includes(section)) {
       return res.status(400).json({ ok: false, message: "Invalid section name" });
     }
@@ -2979,6 +3098,8 @@ module.exports = {
   recordSectionCompletion,
   lockSection,
   unlockSection,
+  requestPreflowReopen,
+  resolvePreflowReopen,
   // Manual BC Form endpoints
   saveLabEnvironment,
   getLabEnvironment,

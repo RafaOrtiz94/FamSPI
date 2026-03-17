@@ -118,7 +118,7 @@ router.get("/:id/export/excel", verifyToken, requireRole(businessCaseRoles), ctr
 router.post(
   "/:id/feasibility-decision",
   verifyToken,
-  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  requireRole(["acp_comercial", "jefe_comercial", "gerencia", "gerencia_general"]),
   ctrl.submitFeasibilityDecision,
 );
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
@@ -132,8 +132,15 @@ router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerat
 router.get("/:id/ui-guidance", verifyToken, requireRole(businessCaseRoles), ctrl.getUIGuidance);
 router.get("/:id/ownership", verifyToken, requireRole(businessCaseRoles), ctrl.getDataOwnership);
 router.post("/:id/ownership/complete", verifyToken, requireRole(businessCaseRoles), ctrl.recordSectionCompletion);
-router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial"]), ctrl.lockSection);
-router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial"]), ctrl.unlockSection);
+router.post("/:id/sections/:section/lock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial", "jefe_comercial"]), ctrl.lockSection);
+router.post("/:id/sections/:section/unlock", verifyToken, requireRole(["acp_comercial", "backoffice_comercial", "jefe_comercial"]), ctrl.unlockSection);
+router.post("/:id/preflow/reopen-request", verifyToken, requireRole(businessCaseRoles), ctrl.requestPreflowReopen);
+router.post(
+  "/:id/preflow/reopen-decision",
+  verifyToken,
+  requireRole(["jefe_comercial", "gerencia", "gerencia_general"]),
+  ctrl.resolvePreflowReopen,
+);
 
 // Investment routes
 router.get("/:id/investments", verifyToken, requireRole(businessCaseRoles), ctrl.getInvestments);

@@ -18,6 +18,44 @@ const generationRequestSchema = Joi.object({
       }).required(),
     )
     .default({}),
+  max_quantities: Joi.array()
+    .items(
+      Joi.object({
+        item_key: Joi.string().trim().required(),
+        item_id: Joi.alternatives().try(Joi.string().allow("").optional(), Joi.number().optional(), Joi.allow(null)),
+        item_name: Joi.string().allow("").required(),
+        item_type: Joi.string().allow("").optional(),
+        source: Joi.string().allow("").optional(),
+        equipment_id: Joi.alternatives().try(Joi.number().integer().optional(), Joi.allow(null)),
+        equipment_name: Joi.string().allow("").optional(),
+        annual_qty: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        planned_qty: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        ops_dispatch_qty: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        ops_dispatched_qty: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        unit_price: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+      }).unknown(false),
+    )
+    .default([]),
+  equipment_tabs: Joi.array()
+    .items(
+      Joi.object({
+        sheet_name: Joi.string().trim().required(),
+        equipment_ids: Joi.array().items(Joi.number().integer()).default([]),
+        equipment_names: Joi.array().items(Joi.string().allow("")).default([]),
+        client: Joi.string().allow("").optional(),
+        date: Joi.string().allow("").optional(),
+        modality: Joi.string().allow("").optional(),
+        deadline_months: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        projected_deadline_months: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+        items: Joi.array().items(Joi.object().unknown(true)).default([]),
+      }).unknown(false),
+    )
+    .default([]),
+  sheet_context: Joi.object({
+    deadline_months: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+    projected_deadline_months: Joi.alternatives().try(Joi.number().min(0).optional(), Joi.allow(null)),
+    modality: Joi.alternatives().try(Joi.string().allow("").optional(), Joi.allow(null)),
+  }).default({}),
 }).required();
 
 function sortRecursively(value) {
@@ -70,6 +108,9 @@ function buildSignedWebAppPayload(payload, secret) {
     output_folder_id: payload.output_folder_id,
     fields: payload.fields || {},
     inversiones: payload.inversiones || {},
+    max_quantities: payload.max_quantities || [],
+    equipment_tabs: payload.equipment_tabs || [],
+    sheet_context: payload.sheet_context || {},
   };
 
   const canonical = stableStringify(base);

@@ -29,7 +29,7 @@ import {
   reviewStudyEnrollment,
 } from "../../../../core/api/permisosApi";
 import UploadJustificantesModal from "../modals/UploadJustificantesModal";
-import { getActiveException, getTodayAttendance } from "../../../../core/api/attendanceApi";
+import { getActiveException } from "../../../../core/api/attendanceApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { formatTimeSafe } from "../../../../shared/utils/dateUtils";
 
@@ -115,6 +115,14 @@ const RECOVERY_COORDINATION_LABELS = {
   finalized_by_approver: "Tramos definidos por jefe inmediato",
 };
 
+const INITIAL_VISIBLE_COUNTS = {
+  mine: 8,
+  approve: 8,
+  study_enrollments: 6,
+  waiting: 8,
+  upload_docs: 6,
+};
+
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
@@ -183,9 +191,9 @@ const PermisosStatusWidget = () => {
   const [cancelReason, setCancelReason] = useState("");
   const [enrollmentReviewDecision, setEnrollmentReviewDecision] = useState("approve");
   const [enrollmentReviewReason, setEnrollmentReviewReason] = useState("");
+  const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
   const [recoveryRows, setRecoveryRows] = useState([]);
   const [activeException, setActiveException] = useState(null);
-  const [attendance, setAttendance] = useState(null);
   const refreshPromiseRef = useRef(null);
 
   const normalizeDateValue = (value) => {
@@ -316,22 +324,6 @@ const PermisosStatusWidget = () => {
     }
   };
 
-  const fetchAttendance = async () => {
-    try {
-      const response = await getTodayAttendance();
-      if (response?.data) {
-        setAttendance(response.data);
-      } else if (response?.ok && response?.data === undefined && response?.id) {
-        setAttendance(response);
-      } else {
-        setAttendance(null);
-      }
-    } catch (error) {
-      console.error("Error fetching attendance:", error);
-      setAttendance(null);
-    }
-  };
-
   const loadData = async ({ silent = false } = {}) => {
     if (refreshPromiseRef.current) return refreshPromiseRef.current;
 
@@ -397,7 +389,7 @@ const PermisosStatusWidget = () => {
         if (!silent) showToast("Error al cargar solicitudes", "error");
       } finally {
         if (!isTalentRole) {
-          await Promise.all([fetchActiveException(), fetchAttendance()]);
+          await fetchActiveException();
         }
         if (!silent) setLoading(false);
       }
@@ -775,15 +767,6 @@ const PermisosStatusWidget = () => {
       ]
     : [];
 
-  const baseTimeEntries = [
-    ["Entrada", attendance?.entry_time, "bg-emerald-50 border-emerald-200 text-emerald-800"],
-    ["Salida Almuerzo", attendance?.lunch_start_time, "bg-orange-50 border-orange-200 text-orange-800"],
-    ["Entrada Almuerzo", attendance?.lunch_end_time, "bg-blue-50 border-blue-200 text-blue-800"],
-    ["Salida", attendance?.exit_time, "bg-indigo-50 border-indigo-200 text-indigo-800"],
-  ].map(([label, time, colors]) => ({ label, value: time, colors }));
-
-  const timeEntries = [...baseTimeEntries, ...exceptionTimeEntries];
-
   const tabs = useMemo(() => {
     const base = [
       { id: "mine", label: "Mis solicitudes", count: misSolicitudes.length, visible: true },
@@ -830,6 +813,63 @@ const PermisosStatusWidget = () => {
       setActiveTab(tabs[0]?.id || "mine");
     }
   }, [activeTab, tabs]);
+
+  const getVisibleCountForSection = (section) =>
+    visibleItemsBySection[section] || INITIAL_VISIBLE_COUNTS[section] || 0;
+
+  const showMoreItems = (section, total) => {
+    setVisibleItemsBySection((current) => {
+      const currentVisible = current[section] || INITIAL_VISIBLE_COUNTS[section] || 0;
+      const step = INITIAL_VISIBLE_COUNTS[section] || 6;
+      return {
+        ...current,
+        [section]: Math.min(total, currentVisible + step),
+      };
+    });
+  };
+
+  const showLessItems = (section) => {
+    setVisibleItemsBySection((current) => ({
+      ...current,
+      [section]: INITIAL_VISIBLE_COUNTS[section] || current[section] || 0,
+    }));
+  };
+
+  const renderListControls = (section, total) => {
+    const initial = INITIAL_VISIBLE_COUNTS[section] || total;
+    const visible = Math.min(getVisibleCountForSection(section), total);
+    if (total <= initial) return null;
+    return (
+      <div className="mt-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-medium text-gray-600">
+          Mostrando <span className="font-semibold text-gray-900">{visible}</span> de{" "}
+          <span className="font-semibold text-gray-900">{total}</span> registros
+        </p>
+        <div className="flex gap-2">
+          {visible < total && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => showMoreItems(section, total)}
+              className="text-xs"
+            >
+              Ver más
+            </Button>
+          )}
+          {visible > initial && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => showLessItems(section)}
+              className="text-xs"
+            >
+              Mostrar menos
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const renderStatusBadge = (status) => {
     const meta = STATUS_META[status] || STATUS_META.pending;
@@ -1351,43 +1391,6 @@ const PermisosStatusWidget = () => {
     );
   };
 
-  const renderAttendanceGrid = () => (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      className="mb-6 rounded-2xl border border-gray-200 bg-gradient-to-br from-blue-50/60 to-white p-5 shadow-sm"
-    >
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-900">Registro de tiempos</h3>
-          <p className="text-xs text-gray-500">Horario registrado hoy</p>
-        </div>
-        <p className="text-[10px] uppercase tracking-wider text-gray-500">
-          {attendance?.updated_at ? `Actualizado ${formatDateShort(attendance.updated_at)}` : "Sin registro"}
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-3">
-        {timeEntries.map((entry) => (
-          <div
-            key={`${entry.label}-${entry.value ?? "pending"}`}
-            className={`rounded-xl border ${entry.colors} p-3 shadow-sm`}
-          >
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-700/80">
-              {entry.label}
-            </div>
-            <div className="text-lg font-mono font-bold">{formatTimeSafe(entry.value)}</div>
-            {entry.note && (
-              <div className="text-[10px] uppercase tracking-wider text-slate-600/70 mt-1">
-                {entry.note}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </motion.div>
-  );
-
   const renderTabContent = () => {
     if (activeTab === "mine") {
       if (misSolicitudes.length === 0) {
@@ -1399,10 +1402,16 @@ const PermisosStatusWidget = () => {
           </div>
         );
       }
-      return misSolicitudes.map((sol) =>
-        renderSolicitudCard(sol, {
-          showDocs: sol.status === "pending_final" || sol.status === "approved",
-        })
+      const visibleItems = misSolicitudes.slice(0, getVisibleCountForSection("mine"));
+      return (
+        <>
+          {visibleItems.map((sol) =>
+            renderSolicitudCard(sol, {
+              showDocs: sol.status === "pending_final" || sol.status === "approved",
+            })
+          )}
+          {renderListControls("mine", misSolicitudes.length)}
+        </>
       );
     }
 
@@ -1417,8 +1426,14 @@ const PermisosStatusWidget = () => {
           </div>
         );
       }
-      return approvalQueue.map((sol) =>
-        renderSolicitudCard(sol, { showActions: true, showUser: true })
+      const visibleItems = approvalQueue.slice(0, getVisibleCountForSection("approve"));
+      return (
+        <>
+          {visibleItems.map((sol) =>
+            renderSolicitudCard(sol, { showActions: true, showUser: true })
+          )}
+          {renderListControls("approve", approvalQueue.length)}
+        </>
       );
     }
 
@@ -1433,11 +1448,12 @@ const PermisosStatusWidget = () => {
           </div>
         );
       }
+      const visibleItems = pendingStudyEnrollments.slice(0, getVisibleCountForSection("study_enrollments"));
       return (
-          <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
           <p className="text-sm font-semibold text-indigo-900">Matrículas de estudios pendientes de validación</p>
           <div className="mt-2 space-y-2">
-            {pendingStudyEnrollments.map((enrollment) => (
+            {visibleItems.map((enrollment) => (
               <div key={enrollment.id} className="rounded-lg border border-indigo-200 bg-white p-3">
                 <div className="grid grid-cols-1 gap-2 text-xs text-gray-700 sm:grid-cols-2">
                   <div>
@@ -1497,6 +1513,7 @@ const PermisosStatusWidget = () => {
               </div>
             ))}
           </div>
+          {renderListControls("study_enrollments", pendingStudyEnrollments.length)}
         </div>
       );
     }
@@ -1511,8 +1528,14 @@ const PermisosStatusWidget = () => {
           </div>
         );
       }
-      return misEsperandoGerencia.map((sol) =>
-        renderSolicitudCard(sol, { showDocs: hasJustificantes(sol) })
+      const visibleItems = misEsperandoGerencia.slice(0, getVisibleCountForSection("waiting"));
+      return (
+        <>
+          {visibleItems.map((sol) =>
+            renderSolicitudCard(sol, { showDocs: hasJustificantes(sol) })
+          )}
+          {renderListControls("waiting", misEsperandoGerencia.length)}
+        </>
       );
     }
 
@@ -1531,7 +1554,6 @@ const PermisosStatusWidget = () => {
 
   return (
     <>
-      {!isTalentRole && attendance && renderAttendanceGrid()}
       {activeException && (
         <motion.div
           initial={{ opacity: 0, y: -8 }}
@@ -1605,7 +1627,7 @@ const PermisosStatusWidget = () => {
           </div>
 
           <div className="mt-4 grid sm:grid-cols-2 gap-3">
-            {pendientesDeJustificante.map((sol) => (
+            {pendientesDeJustificante.slice(0, getVisibleCountForSection("upload_docs")).map((sol) => (
               <div
                 key={sol.id}
                 className="flex items-center justify-between gap-3 rounded-xl bg-white border border-blue-100 px-4 py-3 shadow-sm"
@@ -1633,6 +1655,7 @@ const PermisosStatusWidget = () => {
               </div>
             ))}
           </div>
+          {renderListControls("upload_docs", pendientesDeJustificante.length)}
         </motion.div>
       )}
 

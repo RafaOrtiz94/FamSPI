@@ -22,6 +22,8 @@ const STATUS_META = {
   pending: { label: "Pendiente", className: "bg-amber-50 text-amber-700 border-amber-200" },
 };
 
+const INITIAL_VISIBLE_ROWS = 25;
+
 const formatDate = (value) => {
   if (!value) return "-";
   const date = new Date(value);
@@ -42,6 +44,7 @@ const PermisosGlobalRequestsWidget = () => {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_ROWS);
 
   const load = async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -121,6 +124,15 @@ const PermisosGlobalRequestsWidget = () => {
     });
   }, [rows, search, statusFilter]);
 
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_ROWS);
+  }, [search, statusFilter]);
+
+  const visibleRows = useMemo(
+    () => filteredRows.slice(0, visibleCount),
+    [filteredRows, visibleCount]
+  );
+
   const metrics = useMemo(() => {
     const base = {
       total: filteredRows.length,
@@ -189,7 +201,8 @@ const PermisosGlobalRequestsWidget = () => {
           <option value="pending_final">Pendiente final</option>
         </select>
         <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600 flex items-center">
-          Registros visibles: <span className="ml-1 font-semibold text-gray-900">{filteredRows.length}</span>
+          Registros visibles: <span className="ml-1 font-semibold text-gray-900">{visibleRows.length}</span>
+          <span className="ml-1 text-gray-400">/ {filteredRows.length}</span>
         </div>
       </div>
 
@@ -215,7 +228,7 @@ const PermisosGlobalRequestsWidget = () => {
                 <td className="px-3 py-4 text-gray-500" colSpan={6}>No hay solicitudes para el filtro actual.</td>
               </tr>
             ) : (
-              filteredRows.map((row) => {
+              visibleRows.map((row) => {
                 const meta = STATUS_META[row.status] || STATUS_META.pending;
                 return (
                   <tr key={row.key} className="border-t border-gray-100">
@@ -242,6 +255,37 @@ const PermisosGlobalRequestsWidget = () => {
           </tbody>
         </table>
       </div>
+
+      {filteredRows.length > INITIAL_VISIBLE_ROWS && (
+        <div className="flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-xs font-medium text-gray-600">
+            Mostrando <span className="font-semibold text-gray-900">{visibleRows.length}</span> de{" "}
+            <span className="font-semibold text-gray-900">{filteredRows.length}</span> registros
+          </p>
+          <div className="flex gap-2">
+            {visibleRows.length < filteredRows.length && (
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() => setVisibleCount((current) => Math.min(filteredRows.length, current + INITIAL_VISIBLE_ROWS))}
+                className="text-xs"
+              >
+                Ver más
+              </Button>
+            )}
+            {visibleRows.length > INITIAL_VISIBLE_ROWS && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setVisibleCount(INITIAL_VISIBLE_ROWS)}
+                className="text-xs"
+              >
+                Mostrar menos
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
     </Card>
   );
 };

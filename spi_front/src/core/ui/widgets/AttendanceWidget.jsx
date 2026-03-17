@@ -34,6 +34,9 @@ const EXCEPTION_PRESETS = Object.freeze({
 });
 
 const RECENT_HISTORY_DAYS = 5;
+const LUNCH_REMINDER_MINUTES = 50;
+const LUNCH_SUGGESTION_AFTER_HOURS = 4;
+const EXIT_REMINDER_AFTER_HOURS = 8;
 
 const APPROVED_PERMISSION_STATUSES = new Set(["approved", "aprobado", "partially_approved"]);
 
@@ -61,6 +64,12 @@ const isDateWithinRange = (dateKey, startValue, endValue = null) => {
     const endKey = normalizeDateKey(endValue || startValue);
     if (!dateKey || !startKey) return false;
     return dateKey >= startKey && dateKey <= (endKey || startKey);
+};
+
+const getElapsedMinutes = (value, now = new Date()) => {
+    const parsed = toDate(value);
+    if (!parsed) return 0;
+    return Math.max(0, Math.round((now.getTime() - parsed.getTime()) / 60000));
 };
 
 const mapPermisoToExceptionSuggestion = (permiso) => {
@@ -146,7 +155,7 @@ const AttendanceWidget = () => {
         setExceptionDescription(exceptionSuggestion.description);
     }, [exceptionDescription, exceptionModalOpen, exceptionSuggestion, exceptionType]);
 
-    // Sistema de actualizaciones automÃ¡ticas sin loops
+    // Sistema de actualizaciones automaticas sin loops
     useAutoUpdate(() => {
         refreshAll();
     }, []);
@@ -250,7 +259,7 @@ const AttendanceWidget = () => {
 
         if (!navigator.geolocation) {
             if (showErrors) {
-                showToast("GeolocalizaciÃ³n no soportada por el navegador", "warning");
+                showToast("Geolocalizacion no soportada por el navegador", "warning");
             }
             return null;
         }
@@ -297,13 +306,13 @@ const AttendanceWidget = () => {
 
             // Handle different error types gracefully
             if (showErrors) {
-                let msg = "No se pudo obtener ubicaciÃ³n.";
+                let msg = "No se pudo obtener ubicacion.";
                 if (err.code === 1) {
-                    msg = "Permiso de ubicaciÃ³n denegado. El registro continuarÃ¡ sin ubicaciÃ³n.";
+                    msg = "Permiso de ubicacion denegado. El registro continuara sin ubicacion.";
                 } else if (err.code === 2) {
-                    msg = "UbicaciÃ³n no disponible. El registro continuarÃ¡ sin ubicaciÃ³n.";
+                    msg = "Ubicacion no disponible. El registro continuara sin ubicacion.";
                 } else if (err.code === 3) {
-                    msg = "Tiempo de espera agotado. El registro continuarÃ¡ sin ubicaciÃ³n.";
+                    msg = "Tiempo de espera agotado. El registro continuara sin ubicacion.";
                 }
                 showToast(msg, "warning");
             }
@@ -661,6 +670,8 @@ const AttendanceWidget = () => {
     }, [activeException?.status, attendance?.entry_time, attendance?.exit_time, attendance?.lunch_end_time, attendance?.lunch_start_time, hasActiveException]);
 
     const reminderMeta = useMemo(() => {
+        const now = currentTime;
+
         if (hasActiveException) {
             if (activeException?.status === "ACTIVE") {
                 return {
@@ -685,17 +696,38 @@ const AttendanceWidget = () => {
         }
 
         if (attendance?.lunch_start_time && !attendance?.lunch_end_time) {
+            const lunchOpenMinutes = getElapsedMinutes(attendance.lunch_start_time, now);
             return {
-                key: "lunch-open",
-                text: "Tu almuerzo sigue abierto. Registra el regreso para retomar la jornada.",
+                key: lunchOpenMinutes >= LUNCH_REMINDER_MINUTES ? "lunch-open-delayed" : "lunch-open",
+                text:
+                    lunchOpenMinutes >= LUNCH_REMINDER_MINUTES
+                        ? "Tu almuerzo sigue abierto desde hace un rato. Registra el regreso para retomar la jornada."
+                        : "Tu almuerzo sigue abierto. Registra el regreso para retomar la jornada.",
             };
         }
 
         if (attendance?.entry_time && attendance?.lunch_end_time && !attendance?.exit_time) {
+            const workedHours = Number(attendance?.total_hours || 0);
+            const entryHours = getElapsedMinutes(attendance.entry_time, now) / 60;
             return {
-                key: "shift-open",
-                text: "Tu jornada sigue abierta. Registra la salida final cuando corresponda.",
+                key: workedHours >= EXIT_REMINDER_AFTER_HOURS || entryHours >= EXIT_REMINDER_AFTER_HOURS
+                    ? "shift-open-final"
+                    : "shift-open",
+                text:
+                    workedHours >= EXIT_REMINDER_AFTER_HOURS || entryHours >= EXIT_REMINDER_AFTER_HOURS
+                        ? "Tu jornada ya deberia estar cerrada. Registra la salida final para completar el dia."
+                        : "Tu jornada sigue abierta. Registra la salida final cuando corresponda.",
             };
+        }
+
+        if (attendance?.entry_time && !attendance?.lunch_start_time && !attendance?.lunch_end_time) {
+            const entryHours = getElapsedMinutes(attendance.entry_time, now) / 60;
+            if (entryHours >= LUNCH_SUGGESTION_AFTER_HOURS) {
+                return {
+                    key: "lunch-suggestion",
+                    text: "Ya tienes varias horas continuas desde la entrada. Si saliste a almuerzo, registra esa marca.",
+                };
+            }
         }
 
         if (!attendance?.entry_time) {
@@ -712,6 +744,8 @@ const AttendanceWidget = () => {
         attendance?.exit_time,
         attendance?.lunch_end_time,
         attendance?.lunch_start_time,
+        attendance?.total_hours,
+        currentTime,
         hasActiveException,
     ]);
 
@@ -849,10 +883,10 @@ const AttendanceWidget = () => {
     const renderExceptionBanner = () => {
         if (!hasActiveException) return null;
         const items = [
-            { label: "Salida de oficina", value: activeException.start_time, icon: "ðŸ¢" },
-            { label: "Llegada a destino", value: activeException.arrival_time, icon: "ðŸ“" },
-            { label: "Salida de destino", value: activeException.departure_time, icon: "ðŸš¶" },
-            { label: "Regreso a oficina", value: activeException.return_time, icon: "ðŸ " },
+            { label: "Salida de oficina", value: activeException.start_time, icon: "1" },
+            { label: "Llegada a destino", value: activeException.arrival_time, icon: "2" },
+            { label: "Salida de destino", value: activeException.departure_time, icon: "3" },
+            { label: "Regreso a oficina", value: activeException.return_time, icon: "4" },
         ];
 
         return (
@@ -864,7 +898,7 @@ const AttendanceWidget = () => {
                         </div>
                         <div>
                             <h4 className="text-sm font-bold text-amber-900 uppercase tracking-wider">
-                                ðŸš¨ Salida Inesperada Activa
+                                Salida Inesperada Activa
                             </h4>
                             <p className="text-sm font-semibold text-amber-800">{exceptionStepLabel}</p>
                         </div>
@@ -972,8 +1006,33 @@ const AttendanceWidget = () => {
         );
     };
 
-    const quickEntryTime = attendance?.entry_time ? formatTime(attendance.entry_time) : null;
-    const quickBadgeText = quickEntryTime ? `${nextActionMeta.label} Â· ${quickEntryTime}` : nextActionMeta.label;
+    const launcherMode = !attendance?.entry_time
+        ? "pending_entry"
+        : attendance?.exit_time
+            ? "exit_marked"
+            : attendance?.lunch_start_time && !attendance?.lunch_end_time
+                ? "lunch_marked"
+                : attendance?.lunch_end_time
+                    ? "return_marked"
+                    : "entry_marked";
+    const launcherColorClass = launcherMode === "lunch_marked"
+        ? "bg-amber-500 hover:bg-amber-600"
+        : launcherMode === "return_marked"
+            ? "bg-blue-600 hover:bg-blue-700"
+            : launcherMode === "exit_marked"
+                ? "bg-slate-700 hover:bg-slate-800"
+                : launcherMode === "entry_marked"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-primary hover:bg-primary-dark";
+    const LauncherIcon = launcherMode === "lunch_marked"
+        ? FiCoffee
+        : launcherMode === "return_marked"
+            ? FiClock
+            : launcherMode === "exit_marked"
+                ? FiMoon
+                : launcherMode === "entry_marked"
+                    ? FiSun
+                    : FiClock;
 
     const renderWidgetContent = () => (
         <Card className="relative overflow-hidden rounded-[32px] border border-slate-200/80 bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.08),_transparent_35%),linear-gradient(180deg,_rgba(255,255,255,0.98),_rgba(248,250,252,0.98))] p-4 shadow-xl shadow-slate-200/60 sm:p-6">
@@ -1092,13 +1151,13 @@ const AttendanceWidget = () => {
                             disabled={loading || locationLoading}
                             className={`min-h-[56px] w-full justify-center rounded-[22px] bg-gradient-to-r px-5 py-4 text-sm shadow-lg shadow-slate-200 ${primaryActionConfig?.tone || "from-blue-600 to-indigo-600"}`}
                         >
-                            {loading ? "â³ Registrando..." :
-                                locationLoading ? "ðŸ“ Obteniendo ubicaciÃ³n..." :
+                            {loading ? "Registrando..." :
+                                locationLoading ? "Obteniendo ubicacion..." :
                                     attendance?.lunch_start_time && !attendance?.lunch_end_time
-                                        ? "ðŸ½ï¸ Regresar de Almuerzo"
+                                        ? "Regresar de almuerzo"
                                         : attendance?.lunch_end_time
-                                            ? "ðŸ Finalizar Jornada"
-                                            : "ðŸ½ï¸ Salir a Almuerzo"}
+                                            ? "Finalizar jornada"
+                                            : "Salir a almuerzo"}
                         </Button>
                     ) : (
                         <Button
@@ -1106,9 +1165,9 @@ const AttendanceWidget = () => {
                             disabled={loading || locationLoading}
                             className={`min-h-[56px] w-full justify-center rounded-[22px] bg-gradient-to-r px-5 py-4 text-sm shadow-lg shadow-slate-200 ${primaryActionConfig?.tone || "from-emerald-600 to-green-600"}`}
                         >
-                            {loading ? "â³ Registrando entrada..." :
-                                locationLoading ? "ðŸ“ Obteniendo ubicaciÃ³n..." :
-                                    "ðŸš€ Marcar Entrada"}
+                            {loading ? "Registrando entrada..." :
+                                locationLoading ? "Obteniendo ubicacion..." :
+                                    "Marcar entrada"}
                         </Button>
                     )}
                 </div>
@@ -1259,18 +1318,19 @@ const AttendanceWidget = () => {
 
     return (
         <>
-            <div className="fixed bottom-20 right-4 z-[50] flex max-w-[220px] flex-col items-end gap-2 sm:bottom-24 sm:right-6">
-                <span className="rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-right text-[11px] font-semibold text-blue-900 shadow-sm backdrop-blur">
-                    {quickBadgeText}
-                </span>
-                <button
+            <div className="fixed bottom-20 right-4 z-[60] sm:bottom-24 sm:right-6">
+                <motion.button
                     onClick={() => setWidgetModalOpen(true)}
-                    className="relative flex h-14 w-14 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-500/40 transition hover:scale-105 focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500"
-                    aria-label="Abrir asistencia"
+                    className={`relative flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg shadow-slate-900/20 transition focus-visible:ring-2 focus-visible:ring-accent ${launcherColorClass}`}
+                    aria-label={`Abrir asistencia - ${nextActionMeta.label}`}
+                    title={`Asistencia - ${nextActionMeta.label}`}
+                    whileHover={{ y: -1 }}
+                    whileTap={{ scale: 0.97 }}
+                    animate={showCelebration ? { scale: [1, 1.04, 1] } : { scale: 1 }}
+                    transition={showCelebration ? { duration: 0.6 } : { duration: 0.7 }}
                 >
-                    <span className="absolute inset-0 -z-10 rounded-full bg-blue-500/40 animate-ping" aria-hidden="true" />
-                    <FiClock className="w-6 h-6" />
-                </button>
+                    <LauncherIcon className="text-white" size={20} />
+                </motion.button>
             </div>
             <Modal
                 isOpen={widgetModalOpen}

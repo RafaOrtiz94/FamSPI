@@ -1,7 +1,7 @@
 ﻿/**
  * src/modules/servicio/asistencia-entrenamiento.service.js
  * --------------------------------------------
- * ðŸ“„ PDF Generation Service for Training Attendance List Records
+ * PDF Generation Service for Training Attendance List Records
  * - Fills F.ST-05_V03_LISTA DE ASISTENCIA ENTRENAMIENTOS template
  * - Handles signature embedding and Google Drive storage
  */
@@ -60,7 +60,7 @@ const downloadSignatureFromDrive = async (fileId) => {
  * Generate PDF for training attendance list
  */
 const generateAttendanceListPDF = async (attendanceData) => {
-    console.log("ðŸ“ Backend: Starting training attendance list PDF generation", {
+    console.log("[Attendance PDF] Starting training attendance list PDF generation", {
         ordenNumero: attendanceData.Num_Orden,
         cliente: attendanceData.ORDCliente,
         equipo: attendanceData.ORDEquipo,
@@ -69,12 +69,12 @@ const generateAttendanceListPDF = async (attendanceData) => {
     });
 
     // Load template
-    console.log("ðŸ“ Backend: Loading training attendance list PDF template");
+    console.log("[Attendance PDF] Loading training attendance list PDF template");
     const templateBytes = fs.readFileSync(TEMPLATE_PATH);
     const pdfDoc = await PDFDocument.load(templateBytes);
     const form = pdfDoc.getForm();
     const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-    console.log("ðŸ“ Backend: PDF template loaded successfully");
+    console.log("[Attendance PDF] PDF template loaded successfully");
 
     // Handle signature - can be base64 data or Google Drive file ID
     let signatureBuffer = null;
@@ -95,7 +95,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
         }
     }
 
-    // 1ï¸âƒ£ DATOS GENERALES DEL ENTRENAMIENTO
+    // 1. DATOS GENERALES DEL ENTRENAMIENTO
     setFieldText(form, "Num_Orden", attendanceData.Num_Orden || "");
     setFieldText(form, "ORDFecha", attendanceData.ORDFecha || "");
     setFieldText(form, "ORDCliente", attendanceData.ORDCliente || "");
@@ -103,7 +103,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
     setFieldText(form, "ORDSerie", attendanceData.ORDSerie || "");
     setFieldText(form, "ORDResponsable", attendanceData.ORDResponsable || "");
 
-    // 2ï¸âƒ£ TABLA DE ASISTENCIA (Hasta 7 asistentes)
+    // 2. TABLA DE ASISTENCIA (Hasta 7 asistentes)
     // Nombres y Apellidos
     for (let i = 1; i <= 7; i++) {
         setFieldText(form, `Nombres_Apellidos${i}`, attendanceData[`Nombres_Apellidos${i}`] || "");
@@ -115,40 +115,40 @@ const generateAttendanceListPDF = async (attendanceData) => {
         for (let attendee = 1; attendee <= 7; attendee++) {
             const fieldName = `Dia_${day}_${attendee}`;
             const value = attendanceData[fieldName];
-            // Set attendance mark (typically "âœ”ï¸" for present, "" for absent)
+            // Set attendance mark (typically "?" for present, "" for absent)
             setFieldText(form, fieldName, value || "");
         }
     }
 
-    // 4ï¸âƒ£ FIRMA DEL ESPECIALISTA
+    // 4. FIRMA DEL ESPECIALISTA
     // Set signature in image field
     if (signatureBuffer) {
         try {
-            console.log("ðŸ“ Backend: Attempting to embed attendance specialist signature, buffer size:", signatureBuffer.length);
+            console.log("[Attendance PDF] Attempting to embed attendance specialist signature, buffer size:", signatureBuffer.length);
             let signatureImage = await pdfDoc.embedPng(signatureBuffer);
-            console.log("ðŸ“ Backend: Attendance specialist signature image embedded in PDF document");
+            console.log("[Attendance PDF] Attendance specialist signature image embedded in PDF document");
 
             const signatureField = form.getField("Firma_Especialista");
-            console.log("ðŸ“ Backend: Retrieved attendance specialist signature field:", !!signatureField);
+            console.log("[Attendance PDF] Retrieved attendance specialist signature field:", !!signatureField);
 
             if (signatureField) {
-                console.log("ðŸ“ Backend: Attendance specialist signature field type:", signatureField.constructor.name);
-                console.log("ðŸ“ Backend: Field has setImage method:", typeof signatureField.setImage === "function");
+                console.log("[Attendance PDF] Attendance specialist signature field type:", signatureField.constructor.name);
+                console.log("[Attendance PDF] Field has setImage method:", typeof signatureField.setImage === "function");
 
                 if (typeof signatureField.setImage === "function") {
                     signatureField.setImage(signatureImage);
-                    console.log("ðŸ“ Backend: Attendance specialist signature embedded successfully in image field");
+                    console.log("[Attendance PDF] Attendance specialist signature embedded successfully in image field");
                 } else {
-                    console.log("ðŸ“ Backend: Field doesn't have setImage method, signature not embedded");
+                    console.log("[Attendance PDF] Field does not have setImage method, signature not embedded");
                 }
             } else {
-                console.log("ðŸ“ Backend: Attendance specialist signature field not found");
+                console.log("[Attendance PDF] Attendance specialist signature field not found");
             }
         } catch (sigErr) {
-            console.error({ sigErr }, "ðŸ“ Backend: Error embedding attendance specialist signature image");
+            console.error({ sigErr }, "[Attendance PDF] Error embedding attendance specialist signature image");
         }
     } else {
-        console.log("ðŸ“ Backend: No attendance specialist signature buffer available");
+        console.log("[Attendance PDF] No attendance specialist signature buffer available");
     }
 
 
@@ -176,7 +176,7 @@ const generateAttendanceListPDF = async (attendanceData) => {
  */
 const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => {
     try {
-        console.log("ðŸ“ Backend: Starting training attendance Google Drive save process", {
+        console.log("[Attendance PDF] Starting training attendance Google Drive save process", {
             hasPDF: !!pdfBuffer,
             pdfSize: pdfBuffer?.length,
             ordenNumero: attendanceData.Num_Orden,
@@ -187,20 +187,20 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
         const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 
         if (!DRIVE_ROOT_FOLDER_ID) {
-            console.log("ðŸ“ Backend: DRIVE_ROOT_FOLDER_ID not configured");
+            console.log("[Attendance PDF] DRIVE_ROOT_FOLDER_ID not configured");
             logger.warn("DRIVE_ROOT_FOLDER_ID no configurado, omitiendo guardado en Drive");
             return null;
         }
 
 
-        console.log("ðŸ“ Backend: Creating Servicio Técnico folder");
+        console.log("[Attendance PDF] Creating Servicio Tecnico folder");
         const servicioTecnicoFolder = await ensureFolder("Servicio Técnico", DRIVE_ROOT_FOLDER_ID);
-        console.log("ðŸ“ Backend: Servicio Técnico folder created", { id: servicioTecnicoFolder.id });
+        console.log("[Attendance PDF] Servicio Tecnico folder created", { id: servicioTecnicoFolder.id });
 
         // 2. Create Entrenamiento folder
-        console.log("ðŸ“ Backend: Creating Entrenamiento folder");
+        console.log("[Attendance PDF] Creating Entrenamiento folder");
         const entrenamientoFolder = await ensureFolder("Entrenamiento", servicioTecnicoFolder.id);
-        console.log("ðŸ“ Backend: Entrenamiento folder created", { id: entrenamientoFolder.id });
+        console.log("[Attendance PDF] Entrenamiento folder created", { id: entrenamientoFolder.id });
 
         // 3. Create identificative folder (order number + client + date + user)
         const timestamp = new Date().toISOString().split('T')[0];
@@ -208,9 +208,9 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
         const safeUserName = userName.replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 30); // Clean and limit length
         const safeClient = (attendanceData.ORDCliente || 'Cliente').replace(/[^a-zA-Z0-9\s\-_]/g, '').substring(0, 30);
         const identificativeName = `${attendanceData.Num_Orden}-${safeClient}-${timestamp}-${safeUserName}`;
-        console.log("ðŸ“ Backend: Creating attendance record folder", { name: identificativeName });
+        console.log("[Attendance PDF] Creating attendance record folder", { name: identificativeName });
         const recordFolder = await ensureFolder(identificativeName, entrenamientoFolder.id);
-        console.log("ðŸ“ Backend: Attendance record folder created", { id: recordFolder.id });
+        console.log("[Attendance PDF] Attendance record folder created", { id: recordFolder.id });
 
         // 4. Save PDF
         const pdfBase64 = pdfBuffer.toString('base64');

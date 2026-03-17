@@ -14,6 +14,7 @@ const REVIEW_ROLE_BY_TYPE = Object.freeze({
   private_comodato: "backoffice_comercial",
   comodato_privado: "backoffice_comercial",
 });
+const MANAGER_ROLES = new Set(["jefe_comercial", "gerencia", "gerencia_general"]);
 
 const isUuid = (value) =>
   typeof value === "string" &&
@@ -71,6 +72,73 @@ function getRequiredSections(businessCase) {
   return REQUIRED_SECTIONS;
 }
 
+function normalizeRole(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function normalizeSectionList(sections = []) {
+  if (!Array.isArray(sections)) return [];
+  return [...new Set(
+    sections
+      .map((section) => String(section || "").trim().toLowerCase())
+      .filter(Boolean),
+  )];
+}
+
+function roleToLabel(role) {
+  const normalized = normalizeRole(role);
+  if (normalized === "acp_comercial") return "ACP Comercial";
+  if (normalized === "backoffice_comercial") return "Backoffice Comercial";
+  if (normalized === "jefe_comercial") return "Jefe Comercial";
+  if (normalized === "comercial") return "Comercial";
+  return normalized || "N/D";
+}
+
+function phaseToLabel(phase) {
+  return String(phase || "").toLowerCase() === "review" ? "Revision" : "Comercial";
+}
+
+function buildStageWindow(key, label, role, stageData = {}, nowTs) {
+  const deadlineTs = stageData?.deadlineAt ? new Date(stageData.deadlineAt).getTime() : null;
+  return {
+    key,
+    label,
+    role,
+    roleLabel: roleToLabel(role),
+    startedAt: stageData?.startedAt || null,
+    deadlineAt: stageData?.deadlineAt || null,
+    completedAt: stageData?.completedAt || null,
+    elapsedSeconds: stageData?.elapsedSeconds ?? null,
+    isActive: Boolean(stageData?.startedAt) && !stageData?.completedAt,
+    isExpired: Number.isFinite(deadlineTs) ? nowTs > deadlineTs : false,
+  };
+}
+
+function buildExtensionRequest(metadata = {}, activePhase = "commercial", activeRole = null) {
+  const request = toObject(metadata?.preflow_reopen_request);
+  if (!request || !request.status) return null;
+  return {
+    status: request.status,
+    phase: request.phase || activePhase || null,
+    phaseLabel: phaseToLabel(request.phase || activePhase),
+    role: request.role || activeRole || null,
+    roleLabel: roleToLabel(request.role || activeRole),
+    requestedAt: request.requested_at || null,
+    requestedByEmail: request.requested_by_email || null,
+    requestedByRole: request.requested_by_role || null,
+    reason: request.reason || "",
+    sections: normalizeSectionList(request.sections),
+    approvedAt: request.approved_at || null,
+    approvedByEmail: request.approved_by_email || null,
+    rejectedAt: request.rejected_at || null,
+    rejectedByEmail: request.rejected_by_email || null,
+    additionalHours: Number.isFinite(Number(request.additional_hours)) ? Number(request.additional_hours) : null,
+    previousDeadlineAt: request.previous_deadline_at || null,
+    newDeadlineAt: request.new_deadline_at || null,
+    resolutionNotes: request.resolution_notes || "",
+  };
+}
+
 function buildPreflowInfo(businessCase, ownershipRules = {}, now = new Date()) {
   if (!isPreflowCase(businessCase)) return { isActive: false, serverNow: now.toISOString() };
 
@@ -93,6 +161,33 @@ function buildPreflowInfo(businessCase, ownershipRules = {}, now = new Date()) {
   const completedRequiredSections = requiredSections.filter(
     (sectionKey) => ownershipRules?.[sectionKey]?.isCompleted,
   );
+  const commercial = {
+    startedAt: commercialStartedAt,
+    deadlineAt: commercialDeadlineAt,
+    completedAt: metadata.preflow_commercial_completed_at || null,
+    elapsedSeconds: Number.isFinite(Number(metadata.preflow_commercial_elapsed_seconds))
+      ? Number(metadata.preflow_commercial_elapsed_seconds)
+      : null,
+    role: metadata.preflow_commercial_role || "comercial",
+  };
+  const review = {
+    startedAt: reviewStartedAt,
+    deadlineAt: reviewDeadlineAt,
+    completedAt: metadata.preflow_review_completed_at || null,
+    role: metadata.preflow_review_role || resolveReviewRoleForBusinessCase(businessCase),
+    elapsedSeconds: Number.isFinite(Number(metadata.preflow_review_elapsed_seconds))
+      ? Number(metadata.preflow_review_elapsed_seconds)
+      : null,
+  };
+  const extensionRequest = buildExtensionRequest(
+    metadata,
+    activePhase,
+    activePhase === "review" ? review.role : commercial.role,
+  );
+  const stageWindows = [
+    buildStageWindow("commercial", "Etapa Comercial", commercial.role, commercial, nowTs),
+    buildStageWindow("review", "Etapa Revision", review.role, review, nowTs),
+  ].filter((item) => item.startedAt || item.deadlineAt || item.completedAt || item.role);
 
   return {
     isActive: true,
@@ -113,24 +208,14 @@ function buildPreflowInfo(businessCase, ownershipRules = {}, now = new Date()) {
       activePhase === "review"
         ? metadata.preflow_review_role || null
         : metadata.preflow_commercial_role || "comercial",
-    phaseLabel: activePhase === "review" ? "Revision" : "Comercial",
-    commercial: {
-      startedAt: commercialStartedAt,
-      deadlineAt: commercialDeadlineAt,
-      completedAt: metadata.preflow_commercial_completed_at || null,
-      elapsedSeconds: Number.isFinite(Number(metadata.preflow_commercial_elapsed_seconds))
-        ? Number(metadata.preflow_commercial_elapsed_seconds)
-        : null,
-    },
-    review: {
-      startedAt: reviewStartedAt,
-      deadlineAt: reviewDeadlineAt,
-      completedAt: metadata.preflow_review_completed_at || null,
-      role: metadata.preflow_review_role || null,
-      elapsedSeconds: Number.isFinite(Number(metadata.preflow_review_elapsed_seconds))
-        ? Number(metadata.preflow_review_elapsed_seconds)
-        : null,
-    },
+    activeRoleLabel: roleToLabel(
+      activePhase === "review" ? metadata.preflow_review_role || null : metadata.preflow_commercial_role || "comercial",
+    ),
+    phaseLabel: phaseToLabel(activePhase),
+    commercial,
+    review,
+    stageWindows,
+    extensionRequest,
     serverNow: now.toISOString(),
   };
 }
@@ -518,6 +603,330 @@ async function ensurePreflowWorkspaceProcess({ businessCaseId, actorUser, durati
   });
 }
 
+async function requestPreflowReopen({
+  businessCaseId,
+  actorUser,
+  reason,
+  sections = [],
+}) {
+  return withAdvisoryLock(`${businessCaseId}:preflow:reopen-request`, async () => {
+    const bc = await businessCaseService.getBusinessCaseById(businessCaseId);
+    if (!isPreflowCase(bc)) {
+      const error = new Error("El Business Case no usa ventana preflow.");
+      error.status = 409;
+      throw error;
+    }
+
+    const preflowInfo = buildPreflowInfo(bc, {}, new Date());
+    if (!preflowInfo?.isActive) {
+      const error = new Error("No existe una ventana activa para solicitar reapertura.");
+      error.status = 409;
+      throw error;
+    }
+    if (!preflowInfo?.isExpired) {
+      const error = new Error("La solicitud de reapertura solo aplica cuando la ventana actual ya vencio.");
+      error.status = 409;
+      throw error;
+    }
+
+    const actorRole = normalizeRole(actorUser?.role || actorUser?.scope || actorUser?.role_name);
+    if (!actorRole || actorRole !== normalizeRole(preflowInfo.activeRole)) {
+      const error = new Error("Solo el responsable de la etapa activa puede solicitar una reapertura.");
+      error.status = 403;
+      throw error;
+    }
+
+    const normalizedReason = String(reason || "").trim();
+    if (!normalizedReason) {
+      const error = new Error("Debes indicar la razon de la solicitud de reapertura.");
+      error.status = 400;
+      throw error;
+    }
+
+    const metadata = toObject(bc?.modern_bc_metadata);
+    const currentRequest = buildExtensionRequest(metadata, preflowInfo.activePhase, preflowInfo.activeRole);
+    if (currentRequest?.status === "pending") {
+      const error = new Error("Ya existe una solicitud de reapertura pendiente para esta etapa.");
+      error.status = 409;
+      throw error;
+    }
+
+    const normalizedSections = normalizeSectionList(sections);
+    const now = new Date();
+    const requestPayload = {
+      status: "pending",
+      phase: preflowInfo.activePhase,
+      role: preflowInfo.activeRole,
+      requested_at: now.toISOString(),
+      requested_by_email: actorUser?.email || null,
+      requested_by_role: actorRole,
+      reason: normalizedReason,
+      sections: normalizedSections,
+      previous_deadline_at: preflowInfo.deadlineAt || null,
+    };
+    const history = Array.isArray(metadata.preflow_reopen_history) ? metadata.preflow_reopen_history : [];
+    const nextMetadata = await updateBusinessCaseMetadata(businessCaseId, {
+      preflow_reopen_request: requestPayload,
+      preflow_reopen_history: [
+        ...history,
+        {
+          ...requestPayload,
+          event: "requested",
+        },
+      ],
+    });
+
+    await db.query(
+      `INSERT INTO business_case_section_ownership_audit
+         (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        businessCaseId,
+        "preflow",
+        "preflow_reopen_requested",
+        resolveActorUuid(actorUser),
+        actorRole,
+        String(bc?.canonical_state || bc?.bc_stage || "draft"),
+        JSON.stringify({
+          phase: preflowInfo.activePhase,
+          role: preflowInfo.activeRole,
+          reason: normalizedReason,
+          sections: normalizedSections,
+        }),
+        now,
+      ],
+    );
+
+    const { rows: recipients } = await db.query(
+      `SELECT id
+         FROM users
+        WHERE role = 'jefe_comercial'
+          AND active = true`,
+    );
+    await Promise.all(
+      (recipients || []).map((recipient) =>
+        notificationManager.sendNotification({
+          userId: recipient.id,
+          customTitle: "Solicitud de reapertura Business Case",
+          customMessage:
+            `${actorUser?.email || "Un usuario"} solicito mas tiempo para la etapa ${phaseToLabel(preflowInfo.activePhase)} del BC ${businessCaseId}.`,
+          type: "task",
+          source: "business_case.preflow.reopen_request",
+          priority: 2,
+          email: true,
+          chat: false,
+          meta: {
+            businessCaseId,
+            phase: preflowInfo.activePhase,
+            role: preflowInfo.activeRole,
+            requestedBy: actorUser?.email || null,
+            process_key: `business_case:${businessCaseId}`,
+          },
+        }).catch(() => null),
+      ),
+    );
+
+    return {
+      requested: true,
+      metadata: nextMetadata,
+      request: buildExtensionRequest(nextMetadata, preflowInfo.activePhase, preflowInfo.activeRole),
+    };
+  });
+}
+
+async function resolvePreflowReopen({
+  businessCaseId,
+  actorUser,
+  approved,
+  additionalHours = 0,
+  notes = "",
+  sections = [],
+}) {
+  return withAdvisoryLock(`${businessCaseId}:preflow:reopen-resolve`, async () => {
+    const bc = await businessCaseService.getBusinessCaseById(businessCaseId);
+    if (!isPreflowCase(bc)) {
+      const error = new Error("El Business Case no usa ventana preflow.");
+      error.status = 409;
+      throw error;
+    }
+
+    const actorRole = normalizeRole(actorUser?.role || actorUser?.scope || actorUser?.role_name);
+    if (!MANAGER_ROLES.has(actorRole)) {
+      const error = new Error("No tienes permisos para resolver solicitudes de reapertura.");
+      error.status = 403;
+      throw error;
+    }
+
+    const metadata = toObject(bc?.modern_bc_metadata);
+    const preflowInfo = buildPreflowInfo(bc, {}, new Date());
+    const pendingRequest = buildExtensionRequest(metadata, preflowInfo.activePhase, preflowInfo.activeRole);
+    if (!pendingRequest || pendingRequest.status !== "pending") {
+      const error = new Error("No existe una solicitud pendiente para resolver.");
+      error.status = 409;
+      throw error;
+    }
+
+    const now = new Date();
+    const history = Array.isArray(metadata.preflow_reopen_history) ? metadata.preflow_reopen_history : [];
+    const normalizedNotes = String(notes || "").trim();
+    const requestedSections = normalizeSectionList(pendingRequest.sections);
+    const resolvedSections = normalizeSectionList(sections).length
+      ? normalizeSectionList(sections)
+      : requestedSections;
+    let nextMetadataPatch = {};
+    let nextDeadlineAt = null;
+
+    if (approved) {
+      const parsedHours = Number(additionalHours);
+      if (!Number.isFinite(parsedHours) || parsedHours <= 0) {
+        const error = new Error("Debes indicar una cantidad valida de horas adicionales.");
+        error.status = 400;
+        throw error;
+      }
+
+      const currentDeadlineTs = preflowInfo?.deadlineAt ? new Date(preflowInfo.deadlineAt).getTime() : null;
+      const baseTs = Number.isFinite(currentDeadlineTs) ? Math.max(currentDeadlineTs, now.getTime()) : now.getTime();
+      nextDeadlineAt = new Date(baseTs + parsedHours * 60 * 60 * 1000).toISOString();
+
+      nextMetadataPatch = {
+        preflow_deadline_at: nextDeadlineAt,
+        preflow_status: `${pendingRequest.phase || "commercial"}_reopened`,
+        preflow_reopen_request: {
+          ...toObject(metadata.preflow_reopen_request),
+          status: "approved",
+          approved_at: now.toISOString(),
+          approved_by_email: actorUser?.email || null,
+          approved_by_role: actorRole,
+          additional_hours: parsedHours,
+          sections: resolvedSections,
+          resolution_notes: normalizedNotes,
+          new_deadline_at: nextDeadlineAt,
+        },
+      };
+
+      if ((pendingRequest.phase || "commercial") === "review") {
+        nextMetadataPatch.preflow_review_deadline_at = nextDeadlineAt;
+      } else {
+        nextMetadataPatch.preflow_commercial_deadline_at = nextDeadlineAt;
+      }
+    } else {
+      nextMetadataPatch = {
+        preflow_reopen_request: {
+          ...toObject(metadata.preflow_reopen_request),
+          status: "rejected",
+          rejected_at: now.toISOString(),
+          rejected_by_email: actorUser?.email || null,
+          rejected_by_role: actorRole,
+          resolution_notes: normalizedNotes,
+        },
+      };
+    }
+
+    const nextMetadata = await updateBusinessCaseMetadata(businessCaseId, {
+      ...nextMetadataPatch,
+      preflow_reopen_history: [
+        ...history,
+        {
+          event: approved ? "approved" : "rejected",
+          phase: pendingRequest.phase,
+          role: pendingRequest.role,
+          requested_at: pendingRequest.requestedAt,
+          requested_by_email: pendingRequest.requestedByEmail,
+          approved_at: approved ? now.toISOString() : null,
+          approved_by_email: approved ? actorUser?.email || null : null,
+          rejected_at: approved ? null : now.toISOString(),
+          rejected_by_email: approved ? null : actorUser?.email || null,
+          additional_hours: approved ? Number(additionalHours) : null,
+          sections: resolvedSections,
+          reason: pendingRequest.reason || "",
+          resolution_notes: normalizedNotes,
+          previous_deadline_at: pendingRequest.previousDeadlineAt || preflowInfo.deadlineAt || null,
+          new_deadline_at: nextDeadlineAt,
+        },
+      ],
+    });
+
+    if (approved && resolvedSections.length) {
+      for (const section of resolvedSections) {
+        await BusinessCaseDataOwnership.unlockSection(
+          businessCaseId,
+          section,
+          actorUser,
+          String(bc?.canonical_state || bc?.bc_stage || "draft"),
+          {
+            source: "preflow_reopen_approved",
+            requested_by_email: pendingRequest.requestedByEmail || null,
+            additional_hours: Number(additionalHours),
+            phase: pendingRequest.phase || null,
+          },
+        );
+      }
+    }
+
+    await db.query(
+      `INSERT INTO business_case_section_ownership_audit
+         (business_case_id, section_name, action, performed_by, performed_by_role, canonical_state, metadata, performed_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [
+        businessCaseId,
+        "preflow",
+        approved ? "preflow_reopen_approved" : "preflow_reopen_rejected",
+        resolveActorUuid(actorUser),
+        actorRole,
+        String(bc?.canonical_state || bc?.bc_stage || "draft"),
+        JSON.stringify({
+          phase: pendingRequest.phase || null,
+          role: pendingRequest.role || null,
+          additional_hours: approved ? Number(additionalHours) : null,
+          sections: resolvedSections,
+          notes: normalizedNotes,
+          previous_deadline_at: pendingRequest.previousDeadlineAt || preflowInfo.deadlineAt || null,
+          new_deadline_at: nextDeadlineAt,
+        }),
+        now,
+      ],
+    );
+
+    if (pendingRequest.requestedByEmail) {
+      const { rows: requesterRows } = await db.query(
+        `SELECT id FROM users WHERE lower(email) = lower($1) LIMIT 1`,
+        [pendingRequest.requestedByEmail],
+      );
+      const requesterId = requesterRows?.[0]?.id || null;
+      if (requesterId) {
+        await notificationManager.sendNotification({
+          userId: requesterId,
+          customTitle: approved ? "Reapertura aprobada" : "Reapertura rechazada",
+          customMessage: approved
+            ? `Se aprobo tu solicitud de reapertura del BC ${businessCaseId} con ${Number(additionalHours)}h adicionales.`
+            : `Se rechazo tu solicitud de reapertura del BC ${businessCaseId}.`,
+          type: approved ? "success" : "alert",
+          source: approved ? "business_case.preflow.reopen_approved" : "business_case.preflow.reopen_rejected",
+          priority: 2,
+          email: true,
+          chat: false,
+          meta: {
+            businessCaseId,
+            phase: pendingRequest.phase || null,
+            role: pendingRequest.role || null,
+            approved,
+            additionalHours: approved ? Number(additionalHours) : null,
+            process_key: `business_case:${businessCaseId}`,
+          },
+        }).catch(() => null);
+      }
+    }
+
+    return {
+      resolved: true,
+      approved: Boolean(approved),
+      deadlineAt: nextDeadlineAt,
+      metadata: nextMetadata,
+      request: buildExtensionRequest(nextMetadata, pendingRequest.phase, pendingRequest.role),
+    };
+  });
+}
+
 module.exports = {
   DEFAULT_DURATION_HOURS,
   REQUIRED_SECTIONS,
@@ -530,4 +939,6 @@ module.exports = {
   ensurePreflowStarted,
   completeCommercialStageAndStartReview,
   ensurePreflowWorkspaceProcess,
+  requestPreflowReopen,
+  resolvePreflowReopen,
 };

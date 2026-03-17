@@ -12,6 +12,7 @@ import LabSection from "./sections/LabSection";
 import LISSection from "./sections/LISSection";
 import ConsumptionExportSection from "./sections/ConsumptionExportSection";
 import DispatchWorkspaceSection from "./sections/DispatchWorkspaceSection";
+import FeasibilitySection from "./sections/FeasibilitySection";
 
 const SectionContent = ({
   selectedSection,
@@ -98,13 +99,18 @@ const SectionContent = ({
     },
     consumption_export: {
       title: "Sincronizacion Sheets",
-      description: "Sincronizacion y generacion del formato oficial BC en Google Sheets",
+      description: "Creacion y sincronizacion del formato oficial BC en Google Sheets",
       icon: "EXP"
     },
     dispatch_workspace: {
-      title: "Workspace de Despacho",
-      description: "Plan comercial y control operativo por elemento",
+      title: "Cantidades Maximas",
+      description: "Cantidades maximas comerciales y control operativo por elemento",
       icon: "OPS"
+    },
+    feasibility: {
+      title: "Factibilidad",
+      description: "Decision final del Business Case y cierre para continuidad en compras",
+      icon: "FAC"
     }
   };
 
@@ -207,6 +213,17 @@ const SectionContent = ({
       );
     }
 
+    if (selectedSection === "feasibility") {
+      return (
+        <FeasibilitySection
+          businessCase={businessCase}
+          permissions={permissions}
+          ownership={uiGuidance?.sectionOwnership?.rules?.feasibility || {}}
+          onSave={forwardSave}
+        />
+      );
+    }
+
     return null;
   };
 
@@ -224,7 +241,7 @@ const SectionContent = ({
                 disabled={lockBusy}
                 className="px-3 py-1.5 text-xs font-semibold rounded-full bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-60"
               >
-                Bloquear seccion
+                Cerrar seccion
               </button>
             )}
             {canUnlock && (
@@ -234,7 +251,7 @@ const SectionContent = ({
                 disabled={lockBusy}
                 className="px-3 py-1.5 text-xs font-semibold rounded-full bg-amber-100 text-amber-900 hover:bg-amber-200 disabled:opacity-60"
               >
-                Desbloquear seccion
+                Reabrir seccion
               </button>
             )}
           </div>
