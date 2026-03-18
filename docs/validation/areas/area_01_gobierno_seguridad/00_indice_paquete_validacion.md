@@ -1,27 +1,29 @@
-﻿# PAQUETE DE VALIDACION POR AREA
+﻿# INDICE DEL EXPEDIENTE DE VALIDACION
 
-## Area 01: Gobierno, Seguridad y Cumplimiento
+## 1. Area documentada
+Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental.
 
-### Documentos vigentes
-1. `01_URS_requerimientos_usuario.md`
-2. `02_FRS_requerimientos_funcionales.md`
-3. `03_DDS_diseno_tecnico.md`
-4. `03A_DD_diccionario_datos.md`
-5. `04_IQ_validacion_instalacion.md`
-6. `05_OQ_validacion_funcionamiento.md`
-7. `06_PQ_validacion_operacion_real.md`
-8. `09_informe_hallazgos_area_01.md`
+## 2. Objetivo del expediente
+Este indice identifica los documentos fuente que conforman el expediente de validacion del Area 01 y establece el orden de lectura recomendado para comprender el dominio, verificar su base normativa, revisar el diseno tecnico y ejecutar las pruebas de calificacion correspondientes.
 
-### Protocolos de ejecucion
-9. `10_IQ_protocolo_ejecucion.md`
-10. `11_OQ_protocolo_ejecucion.md`
-11. `12_PQ_protocolo_ejecucion.md`
-12. `13_registro_evidencias_desviaciones.md`
+## 3. Alcance del expediente
+El expediente cubre los modulos y capacidades del area que sostienen autenticacion, seguridad, auditoria, preparacion documental de auditoria, trazabilidad gerencial, firma avanzada, gestion documental, notificaciones operativas, dashboard documental y autorizacion o envio de correo mediante Gmail.
 
-### Documentos de referencia historica
-- `08_revision_hallazgos_produccion.md`
+## 4. Documentos vigentes
+1. URS - Requerimientos de Usuario.
+2. FRS - Requerimientos Funcionales.
+3. DDS - Diseno Tecnico.
+4. DD - Diccionario de Datos.
+5. IQ - Calificacion de Instalacion.
+6. OQ - Calificacion de Operacion.
+7. PQ - Calificacion de Desempeno.
+8. Informe de Hallazgos Vigentes del Area.
+9. Protocolo de Ejecucion IQ.
+10. Protocolo de Ejecucion OQ.
+11. Protocolo de Ejecucion PQ.
+12. Registro de Evidencias y Desviaciones.
 
-### Modulos cubiertos
+## 5. Modulos cubiertos
 - `auth`
 - `security`
 - `auditoria`
@@ -29,17 +31,14 @@
 - `approvals`
 - `management`
 - `signature`
+- `documents`
+- `files`
+- `notifications`
+- `dashboard`
+- `gmail`
 
-### Criterio de actualizacion
-Este paquete fue revalidado contra el codigo vigente del repositorio. Se corrigieron desalineaciones previas en:
-- montaje de `security`
-- referencias SQL de `management`
-- contrato tecnico de `signature`
-- efecto secundario de `auth/me`
-- RBAC base a traves de `middlewares/roles.js`
+## 6. Criterio de actualizacion
+Este expediente fue reescrito para alinear el Area 01 con el mapa maestro compacto del sistema. A partir de esta actualizacion, el area incorpora formalmente gestion documental, notificaciones y soporte de correo o autorizacion donde existe evidencia tecnica de montaje y uso real en runtime.
 
-### Observaciones
-- `signature` mantiene compatibilidad bajo `/api` y ahora dispone tambien de alias versionado en `/api/v1/signature` para endpoints autenticados y de verificacion.
-- `approvals` no es un motor transversal de aprobaciones corporativas; en la implementacion actual cubre cola y decision de solicitudes del flujo tecnico/servicio.
-- El informe `09_informe_hallazgos_area_01.md` contiene solo hallazgos vigentes tras la revalidacion actual.
-- Los protocolos `10`, `11` y `12` estan preparados para ejecucion formal y captura de evidencia.
+## 7. Documento historico relacionado
+- Revision de hallazgos de produccion del area, conservada como referencia historica y no como fuente vigente de requisitos.

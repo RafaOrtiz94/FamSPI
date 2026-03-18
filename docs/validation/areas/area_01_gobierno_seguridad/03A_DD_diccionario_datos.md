@@ -1,17 +1,42 @@
-﻿# DICCIONARIO DE DATOS
+# DICCIONARIO DE DATOS
 
-## Area 01: Gobierno, Seguridad y Cumplimiento
+## Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental
 
-## 1. Objetivo
-Documentar las estructuras de datos reales consumidas por los modulos `auth`, `security`, `auditoria`, `audit-prep`, `approvals`, `management` y `signature`, tomando como fuente la base vigente en Neon.
+## 1. Introduccion
+El presente diccionario de datos documenta las estructuras persistentes que soportan el funcionamiento real del Area 01. Su funcion es explicar no solo que tablas, vistas y campos existen, sino tambien por que forman parte del dominio, como se relacionan con los modulos del area y cuando intervienen dentro de los flujos auditables, gerenciales o documentales del sistema.
 
-## 2. Fuente de verdad
+## 2. Objetivo
+Documentar las estructuras de datos reales consumidas por los modulos `auth`, `security`, `auditoria`, `audit-prep`, `approvals`, `management`, `signature`, `documents`, `files`, `notifications`, `dashboard` y `gmail`, tomando como fuente la base vigente en Neon y justificando su uso dentro del dominio de Gobierno, Seguridad, Cumplimiento y Gestion Documental.
+
+## 3. Fuente de verdad
 - Motor consultado: PostgreSQL en Neon.
 - Base consultada: `FamSPI`.
 - Extraccion realizada desde catalogos reales (`information_schema`, `pg_catalog`).
 - Regla aplicada: cuando el codigo usa objetos distintos a los existentes en Neon, se registra como discrepancia tecnica.
 
-## 3. Tablas y vistas incluidas
+## 4. Criterio de inclusion
+Las entidades incluidas en este diccionario fueron seleccionadas porque participan de manera directa en alguno de los siguientes escenarios:
+- autenticacion y manejo de sesion
+- trazabilidad y bitacora del sistema
+- revision de seguridad
+- preparacion documental de auditoria
+- decisiones de aprobacion del flujo soportado
+- consulta gerencial de solicitudes y evidencia
+- generacion documental desde plantilla
+- custodia de adjuntos por solicitud
+- notificaciones operativas por usuario
+- autorizacion y uso de Gmail donde existe persistencia verificable
+- firma avanzada, verificacion y auditoria documental
+
+## 5. Como leer este diccionario
+Cada entidad documentada incluye:
+- tipo de objeto
+- modulos consumidores
+- justificacion funcional o tecnica de uso
+- clave primaria y relaciones visibles
+- definicion de campos relevantes
+- indices visibles cuando aportan criterio de desempeno o trazabilidad
+## 6. Tablas y vistas incluidas
 - `auditoria.logs` (table)
 - `public.audit_access_grants` (table)
 - `public.audit_documents` (table)
@@ -37,7 +62,14 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 - `public.user_sessions` (table)
 - `public.users` (table)
 
-## 4. Diccionario por entidad
+## 7. Cuando intervienen estas entidades
+- `users`, `departments`, `user_sessions`, `user_profile` y `user_lopdp_consents` intervienen durante autenticaciÃ³n, perfil, sesiones y aceptaciÃ³n interna.
+- `auditoria.logs` y `notifications` intervienen cuando el sistema registra, expone o revisa eventos relevantes.
+- `audit_*` intervienen durante preparaciÃ³n documental y control de auditorÃ­a.
+- `requests`, `request_types`, `request_approvals`, `request_attachments` y `request_versions` intervienen durante decisiones operativas y visibilidad gerencial.
+- `documents` y `document_*` intervienen durante firma avanzada, verificaciÃ³n pÃºblica y audit trail documental.
+
+## 8. Diccionario por entidad
 
 ### auditoria.logs
 - Tipo de objeto: table.
@@ -50,13 +82,13 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 |---|---|---|---|---|
 | id | integer | NO | nextval('auditoria.logs_id_seq'::regclass) |  |
 | usuario_id | integer | YES |  |  |
-| usuario_email | character varying | YES |  | Correo del usuario que realizÃ³ la acciÃ³n |
+| usuario_email | character varying | YES |  | Correo del usuario que realizÃƒÂ³ la acciÃƒÂ³n |
 | rol | character varying | YES |  |  |
-| modulo | character varying | YES |  | MÃ³dulo afectado (auth, solicitudes, mantenimientos, etc.) |
-| accion | character varying | YES |  | Tipo de acciÃ³n (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
-| descripcion | text | YES |  | DescripciÃ³n amigable de la acciÃ³n realizada |
+| modulo | character varying | YES |  | MÃƒÂ³dulo afectado (auth, solicitudes, mantenimientos, etc.) |
+| accion | character varying | YES |  | Tipo de acciÃƒÂ³n (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
+| descripcion | text | YES |  | DescripciÃƒÂ³n amigable de la acciÃƒÂ³n realizada |
 | datos_anteriores | jsonb | YES |  | JSON con los datos antes del cambio |
-| datos_nuevos | jsonb | YES |  | JSON con los datos despuÃ©s del cambio |
+| datos_nuevos | jsonb | YES |  | JSON con los datos despuÃƒÂ©s del cambio |
 | ip | character varying | YES |  |  |
 | user_agent | text | YES |  |  |
 | fecha | timestamp without time zone | YES | CURRENT_TIMESTAMP | Fecha y hora del evento registrado |
@@ -570,7 +602,7 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 | legacy_purchase_id | uuid | YES |  | Reverse mapping to legacy purchase for debugging |
 | drive_comercial_folder_id | text | YES |  | Google Drive folder ID for the main "Comercial" folder at root level |
 | drive_user_folder_id | text | YES |  | Google Drive folder ID for the user-specific folder within "Comercial" |
-| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "InspecciÃ³n de Ambiente") |
+| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "InspecciÃƒÂ³n de Ambiente") |
 | drive_request_folder_id | text | YES |  | Google Drive folder ID for the specific request folder (REQ-xxxx) |
 | origin_department_id | integer | YES |  |  |
 | origin_department_name | text | YES |  |  |
@@ -739,7 +771,7 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 | can_sign_documents | boolean | YES | false | Whether user has permission to sign documents |
 | signature_role | character varying | YES |  | Role for signature authorization (DPD, Manager, etc.) |
 | signature_certificate_id | character varying | YES |  | ID of digital certificate for qualified signatures |
-| active | boolean | NO | true | Indica si el usuario estÃ¡ activo en el sistema. Los usuarios inactivos no pueden acceder. |
+| active | boolean | NO | true | Indica si el usuario estÃƒÂ¡ activo en el sistema. Los usuarios inactivos no pueden acceder. |
 
 - Indices visibles:
   - idx_users_active: CREATE INDEX idx_users_active ON public.users USING btree (active)
@@ -756,5 +788,3 @@ Documentar las estructuras de datos reales consumidas por los modulos `auth`, `s
 - `auth/me` ya no toca `user_attendance_records`, pero `auth.googleCallback` sigue ejecutando `ensureDailyClockIn()` como side effect transversal.
 - `approvals` sigue limitado a la cola tecnica soportada por `requests` y `request_approvals`; no implementa un motor transversal de aprobaciones por area.
 
-## 6. Conclusion
-El area 01 dispone de un modelo de datos real suficiente para autenticacion, seguridad off-hours, auditoria, preparacion de auditoria, aprobaciones tecnicas, trazabilidad gerencial y firma documental. Tras la revalidacion actual, las discrepancias mas relevantes ya no estan en tablas o columnas incorrectas del flujo core, sino en alcance funcional de `approvals`, totalizacion/trazabilidad robusta en `management`, acoplamiento transversal de `auth` y dependencia SQL especializada de `signature`.

@@ -7,7 +7,7 @@
 const router = require("express").Router();
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./attendance.controller");
-const { generatePDF } = require("./attendance.service");
+const { requireAttendanceReportAccess } = require("./attendance.auth");
 
 // Clock in/out endpoints
 router.post("/clock-in", verifyToken, controller.clockIn);
@@ -25,10 +25,10 @@ router.get("/overtime", verifyToken, controller.getOvertimeRecords);
 
 // Query endpoints
 router.get("/today", verifyToken, controller.getToday);
-router.get("/user/:userId", verifyToken, controller.getUserAttendance);
-router.get("/range", verifyToken, controller.getRange);
+router.get("/user/:userId", verifyToken, requireAttendanceReportAccess("param"), controller.getUserAttendance);
+router.get("/range", verifyToken, requireAttendanceReportAccess("query", { allowAll: true }), controller.getRange);
 
 // PDF generation
-router.get("/pdf/:userId", verifyToken, generatePDF);
+router.get("/pdf/:userId", verifyToken, requireAttendanceReportAccess("param", { allowAll: true }), controller.generatePDF);
 
 module.exports = router;

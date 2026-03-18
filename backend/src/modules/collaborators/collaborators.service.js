@@ -2,6 +2,7 @@ const db = require('../../config/db');
 const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { ensureFolder, uploadBase64File } = require('../../utils/drive');
+const { PROFILE_SYNC_KEYS, collectNestedFields } = require('../shared/profileSync');
 
 const REQUIRED_PROFILE_FIELDS = [
   'personal.nombres',
@@ -106,53 +107,8 @@ const computeDocumentsCompletion = (docTypes = []) => {
   return { total, done, complete: total > 0 && done === total };
 };
 
-const PROFILE_SYNC_KEYS = [
-  'personal.telefono_personal',
-  'personal.email_personal',
-  'personal.estado_civil',
-  'personal.genero',
-  'personal.tipo_sangre',
-  'personal.lugar_nacimiento',
-  'personal.fecha_nacimiento',
-  'domicilio.ciudad_domicilio',
-  'domicilio.direccion_domicilio',
-  'domicilio.telefono_fijo',
-  'emergencia.persona_contacto',
-  'emergencia.telefono_contacto',
-  'estudios.nivel_instruccion',
-  'estudios.titulo_tercer_nivel',
-  'estudios.universidad_tercer_nivel',
-  'estudios.titulo_cuarto_nivel',
-  'estudios.universidad_cuarto_nivel',
-  'laboral.fecha_ingreso',
-  'laboral.cargo',
-  'laboral.area',
-  'laboral.telefono_celular_famproject',
-  'laboral.email_famproject'
-];
-
-const getNestedValue = (obj, path) => {
-  return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
-};
-
 const pickProfileForMetadata = (profile = {}) => {
-  const result = {};
-  PROFILE_SYNC_KEYS.forEach((key) => {
-    const path = key.split('.');
-    const value = getNestedValue(profile, path);
-    if (value !== undefined) {
-      let ref = result;
-      path.forEach((part, idx) => {
-        if (idx === path.length - 1) {
-          ref[part] = value;
-        } else {
-          if (!ref[part] || typeof ref[part] !== 'object') ref[part] = {};
-          ref = ref[part];
-        }
-      });
-    }
-  });
-  return result;
+  return collectNestedFields(profile, PROFILE_SYNC_KEYS);
 };
 
 const mergeProfiles = (base = {}, incoming = {}) => {
@@ -268,7 +224,7 @@ const listCollaborators = async (filters = {}) => {
       d.name AS department_name,
       cp.profile,
       cp.updated_at AS profile_updated_at,
-        up.metadata->>'profile_last_reviewed_at' AS profile_last_reviewed_at,
+      up.metadata->>'profile_last_reviewed_at' AS profile_last_reviewed_at,
       (
         SELECT ARRAY_AGG(cd.doc_type)
         FROM collaborator_documents cd
@@ -279,6 +235,23 @@ const listCollaborators = async (filters = {}) => {
         FROM user_certifications uc
         WHERE uc.user_id = u.id AND uc.is_active = true
       ) AS certifications_count
+      ,
+      (
+        SELECT COUNT(*)
+        FROM user_certifications uc
+        WHERE uc.user_id = u.id
+          AND uc.is_active = true
+          AND uc.expiry_date IS NOT NULL
+          AND uc.expiry_date < CURRENT_DATE
+      ) AS certifications_expired_count,
+      (
+        SELECT COUNT(*)
+        FROM user_certifications uc
+        WHERE uc.user_id = u.id
+          AND uc.is_active = true
+          AND uc.expiry_date IS NOT NULL
+          AND uc.expiry_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')
+      ) AS certifications_expiring_soon_count
     FROM users u
     LEFT JOIN departments d ON u.department_id = d.id
     LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
@@ -309,6 +282,8 @@ const listCollaborators = async (filters = {}) => {
       return {
         ...row,
         certifications_count: Number(row.certifications_count || 0),
+        certifications_expired_count: Number(row.certifications_expired_count || 0),
+        certifications_expiring_soon_count: Number(row.certifications_expiring_soon_count || 0),
         review_pending,
         profile_completion: profileCompletion,
         documents_completion: documentsCompletion,
@@ -349,11 +324,31 @@ const getCollaboratorProfile = async (userId) => {
     [userId]
   );
 
+  const reviewQuery = await db.query(
+    `SELECT metadata->>'profile_last_reviewed_at' AS profile_last_reviewed_at
+     FROM user_profile
+     WHERE user_id = $1
+     LIMIT 1`,
+    [userId]
+  );
+
   const docsQuery = await db.query(
     `SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, uploaded_by, created_at
      FROM collaborator_documents
      WHERE user_id = $1
      ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  const certificationsQuery = await db.query(
+    `
+    SELECT
+      COUNT(*) FILTER (WHERE is_active = true) AS active_count,
+      COUNT(*) FILTER (WHERE is_active = true AND expiry_date IS NOT NULL AND expiry_date < CURRENT_DATE) AS expired_count,
+      COUNT(*) FILTER (WHERE is_active = true AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')) AS expiring_soon_count
+    FROM user_certifications
+    WHERE user_id = $1
+    `,
     [userId]
   );
 
@@ -366,6 +361,13 @@ const getCollaboratorProfile = async (userId) => {
     updated_at: profileQuery.rows[0]?.updated_at || null,
     updated_by: profileQuery.rows[0]?.updated_by || null,
     documents: docsQuery.rows || [],
+    certifications_summary: {
+      active: Number(certificationsQuery.rows[0]?.active_count || 0),
+      expired: Number(certificationsQuery.rows[0]?.expired_count || 0),
+      expiring_soon: Number(certificationsQuery.rows[0]?.expiring_soon_count || 0),
+    },
+    profile_last_reviewed_at: reviewQuery.rows[0]?.profile_last_reviewed_at || null,
+    review_pending: isReviewPending(reviewQuery.rows[0]?.profile_last_reviewed_at || null),
     completion: {
       profile: computeProfileCompletion(profile),
       documents: computeDocumentsCompletion(docTypes),
@@ -499,11 +501,28 @@ const getCollaboratorStats = async () => {
         u.id,
         cp.profile,
         up.metadata->>'profile_last_reviewed_at' AS profile_last_reviewed_at,
-        (
-          SELECT ARRAY_AGG(cd.doc_type)
-          FROM collaborator_documents cd
-          WHERE cd.user_id = u.id
-        ) AS doc_types
+      (
+        SELECT ARRAY_AGG(cd.doc_type)
+        FROM collaborator_documents cd
+        WHERE cd.user_id = u.id
+      ) AS doc_types
+      ,
+      (
+        SELECT COUNT(*)
+        FROM user_certifications uc
+        WHERE uc.user_id = u.id
+          AND uc.is_active = true
+          AND uc.expiry_date IS NOT NULL
+          AND uc.expiry_date < CURRENT_DATE
+      ) AS certifications_expired_count,
+      (
+        SELECT COUNT(*)
+        FROM user_certifications uc
+        WHERE uc.user_id = u.id
+          AND uc.is_active = true
+          AND uc.expiry_date IS NOT NULL
+          AND uc.expiry_date BETWEEN CURRENT_DATE AND (CURRENT_DATE + INTERVAL '30 days')
+      ) AS certifications_expiring_soon_count
       FROM users u
       LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
       LEFT JOIN user_profile up ON up.user_id = u.id
@@ -537,7 +556,18 @@ const getCollaboratorStats = async () => {
     const percent_complete = total > 0 ? Math.round((complete / total) * 100) : 0;
     const avg_completion = total > 0 ? Math.round((sumCompletion / total) * 100) : 0;
 
-    return { total, complete, percent_complete, avg_completion, pending_review };
+    const certifications_expired = rows.reduce((acc, row) => acc + Number(row.certifications_expired_count || 0), 0);
+    const certifications_expiring_soon = rows.reduce((acc, row) => acc + Number(row.certifications_expiring_soon_count || 0), 0);
+
+    return {
+      total,
+      complete,
+      percent_complete,
+      avg_completion,
+      pending_review,
+      certifications_expired,
+      certifications_expiring_soon,
+    };
   };
 
 module.exports = {

@@ -4,8 +4,8 @@ import api from "./index";
 /**
  * Obtener todos los usuarios (con nombre de departamento)
  */
-export const getUsers = async () => {
-  const { data } = await api.get("/users");
+export const getUsers = async (params = {}) => {
+  const { data } = await api.get("/users", { params });
   return data.data;
 };
 
@@ -26,7 +26,7 @@ export const updateUser = async (id, payload) => {
 };
 
 /**
- * Eliminar usuario
+ * Desactivar usuario
  */
 export const deleteUser = async (id) => {
   const { data } = await api.delete(`/users/${id}`);

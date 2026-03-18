@@ -20,34 +20,86 @@ const REQUEST_TYPE_LABELS = {
 const getRequestLabel = (code, fallback) =>
   (code && REQUEST_TYPE_LABELS[code]) || fallback || code || "Solicitud";
 const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:3000";
+const FINAL_REQUEST_STATUSES = [
+  "approved",
+  "aprobado",
+  "rechazado",
+  "rejected",
+  "cancelado",
+  "cancelled",
+];
+
+const buildPendingAssignmentsClause = (actorId, params) => {
+  if (!Number.isInteger(actorId)) {
+    return "";
+  }
+
+  params.push(actorId);
+  const actorParam = `$${params.length}`;
+
+  return `
+    AND (
+      EXISTS (
+        SELECT 1
+        FROM request_approvals pa
+        WHERE pa.request_id = r.id
+          AND pa.approver_id = ${actorParam}
+          AND pa.action IS NULL
+          AND COALESCE(pa.used, FALSE) = FALSE
+          AND (pa.token_expires_at IS NULL OR pa.token_expires_at >= NOW())
+      )
+      OR NOT EXISTS (
+        SELECT 1
+        FROM request_approvals pa
+        WHERE pa.request_id = r.id
+          AND pa.action IS NULL
+          AND COALESCE(pa.used, FALSE) = FALSE
+          AND (pa.token_expires_at IS NULL OR pa.token_expires_at >= NOW())
+      )
+    )
+  `;
+};
 
 /**
  * 📋 Listar solicitudes pendientes
  * Filtra por rol o tipo de solicitud.
  */
-async function listPending(page = 1, pageSize = 10, role = "") {
+async function listPending(page = 1, pageSize = 10, actor = {}) {
   const offset = (page - 1) * pageSize;
+  const baseParams = [FINAL_REQUEST_STATUSES];
+  const visibilityClause = buildPendingAssignmentsClause(actor?.id, baseParams);
+  const baseQuery = `
+    FROM requests r
+    JOIN request_types rt ON r.request_type_id = rt.id
+    JOIN users u ON u.id = r.requester_id
+    WHERE LOWER(r.status) <> ALL($1::text[])
+    ${visibilityClause}
+  `;
+  const listParams = [...baseParams, pageSize, offset];
+  const limitParam = `$${listParams.length - 1}`;
+  const offsetParam = `$${listParams.length}`;
 
   const q = await db.query(
     `
     SELECT r.id,
            r.status,
            r.created_at,
-           u.fullname AS requester_name,
+           COALESCE(u.fullname, u.name, u.email) AS requester_name,
            rt.code AS type_code,
            rt.title AS type_title
-    FROM requests r
-    JOIN request_types rt ON r.request_type_id = rt.id
-    JOIN users u ON u.id = r.requester_id
-    WHERE LOWER(r.status) NOT IN ('approved','aprobado','rechazado','rejected','cancelado','cancelled')
+    ${baseQuery}
     ORDER BY r.created_at DESC
-    LIMIT $1 OFFSET $2
+    LIMIT ${limitParam} OFFSET ${offsetParam}
     `,
-    [pageSize, offset]
+    listParams
   );
 
   const totalQ = await db.query(
-    "SELECT COUNT(*) FROM requests WHERE LOWER(status) NOT IN ('approved','aprobado','rechazado','rejected','cancelado','cancelled')"
+    `
+    SELECT COUNT(*) AS total
+    ${baseQuery}
+    `,
+    baseParams
   );
 
   const mapped = q.rows.map((row) => ({
@@ -55,7 +107,7 @@ async function listPending(page = 1, pageSize = 10, role = "") {
     type_title: getRequestLabel(row.type_code, row.type_title),
   }));
 
-  return { rows: mapped, total: parseInt(totalQ.rows[0].count, 10) };
+  return { rows: mapped, total: parseInt(totalQ.rows[0].total, 10) };
 }
 
 /**

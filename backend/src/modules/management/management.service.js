@@ -1,5 +1,24 @@
 const db = require("../../config/db");
 
+const buildRequestFilters = ({ status, area }) => {
+  const filters = [];
+  const params = [];
+
+  if (status) {
+    params.push(status);
+    filters.push(`r.status = $${params.length}`);
+  }
+  if (area) {
+    params.push(area);
+    filters.push(`(r.payload->>'area') ILIKE '%' || $${params.length} || '%'`);
+  }
+
+  return {
+    params,
+    where: filters.length ? `WHERE ${filters.join(" AND ")}` : "",
+  };
+};
+
 const getStats = async () => {
   const [countAll, countApproved, countRejected, avgTime] = await Promise.all([
     db.query("SELECT COUNT(*) FROM requests"),
@@ -29,19 +48,16 @@ const getStats = async () => {
 
 const listRequests = async ({ page, pageSize, status, area }) => {
   const offset = (page - 1) * pageSize;
-  const filters = [];
-  const params = [];
-
-  if (status) {
-    params.push(status);
-    filters.push(`r.status = $${params.length}`);
-  }
-  if (area) {
-    params.push(area);
-    filters.push(`(r.payload->>'area') ILIKE '%' || $${params.length} || '%'`);
-  }
-
-  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const { params, where } = buildRequestFilters({ status, area });
+  const countQuery = `
+    SELECT COUNT(*) AS total
+    FROM requests r
+    ${where}
+  `;
+  const countResult = await db.query(countQuery, params);
+  const listParams = [...params, pageSize, offset];
+  const limitParam = `$${listParams.length - 1}`;
+  const offsetParam = `$${listParams.length}`;
   const query = `
     SELECT r.*, rt.title AS tipo, COALESCE(u.fullname, u.name, u.email) AS solicitante
     FROM requests r
@@ -49,13 +65,18 @@ const listRequests = async ({ page, pageSize, status, area }) => {
     JOIN users u ON u.id = r.requester_id
     ${where}
     ORDER BY r.created_at DESC
-    LIMIT ${pageSize} OFFSET ${offset}
+    LIMIT ${limitParam} OFFSET ${offsetParam}
   `;
-  const data = await db.query(query, params);
-  return { rows: data.rows, total: data.rowCount };
+  const data = await db.query(query, listParams);
+  return { rows: data.rows, total: Number(countResult.rows[0]?.total || 0) };
 };
 
 const getTrace = async (id) => {
+  const normalizedId = Number(id);
+  if (!Number.isInteger(normalizedId)) {
+    return [];
+  }
+
   const logs = await db.query(
     `SELECT
        id,
@@ -78,10 +99,10 @@ const getTrace = async (id) => {
        creado_en
      FROM auditoria.logs
      WHERE request_id = $1
-        OR (datos_nuevos->>'request_id')::INT = $1
-        OR (datos_anteriores->>'request_id')::INT = $1
+        OR ((datos_nuevos->>'request_id') ~ '^[0-9]+$' AND (datos_nuevos->>'request_id')::BIGINT = $1)
+        OR ((datos_anteriores->>'request_id') ~ '^[0-9]+$' AND (datos_anteriores->>'request_id')::BIGINT = $1)
      ORDER BY creado_en ASC`,
-    [id]
+    [normalizedId]
   );
   return logs.rows;
 };

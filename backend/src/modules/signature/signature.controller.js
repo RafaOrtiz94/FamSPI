@@ -4,6 +4,7 @@ const crypto = require("crypto");
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
+const { assertSignatureDependencies } = require("../../services/signatures/signatureSchema.service");
 
 const SIGNATURE_CONSTANTS = {
   ALGORITHMS: {
@@ -222,6 +223,7 @@ exports.signDocument = asyncHandler(async (req, res) => {
   const { document_base64: documentBase64, role_at_sign: roleAtSign, authorized_role: authorizedRole, session_id: sessionIdHeader } = req.body || {};
 
   validateSignatureRequest(req.body);
+  await assertSignatureDependencies(["sealGenerator"]);
 
   if (!req.user?.email) {
     return res.status(422).json({ ok: false, message: "El usuario autenticado no tiene email para registrar la firma" });
@@ -321,6 +323,7 @@ exports.verifyDocument = [
     const { token } = req.params;
 
     try {
+      const dependencyStatus = await assertSignatureDependencies(["verificationView"]);
       const result = await db.query(
         `SELECT *
          FROM document_verification_info
@@ -337,8 +340,10 @@ exports.verifyDocument = [
         `SELECT id FROM document_qr_codes WHERE verification_token = $1 LIMIT 1`,
         [token]
       );
-      if (qrLookup.rows[0]?.id) {
+      if (dependencyStatus.qrTracker && qrLookup.rows[0]?.id) {
         await db.query(`SELECT track_qr_access($1)`, [qrLookup.rows[0].id]);
+      } else if (!dependencyStatus.qrTracker) {
+        logger.warn("Seguimiento QR omitido: track_qr_access() no esta disponible");
       }
 
       return res.json({
@@ -377,7 +382,7 @@ exports.verifyDocument = [
       });
     } catch (err) {
       logger.error({ err }, "Error en verificacion de documento");
-      return res.status(500).json({ ok: false, message: "Error interno del servidor" });
+      return res.status(err.status || 500).json({ ok: false, message: err.message || "Error interno del servidor" });
     }
   }),
 ];

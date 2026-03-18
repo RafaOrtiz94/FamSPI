@@ -1,6 +1,12 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { logAction } = require("../../utils/audit");
+const WHITELIST_TABLE_IDENTIFIER = "public.security_offhours_whitelist";
+const TABLE_CACHE_TTL_MS = 60 * 1000;
+let whitelistTableCache = {
+  checkedAt: 0,
+  exists: null,
+};
 
 /**
  * Security Whitelist Engine
@@ -32,6 +38,39 @@ function isValidCIDR(cidr) {
   return true;
 }
 
+async function isWhitelistTableAvailable() {
+  const now = Date.now();
+  if (
+    whitelistTableCache.exists !== null &&
+    now - whitelistTableCache.checkedAt < TABLE_CACHE_TTL_MS
+  ) {
+    return whitelistTableCache.exists;
+  }
+
+  const result = await db.query(
+    "SELECT to_regclass($1)::text AS table_name",
+    [WHITELIST_TABLE_IDENTIFIER]
+  );
+
+  whitelistTableCache = {
+    checkedAt: now,
+    exists: Boolean(result.rows[0]?.table_name),
+  };
+
+  return whitelistTableCache.exists;
+}
+
+async function assertWhitelistTableAvailable() {
+  const exists = await isWhitelistTableAvailable();
+  if (exists) {
+    return true;
+  }
+
+  const error = new Error("La whitelist auxiliar de seguridad no esta disponible en este entorno");
+  error.status = 503;
+  throw error;
+}
+
 // Check if IP matches CIDR (basic implementation for common cases)
 function ipMatchesCIDR(ip, cidr) {
   if (!ip || !cidr) return false;
@@ -60,6 +99,11 @@ function ipMatchesCIDR(ip, cidr) {
  */
 async function checkWhitelist(actorEmail, reason, ip) {
   try {
+    if (!(await isWhitelistTableAvailable())) {
+      logger.info("[WHITELIST] Tabla auxiliar no disponible; se omite whitelist");
+      return { isWhitelisted: false, unavailable: true };
+    }
+
     // Query active whitelist rules for this actor
     const query = `
       SELECT id, reason, ip_cidr
@@ -130,6 +174,8 @@ async function checkWhitelist(actorEmail, reason, ip) {
  */
 async function getWhitelistRules() {
   try {
+    await assertWhitelistTableAvailable();
+
     const result = await db.query(`
       SELECT
         w.id,
@@ -172,6 +218,8 @@ async function createWhitelistRule(ruleData, createdBy) {
   }
 
   try {
+    await assertWhitelistTableAvailable();
+
     const result = await db.query(`
       INSERT INTO security_offhours_whitelist
         (actor_email, reason, ip_cidr, notes, created_by)
@@ -225,6 +273,8 @@ async function updateWhitelistRule(ruleId, updates, updatedBy) {
   }
 
   try {
+    await assertWhitelistTableAvailable();
+
     const result = await db.query(`
       UPDATE security_offhours_whitelist
       SET

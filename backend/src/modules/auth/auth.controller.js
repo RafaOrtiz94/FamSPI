@@ -32,6 +32,7 @@ const { logAction } = require("../../utils/audit");
 const { ensureDailyClockIn } = require("../attendance/attendance.utils");
 // Use crypto.randomUUID() (Node.js 18+ native)
 const { randomUUID } = require('crypto');
+const LOGIN_ATTENDANCE_SYNC_ENABLED = process.env.AUTH_ENABLE_LOGIN_CLOCK_IN !== "false";
 
 const SCOPES = ["profile", "email"];
 const ROLE_META = {
@@ -136,6 +137,40 @@ const LOPDP_ROOT_FOLDER = "Consentimientos LOPDP";
 const LOPDP_INTERNAL_FOLDER = "Colaboradores";
 const LOPDP_SIGNATURES_FOLDER = "Firmas";
 const LOPDP_DOCUMENTS_FOLDER = "Documentos";
+
+const syncAttendanceDuringLogin = async (user) => {
+  if (!LOGIN_ATTENDANCE_SYNC_ENABLED) {
+    logger.info("Sincronizacion de asistencia en login deshabilitada por configuracion", {
+      userId: user?.id,
+      email: user?.email,
+    });
+    return { skipped: true };
+  }
+
+  try {
+    const attendanceResult = await ensureDailyClockIn({
+      userId: user.id,
+      location: null,
+      timestamp: new Date(),
+    });
+
+    logger.info("Asistencia sincronizada durante login", {
+      userId: user.id,
+      email: user.email,
+      created: attendanceResult.created,
+      attendanceDate: attendanceResult.date,
+    });
+
+    return { skipped: false, result: attendanceResult };
+  } catch (attendanceErr) {
+    logger.warn("No se pudo registrar asistencia automatica en login: %s", attendanceErr.message, {
+      userId: user?.id,
+      email: user?.email,
+    });
+
+    return { skipped: false, error: attendanceErr };
+  }
+};
 
 /* ============================================================
    1️⃣ Redirigir a Google OAuth
@@ -305,25 +340,7 @@ const googleCallback = async (req, res) => {
       logger.warn("⚠️ No se pudo registrar la sesión en user_sessions: %s", sessionErr.message);
     }
 
-    try {
-      const attendanceResult = await ensureDailyClockIn({
-        userId: user.id,
-        location: null,
-        timestamp: new Date(),
-      });
-
-      logger.info("✅ Asistencia sincronizada durante login", {
-        userId: user.id,
-        email: user.email,
-        created: attendanceResult.created,
-        attendanceDate: attendanceResult.date,
-      });
-    } catch (attendanceErr) {
-      logger.warn("⚠️ No se pudo registrar asistencia automática en login: %s", attendanceErr.message, {
-        userId: user.id,
-        email: user.email,
-      });
-    }
+    await syncAttendanceDuringLogin(user);
 
     // 🔐 Seguridad: Verificar login fuera de horario
     let offHoursCheck = isOffHours(new Date());

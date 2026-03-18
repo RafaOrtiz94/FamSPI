@@ -72,21 +72,69 @@ const PersonnelRequestForm = ({ onClose, onSuccess, isModal = true }) => {
         return Object.keys(nextErrors).length === 0;
     };
 
+    const getStepRequiredFields = (step) => {
+        switch (step) {
+            case 1:
+                return ['position_title', 'position_type', 'quantity', 'justification'];
+            case 2:
+                return ['education_level'];
+            case 3:
+                return ['main_responsibilities'];
+            case 4:
+                return ['work_schedule', 'salary_range', 'work_location', 'benefits'];
+            default:
+                return [];
+        }
+    };
+
+    const validateQuantity = () => {
+        const quantityValue = Number(formData.quantity);
+        if (!Number.isInteger(quantityValue) || quantityValue < 1) {
+            setFieldErrors(prev => ({
+                ...prev,
+                quantity: 'La cantidad debe ser un numero entero mayor o igual a 1',
+            }));
+            return false;
+        }
+        return true;
+    };
+
+    const validateStep = (step) => {
+        const requiredFields = getStepRequiredFields(step);
+        const okFields = validateFields(requiredFields);
+        const okQuantity = step === 1 ? validateQuantity() : true;
+        return okFields && okQuantity;
+    };
+
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         if (currentStep < 4) {
+            if (!validateStep(currentStep)) {
+                toast.error('Completa los campos obligatorios de este paso');
+                return;
+            }
             nextStep();
             return;
         }
         if (loading) return;
 
         // Validaciones basicas
-        const requiredBase = ['position_title', 'education_level', 'main_responsibilities', 'justification'];
-        const requiredConditions = ['work_schedule', 'salary_range', 'work_location', 'benefits'];
-        const okBase = validateFields(requiredBase);
-        const okConditions = validateFields(requiredConditions);
-        if (!okBase || !okConditions) {
+        const requiredFields = [
+            'position_title',
+            'position_type',
+            'quantity',
+            'education_level',
+            'main_responsibilities',
+            'justification',
+            'work_schedule',
+            'salary_range',
+            'work_location',
+            'benefits',
+        ];
+        const okFields = validateFields(requiredFields);
+        const okQuantity = validateQuantity();
+        if (!okFields || !okQuantity) {
             toast.error('Por favor completa los campos obligatorios');
             return;
         }
@@ -118,6 +166,10 @@ const PersonnelRequestForm = ({ onClose, onSuccess, isModal = true }) => {
         if (currentStep >= 4) return;
         if (e.target?.tagName === "TEXTAREA") return;
         e.preventDefault();
+        if (!validateStep(currentStep)) {
+            toast.error('Completa los campos obligatorios de este paso');
+            return;
+        }
         nextStep();
     };
 
@@ -216,8 +268,8 @@ const PersonnelRequestForm = ({ onClose, onSuccess, isModal = true }) => {
                                             <option value="reemplazo">Reemplazo</option>
                                             <option value="proyecto">Por Proyecto</option>
                                         </select>
-                                        {fieldErrors.education_level && (
-                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.education_level}</p>
+                                        {fieldErrors.position_type && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.position_type}</p>
                                         )}
                                     </div>
 
@@ -234,6 +286,9 @@ const PersonnelRequestForm = ({ onClose, onSuccess, isModal = true }) => {
                                             min="1"
                                             required
                                         />
+                                        {fieldErrors.quantity && (
+                                            <p className="text-xs text-red-600 mt-1">{fieldErrors.quantity}</p>
+                                        )}
                                     </div>
 
                                     <div>

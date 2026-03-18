@@ -6,9 +6,19 @@ const { requireRole } = require('../../middlewares/roles');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 
-router.post('/api/v1/hr/employees', verifyToken, requireRole(['talento_humano','gerencia']), ctrl.createEmployee);
-router.get('/api/v1/hr/employees', verifyToken, requireRole(['talento_humano','gerencia']), ctrl.listEmployees);
-router.put('/api/v1/hr/employees/:id', verifyToken, requireRole(['talento_humano','gerencia']), ctrl.updateEmployee);
-router.post('/api/v1/hr/documents/:id', verifyToken, requireRole(['talento_humano','gerencia']), upload.single('file'), ctrl.uploadDocument);
+const EMPLOYEES_ROUTES = ['/employees'];
+const EMPLOYEE_BY_ID_ROUTES = ['/employees/:id'];
+const EMPLOYEE_DOCUMENTS_ROUTES = ['/documents/:id'];
+
+router.post(EMPLOYEES_ROUTES, verifyToken, requireRole(['talento_humano', 'gerencia']), ctrl.createEmployee);
+router.get(EMPLOYEES_ROUTES, verifyToken, requireRole(['talento_humano', 'gerencia']), ctrl.listEmployees);
+router.put(EMPLOYEE_BY_ID_ROUTES, verifyToken, requireRole(['talento_humano', 'gerencia']), ctrl.updateEmployee);
+router.post(
+  EMPLOYEE_DOCUMENTS_ROUTES,
+  verifyToken,
+  requireRole(['talento_humano', 'gerencia']),
+  upload.single('file'),
+  ctrl.uploadDocument
+);
 
 module.exports = router;

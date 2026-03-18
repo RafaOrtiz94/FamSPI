@@ -7,6 +7,7 @@ import CollaboratorList from "./CollaboratorList";
 import PersonnelApprovalsModal from "./PersonnelApprovalsModal";
 
 const PersonnelSidebar = ({
+  className = "",
   activeView,
   setActiveView,
   requests,
@@ -63,7 +64,7 @@ const PersonnelSidebar = ({
   }, [collaborators, collaboratorSearch]);
 
   return (
-    <Card className="flex h-full flex-col overflow-hidden bg-white shadow-sm border border-gray-200">
+    <Card className={`flex h-full flex-col overflow-hidden bg-white shadow-sm border border-gray-200 ${className}`}>
       <div className="border-b border-gray-100 p-4">
         <h2 className="text-lg font-bold text-gray-900">Workspace</h2>
         <p className="text-xs text-gray-500">Gestion de Talento Humano</p>

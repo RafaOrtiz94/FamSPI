@@ -298,7 +298,7 @@ const AppRoutes = () => {
           </Route>
 
           {/* Subrutas Talento Humano */}
-          <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub />} />
+          <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub initialTab="colaboradores" />} />
           <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorWorkspace />} />
           <Route element={<ProtectedRoute allowedRoles={peopleAdminRoles} />}>
             <Route path="/dashboard/talento-humano/usuarios" element={<ColaboradoresHub initialTab="usuarios" />} />

@@ -116,7 +116,7 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
           ) : (
             <div className="space-y-3">
               {filteredRequests.map((req) => (
-                <div
+                  <div
                   key={req.id}
                   className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 hover:bg-gray-50"
                 >
@@ -139,6 +139,18 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
                   <div className="text-xs text-gray-500">
                     Estado: {req.status || "pendiente"}
                   </div>
+                  {req.workflow && (
+                    <div className="flex flex-wrap gap-2 text-[10px] font-medium text-gray-600">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5">
+                        {req.workflow.current_stage_label}
+                      </span>
+                      <span className={`rounded-full px-2 py-0.5 ${
+                        req.workflow.stalled ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                      }`}>
+                        {req.workflow.stalled ? "Estancada" : req.workflow.elapsed_label || "En curso"}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

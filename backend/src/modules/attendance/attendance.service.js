@@ -306,40 +306,6 @@ const generateAttendancePDF = async (userId, startDate, endDate) => {
     return Buffer.from(pdfBytes);
 };
 
-/**
- * Generate PDF endpoint handler
- */
-const generatePDF = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const { start, end } = req.query;
-
-        if (!start || !end) {
-            return res.status(400).json({
-                ok: false,
-                message: "Fechas de inicio y fin requeridas (start, end)",
-            });
-        }
-
-        const pdfBuffer = await generateAttendancePDF(userId, start, end);
-
-        res.setHeader("Content-Type", "application/pdf");
-        res.setHeader(
-            "Content-Disposition",
-            `attachment; filename=asistencia-${userId}-${start}-${end}.pdf`
-        );
-
-        res.send(pdfBuffer);
-    } catch (err) {
-        logger.error({ err }, "Error en endpoint de PDF");
-        return res.status(500).json({
-            ok: false,
-            message: err.message || "Error generando PDF",
-        });
-    }
-};
-
 module.exports = {
     generateAttendancePDF,
-    generatePDF,
 };

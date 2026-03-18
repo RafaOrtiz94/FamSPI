@@ -231,8 +231,18 @@ async function computeTakenDays(userId, year) {
     [userId, year]
   );
   const vacationDays = Number(rows[0]?.total || 0);
+  const { rows: legacyRows } = await db.query(
+    `SELECT COALESCE(SUM(COALESCE(duracion_dias, 0)), 0) AS total
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND LOWER(COALESCE(status, '')) IN ('aprobado', 'approved')
+        AND EXTRACT(YEAR FROM fecha_inicio) = $2`,
+    [userId, year]
+  );
+  const legacyVacationDays = Number(legacyRows[0]?.total || 0);
   const chargedDays = await computeChargedVacationDays({ userId, year, statuses: ["approved", "aprobado"] });
-  return Math.round(((vacationDays + chargedDays) + Number.EPSILON) * 100) / 100;
+  return Math.round(((vacationDays + legacyVacationDays + chargedDays) + Number.EPSILON) * 100) / 100;
 }
 
 async function computeChargedVacationDays({ userId, userEmail, year, statuses = [] }) {
@@ -573,12 +583,26 @@ async function summary(user, includeAll = false) {
       WHERE requester_id=$1 AND EXTRACT(YEAR FROM start_date)=$2`,
       [user.id, year]
     );
+    const { rows: legacySummaryRows } = await db.query(
+      `SELECT
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS approved,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS pending,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS rejected,
+         COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS cancelled,
+         COALESCE(SUM(COALESCE(duracion_dias, 0)),0) AS requested
+       FROM permisos_vacaciones
+      WHERE user_id = $1
+        AND LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+        AND EXTRACT(YEAR FROM fecha_inicio) = $2`,
+      [user.id, year]
+    );
     const summaryRow = summaryRows[0] || {};
-    const approved = Number(summaryRow.approved || 0);
-    const pending = Number(summaryRow.pending || 0);
-    const rejected = Number(summaryRow.rejected || 0);
-    const cancelled = Number(summaryRow.cancelled || 0);
-    const requested = Number(summaryRow.requested || 0);
+    const legacySummaryRow = legacySummaryRows[0] || {};
+    const approved = Number(summaryRow.approved || 0) + Number(legacySummaryRow.approved || 0);
+    const pending = Number(summaryRow.pending || 0) + Number(legacySummaryRow.pending || 0);
+    const rejected = Number(summaryRow.rejected || 0) + Number(legacySummaryRow.rejected || 0);
+    const cancelled = Number(summaryRow.cancelled || 0) + Number(legacySummaryRow.cancelled || 0);
+    const requested = Number(summaryRow.requested || 0) + Number(legacySummaryRow.requested || 0);
     const chargedFromPermisos = await computeChargedVacationDays({
       userId: user.id,
       userEmail: user.email,
@@ -614,13 +638,28 @@ async function summary(user, includeAll = false) {
   const { rows } = await db.query(
     `SELECT u.id as user_id, u.fullname, u.email, d.name as department,
             MAX(cp.profile->'laboral'->>'fecha_ingreso') as fecha_ingreso,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN v.days ELSE 0 END),0) as approved,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN v.days ELSE 0 END),0) as pending,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN v.days ELSE 0 END),0) as rejected,
-            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN v.days ELSE 0 END),0) as cancelled,
-            COALESCE(SUM(v.days),0) as requested
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('aprobado','approved') THEN v.days ELSE 0 END),0)
+              + COALESCE(MAX(legacy.approved), 0) as approved,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('pendiente','pending') THEN v.days ELSE 0 END),0)
+              + COALESCE(MAX(legacy.pending), 0) as pending,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('rechazado','rejected') THEN v.days ELSE 0 END),0)
+              + COALESCE(MAX(legacy.rejected), 0) as rejected,
+            COALESCE(SUM(CASE WHEN LOWER(v.status) IN ('cancelado','cancelled') THEN v.days ELSE 0 END),0)
+              + COALESCE(MAX(legacy.cancelled), 0) as cancelled,
+            COALESCE(SUM(v.days),0) + COALESCE(MAX(legacy.requested), 0) as requested
        FROM users u
        LEFT JOIN vacaciones_solicitudes v ON v.requester_id = u.id
+       LEFT JOIN (
+          SELECT user_id,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('aprobado','approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS approved,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('pendiente','pending','pending_final','partially_approved') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS pending,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('rechazado','rejected') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS rejected,
+                 COALESCE(SUM(CASE WHEN LOWER(status) IN ('cancelado','cancelled') THEN COALESCE(duracion_dias, 0) ELSE 0 END),0) AS cancelled,
+                 COALESCE(SUM(COALESCE(duracion_dias, 0)),0) AS requested
+            FROM permisos_vacaciones
+           WHERE LOWER(COALESCE(tipo_solicitud, '')) = 'vacaciones'
+           GROUP BY user_id
+       ) legacy ON legacy.user_id = u.id
        LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
        LEFT JOIN departments d ON d.id = u.department_id
       WHERE (COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms'

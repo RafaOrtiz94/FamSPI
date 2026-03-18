@@ -5,6 +5,7 @@ const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { logAction } = require("../../utils/audit");
 const { ensureFolder } = require("../../utils/drive");
+const { PROFILE_SYNC_KEYS, applyNestedFields } = require("../shared/profileSync");
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BLOCKED_METADATA_KEYS = new Set([
@@ -122,80 +123,13 @@ const getIdentity = async (userId) => {
   return rows[0];
 };
 
-const PROFILE_SYNC_KEYS = [
-  'personal.telefono_personal',
-  'personal.email_personal',
-  'personal.estado_civil',
-  'personal.genero',
-  'personal.tipo_sangre',
-  'personal.lugar_nacimiento',
-  'personal.fecha_nacimiento',
-  'domicilio.ciudad_domicilio',
-  'domicilio.direccion_domicilio',
-  'domicilio.telefono_fijo',
-  'emergencia.persona_contacto',
-  'emergencia.telefono_contacto',
-  'estudios.nivel_instruccion',
-  'estudios.titulo_tercer_nivel',
-  'estudios.universidad_tercer_nivel',
-  'estudios.titulo_cuarto_nivel',
-  'estudios.universidad_cuarto_nivel',
-  'laboral.fecha_ingreso',
-  'laboral.cargo',
-  'laboral.area',
-  'laboral.telefono_celular_famproject',
-  'laboral.email_famproject'
-];
-
-const getNested = (obj, path) => {
-  if (!obj) return undefined;
-  return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), obj);
-};
-
-const setNested = (obj, path, value) => {
-  let ref = obj;
-  path.forEach((key, idx) => {
-    if (idx === path.length - 1) {
-      ref[key] = value;
-    } else {
-      if (!ref[key] || typeof ref[key] !== 'object') ref[key] = {};
-      ref = ref[key];
-    }
-  });
-};
-
-const pickCollaboratorProfile = (profile = {}) => {
-  const result = {};
-  PROFILE_SYNC_KEYS.forEach((key) => {
-    const path = key.split('.');
-    const value = getNested(profile, path);
-    if (value !== undefined) {
-      setNested(result, path, value);
-    }
-  });
-  return result;
-};
-
 const mergeCollaboratorIntoProfile = (metadata = {}, collaboratorProfile = {}) => {
   const safe = sanitizeMetadata(metadata);
-  const merged = { ...safe };
-  const synced = pickCollaboratorProfile(collaboratorProfile);
-  Object.entries(synced).forEach(([section, data]) => {
-    merged[section] = { ...(merged[section] || {}), ...data };
-  });
-  return merged;
+  return applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
 };
 
 const mergeProfileIntoCollaborator = (collabProfile = {}, metadata = {}) => {
-  const next = { ...(collabProfile || {}) };
-  PROFILE_SYNC_KEYS.forEach((key) => {
-    const path = key.split('.');
-    const incoming = getNested(metadata, path);
-    if (incoming !== undefined) {
-      setNested(next, path, incoming);
-    }
-  });
-  return next;
+  return applyNestedFields(collabProfile, metadata, PROFILE_SYNC_KEYS);
 };
 
 

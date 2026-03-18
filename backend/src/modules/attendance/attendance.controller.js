@@ -12,6 +12,8 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { normalizeDateTime, toNumberOrZero, normalizeRow } = require("../../utils/normalizers");
 const { getBusinessDate, ensureDailyClockIn } = require("./attendance.utils");
+const { generateAttendancePDF } = require("./attendance.service");
+const { hasReportingAccess } = require("./attendance.auth");
 
 const ATTENDANCE_LOCATION_TARGETS = Object.freeze({
   entry: { timeColumn: "entry_time", locationColumn: "entry_location" },
@@ -26,6 +28,69 @@ const EXCEPTION_LOCATION_TARGETS = Object.freeze({
   departure: { timeColumn: "departure_time", locationColumn: "departure_location" },
   return: { timeColumn: "return_time", locationColumn: "return_location" },
 });
+
+const ATTENDANCE_STATUS_LABELS = Object.freeze({
+  no_entry: "Sin entrada",
+  working: "Jornada abierta",
+  lunch_open: "Almuerzo abierto",
+  completed: "Jornada cerrada",
+});
+
+const ATTENDANCE_STATUS_ALIASES = Object.freeze({
+  no_entry: "no_entry",
+  sin_entrada: "no_entry",
+  pending_entry: "no_entry",
+  entry_pending: "no_entry",
+  working: "working",
+  jornada_abierta: "working",
+  abierta: "working",
+  lunch_open: "lunch_open",
+  almuerzo_abierto: "lunch_open",
+  lunch: "lunch_open",
+  completed: "completed",
+  complete: "completed",
+  jornada_cerrada: "completed",
+  closed: "completed",
+  cerrada: "completed",
+});
+
+const normalizeAttendanceStateFilter = (value) => {
+  const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return ATTENDANCE_STATUS_ALIASES[normalized] || null;
+};
+
+const deriveAttendanceState = (record = {}) => {
+  if (!record?.entry_time) {
+    return "no_entry";
+  }
+
+  if (record?.exit_time) {
+    return "completed";
+  }
+
+  if (record?.lunch_start_time && !record?.lunch_end_time) {
+    return "lunch_open";
+  }
+
+  return "working";
+};
+
+const enrichAttendanceRow = (record = {}) => {
+  const attendanceState = deriveAttendanceState(record);
+  return {
+    ...record,
+    attendance_status: attendanceState,
+    attendance_status_label: ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado",
+  };
+};
+
+const enrichAttendanceRows = (rows = []) => rows.map((row) => enrichAttendanceRow(row));
+
+const matchesAttendanceState = (record, statusFilter) => {
+  const normalizedFilter = normalizeAttendanceStateFilter(statusFilter);
+  if (!normalizedFilter) return true;
+  return deriveAttendanceState(record) === normalizedFilter;
+};
 
 /**
  * 🕐 Clock In - Record entry time
@@ -477,13 +542,13 @@ const getToday = async (req, res) => {
       [userId, today]
     );
 
-    // Aplicar normalización usando helper compartido
-    const data = result.rows[0] ? normalizeRow(result.rows[0], [
+    // Aplicar normalizacion usando helper compartido
+    const data = result.rows[0] ? enrichAttendanceRow(normalizeRow(result.rows[0], [
       'date', 'entry_time', 'lunch_start_time', 'lunch_end_time', 'exit_time',
       'created_at', 'updated_at', 'auto_shift_end_at', 'auto_closed_at',
       'overtime_start_at', 'entry_location_timestamp', 'lunch_start_location_timestamp',
       'lunch_end_location_timestamp', 'exit_location_timestamp'
-    ], ['overtime_hours', 'total_hours']) : null;
+    ], ['overtime_hours', 'total_hours'])) : null;
 
     return res.status(200).json({
       ok: true,
@@ -504,13 +569,29 @@ const getToday = async (req, res) => {
  */
 const getUserAttendance = async (req, res) => {
   try {
+    const requesterId = Number(req.user?.id || 0);
     const { userId } = req.params;
-    const { date } = req.query;
+    const { date, status } = req.query;
 
     if (!date) {
       return res.status(400).json({
         ok: false,
         message: "Fecha requerida (formato: YYYY-MM-DD)",
+      });
+    }
+
+    const targetUserId = Number(userId);
+    if (!Number.isFinite(targetUserId)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Usuario requerido",
+      });
+    }
+
+    if (targetUserId !== requesterId && !hasReportingAccess(req.user)) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para ver asistencia de otros usuarios",
       });
     }
 
@@ -525,12 +606,21 @@ const getUserAttendance = async (req, res) => {
       JOIN users u ON a.user_id = u.id
       WHERE a.user_id = $1 AND a.date = $2
       `,
-      [userId, date]
+      [targetUserId, date]
     );
+
+    const normalizedRow = result.rows[0] ? enrichAttendanceRow(result.rows[0]) : null;
+
+    if (normalizedRow && !matchesAttendanceState(normalizedRow, status)) {
+      return res.status(200).json({
+        ok: true,
+        data: null,
+      });
+    }
 
     return res.status(200).json({
       ok: true,
-      data: result.rows[0] || null,
+      data: normalizedRow,
     });
   } catch (err) {
     logger.error({ err }, "❌ Error obteniendo asistencia de usuario");
@@ -547,12 +637,47 @@ const getUserAttendance = async (req, res) => {
  */
 const getRange = async (req, res) => {
   try {
-    const { start, end, userId } = req.query;
+    const requesterId = Number(req.user?.id || 0);
+    const { start, end, userId, status } = req.query;
 
     if (!start || !end) {
       return res.status(400).json({
         ok: false,
         message: "Fechas de inicio y fin requeridas",
+      });
+    }
+
+    const normalizedStatus = normalizeAttendanceStateFilter(status);
+    if (status && !normalizedStatus) {
+      return res.status(400).json({
+        ok: false,
+        message: "Estado de asistencia invalido",
+      });
+    }
+
+    const hasExplicitTarget = userId && String(userId).toLowerCase() !== "all";
+    const wantsGlobalScope = String(userId || "").toLowerCase() === "all";
+    const targetUserId = hasExplicitTarget ? Number(userId) : requesterId;
+    const isAdminScope = hasReportingAccess(req.user);
+
+    if (hasExplicitTarget && !Number.isFinite(targetUserId)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Usuario requerido",
+      });
+    }
+
+    if (hasExplicitTarget && targetUserId !== requesterId && !isAdminScope) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para consultar asistencia de otros usuarios",
+      });
+    }
+
+    if (wantsGlobalScope && !isAdminScope) {
+      return res.status(403).json({
+        ok: false,
+        message: "No tienes permisos para consultar asistencia global",
       });
     }
 
@@ -571,19 +696,50 @@ const getRange = async (req, res) => {
 
     const params = [start, end];
 
-    if (userId) {
+    if (isAdminScope && hasExplicitTarget) {
       query += " AND a.user_id = $3";
-      params.push(userId);
+      params.push(targetUserId);
+    } else if (!isAdminScope) {
+      query += " AND a.user_id = $3";
+      params.push(requesterId);
     }
 
     query += " ORDER BY a.date DESC, u.fullname ASC";
 
     const result = await db.query(query, params);
+    const normalizedRows = enrichAttendanceRows(result.rows);
+    const filteredRows = normalizedStatus
+      ? normalizedRows.filter((row) => row.attendance_status === normalizedStatus)
+      : normalizedRows;
+
+    const summary = normalizedRows.reduce(
+      (acc, row) => {
+        acc.total += 1;
+        acc.byStatus[row.attendance_status] = (acc.byStatus[row.attendance_status] || 0) + 1;
+        return acc;
+      },
+      {
+        total: 0,
+        byStatus: {
+          no_entry: 0,
+          working: 0,
+          lunch_open: 0,
+          completed: 0,
+        },
+      }
+    );
 
     return res.status(200).json({
       ok: true,
-      total: result.rows.length,
-      data: result.rows,
+      total: normalizedRows.length,
+      filteredTotal: filteredRows.length,
+      status: normalizedStatus || "all",
+      summary: {
+        ...summary,
+        filteredTotal: filteredRows.length,
+        labels: ATTENDANCE_STATUS_LABELS,
+      },
+      data: filteredRows,
     });
   } catch (err) {
     logger.error({ err }, "❌ Error obteniendo rango de asistencia");
@@ -795,6 +951,51 @@ const getOvertimeRecords = async (req, res) => {
   }
 };
 
+const generatePDF = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { start, end } = req.query;
+
+    if (!start || !end) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fechas de inicio y fin requeridas (start, end)",
+      });
+    }
+
+    if (String(userId || "").trim().toLowerCase() === "all") {
+      return res.status(400).json({
+        ok: false,
+        message: "Debes seleccionar un usuario específico para generar el PDF",
+      });
+    }
+
+    const targetUserId = Number(userId);
+    if (!Number.isFinite(targetUserId)) {
+      return res.status(400).json({
+        ok: false,
+        message: "Usuario requerido",
+      });
+    }
+
+    const pdfBuffer = await generateAttendancePDF(targetUserId, start, end);
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=asistencia-${targetUserId}-${start}-${end}.pdf`
+    );
+
+    return res.send(pdfBuffer);
+  } catch (err) {
+    logger.error({ err }, "Error en endpoint de PDF");
+    return res.status(500).json({
+      ok: false,
+      message: err.message || "Error generando PDF",
+    });
+  }
+};
+
 module.exports = {
   clockIn,
   clockOutLunch,
@@ -806,6 +1007,7 @@ module.exports = {
   getToday,
   getUserAttendance,
   getRange,
+  generatePDF,
   syncLocation,
   markOvertime,
   getOvertimeRecords,

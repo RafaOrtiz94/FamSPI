@@ -1,8 +1,11 @@
 const crypto = require("crypto");
 const db = require("../../config/db");
+const { assertSignatureDependencies } = require("./signatureSchema.service");
 
 class VerificationService {
   async verify({ token, documentBuffer }) {
+    await assertSignatureDependencies(["verificationView"]);
+
     const verificationRes = await db.query(
       `SELECT *
        FROM document_verification_info

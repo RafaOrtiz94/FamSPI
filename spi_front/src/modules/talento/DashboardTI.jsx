@@ -34,7 +34,7 @@ const DashboardTI = () => {
       try {
         const [u, d, s] = await Promise.all([
           getUsers(),
-          getDepartments(),
+          getDepartments({ include_inactive: true }),
           api.get("/auth/sessions"),
         ]);
         setUsers(u || []);
@@ -64,8 +64,10 @@ const DashboardTI = () => {
   // 🔹 KPIs generales
   // ============================================================
   const totalUsuarios = users.length;
-  const activos = users.filter((u) => u.role !== "pendiente").length;
-  const departamentos = departments.length;
+  const activos = users.filter((u) => u.active !== false).length;
+  const inactivos = users.filter((u) => u.active === false).length;
+  const departamentos = departments.filter((d) => String(d.status || "").toLowerCase() !== "inactive").length;
+  const departamentosInactivos = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
   const role = (user?.role || "").toLowerCase();
   const auditActive = Boolean(auditStatus?.active);
   const canSeeAudit = auditActive || ["admin_ti", "jefe_ti", "ti"].includes(role);
@@ -102,10 +104,22 @@ const DashboardTI = () => {
             color: "green",
           },
           {
+            icon: <FiActivity />,
+            label: "Usuarios Inactivos",
+            value: inactivos,
+            color: "red",
+          },
+          {
             icon: <FiSettings />,
-            label: "Departamentos",
+            label: "Departamentos Activos",
             value: departamentos,
             color: "orange",
+          },
+          {
+            icon: <FiSettings />,
+            label: "Departamentos Inactivos",
+            value: departamentosInactivos,
+            color: "slate",
           },
           {
             icon: <FiDatabase />,

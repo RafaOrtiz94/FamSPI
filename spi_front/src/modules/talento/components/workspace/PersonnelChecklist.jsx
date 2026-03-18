@@ -13,6 +13,27 @@ const PersonnelChecklist = ({
     return documents.some((d) => d.doc_type === docKey);
   };
 
+  const getOverallCompletion = () => {
+    let total = 0;
+    let done = 0;
+    checklistSections.forEach((section) => {
+      section.items.forEach((item) => {
+        total += 1;
+        const isChecked = item.type === "doc"
+          ? isDocUploaded(item.docType)
+          : Boolean(profileData?.onboarding?.[item.flagKey]);
+        if (isChecked) done += 1;
+      });
+    });
+    return {
+      total,
+      done,
+      percent: total > 0 ? Math.round((done / total) * 100) : 0,
+    };
+  };
+
+  const overall = getOverallCompletion();
+
   const getSectionStatus = (section) => {
     const total = section.items.length;
     let done = 0;
@@ -27,7 +48,25 @@ const PersonnelChecklist = ({
   };
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Progreso del checklist</h3>
+            <p className="text-xs text-slate-500">
+              {overall.done} de {overall.total} validaciones completadas
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            {overall.percent}%
+          </span>
+        </div>
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${overall.percent}%` }} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
       {checklistSections.map((section) => {
         const { total, done, complete } = getSectionStatus(section);
         const isLocked = lockedSections.includes(section.title);
@@ -108,6 +147,7 @@ const PersonnelChecklist = ({
           </div>
         );
       })}
+      </div>
     </div>
   );
 };

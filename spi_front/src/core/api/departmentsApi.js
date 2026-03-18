@@ -2,8 +2,8 @@
 import api from "./index";
 
 /** Obtener todos los departamentos */
-export const getDepartments = async () => {
-  const { data } = await api.get("/departments");
+export const getDepartments = async (params = {}) => {
+  const { data } = await api.get("/departments", { params });
   // Garantiza que siempre devuelva un array
   return Array.isArray(data.data) ? data.data : [];
 };

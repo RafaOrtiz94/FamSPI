@@ -1,54 +1,21 @@
 ﻿# REGISTRO DE EVIDENCIAS Y DESVIACIONES
-## Area 01: Gobierno, Seguridad y Cumplimiento
+## Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental
 
 ## 1. Objetivo
-Centralizar la evidencia objetiva de ejecucion de IQ, OQ y PQ, asi como las desviaciones, incidentes y defectos detectados durante la validacion formal del area 01.
+Concentrar la evidencia objetiva generada durante IQ, OQ y PQ, junto con las desviaciones detectadas, su analisis, responsable y estado de cierre.
 
-## 2. Datos generales
-| Campo | Valor |
-|---|---|
-| Sistema | SPI |
-| Area | Gobierno, Seguridad y Cumplimiento |
-| Ambiente | __________________ |
-| Fecha de inicio | __________________ |
-| Fecha de cierre | __________________ |
-| Responsable de ejecucion | __________________ |
-| Responsable de revision | __________________ |
-
-## 3. Registro de evidencias
-| ID evidencia | Protocolo | Caso | Fecha | Tipo de evidencia | Ubicacion o referencia | Descripcion | Revisado por |
+## 2. Tabla de evidencias
+| ID evidencia | Fase | Caso relacionado | Tipo de evidencia | Descripcion | Responsable | Fecha | Ruta o referencia |
 |---|---|---|---|---|---|---|---|
-| EV-GSC-001 | IQ/OQ/PQ | ______ | ______ | Captura / log / export / query / correo | __________________ | __________________ | __________________ |
-| EV-GSC-002 | IQ/OQ/PQ | ______ | ______ | Captura / log / export / query / correo | __________________ | __________________ | __________________ |
-| EV-GSC-003 | IQ/OQ/PQ | ______ | ______ | Captura / log / export / query / correo | __________________ | __________________ | __________________ |
+| EV-GD-001 | IQ | ______ | Captura / SQL / Log / Archivo | ______ | ______ | ______ | ______ |
+| EV-GD-002 | OQ | ______ | Captura / SQL / Log / Archivo | ______ | ______ | ______ | ______ |
+| EV-GD-003 | PQ | ______ | Captura / SQL / Log / Archivo | ______ | ______ | ______ | ______ |
 
-## 4. Registro de desviaciones
-| ID desviacion | Protocolo | Caso | Fecha | Descripcion de la desviacion | Severidad | Impacto | Accion inmediata | Estado |
-|---|---|---|---|---|---|---|---|---|
-| DEV-GSC-001 | IQ/OQ/PQ | ______ | ______ | __________________ | Baja / Media / Alta / Critica | __________________ | __________________ | Abierta / En analisis / Resuelta |
-| DEV-GSC-002 | IQ/OQ/PQ | ______ | ______ | __________________ | Baja / Media / Alta / Critica | __________________ | __________________ | Abierta / En analisis / Resuelta |
-| DEV-GSC-003 | IQ/OQ/PQ | ______ | ______ | __________________ | Baja / Media / Alta / Critica | __________________ | __________________ | Abierta / En analisis / Resuelta |
-
-## 5. Registro de defectos asociados
-| ID defecto | Modulo | Caso relacionado | Descripcion | Evidencia asociada | Responsable | Estado | Fecha compromiso |
+## 3. Tabla de desviaciones
+| ID desviacion | Fase | Caso relacionado | Descripcion | Impacto | Accion propuesta | Responsable | Estado |
 |---|---|---|---|---|---|---|---|
-| BUG-GSC-001 | ______ | ______ | __________________ | __________________ | __________________ | Abierto / En correccion / Validado / Cerrado | __________________ |
-| BUG-GSC-002 | ______ | ______ | __________________ | __________________ | __________________ | Abierto / En correccion / Validado / Cerrado | __________________ |
+| DEV-GD-001 | ______ | ______ | ______ | ______ | ______ | ______ | Abierta / En curso / Cerrada |
+| DEV-GD-002 | ______ | ______ | ______ | ______ | ______ | ______ | Abierta / En curso / Cerrada |
 
-## 6. Bitacora de ejecucion
-| Fecha/hora | Protocolo | Caso | Ejecutado por | Resultado | Observaciones |
-|---|---|---|---|---|---|
-| ______ | IQ/OQ/PQ | ______ | __________________ | Aprobado / Desviacion / Rechazado | __________________ |
-| ______ | IQ/OQ/PQ | ______ | __________________ | Aprobado / Desviacion / Rechazado | __________________ |
-
-## 7. Cierre del ciclo de validacion
-| Item | Valor |
-|---|---|
-| IQ cerrado | __________________ |
-| OQ cerrado | __________________ |
-| PQ cerrado | __________________ |
-| Total evidencias registradas | __________________ |
-| Total desviaciones abiertas | __________________ |
-| Total defectos abiertos | __________________ |
-| Decision final del area | Aprobada / Aprobada con desviaciones / Rechazada |
-| Firma responsable validacion | __________________ |
+## 4. Criterio de cierre documental
+El expediente se considera completo cuando cada caso ejecutado dispone de evidencia suficiente, cada desviacion tiene tratamiento documentado y el cierre del area puede sustentarse con trazabilidad objetiva.

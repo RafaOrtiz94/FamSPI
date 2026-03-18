@@ -54,6 +54,76 @@ const validateCertificationData = (data) => {
   return errors;
 };
 
+const EXPIRY_WARNING_DAYS = Number(process.env.CERT_EXPIRY_WARNING_DAYS || 30);
+
+const getCertificationLifecycle = (cert = {}) => {
+  const expiryDate = cert.expiry_date ? new Date(cert.expiry_date) : null;
+  if (!expiryDate || Number.isNaN(expiryDate.getTime())) {
+    return {
+      status: "permanent",
+      status_label: "Sin caducidad",
+      status_color: "blue",
+      days_until_expiry: null,
+      is_expired: false,
+      is_expiring_soon: false,
+    };
+  }
+
+  const now = new Date();
+  const daysUntilExpiry = Math.ceil((expiryDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (daysUntilExpiry < 0) {
+    return {
+      status: "expired",
+      status_label: "Expirada",
+      status_color: "red",
+      days_until_expiry: daysUntilExpiry,
+      is_expired: true,
+      is_expiring_soon: false,
+    };
+  }
+
+  if (daysUntilExpiry <= EXPIRY_WARNING_DAYS) {
+    return {
+      status: "expiring_soon",
+      status_label: `Expira en ${daysUntilExpiry} días`,
+      status_color: "amber",
+      days_until_expiry: daysUntilExpiry,
+      is_expired: false,
+      is_expiring_soon: true,
+    };
+  }
+
+  return {
+    status: "active",
+    status_label: "Vigente",
+    status_color: "emerald",
+    days_until_expiry: daysUntilExpiry,
+    is_expired: false,
+    is_expiring_soon: false,
+  };
+};
+
+const enrichCertification = (cert = {}) => ({
+  ...cert,
+  ...getCertificationLifecycle(cert),
+});
+
+const summarizeCertifications = (certifications = []) => {
+  return certifications.reduce(
+    (acc, cert) => {
+      const status = getCertificationLifecycle(cert);
+      acc.total += 1;
+      if (status.status === "active") acc.active += 1;
+      if (status.status === "permanent") acc.permanent += 1;
+      if (status.status === "expiring_soon") acc.expiring_soon += 1;
+      if (status.status === "expired") acc.expired += 1;
+      return acc;
+    },
+    { total: 0, active: 0, permanent: 0, expiring_soon: 0, expired: 0 }
+  );
+};
+
 const createCertification = async (userId, certificationData, file = null) => {
   const validationErrors = validateCertificationData(certificationData);
   if (validationErrors.length > 0) {
@@ -154,7 +224,11 @@ const getUserCertifications = async (userId, includeInactive = false) => {
     ORDER BY created_at DESC
   `;
   const result = await db.query(query, [userId]);
-  return result.rows;
+  const certifications = result.rows.map(enrichCertification);
+  return {
+    certifications,
+    summary: summarizeCertifications(certifications),
+  };
 };
 
 const getCertificationsByUserId = async (targetUserId, requesterUserId, requesterRole) => {
@@ -175,6 +249,7 @@ const getCertificationsByUserId = async (targetUserId, requesterUserId, requeste
   `;
 
   const result = await db.query(query, [targetUserId]);
+  const certifications = result.rows.map(enrichCertification);
 
   // Audit access by other users
   if (requesterUserId !== targetUserId) {
@@ -185,11 +260,14 @@ const getCertificationsByUserId = async (targetUserId, requesterUserId, requeste
       modulo: "user-certifications",
       accion: "certification_accessed_by_role",
       descripcion: `Acceso a certificaciones del usuario ${targetUserId}`,
-      datos_nuevos: { target_user_id: targetUserId, count: result.rows.length }
+      datos_nuevos: { target_user_id: targetUserId, count: certifications.length }
     });
   }
 
-  return result.rows;
+  return {
+    certifications,
+    summary: summarizeCertifications(certifications),
+  };
 };
 
 const softDeleteCertification = async (certificationId, userId, requesterRole) => {
@@ -251,7 +329,8 @@ const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUser
   }
 
   // Obtener certificaciones del usuario
-  const certifications = await getCertificationsByUserId(targetUserId, requesterUserId, requesterRole);
+  const certificationsResult = await getCertificationsByUserId(targetUserId, requesterUserId, requesterRole);
+  const certifications = certificationsResult.certifications || [];
 
   if (certifications.length === 0) {
     const err = new Error("El usuario no tiene certificaciones activas");

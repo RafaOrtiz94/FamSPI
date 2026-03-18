@@ -38,6 +38,12 @@ const CollaboratorWorkspace = () => {
   const [openSections, setOpenSections] = useState(() => new Set(["personal", "laboral"]));
   const [collaborator, setCollaborator] = useState(null);
   const [certifications, setCertifications] = useState([]);
+  const [certificationSummary, setCertificationSummary] = useState({
+    active: 0,
+    expired: 0,
+    expiring_soon: 0,
+  });
+  const [profileLastReviewedAt, setProfileLastReviewedAt] = useState(null);
   const [offboardingSaving, setOffboardingSaving] = useState(false);
 
   const defaultProfile = useMemo(() => defaultProfileTemplate, []);
@@ -117,6 +123,24 @@ const CollaboratorWorkspace = () => {
     const { total, done } = getOffboardingProgress();
     return total > 0 && done === total;
   };
+
+  const reviewStatus = useMemo(() => {
+    if (!profileLastReviewedAt) {
+      return { pending: true, label: "Revision anual pendiente", tone: "amber" };
+    }
+
+    const lastDate = new Date(profileLastReviewedAt);
+    if (Number.isNaN(lastDate.getTime())) {
+      return { pending: true, label: "Revision anual pendiente", tone: "amber" };
+    }
+
+    const diffDays = (Date.now() - lastDate.getTime()) / (1000 * 60 * 60 * 24);
+    if (diffDays >= 365) {
+      return { pending: true, label: "Revision anual vencida", tone: "red" };
+    }
+
+    return { pending: false, label: "Revision anual al dia", tone: "emerald" };
+  }, [profileLastReviewedAt]);
 
   const handleFinalizeOffboarding = async () => {
     if (!profileData) return;
@@ -206,11 +230,18 @@ const CollaboratorWorkspace = () => {
       setProfileData(mergedProfile);
       setDocuments(response.data?.documents || []);
       setCollaborator(response.data?.user || null);
+      setProfileLastReviewedAt(response.data?.profile_last_reviewed_at || null);
 
       if (certsResult.status === 'fulfilled') {
         setCertifications(certsResult.value.data || []);
+        setCertificationSummary(certsResult.value.summary || {
+          active: 0,
+          expired: 0,
+          expiring_soon: 0,
+        });
       } else {
         setCertifications([]);
+        setCertificationSummary({ active: 0, expired: 0, expiring_soon: 0 });
       }
     } catch (error) {
       console.error("Error cargando colaborador:", error);
@@ -422,6 +453,48 @@ const handleProfileChange = (sectionKey, fieldKey, value) => {
         </div>
       )}
 
+      <div className="mb-6 grid gap-4 md:grid-cols-4">
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Perfil</p>
+          <p className="text-2xl font-semibold text-gray-800">
+            {checklistProgress.total > 0 ? `${Math.round((checklistProgress.done / checklistProgress.total) * 100)}%` : "0%"}
+          </p>
+          <p className="text-xs text-gray-500">Completitud del expediente</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Documentos</p>
+          <p className="text-2xl font-semibold text-gray-800">
+            {documents.length}
+          </p>
+          <p className="text-xs text-gray-500">
+            {documents.length === 1 ? "Documento cargado" : "Documentos cargados"}
+          </p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Certificaciones</p>
+          <p className="text-2xl font-semibold text-emerald-600">{certificationSummary.active}</p>
+          <p className="text-xs text-gray-500">Vigentes</p>
+        </Card>
+        <Card className="p-4">
+          <p className="text-xs uppercase tracking-wide text-gray-400">Revision anual</p>
+          <p className={`text-2xl font-semibold ${reviewStatus.pending ? "text-amber-600" : "text-emerald-600"}`}>
+            {reviewStatus.pending ? "Pendiente" : "OK"}
+          </p>
+          <p className="text-xs text-gray-500">{reviewStatus.label}</p>
+        </Card>
+      </div>
+
+      {(certificationSummary.expired > 0 || certificationSummary.expiring_soon > 0) && (
+        <Card className="mb-6 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <p className="font-semibold">Alertas de certificaciones</p>
+          <p className="mt-1 text-amber-800">
+            {certificationSummary.expired > 0 ? `${certificationSummary.expired} vencidas` : ""}
+            {certificationSummary.expired > 0 && certificationSummary.expiring_soon > 0 ? " y " : ""}
+            {certificationSummary.expiring_soon > 0 ? `${certificationSummary.expiring_soon} por vencer` : ""}.
+          </p>
+        </Card>
+      )}
+
       <Card className="p-4 mb-6">
         <div className="flex flex-col gap-2 text-xs text-gray-600">
           <div className="flex items-center justify-between">
@@ -466,51 +539,46 @@ const handleProfileChange = (sectionKey, fieldKey, value) => {
                 const isLocked = getLockedSections().includes(section.key);
                 return (
                   <div key={section.key} className="border border-gray-100 rounded-xl overflow-hidden">
-                    <button
-                      type="button"
-                      onClick={() => toggleSection(section.key)}
-                      className="w-full flex items-center justify-between px-4 py-3 bg-gray-50"
-                    >
-                      <div className="flex items-center gap-3">
-                        {isOpen ? <FiChevronDown /> : <FiChevronRight />}
-                        <span className="font-semibold text-gray-800">{section.title}</span>
+                    <div className="flex flex-col gap-3 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                      <button
+                        type="button"
+                        onClick={() => toggleSection(section.key)}
+                        aria-expanded={isOpen}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        {isOpen ? <FiChevronDown className="shrink-0" /> : <FiChevronRight className="shrink-0" />}
+                        <span className="min-w-0 truncate font-semibold text-gray-800">{section.title}</span>
 
                         {isLocked && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-slate-200 text-slate-600">Bloqueado</span>
+                          <span className="shrink-0 rounded-full bg-slate-200 px-2 py-0.5 text-xs text-slate-600">Bloqueado</span>
                         )}
                         {!isLocked && completion.complete && (
-                          <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">Completo</span>
+                          <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">Completo</span>
                         )}
+                      </button>
 
-                      </div>
-                      
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-gray-400">{completion.done}/{completion.total}</span>
+                      <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                        <span className="rounded-full bg-white px-2 py-0.5 text-xs text-gray-400 ring-1 ring-gray-200">
+                          {completion.done}/{completion.total}
+                        </span>
                         {canUnlockSections && (
                           <button
                             type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSectionLockedState(section.key, !isLocked);
-                            }}
-                            className="text-xs px-2 py-0.5 rounded-full border border-gray-200 text-gray-600 hover:bg-gray-100"
+                            onClick={() => setSectionLockedState(section.key, !isLocked)}
+                            className="rounded-full border border-gray-200 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100"
                           >
                             {isLocked ? "Desbloquear" : "Bloquear"}
                           </button>
                         )}
                         <button
                           type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            saveSection(section.key, { silent: false });
-                          }}
-                          className="text-xs px-2 py-0.5 rounded-full border border-blue-200 text-blue-600 hover:bg-blue-50"
+                          onClick={() => saveSection(section.key, { silent: false })}
+                          className="rounded-full border border-blue-200 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
                         >
                           {sectionSaving[section.key] ? "Guardando..." : "Guardar sección"}
                         </button>
                       </div>
-
-                    </button>
+                    </div>
 
                     {isOpen && (
                       <div className="p-4 grid gap-3 sm:grid-cols-2">
@@ -616,9 +684,31 @@ const handleProfileChange = (sectionKey, fieldKey, value) => {
             ) : (
               <ul className="space-y-2 text-sm text-gray-700">
                 {certifications.map((cert) => (
-                  <li key={cert.id} className="flex items-center justify-between">
-                    <span className="font-medium">{cert.title}</span>
-                    <span className="text-xs text-gray-400">{cert.issuer || ""}</span>
+                  <li key={cert.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-100 px-3 py-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 truncate">{cert.title}</p>
+                      <p className="text-xs text-gray-500 truncate">{cert.issuer || ""}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className={`text-xs font-semibold ${
+                        cert.status === "expired"
+                          ? "text-red-600"
+                          : cert.status === "expiring_soon"
+                            ? "text-amber-600"
+                            : cert.status === "permanent"
+                              ? "text-blue-600"
+                              : "text-emerald-600"
+                      }`}>
+                        {cert.status_label || (cert.expiry_date ? "Con vencimiento" : "Sin caducidad")}
+                      </p>
+                      {cert.days_until_expiry !== null && cert.days_until_expiry !== undefined && (
+                        <p className="text-[11px] text-gray-400">
+                          {cert.days_until_expiry < 0
+                            ? `${Math.abs(cert.days_until_expiry)} dias vencida`
+                            : `${cert.days_until_expiry} dias restantes`}
+                        </p>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>

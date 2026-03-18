@@ -126,13 +126,21 @@ export const getUserAttendance = async (userId, date) => {
 /**
  * Get Attendance Range - For reporting
  */
-export const getAttendanceRange = async (startDate, endDate, userId = null) => {
-    let url = `/attendance/range?start=${startDate}&end=${endDate}`;
-    if (userId) {
-        url += `&userId=${userId}`;
+export const getAttendanceRange = async (startDate, endDate, userId = null, status = null) => {
+    const params = new URLSearchParams({
+        start: startDate,
+        end: endDate,
+    });
+
+    if (userId !== null && userId !== undefined && userId !== "") {
+        params.set("userId", userId);
     }
 
-    const { data } = await api.get(url);
+    if (status) {
+        params.set("status", status);
+    }
+
+    const { data } = await api.get(`/attendance/range?${params.toString()}`);
 
     return data;
 };

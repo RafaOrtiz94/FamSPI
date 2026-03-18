@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Personnel Requests Controller
  * Controlador para endpoints de solicitudes de personal
  */
@@ -135,6 +135,7 @@ async function addComment(req, res) {
         const { id } = req.params;
         const { comment, is_internal } = req.body;
         const userId = req.user.id;
+        const userRole = req.user?.role || req.user?.role_name || req.user?.rol || null;
 
         if (!comment) {
             return res.status(400).json({
@@ -147,7 +148,8 @@ async function addComment(req, res) {
             id,
             userId,
             comment,
-            is_internal || false
+            is_internal || false,
+            userRole
         );
 
         res.status(201).json({
@@ -306,3 +308,5 @@ module.exports = {
     linkApplicant,
     hireApplicant
 };
+
+

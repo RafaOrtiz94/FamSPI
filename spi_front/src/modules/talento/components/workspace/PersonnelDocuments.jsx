@@ -22,8 +22,30 @@ const PersonnelDocuments = ({
     return section ? lockedSections.includes(section.title) : false;
   };
 
+  const uploadedCount = documentTypes.filter((docType) => getDocStatus(docType.key)).length;
+  const totalCount = documentTypes.length;
+  const percent = totalCount > 0 ? Math.round((uploadedCount / totalCount) * 100) : 0;
+
   return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+    <div className="space-y-4">
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Progreso documental</h3>
+            <p className="text-xs text-slate-500">
+              {uploadedCount} de {totalCount} documentos cargados
+            </p>
+          </div>
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+            {percent}%
+          </span>
+        </div>
+        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+          <div className="h-full rounded-full bg-blue-600 transition-all" style={{ width: `${percent}%` }} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
       {documentTypes.map((docType) => {
         const existingDoc = getDocStatus(docType.key);
         const locked = isLocked(docType.key);
@@ -109,6 +131,7 @@ const PersonnelDocuments = ({
           </div>
         );
       })}
+      </div>
     </div>
   );
 };

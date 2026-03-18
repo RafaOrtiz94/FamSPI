@@ -73,6 +73,23 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
       </div>
 
       <div className="space-y-6">
+        {request.workflow && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Estado operativo</p>
+                <p className="text-sm font-semibold text-slate-900">{request.workflow.current_stage_label}</p>
+              </div>
+              <div className="text-sm text-slate-700">
+                Responsable: <span className="font-semibold">{request.workflow.current_responsible_name || request.workflow.current_responsible_label}</span>
+              </div>
+            </div>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white">
+              <div className="h-full rounded-full bg-slate-900" style={{ width: `${request.workflow.progress_percent || 0}%` }} />
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
           <div>
             <span className="block font-medium text-gray-500">Solicitante</span>

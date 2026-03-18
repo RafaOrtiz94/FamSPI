@@ -40,6 +40,20 @@ const RequestList = ({ requests, selectedRequestId, onSelect }) => {
           <p className="text-[11px] text-gray-400 mt-0.5 truncate">
             {request.department_name || "N/A"}
           </p>
+          {request.workflow && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                {request.workflow.current_stage_label}
+              </span>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                request.workflow.stalled
+                  ? "bg-rose-100 text-rose-700"
+                  : "bg-emerald-100 text-emerald-700"
+              }`}>
+                {request.workflow.stalled ? "Estancada" : request.workflow.elapsed_label || "En curso"}
+              </span>
+            </div>
+          )}
         </button>
       ))}
     </div>

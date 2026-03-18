@@ -39,6 +39,12 @@ const LUNCH_SUGGESTION_AFTER_HOURS = 4;
 const EXIT_REMINDER_AFTER_HOURS = 8;
 
 const APPROVED_PERMISSION_STATUSES = new Set(["approved", "aprobado", "partially_approved"]);
+const ATTENDANCE_STATUS_LABELS = Object.freeze({
+    no_entry: "Sin entrada",
+    working: "Jornada abierta",
+    lunch_open: "Almuerzo abierto",
+    completed: "Jornada cerrada",
+});
 
 const getLocalDateKey = (date = new Date()) => {
     const year = date.getFullYear();
@@ -70,6 +76,13 @@ const getElapsedMinutes = (value, now = new Date()) => {
     const parsed = toDate(value);
     if (!parsed) return 0;
     return Math.max(0, Math.round((now.getTime() - parsed.getTime()) / 60000));
+};
+
+const deriveAttendanceState = (record = {}) => {
+    if (!record?.entry_time) return "no_entry";
+    if (record?.exit_time) return "completed";
+    if (record?.lunch_start_time && !record?.lunch_end_time) return "lunch_open";
+    return "working";
 };
 
 const mapPermisoToExceptionSuggestion = (permiso) => {
@@ -537,6 +550,8 @@ const AttendanceWidget = () => {
 
     const progress = calculateProgress();
     const status = getStatusInfo();
+    const attendanceState = attendance?.attendance_status || deriveAttendanceState(attendance);
+    const attendanceStateLabel = attendance?.attendance_status_label || ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado";
     const hasActiveException = Boolean(activeException);
     const exceptionStatus = activeException?.status || "NONE";
     const exceptionStepLabel =
@@ -791,6 +806,11 @@ const AttendanceWidget = () => {
             label: "Siguiente accion",
             value: nextActionMeta.label,
             hint: nextActionMeta.detail,
+        },
+        {
+            label: "Estado tecnico",
+            value: attendanceStateLabel,
+            hint: attendance?.attendance_status ? "Estado calculado desde el backend" : "Estado derivado localmente",
         },
     ];
 
@@ -1064,7 +1084,7 @@ const AttendanceWidget = () => {
                 </div>
             </div>
 
-            <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
                 {summaryCards.map((card) => (
                     <div key={card.label} className="rounded-[24px] border border-slate-200 bg-white/90 px-4 py-3 shadow-sm">
                         <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">

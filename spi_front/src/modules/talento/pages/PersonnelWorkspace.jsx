@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { FiUsers } from "react-icons/fi";
+import { FiChevronDown, FiUsers } from "react-icons/fi";
 import toast from "react-hot-toast";
 
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
@@ -12,7 +12,9 @@ import {
   getPersonnelRequestProfile,
   updatePersonnelRequestProfile,
   uploadPersonnelRequestDocument,
+  addPersonnelRequestComment,
   hirePersonnelRequest,
+  linkPersonnelRequestCollaborator,
   linkPersonnelRequestApplicant,
 } from "../../../core/api/personnelRequestsApi";
 import { getApplicants } from "../../../core/api/applicantsApi";
@@ -36,11 +38,20 @@ import PersonnelProfile from "../components/workspace/PersonnelProfile";
 import PersonnelChecklist from "../components/workspace/PersonnelChecklist";
 import PersonnelDocuments from "../components/workspace/PersonnelDocuments";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
+import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
+import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
 
 import PersonnelRequestReview from "../components/workspace/PersonnelRequestReview";
 import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
 
-const PersonnelWorkspace = () => {
+const WORKSPACE_VIEWS = new Set(["solicitudes", "aspirantes", "colaboradores"]);
+
+const normalizeWorkspaceView = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  return WORKSPACE_VIEWS.has(normalized) ? normalized : "solicitudes";
+};
+
+const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -49,6 +60,7 @@ const PersonnelWorkspace = () => {
   const canRequestPersonnel = ["talento_humano", "gerencia_general"].includes(role);
   const canApprovePersonnel = role === "gerencia_general";
   const canHireApplicant = ["talento_humano", "gerencia_general"].includes(role);
+  const canReassignPersonnel = ["talento_humano", "gerencia_general", "admin"].includes(role);
   const { id } = useParams();
 
   // Data States
@@ -73,12 +85,17 @@ const PersonnelWorkspace = () => {
   const [loadingCollaborators, setLoadingCollaborators] = useState(false);
   const [selectedCollaboratorId, setSelectedCollaboratorId] = useState("");
   const [selectedCollaborator, setSelectedCollaborator] = useState(null);
+  const [requestCollaboratorId, setRequestCollaboratorId] = useState("");
+  const [workflowComment, setWorkflowComment] = useState("");
+  const [workflowCommentInternal, setWorkflowCommentInternal] = useState(false);
+  const [workflowCommentSaving, setWorkflowCommentSaving] = useState(false);
 
   // UI States
-  const [activeView, setActiveView] = useState("solicitudes"); // Sidebar View
+  const [activeView, setActiveView] = useState(() => normalizeWorkspaceView(initialView)); // Sidebar View
   const [activeTab, setActiveTab] = useState("perfil"); // Main Content Tab
   const [activeMainView, setActiveMainView] = useState("workspace"); // "workspace" | "create_request" | "review_request"
   const [reviewRequestData, setReviewRequestData] = useState(null);
+  const [mobileSelectorOpen, setMobileSelectorOpen] = useState(() => normalizeWorkspaceView(initialView) !== "aspirantes");
 
   const lastSavedRef = useRef(null);
   const initialCargoRef = useRef(location?.state?.cargo || "");
@@ -87,6 +104,7 @@ const PersonnelWorkspace = () => {
   const defaultProfile = useMemo(() => defaultProfileTemplate, []);
   const checklistSections = useMemo(() => checklistSectionsTemplate, []);
   const applicantProfileSections = useMemo(() => applicantProfileSectionsTemplate, []);
+  const normalizedInitialView = useMemo(() => normalizeWorkspaceView(initialView), [initialView]);
 
   // --- Logic Helpers ---
 
@@ -270,7 +288,9 @@ const PersonnelWorkspace = () => {
   const loadSelectedRequest = async (requestId) => {
     try {
       const response = await getPersonnelRequestById(requestId);
-      setSelectedRequest(response.data);
+      const requestData = response.data || null;
+      setSelectedRequest(requestData);
+      setRequestCollaboratorId(requestData?.collaborator_user_id ? String(requestData.collaborator_user_id) : "");
     } catch (error) {
       console.error("Error cargando solicitud:", error);
       toast.error("Error al cargar solicitud");
@@ -349,11 +369,22 @@ const PersonnelWorkspace = () => {
   }, []);
 
   useEffect(() => {
+    setActiveView(normalizedInitialView);
+  }, [normalizedInitialView]);
+
+  useEffect(() => {
     if (activeView !== "colaboradores") return;
     if (collaborators.length === 0 && !loadingCollaborators) {
       loadCollaborators();
     }
   }, [activeView, collaborators.length, loadingCollaborators]);
+
+  useEffect(() => {
+    if (!selectedRequest || !canReassignPersonnel) return;
+    if (collaborators.length === 0 && !loadingCollaborators) {
+      loadCollaborators();
+    }
+  }, [selectedRequest?.id, canReassignPersonnel, collaborators.length, loadingCollaborators]);
 
   useEffect(() => {
     if (activeView === "colaboradores" && selectedRequest) {
@@ -405,6 +436,17 @@ const PersonnelWorkspace = () => {
     if (!selectedCollaboratorId) return;
     loadCollaboratorProfile(selectedCollaboratorId);
   }, [selectedCollaboratorId]);
+
+  useEffect(() => {
+    if (activeMainView !== "workspace") {
+      setMobileSelectorOpen(false);
+      return;
+    }
+
+    if (!selectedRequest && !selectedCollaboratorId) {
+      setMobileSelectorOpen(true);
+    }
+  }, [activeMainView, selectedRequest, selectedCollaboratorId]);
 
   useEffect(() => {
     if (!profileData?.personal) return;
@@ -525,19 +567,63 @@ const PersonnelWorkspace = () => {
     }
   };
 
+  const handleAssignCollaborator = async (event) => {
+    event.preventDefault();
+    if (!selectedRequest) return;
+    if (!requestCollaboratorId) {
+      toast.error("Selecciona un colaborador para asignar");
+      return;
+    }
+    try {
+      await linkPersonnelRequestCollaborator(selectedRequest.id, requestCollaboratorId);
+      toast.success("Responsable actualizado");
+      await loadSelectedRequest(selectedRequest.id);
+      await loadRequests();
+    } catch (error) {
+      console.error("Error reasignando colaborador:", error);
+      toast.error(error?.response?.data?.message || "No se pudo reasignar el responsable");
+    }
+  };
+
+  const handleAddComment = async (event) => {
+    event.preventDefault();
+    if (!selectedRequest) return;
+    const text = String(workflowComment || "").trim();
+    if (!text) {
+      toast.error("Escribe un comentario antes de guardar");
+      return;
+    }
+    setWorkflowCommentSaving(true);
+    try {
+      await addPersonnelRequestComment(selectedRequest.id, text, workflowCommentInternal);
+      setWorkflowComment("");
+      setWorkflowCommentInternal(false);
+      await loadSelectedRequest(selectedRequest.id);
+      toast.success("Comentario agregado");
+    } catch (error) {
+      console.error("Error agregando comentario:", error);
+      toast.error(error?.response?.data?.message || "No se pudo agregar el comentario");
+    } finally {
+      setWorkflowCommentSaving(false);
+    }
+  };
+
   const handleSelectRequest = (req) => {
     navigate(`/dashboard/talento-humano/workspace-personal/${req.id}`);
     setActiveView("solicitudes"); // Ensure we stay on requests view
     setActiveMainView("workspace");
+    setMobileSelectorOpen(false);
     setSelectedCollaborator(null);
     setSelectedCollaboratorId("");
     setSelectedApplicant(null);
     setSelectedApplicantId("");
+    setRequestCollaboratorId(req?.collaborator_user_id ? String(req.collaborator_user_id) : "");
   };
 
   const handleSelectApplicant = async (applicant) => {
     setSelectedApplicantId(applicant?.id || "");
     if (applicant) {
+      setMobileSelectorOpen(false);
       setProfileLoading(true);
       try {
         const { getApplicantById } = await import("../../../core/api/applicantsApi");
@@ -587,23 +673,29 @@ const PersonnelWorkspace = () => {
     setSelectedRequest(null);
     setSelectedApplicant(null);
     setSelectedApplicantId("");
+    setRequestCollaboratorId("");
     setActiveView("colaboradores");
     setActiveMainView("workspace");
+    setMobileSelectorOpen(false);
   };
 
   const handleCreateRequest = () => {
     setActiveMainView("create_request");
+    setMobileSelectorOpen(false);
     setSelectedRequest(null); // Deselect current workspace request
     setSelectedCollaborator(null);
     setSelectedCollaboratorId("");
+    setRequestCollaboratorId("");
   };
 
   const handleReviewRequest = (req) => {
     setReviewRequestData(req);
     setActiveMainView("review_request");
+    setMobileSelectorOpen(false);
     setSelectedRequest(null);
     setSelectedCollaborator(null);
     setSelectedCollaboratorId("");
+    setRequestCollaboratorId("");
   };
 
   const handleBackToWorkspace = () => {
@@ -632,7 +724,14 @@ const PersonnelWorkspace = () => {
   const activeProfileSections = isCollaboratorContext ? profileSectionsTemplate : applicantProfileSections;
   const profileCompletion = computeProfileCompletion(activeProfileSections);
   const checklistCompletion = computeChecklistCompletion();
+  const requestWorkflow = selectedRequest?.workflow || null;
   const canHire = isRequestContext && canHireApplicant && profileCompletion.complete && checklistCompletion.complete;
+  const activeViewLabel =
+    activeView === "colaboradores"
+      ? "Colaboradores"
+      : activeView === "aspirantes"
+        ? "Postulantes"
+        : "Solicitudes";
 
   return (
     <DashboardLayout>
@@ -684,10 +783,79 @@ const PersonnelWorkspace = () => {
              </div>
           ) : (
             <>
+              <div className="border-b border-gray-200 bg-white px-4 py-4 shadow-sm md:hidden">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">Selector</p>
+                    <p className="text-sm font-semibold text-gray-900">{activeViewLabel}</p>
+                  </div>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    className="inline-flex items-center gap-2"
+                    onClick={() => setMobileSelectorOpen((prev) => !prev)}
+                  >
+                    <FiChevronDown className={`transition-transform ${mobileSelectorOpen ? "rotate-180" : ""}`} />
+                    {mobileSelectorOpen ? "Ocultar" : "Abrir"}
+                  </Button>
+                </div>
+
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  {[
+                    { key: "solicitudes", label: "Solicitudes" },
+                    { key: "aspirantes", label: "Postulantes" },
+                    { key: "colaboradores", label: "Colaboradores" },
+                  ].map((view) => (
+                    <button
+                      key={view.key}
+                      type="button"
+                      onClick={() => {
+                        setActiveView(view.key);
+                        setMobileSelectorOpen(true);
+                      }}
+                      className={`rounded-full px-3 py-2 text-xs font-semibold transition-colors ${
+                        activeView === view.key
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                      }`}
+                    >
+                      {view.label}
+                    </button>
+                  ))}
+                </div>
+
+                {mobileSelectorOpen && activeMainView === "workspace" && (
+                  <div className="mt-4 max-h-[60vh] overflow-hidden rounded-2xl border border-gray-200">
+                    <PersonnelSidebar
+                      className="h-full rounded-none border-0 shadow-none"
+                      activeView={activeView}
+                      setActiveView={setActiveView}
+                      requests={requests}
+                      loadingRequests={loadingRequests}
+                      selectedRequestId={selectedRequest?.id}
+                      onSelectRequest={handleSelectRequest}
+                      applicants={applicants}
+                      loadingApplicants={applicantsLoading}
+                      selectedApplicantId={selectedApplicantId}
+                      onSelectApplicant={handleSelectApplicant}
+                      collaborators={collaborators}
+                      loadingCollaborators={loadingCollaborators}
+                      selectedCollaboratorId={selectedCollaboratorId}
+                      onSelectCollaborator={handleSelectCollaborator}
+                      canRequestPersonnel={canRequestPersonnel}
+                      canApprovePersonnel={canApprovePersonnel}
+                      selectedRequestTitle={selectedRequest?.position_title}
+                      onCreateRequest={handleCreateRequest}
+                    />
+                  </div>
+                )}
+              </div>
+
               <PersonnelHeader
                 selectedRequest={selectedRequest}
                 selectedCollaborator={selectedCollaborator}
                 selectedApplicant={selectedApplicant}
+                workflow={requestWorkflow}
                 onSave={handleSaveProfile}
                 saving={profileSaving}
                 loading={profileLoading}
@@ -701,7 +869,7 @@ const PersonnelWorkspace = () => {
                       Selecciona una solicitud o colaborador
                     </h3>
                     <p className="mt-1 text-sm">
-                      Elige una solicitud o colaborador desde el sidebar para gestionar su información.
+                      Usa el selector visible para elegir una solicitud o colaborador y gestionar su información.
                     </p>
                   </div>
                 ) : isRequestContext && !["aprobada", "en_proceso", "completada"].includes(selectedRequest.status) ? (
@@ -719,10 +887,46 @@ const PersonnelWorkspace = () => {
                         Datos precargados desde el postulante: <strong>{selectedApplicant.fullname}</strong>. Puedes ajustar la información antes de guardar.
                       </div>
                     )}
+                    {isRequestContext && requestWorkflow && (
+                      <PersonnelRequestProgress workflow={requestWorkflow} request={selectedRequest} />
+                    )}
+                    {isRequestContext && canReassignPersonnel && (
+                      <form
+                        onSubmit={handleAssignCollaborator}
+                        className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                          <div className="flex-1 space-y-1">
+                            <p className="text-sm font-semibold text-slate-900">Responsable operativo</p>
+                            <p className="text-xs text-slate-500">
+                              Vincula o reasigna el colaborador que debe operar esta solicitud.
+                            </p>
+                          </div>
+                          <div className="flex w-full flex-col gap-2 sm:flex-row lg:max-w-2xl">
+                            <select
+                              value={requestCollaboratorId}
+                              onChange={(e) => setRequestCollaboratorId(e.target.value)}
+                              className="min-w-0 flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                            >
+                              <option value="">Sin responsable asignado</option>
+                              {collaborators.map((collaborator) => (
+                                <option key={collaborator.id} value={collaborator.id}>
+                                  {collaborator.fullname || collaborator.email}
+                                  {collaborator.department_name ? ` - ${collaborator.department_name}` : ""}
+                                </option>
+                              ))}
+                            </select>
+                            <Button type="submit" variant="secondary" disabled={!requestCollaboratorId}>
+                              Guardar responsable
+                            </Button>
+                          </div>
+                        </div>
+                      </form>
+                    )}
                     {/* Tabs */}
                     <div className="border-b border-gray-200">
-                      <nav className="-mb-px flex space-x-8">
-                        {["perfil", "checklist", "documentos"].map((tab) => (
+                      <nav className="-mb-px flex flex-wrap gap-4">
+                        {["perfil", "checklist", "documentos", "comentarios"].map((tab) => (
                           <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -764,7 +968,7 @@ const PersonnelWorkspace = () => {
                                 <div className="text-sm text-gray-700">
                                   <p className="font-semibold text-gray-900">Estado para contratación</p>
                                   <p className="text-xs text-gray-500">
-                                    Perfil: {profileCompletion.done}/{profileCompletion.total} · Checklist: {checklistCompletion.done}/{checklistCompletion.total}
+                                    Perfil: {profileCompletion.done}/{profileCompletion.total} | Checklist: {checklistCompletion.done}/{checklistCompletion.total}
                                   </p>
                                 </div>
                                 <Button
@@ -799,6 +1003,19 @@ const PersonnelWorkspace = () => {
                           uploadingDocKey={docUploading}
                           lockedSections={getLockedSections()}
                           readOnly={selectedRequest?.status === "completada"}
+                        />
+                      )}
+
+                      {activeTab === "comentarios" && (
+                        <PersonnelRequestComments
+                          comments={selectedRequest?.comments || []}
+                          commentText={workflowComment}
+                          setCommentText={setWorkflowComment}
+                          commentInternal={workflowCommentInternal}
+                          setCommentInternal={setWorkflowCommentInternal}
+                          onAddComment={handleAddComment}
+                          saving={workflowCommentSaving}
+                          canMarkInternal={canReassignPersonnel}
                         />
                       )}
                     </div>

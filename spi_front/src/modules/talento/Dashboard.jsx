@@ -24,7 +24,7 @@ const TalentoDashboard = () => {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [u, d, stats] = await Promise.all([getUsers(), getDepartments(), getCollaboratorStats()]);
+      const [u, d, stats] = await Promise.all([getUsers(), getDepartments({ include_inactive: true }), getCollaboratorStats()]);
       setUsers(u);
       setDepartments(d);
       setPendingReview(Number(stats?.pending_review || 0));
@@ -47,7 +47,10 @@ const TalentoDashboard = () => {
       </div>
     );
 
-  const activos = users.filter((u) => u.role !== "pendiente").length;
+  const activosReales = users.filter((u) => u.active !== false).length;
+  const inactivosReales = users.filter((u) => u.active === false).length;
+  const departmentsActive = departments.filter((d) => String(d.status || "").toLowerCase() !== "inactive").length;
+  const departmentsInactive = departments.filter((d) => String(d.status || "").toLowerCase() === "inactive").length;
   const pendientes = users.filter((u) => u.role === "pendiente").length;
 
   return (
@@ -82,17 +85,32 @@ const TalentoDashboard = () => {
         <Card className="flex flex-col items-center justify-center text-center p-5">
           <FiUsers className="text-yellow-600 text-4xl mb-2" />
           <p className="text-sm text-gray-500">Usuarios Activos</p>
-          <p className="text-2xl font-semibold">{activos}</p>
+          <p className="text-2xl font-semibold">{activosReales}</p>
         </Card>
         <Card className="flex flex-col items-center justify-center text-center p-5">
           <FiUsers className="text-red-600 text-4xl mb-2" />
-          <p className="text-sm text-gray-500">Pendientes de asignación</p>
+          <p className="text-sm text-gray-500">Usuarios Inactivos</p>
+          <p className="text-2xl font-semibold">{inactivosReales}</p>
+        </Card>
+        <Card className="flex flex-col items-center justify-center text-center p-5">
+          <FiUsers className="text-indigo-600 text-4xl mb-2" />
+          <p className="text-sm text-gray-500">Pendientes de asignacion</p>
           <p className="text-2xl font-semibold">{pendientes}</p>
         </Card>
         <Card className="flex flex-col items-center justify-center text-center p-5">
           <FiAlertCircle className="text-amber-600 text-4xl mb-2" />
           <p className="text-sm text-gray-500">Pendientes actualización anual</p>
           <p className="text-2xl font-semibold">{pendingReview}</p>
+        </Card>
+        <Card className="flex flex-col items-center justify-center text-center p-5">
+          <FiSettings className="text-slate-600 text-4xl mb-2" />
+          <p className="text-sm text-gray-500">Deptos Activos</p>
+          <p className="text-2xl font-semibold">{departmentsActive}</p>
+        </Card>
+        <Card className="flex flex-col items-center justify-center text-center p-5">
+          <FiSettings className="text-slate-400 text-4xl mb-2" />
+          <p className="text-sm text-gray-500">Deptos Inactivos</p>
+          <p className="text-2xl font-semibold">{departmentsInactive}</p>
         </Card>
 
       </div>

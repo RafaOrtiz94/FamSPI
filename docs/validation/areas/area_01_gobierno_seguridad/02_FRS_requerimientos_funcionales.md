@@ -1,169 +1,108 @@
-﻿# FRS - AREA 01 GOBIERNO, SEGURIDAD Y CUMPLIMIENTO
+﻿# FRS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
 
 ## 1. Introduccion
-Este FRS describe el comportamiento funcional verificable de los modulos del area 01 a partir del codigo actual.
+La presente especificacion funcional describe el comportamiento verificable del Area 01 del sistema SPI. Su objetivo es traducir los requerimientos de usuario del dominio a funciones concretas observables en el sistema, explicando para cada modulo por que existe la funcion, como debe ejecutarse y cuando debe intervenir dentro de la operacion real. Esta FRS se elaboro a partir del codigo vigente y de los contratos efectivamente expuestos por backend y frontend.
 
-## 2. Alcance funcional real
-- `auth`: Google OAuth, JWT, refresh, logout, sesiones, LOPDP interna.
-- `security`: consulta/revision/export de logins fuera de horario.
-- `auditoria`: listado, detalle y export CSV.
-- `audit-prep`: status, secciones, documentos, accesos externos.
-- `approvals`: cola pendiente y decision del flujo tecnico.
-- `management`: metricas, requests, trace y documents para gerencia.
-- `signature`: firma, verificacion, audit trail y dashboard.
+## 2. Objetivo
+Definir de manera funcional y verificable las capacidades del Area 01, detallando el comportamiento esperado de `auth`, `security`, `auditoria`, `audit-prep`, `approvals`, `management`, `signature`, `documents`, `files`, `notifications`, `dashboard` y `gmail`, junto con sus entradas, salidas, validaciones y contexto de ejecucion.
 
-## 3. Requerimientos funcionales detallados
-### FR-GSC-001 Autenticacion federada
-- URS asociado: `REQ-GSC-001`
-- Endpoint: `GET /api/v1/auth/google`, `GET /api/v1/auth/google/callback`
-- Entradas: `code` OAuth en callback.
-- Proceso:
-  1. Intercambia `code` por tokens Google.
-  2. Obtiene `userinfo`.
-  3. Crea o actualiza usuario en `users`.
-  4. Genera JWT de acceso y refresh.
-  5. Inserta sesion en `user_sessions`.
-  6. Ejecuta deteccion off-hours y log de auditoria.
-  7. Redirige al frontend con tokens.
-- Salida: redireccion al frontend o redireccion con `error=*`.
+## 3. Alcance funcional
+El alcance de esta FRS comprende autenticacion federada, control de sesion, monitoreo off-hours, consulta y exportacion de auditoria, preparacion documental, aprobaciones del flujo tecnico soportado, visibilidad gerencial, gestion documental desde plantilla, custodia de adjuntos, notificaciones operativas, dashboard comercial montado y autorizacion/envio mediante Gmail.
 
-### FR-GSC-002 Perfil y sesion actual
-- URS asociado: `REQ-GSC-002`, `REQ-GSC-003`
-- Endpoint: `GET /api/v1/auth/me`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`
-- Entradas: JWT y/o `x-refresh-token`.
-- Proceso:
-  - `me`: consulta `users`, `departments`, `user_profile`.
-  - `refresh`: valida refresh token y exige coincidencia con sesion activa.
-  - `logout`: cierra sesiones activas por email o refresh token.
-- Salida: perfil, tokens renovados o confirmacion de cierre.
+## 4. Requerimientos funcionales detallados
+### FR-GD-001 Autenticacion federada
+- Endpoints: `GET /api/v1/auth/google`, `GET /api/v1/auth/google/callback`.
+- Proceso: intercambio de `code`, resolucion de `userinfo`, creacion o actualizacion de usuario, generacion de JWT, registro de sesion, auditoria y redireccion al frontend.
+- Cuando aplica: cada vez que un usuario inicia sesion mediante el flujo corporativo.
 
-### FR-GSC-003 LOPDP interna
-- URS asociado: `REQ-GSC-003`
-- Endpoint: `POST /api/v1/auth/lopdp/accept`
-- Entradas: `signature_base64`, `pdf_base64`, `accepted`, `notes`.
-- Proceso:
-  1. Valida aceptacion y archivos.
-  2. Crea carpeta/persona/evidencias en Drive.
-  3. Actualiza `users`.
-  4. Inserta fila en `user_lopdp_consents`.
-- Salida: usuario actualizado.
+### FR-GD-002 Perfil, refresh y logout
+- Endpoints: `GET /api/v1/auth/me`, `POST /api/v1/auth/refresh`, `POST /api/v1/auth/logout`.
+- `me` devuelve identidad y contexto; `refresh` valida que el refresh token corresponda a una sesion activa; `logout` cierra la sesion o sesiones activas asociadas.
 
-### FR-GSC-004 Monitoreo de seguridad off-hours
-- URS asociado: `REQ-GSC-004`, `REQ-GSC-005`
-- Endpoints:
-  - `GET /api/v1/security/offhours-logins`
-  - `GET /api/v1/security/offhours-logins/:id/timeline`
-  - `POST /api/v1/security/offhours-logins/:id/review`
-  - `GET /api/v1/security/offhours-logins/export`
-- Proceso:
-  - lee `auditoria.logs` filtrando `modulo='auth'` y `accion='offhours_login'`
-  - enriquece con `notifications`, `users`, `departments`
-  - marca revision sobre `notifications`
-  - exporta CSV/JSON saneado
-- Restriccion: acceso solo TI.
+### FR-GD-003 Aceptacion interna LOPDP
+- Endpoint: `POST /api/v1/auth/lopdp/accept`.
+- Valida aceptacion y archivos, crea carpeta y evidencia en Drive, actualiza `users` e inserta fila en `user_lopdp_consents`.
 
-### FR-GSC-005 Consulta de auditoria
-- URS asociado: `REQ-GSC-006`
-- Endpoints:
-  - `GET /api/v1/auditoria`
-  - `GET /api/v1/auditoria/:id`
-  - `GET /api/v1/auditoria/export/csv`
-- Proceso:
-  - filtra por usuario, modulo, accion, request, mantenimiento, inventario, fecha y `auto`
-  - pagina resultados
-  - exporta CSV a demanda
+### FR-GD-004 Monitoreo de seguridad off-hours
+- Endpoints: `GET /api/v1/security/offhours-logins`, `GET /api/v1/security/offhours-logins/:id/timeline`, `POST /api/v1/security/offhours-logins/:id/review`, `GET /api/v1/security/offhours-logins/export`.
+- Lee `auditoria.logs`, correlaciona `notifications`, `users` y `departments` y permite exportacion saneada.
 
-### FR-GSC-006 Preparacion de auditoria
-- URS asociado: `REQ-GSC-007`, `REQ-GSC-008`, `REQ-GSC-009`, `REQ-GSC-010`
-- Endpoints:
-  - `GET/PUT /api/v1/audit-prep/status`
-  - `GET/POST /api/v1/audit-prep/sections`
-  - `GET/POST/PATCH /api/v1/audit-prep/documents*`
-  - `GET/POST/DELETE /api/v1/audit-prep/external-access*`
-- Proceso:
-  - mantiene `audit_settings`
-  - filtra `audit_sections` por rol
-  - crea carpetas en Drive y registra `audit_documents`
-  - limita accesos externos activos a dos
+### FR-GD-005 Consulta de auditoria
+- Endpoints: `GET /api/v1/auditoria`, `GET /api/v1/auditoria/:id`, `GET /api/v1/auditoria/export/csv`.
+- Filtra, pagina, detalla y exporta bitacora transversal.
 
-### FR-GSC-007 Aprobaciones operativas soportadas
-- URS asociado: `REQ-GSC-011`, `REQ-GSC-012`
-- Endpoints:
-  - `GET /api/v1/approvals/pending`
-  - `POST /api/v1/approvals/:id/approve`
-  - `POST /api/v1/approvals/:id/reject`
-- Proceso:
-  - lista pendientes desde `requests`
-  - aprueba o rechaza via `requests.service.updateRequestStatus`
-  - registra decision en `request_approvals`
-  - dispara correo
-- Observacion: el alcance actual es tecnico/servicio, no corporativo transversal.
+### FR-GD-006 Preparacion de auditoria
+- Endpoints: `GET/PUT /api/v1/audit-prep/status`, `GET/POST /api/v1/audit-prep/sections`, `GET/POST/PATCH /api/v1/audit-prep/documents*`, `GET/POST/DELETE /api/v1/audit-prep/external-access*`.
+- Mantiene settings, filtra secciones, registra `audit_documents`, crea carpetas Drive y limita accesos externos activos a dos.
 
-### FR-GSC-008 Gestion gerencial
-- URS asociado: `REQ-GSC-013`, `REQ-GSC-014`
-- Endpoints:
-  - `GET /api/v1/management/stats`
-  - `GET /api/v1/management/requests`
-  - `GET /api/v1/management/trace/:id`
-  - `GET /api/v1/management/documents/:id`
-- Proceso:
-  - agrega estadisticas de `requests`
-  - lista solicitudes con `request_types` y `users`
-  - consulta trazabilidad en `auditoria.logs`
-  - consulta adjuntos y versiones en `request_attachments` y `request_versions`
+### FR-GD-007 Aprobaciones operativas soportadas
+- Endpoints: `GET /api/v1/approvals/pending`, `POST /api/v1/approvals/:id/approve`, `POST /api/v1/approvals/:id/reject`.
+- Lista pendientes, actualiza `requests.status`, registra decision en `request_approvals` y dispara correo.
 
-### FR-GSC-009 Firma y verificacion documental
-- URS asociado: `REQ-GSC-015`, `REQ-GSC-016`, `REQ-GSC-017`
-- Endpoints reales montados bajo `/api`:
-  - `POST /api/documents/:documentId/sign`
-  - `POST /api/signature/documents/:documentId/sign`
-  - `GET /api/verificar/:token`
-  - `GET /api/verify/:token`
-  - `GET /api/signature/verificar/:token`
-  - `GET /api/signature/verify/:token`
-  - `GET /api/documents/:documentId/audit-trail`
-  - `GET /api/signature/documents/:documentId/audit-trail`
-  - `GET /api/dashboard`
-  - `GET /api/signature/dashboard`
-- Proceso:
-  1. valida payload de firma.
-  2. calcula hash y actualiza `document_hashes`.
-  3. inserta `document_signatures_advanced`.
-  4. ejecuta `create_document_seal_and_qr`.
-  5. bloquea el documento.
-  6. expone verificacion por token y dashboard.
+### FR-GD-008 Gestion gerencial
+- Endpoints: `GET /api/v1/management/stats`, `GET /api/v1/management/requests`, `GET /api/v1/management/trace/:id`, `GET /api/v1/management/documents/:id`.
+- Entrega metricas, solicitudes, trazabilidad y soporte documental del dominio.
 
-## 4. Validaciones funcionales relevantes
-- `auth/refresh` rechaza refresh token si no corresponde a una sesion activa.
-- `security` solo admite roles TI.
-- `audit-prep` valida MIME y peso de archivo.
-- `audit-prep` valida seccion permitida por rol.
-- `signature` exige `signer_email` desde usuario autenticado y `session_id` para trazabilidad.
+### FR-GD-009 Gestion documental desde plantilla
+- Endpoints: `POST /api/v1/documents/from-template`, `GET /api/v1/documents/by-request/:requestId`, `GET /api/v1/documents/:documentId`, `POST /api/v1/documents/:documentId/sign`, `POST /api/v1/documents/:documentId/sign-advanced`, `POST /api/v1/documents/:documentId/export-pdf`.
+- Crea documentos desde plantilla, permite firma posicionada o avanzada y exporta PDF.
+
+### FR-GD-010 Gestion de adjuntos
+- Endpoints: `POST /api/v1/files/upload/:requestId`, `GET /api/v1/files/by-request/:requestId`, `GET /api/v1/files/:fileId/metadata`, `GET /api/v1/files/:fileId/download`, `DELETE /api/v1/files/:fileId`.
+- Custodia anexos con carga multiple, metadata, descarga y borrado controlado.
+
+### FR-GD-011 Notificaciones operativas
+- Endpoints: `GET /api/v1/notifications`, `POST /api/v1/notifications`, `PATCH /api/v1/notifications/read-all`, `PATCH /api/v1/notifications/:id/read`, `DELETE /api/v1/notifications/clear`, `DELETE /api/v1/notifications/:id`.
+- Lista la bandeja del usuario, crea notificaciones y controla lectura o eliminacion.
+
+### FR-GD-012 Dashboard operacional montado
+- Endpoint: `GET /api/v1/dashboard/comercial/summary`.
+- Exige autenticacion, rol permitido y permite `fresh=1` para refresco de cache.
+
+### FR-GD-013 Autorizacion y envio mediante Gmail
+- Endpoints: `GET /api/v1/gmail/auth/url`, `GET /api/v1/gmail/auth/callback`, `GET /api/v1/gmail/auth/status`, `POST /api/v1/gmail/send`, `DELETE /api/v1/gmail/auth/revoke`.
+- Genera URL de autorizacion, guarda tokens en `user_gmail_tokens`, informa estado, envia correo y revoca acceso.
+
+### FR-GD-014 Firma avanzada y verificacion publica
+- Endpoints: `POST /api/v1/signature/documents/:documentId/sign`, `GET /api/v1/signature/verificar/:token`, `GET /api/v1/signature/documents/:documentId/audit-trail`, `GET /api/v1/signature/dashboard`.
+- Calcula hash, registra firma avanzada, genera sello y QR, bloquea documento, verifica y expone metricas.
 
 ## 5. Flujos principales
-### Flujo A - Login
-1. Usuario accede a `/auth/google`.
-2. Google devuelve `code`.
-3. Backend crea/actualiza usuario.
-4. Backend genera JWT y sesion.
-5. Backend registra auditoria de login y posible evento off-hours.
-6. Frontend recibe tokens y continua carga de sesion.
+### Flujo A - Login corporativo
+```text
+[Usuario inicia login] -> [Google OAuth] -> [Callback backend]
+-> [Crear/actualizar usuario] -> [Crear sesion y tokens]
+-> [Auditoria y off-hours] -> [Frontend con sesion operativa]
+```
 
 ### Flujo B - Revision off-hours
-1. TI consulta cola de eventos.
-2. Backend consulta `auditoria.logs` y `notifications`.
-3. TI revisa evento.
-4. Backend marca notificacion como leida y registra accion de revision.
+```text
+[Login fuera de horario] -> [auditoria.logs]
+-> [Relacion con notifications] -> [Consulta TI]
+-> [Timeline y detalle] -> [Revision y cierre]
+```
 
-### Flujo C - Firma
-1. Usuario autenticado envia documento base64.
-2. Backend calcula hash.
-3. Backend inserta firma avanzada.
-4. Backend crea sello y QR.
-5. Documento queda bloqueado.
-6. El token puede verificarse por endpoints publicos.
+### Flujo C - Preparacion y custodia documental de auditoria
+```text
+[Activar auditoria] -> [Definir secciones] -> [Cargar documento]
+-> [Persistir audit_documents + Drive] -> [Descarga por rol]
+-> [Alta/revocacion de acceso externo]
+```
 
-## 6. Restricciones y limites observados
-- `approvals` no segmenta la cola por aprobador real; expone un conjunto general de pendientes dentro del alcance de roles habilitados.
-- `management/requests` devuelve `rowCount` del lote y no un total real global.
-- `signature` depende de funciones y vistas SQL especificas (`create_document_seal_and_qr`, `track_qr_access`, `document_verification_info`).
+### Flujo D - Gestion documental y firma
+```text
+[Crear desde plantilla] -> [Recuperar documento]
+-> [Firma posicionada o avanzada] -> [Exportar PDF]
+-> [Sello, QR y bloqueo] -> [Verificacion publica]
+```
+
+### Flujo E - Notificacion y correo autenticado
+```text
+[Evento operativo] -> [Crear notificacion]
+-> [Usuario lista/lee/limpia]
+-> [Si requiere correo] -> [OAuth Gmail]
+-> [Enviar email] -> [Auditoria del envio]
+```
+
+## 6. Conclusion
+La FRS del Area 01 deja descrito el comportamiento funcional real del dominio ampliado. El area incorpora gestion documental, notificaciones, adjuntos, dashboard operacional y Gmail donde existe evidencia tecnica de montaje y consumo.

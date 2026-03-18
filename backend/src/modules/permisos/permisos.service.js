@@ -3035,6 +3035,7 @@ async function listarResumenColaboradores() {
   const { rows } = await db.query(
     `SELECT
         id,
+        user_id,
         user_email,
         user_fullname,
         tipo_solicitud,
@@ -3055,8 +3056,53 @@ async function listarResumenColaboradores() {
       FROM permisos_vacaciones
       ORDER BY created_at DESC`
   );
+  const vacationRequestsResult = await db.query(
+    `SELECT
+        v.id,
+        v.requester_id,
+        u.email AS requester_email,
+        COALESCE(u.fullname, u.name, u.email, CONCAT('Usuario #', v.requester_id)) AS requester_name,
+        v.status,
+        v.start_date,
+        v.end_date,
+        v.days,
+        v.created_at
+      FROM vacaciones_solicitudes v
+      LEFT JOIN users u ON u.id = v.requester_id
+      ORDER BY v.created_at DESC`
+  );
 
   const collaborators = new Map();
+  const ensureCollaboratorRecord = ({ key, userId = null, userEmail = null, userFullname = null }) => {
+    if (collaborators.has(key)) return collaborators.get(key);
+    collaborators.set(key, {
+      user_id: userId,
+      user_email: userEmail,
+      user_fullname: userFullname || userEmail || `Usuario #${userId || "sin-correo"}`,
+      permisos: {
+        total: 0,
+        aprobacion_completa: 0,
+        aprobacion_parcial: 0,
+        pendientes: 0,
+        aprobados: 0,
+        items: [],
+      },
+      vacaciones: {
+        dias_aprobados: 0,
+        dias_pendientes: 0,
+        dias_disponibles: 0,
+        dias_restantes: 0,
+        dias_base: 0,
+        dias_arrastre: 0,
+        missing_hire_date: true,
+        eligible: false,
+        eligible_from: null,
+        accrued_this_year: false,
+        items: [],
+      },
+    });
+    return collaborators.get(key);
+  };
 
   for (const user of usersResult.rows) {
     if (String(user.applicant_source || "").toLowerCase() === "google_forms") {
@@ -3104,37 +3150,13 @@ async function listarResumenColaboradores() {
   const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
 
   settledRows.forEach((row) => {
-    const key = row.user_email || `user-${row.id}`;
-    if (!collaborators.has(key)) {
-      collaborators.set(key, {
-        user_id: null,
-        user_email: row.user_email,
-        user_fullname: row.user_fullname,
-        permisos: {
-          total: 0,
-          aprobacion_completa: 0,
-          aprobacion_parcial: 0,
-          pendientes: 0,
-          aprobados: 0,
-          items: [],
-        },
-        vacaciones: {
-          dias_aprobados: 0,
-          dias_pendientes: 0,
-          dias_disponibles: 0,
-          dias_restantes: 0,
-          dias_base: 0,
-          dias_arrastre: 0,
-          missing_hire_date: true,
-          eligible: false,
-          eligible_from: null,
-          accrued_this_year: false,
-          items: [],
-        },
-      });
-    }
-
-    const record = collaborators.get(key);
+    const key = row.user_email || `user-${row.user_id || row.id}`;
+    const record = ensureCollaboratorRecord({
+      key,
+      userId: row.user_id || null,
+      userEmail: row.user_email || null,
+      userFullname: row.user_fullname || null,
+    });
     const status = row.status || "pending";
 
     if (row.tipo_solicitud === "vacaciones") {
@@ -3152,39 +3174,69 @@ async function listarResumenColaboradores() {
         fecha_fin: row.fecha_fin,
         duracion_dias: days,
         created_at: row.created_at,
+        source: "permisos_vacaciones",
       });
-    } else {
-      record.permisos.total += 1;
-      if (status === "approved" || status === "aprobado") {
-        record.permisos.aprobacion_completa += 1;
-        record.permisos.aprobados += 1;
-        if (row.charged_to_vacation) {
-          record.vacaciones.dias_aprobados += getChargedVacationDays(row);
-        }
-      } else if (status === "partially_approved") {
-        record.permisos.aprobacion_parcial += 1;
-      } else if (status === "pending" || status === "pending_final" || status === "pendiente") {
-        record.permisos.pendientes += 1;
-      }
-
-      record.permisos.items.push({
-        id: row.id,
-        status,
-        tipo_permiso: row.tipo_permiso,
-        fecha_inicio: row.fecha_inicio,
-        fecha_fin: row.fecha_fin,
-        duracion_horas: row.duracion_horas,
-        duracion_dias: row.duracion_dias,
-        charged_to_vacation: row.charged_to_vacation,
-        charged_vacation_hours: row.charged_vacation_hours,
-        charged_vacation_days: row.charged_vacation_days,
-        justificacion_requerida: row.justificacion_requerida,
-        justificantes_urls: row.justificantes_urls,
-        created_at: row.created_at,
-        aprobacion_parcial_at: row.aprobacion_parcial_at,
-        aprobacion_final_at: row.aprobacion_final_at,
-      });
+      return;
     }
+
+    record.permisos.total += 1;
+    if (status === "approved" || status === "aprobado") {
+      record.permisos.aprobacion_completa += 1;
+      record.permisos.aprobados += 1;
+      if (row.charged_to_vacation) {
+        record.vacaciones.dias_aprobados += getChargedVacationDays(row);
+      }
+    } else if (status === "partially_approved") {
+      record.permisos.aprobacion_parcial += 1;
+    } else if (status === "pending" || status === "pending_final" || status === "pendiente") {
+      record.permisos.pendientes += 1;
+    }
+
+    record.permisos.items.push({
+      id: row.id,
+      status,
+      tipo_permiso: row.tipo_permiso,
+      fecha_inicio: row.fecha_inicio,
+      fecha_fin: row.fecha_fin,
+      duracion_horas: row.duracion_horas,
+      duracion_dias: row.duracion_dias,
+      charged_to_vacation: row.charged_to_vacation,
+      charged_vacation_hours: row.charged_vacation_hours,
+      charged_vacation_days: row.charged_vacation_days,
+      justificacion_requerida: row.justificacion_requerida,
+      justificantes_urls: row.justificantes_urls,
+      created_at: row.created_at,
+      aprobacion_parcial_at: row.aprobacion_parcial_at,
+      aprobacion_final_at: row.aprobacion_final_at,
+    });
+  });
+
+  vacationRequestsResult.rows.forEach((row) => {
+    const key = row.requester_email || `user-${row.requester_id || row.id}`;
+    const record = ensureCollaboratorRecord({
+      key,
+      userId: row.requester_id || null,
+      userEmail: row.requester_email || null,
+      userFullname: row.requester_name || null,
+    });
+    const status = String(row.status || "").toLowerCase();
+    const days = Number(row.days || 0);
+
+    if (status === "approved" || status === "aprobado") {
+      record.vacaciones.dias_aprobados += days;
+    } else if (status === "pending" || status === "pendiente") {
+      record.vacaciones.dias_pendientes += days;
+    }
+
+    record.vacaciones.items.push({
+      id: row.id,
+      status: row.status,
+      fecha_inicio: row.start_date,
+      fecha_fin: row.end_date,
+      duracion_dias: days,
+      created_at: row.created_at,
+      source: "vacaciones_solicitudes",
+    });
   });
 
   return Array.from(collaborators.values()).map((record) => {

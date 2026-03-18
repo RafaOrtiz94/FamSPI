@@ -1,30 +1,32 @@
-﻿# PQ - AREA 01 GOBIERNO, SEGURIDAD Y CUMPLIMIENTO
+﻿# PQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
 
-## 1. Objetivo
-Definir escenarios de calificacion de desempeno y uso real del area 01 segun la implementacion vigente.
+## 1. Introduccion
+La calificacion de desempeno del Area 01 tiene como proposito demostrar que los modulos comprendidos dentro del dominio de Gobierno, Seguridad, Cumplimiento y Gestion Documental mantienen un comportamiento estable, consistente y trazable cuando operan en condiciones representativas de uso real.
 
 ## 2. Casos PQ
 | ID | Modulo | Escenario | Resultado esperado |
 |---|---|---|---|
-| PQ-GSC-001 | auth | 20 consultas consecutivas a `/api/v1/auth/me` con el mismo token | respuestas consistentes sin crear efectos secundarios de asistencia |
-| PQ-GSC-002 | auth | 10 refresh encadenados usando siempre el ultimo refresh token valido | no debe aceptar tokens ya reemplazados o sin sesion activa |
-| PQ-GSC-003 | auth | login repetido de un mismo usuario en un mismo dia | no debe duplicar entradas de asistencia del dia |
-| PQ-GSC-004 | security | consulta repetida de eventos off-hours con filtros y export | respuestas estables, saneadas y sin filtrar datos crudos no deseados |
-| PQ-GSC-005 | auditoria | listados amplios + detalle + export CSV | paginacion y export estables |
-| PQ-GSC-006 | audit-prep | 5 cargas consecutivas de documentos validos | persistencia coherente en `audit_documents` y continuidad de descarga |
-| PQ-GSC-007 | audit-prep | altas y revocaciones repetidas de accesos externos | se respeta limite de 2 activos y el estado permanece consistente |
-| PQ-GSC-008 | approvals | consultas repetidas de pendientes con distintos roles permitidos | la cola responde, pero debe documentarse si varios roles ven el mismo universo de solicitudes |
-| PQ-GSC-009 | approvals | serie de aprobaciones y rechazos validos | `requests` y `request_approvals` se mantienen consistentes |
-| PQ-GSC-010 | management | cargas repetidas de `stats`, `requests`, `trace` y `documents` | operacion estable; verificar total real y trazabilidad consistente |
-| PQ-GSC-011 | signature | multiples verificaciones de token QR valido | respuesta estable y tracking de acceso coherente |
-| PQ-GSC-012 | signature | intentos repetidos de firma sobre documentos validos | firma estable solo si funciones/vistas SQL requeridas existen en el entorno |
-| PQ-GSC-013 | area | combinacion de login, evento off-hours, revision TI y consulta auditoria | la trazabilidad debe poder seguirse de `auth` a `security` y `auditoria` |
+| PQ-GD-001 | auth | 20 consultas consecutivas a `/api/v1/auth/me` con el mismo token | respuestas consistentes sin efectos secundarios inesperados |
+| PQ-GD-002 | auth | 10 refresh encadenados usando siempre el ultimo refresh token valido | no acepta tokens ya reemplazados o sin sesion activa |
+| PQ-GD-003 | security | consulta repetida de eventos off-hours con filtros y export | respuestas estables, saneadas y exportables |
+| PQ-GD-004 | auditoria | listados amplios, detalle y export CSV | paginacion y export estables |
+| PQ-GD-005 | audit-prep | 5 cargas consecutivas de documentos validos | persistencia coherente en `audit_documents` y continuidad de descarga |
+| PQ-GD-006 | approvals | serie de aprobaciones y rechazos validos | `requests` y `request_approvals` se mantienen consistentes |
+| PQ-GD-007 | management | cargas repetidas de `stats`, `requests`, `trace` y `documents` | operacion estable con trazabilidad gerencial consistente |
+| PQ-GD-008 | documents | 10 creaciones desde plantilla y 10 consultas por solicitud | creacion y lectura consistentes sin perdida de referencia |
+| PQ-GD-009 | files | 10 cargas y 10 descargas de adjuntos por lote | stream y metadata consistentes |
+| PQ-GD-010 | notifications | 30 operaciones mixtas de listar, leer y limpiar | bandeja consistente y conteo no leido correcto |
+| PQ-GD-011 | dashboard | 20 consultas al resumen comercial con y sin `fresh=1` | respuesta funcional sostenida y sin degradacion critica |
+| PQ-GD-012 | gmail | 5 envios sucesivos con autorizacion valida | envio estable y trazabilidad del modulo |
+| PQ-GD-013 | signature | multiples verificaciones de token QR valido | respuesta estable y tracking coherente |
+| PQ-GD-014 | area | combinacion de login, evento off-hours, notificacion, generacion documental y firma | la trazabilidad debe poder seguirse de extremo a extremo |
 
 ## 3. Riesgos PQ vigentes
 - `auth` mantiene un acoplamiento transversal con `attendance` durante login.
-- `approvals` puede degradar la segregacion funcional al no segmentar la cola por aprobador real.
-- `management/requests` no expone un total global confiable para volumenes altos.
-- `signature` depende de funciones/vistas SQL sin fallback en codigo.
+- `approvals` requiere seguimiento para asegurar segmentacion consistente del universo visible.
+- `management` debe mantener consistencia entre metricas, listados y trazabilidad gerencial.
+- `signature` depende de funciones y vistas SQL especializadas cuya ausencia afecta el flujo completo.
+- `gmail` depende de autorizacion previa valida del usuario y de integracion Google operativa.
 
-## 4. Conclusion PQ
-El area 01 puede sostener sus flujos core en runtime si el entorno tiene correctamente disponibles Google OAuth, Drive, correo y los artefactos SQL de firma. La PQ no queda plenamente cerrada mientras sigan abiertos los hallazgos de segmentacion en `approvals`, totalizacion en `management` y dependencia fuerte de SQL especializado en `signature`.
+## 4. Conclusiones de PQ
+La incorporacion de gestion documental, archivos, notificaciones, dashboard y Gmail exige que la PQ confirme no solo estabilidad de seguridad y auditoria, sino tambien consistencia del soporte documental transversal del sistema.

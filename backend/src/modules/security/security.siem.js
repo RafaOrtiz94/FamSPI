@@ -2,11 +2,40 @@ const fetch = require('node-fetch');
 const logger = require("../../config/logger");
 const { logAction } = require("../../utils/audit");
 const { SECURITY_SIEM_ENABLED, SECURITY_SIEM_WEBHOOK_URL, SECURITY_SIEM_TIMEOUT_MS, SECURITY_SIEM_RETRY_MAX } = require('../../config/security');
+const SECURITY_JOBS_LOG_IDENTIFIER = "public.security_jobs_log";
+const TABLE_CACHE_TTL_MS = 60 * 1000;
+let securityJobsLogCache = {
+  checkedAt: 0,
+  exists: null,
+};
 
 /**
  * SIEM Integration Module
  * Sends sanitized security events to external SIEM systems
  */
+
+async function isSecurityJobsLogAvailable() {
+  const now = Date.now();
+  if (
+    securityJobsLogCache.exists !== null &&
+    now - securityJobsLogCache.checkedAt < TABLE_CACHE_TTL_MS
+  ) {
+    return securityJobsLogCache.exists;
+  }
+
+  const db = require("../../config/db");
+  const result = await db.query(
+    "SELECT to_regclass($1)::text AS table_name",
+    [SECURITY_JOBS_LOG_IDENTIFIER]
+  );
+
+  securityJobsLogCache = {
+    checkedAt: now,
+    exists: Boolean(result.rows[0]?.table_name),
+  };
+
+  return securityJobsLogCache.exists;
+}
 
 /**
  * Send security event to SIEM webhook
@@ -149,6 +178,11 @@ async function logJob(jobName, status, details = {}) {
   const db = require("../../config/db");
 
   try {
+    if (!(await isSecurityJobsLogAvailable())) {
+      logger.info('[SIEM] Tabla security_jobs_log no disponible; se omite log auxiliar');
+      return;
+    }
+
     await db.query(`
       INSERT INTO security_jobs_log (job_name, status, details, created_at)
       VALUES ($1, $2, $3, NOW())

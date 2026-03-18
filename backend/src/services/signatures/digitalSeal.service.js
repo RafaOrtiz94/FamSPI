@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const immutableLogger = require("./immutableSignatureLogger.service");
+const { assertSignatureDependencies } = require("./signatureSchema.service");
 
 class DigitalSealService {
   async applySeal({ documentHash, authorizedRole, client }) {
@@ -18,6 +19,8 @@ class DigitalSealService {
         err.status = 400;
         throw err;
       }
+
+      await assertSignatureDependencies(["sealGenerator"], { client: pgClient });
 
       const existingSeal = await pgClient.query(
         `SELECT id FROM document_seals WHERE document_hash_id = $1 AND is_active = TRUE LIMIT 1`,

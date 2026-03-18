@@ -1,85 +1,80 @@
-﻿# OQ - AREA 01 GOBIERNO, SEGURIDAD Y CUMPLIMIENTO
+﻿# OQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
 
-## 1. Objetivo
-Definir casos de calificacion operacional basados en el comportamiento real verificable del area 01.
+## 1. Introduccion
+La calificacion operacional del Area 01 se orienta a demostrar que los modulos incluidos en su alcance ejecutan las funciones esperadas de manera coherente con la especificacion funcional vigente. El foco principal es validar autenticacion, seguridad, auditoria, preparacion documental, aprobaciones, gestion gerencial, documentos, archivos, notificaciones, dashboard, Gmail y firma documental bajo condiciones normales y de error controlado.
 
 ## 2. Casos OQ por modulo
-### 2.1 `auth`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-AUTH-001 | `GET /api/v1/auth/google` | redirige a Google OAuth |
-| OQ-AUTH-002 | `GET /api/v1/auth/google/callback?code=*` | crea/actualiza usuario, crea sesion, registra auditoria de login y redirige con tokens |
-| OQ-AUTH-003 | `GET /api/v1/auth/me` | devuelve perfil autenticado; no registra asistencia aqui |
-| OQ-AUTH-004 | `POST /api/v1/auth/refresh` | renueva tokens solo si el refresh token corresponde a una sesion activa |
-| OQ-AUTH-005 | `POST /api/v1/auth/logout` | cierra sesiones activas del usuario o la sesion asociada al refresh token |
-| OQ-AUTH-006 | `POST /api/v1/auth/lopdp/accept` | guarda evidencia interna en Drive y actualiza `users` / `user_lopdp_consents` |
-| OQ-AUTH-007 | `GET /api/v1/auth/sessions` | lista sesiones para TI/Gerencia |
-| OQ-AUTH-008 | `GET /api/v1/auth/active-users` | lista usuarios con sesion abierta |
+### `auth`
+- `GET /api/v1/auth/google`: redirige a Google OAuth.
+- `GET /api/v1/auth/google/callback?code=*`: crea o actualiza usuario, crea sesion y registra auditoria.
+- `GET /api/v1/auth/me`: devuelve perfil autenticado.
+- `POST /api/v1/auth/refresh`: renueva tokens solo si el refresh token corresponde a una sesion activa.
+- `POST /api/v1/auth/lopdp/accept`: guarda evidencia interna en Drive y actualiza `users` y `user_lopdp_consents`.
 
-### 2.2 `security`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-SEC-001 | `GET /api/v1/security/offhours-logins` | devuelve eventos off-hours saneados y paginados |
-| OQ-SEC-002 | `GET /api/v1/security/offhours-logins/:id/timeline` | devuelve timeline asociado al `correlation_id` |
-| OQ-SEC-003 | `POST /api/v1/security/offhours-logins/:id/review` | marca notificaciones de seguridad como revisadas y registra accion de revision |
-| OQ-SEC-004 | `GET /api/v1/security/offhours-logins/export` | exporta CSV o JSON saneado |
+### `security`
+- `GET /api/v1/security/offhours-logins`: devuelve eventos off-hours saneados y paginados.
+- `GET /api/v1/security/offhours-logins/:id/timeline`: devuelve timeline asociado al `correlation_id`.
+- `POST /api/v1/security/offhours-logins/:id/review`: marca notificaciones de seguridad como revisadas.
+- `GET /api/v1/security/offhours-logins/export`: exporta CSV o JSON saneado.
 
-### 2.3 `auditoria`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-AUD-001 | `GET /api/v1/auditoria` | devuelve logs filtrables y paginados |
-| OQ-AUD-002 | `GET /api/v1/auditoria/:id` | devuelve detalle de registro |
-| OQ-AUD-003 | `GET /api/v1/auditoria/export/csv` | exporta auditoria a CSV |
+### `auditoria`
+- `GET /api/v1/auditoria`, `GET /api/v1/auditoria/:id`, `GET /api/v1/auditoria/export/csv` deben listar, detallar y exportar la bitacora.
 
-### 2.4 `audit-prep`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-APREP-001 | `GET /api/v1/audit-prep/status` | devuelve status y ventana de auditoria |
-| OQ-APREP-002 | `PUT /api/v1/audit-prep/status` | actualiza modo/fechas si el rol es TI autorizado |
-| OQ-APREP-003 | `GET /api/v1/audit-prep/sections` | devuelve secciones filtradas por rol |
-| OQ-APREP-004 | `POST /api/v1/audit-prep/sections` | inserta o actualiza seccion |
-| OQ-APREP-005 | `GET /api/v1/audit-prep/documents` | lista documentos visibles para el rol |
-| OQ-APREP-006 | `POST /api/v1/audit-prep/documents/upload` | valida archivo, crea carpeta Drive y registra `audit_documents` |
-| OQ-APREP-007 | `PATCH /api/v1/audit-prep/documents/:id/status` | actualiza estado documental |
-| OQ-APREP-008 | `GET /api/v1/audit-prep/documents/:id/download` | obtiene documento si la seccion esta permitida |
-| OQ-APREP-009 | `GET /api/v1/audit-prep/external-access` | lista accesos externos |
-| OQ-APREP-010 | `POST /api/v1/audit-prep/external-access` | crea acceso externo si no excede 2 activos |
-| OQ-APREP-011 | `DELETE /api/v1/audit-prep/external-access/:id` | revoca acceso externo |
+### `audit-prep`
+- `GET /api/v1/audit-prep/status` devuelve estado y ventana.
+- `PUT /api/v1/audit-prep/status` actualiza modo y fechas.
+- `GET /api/v1/audit-prep/sections` filtra secciones por rol.
+- `POST /api/v1/audit-prep/documents/upload` valida archivo, crea carpeta Drive y registra `audit_documents`.
+- `GET /api/v1/audit-prep/documents/:id/download` entrega documento si la seccion esta permitida.
 
-### 2.5 `approvals`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-APP-001 | `GET /api/v1/approvals/pending` | lista pendientes no finalizados del flujo soportado |
-| OQ-APP-002 | `POST /api/v1/approvals/:id/approve` | inserta decision y actualiza `requests.status` a aprobado |
-| OQ-APP-003 | `POST /api/v1/approvals/:id/reject` | inserta decision y actualiza `requests.status` a rechazado |
+### `approvals`
+- `GET /api/v1/approvals/pending` lista pendientes del flujo soportado.
+- `POST /api/v1/approvals/:id/approve` y `POST /api/v1/approvals/:id/reject` registran decision y actualizan `requests.status`.
 
-### 2.6 `management`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-MGMT-001 | `GET /api/v1/management/stats` | devuelve resumen y conteo por tipo |
-| OQ-MGMT-002 | `GET /api/v1/management/requests` | devuelve listado paginado del lote solicitado |
-| OQ-MGMT-003 | `GET /api/v1/management/trace/:id` | devuelve trazabilidad desde `auditoria.logs` |
-| OQ-MGMT-004 | `GET /api/v1/management/documents/:id` | devuelve adjuntos y versiones |
+### `management`
+- `GET /api/v1/management/stats`, `GET /api/v1/management/requests`, `GET /api/v1/management/trace/:id`, `GET /api/v1/management/documents/:id` deben devolver metricas, solicitudes, trazabilidad y soporte documental.
 
-### 2.7 `signature`
-| ID | Endpoint | Resultado esperado |
-|---|---|---|
-| OQ-SIGN-001 | `POST /api/signature/documents/:documentId/sign` | calcula hash, inserta firma, crea sello/QR y bloquea documento |
-| OQ-SIGN-002 | `GET /api/verificar/:token` | devuelve verificacion publica si el token existe y esta activo |
-| OQ-SIGN-003 | `GET /api/signature/verificar/:token` | alias funcional del endpoint publico |
-| OQ-SIGN-004 | `GET /api/signature/documents/:documentId/audit-trail` | devuelve trail documental para firmante, bloqueador o admin |
-| OQ-SIGN-005 | `GET /api/signature/dashboard` | devuelve metricas del modulo |
+### `documents`
+- `POST /api/v1/documents/from-template` crea documento desde plantilla.
+- `GET /api/v1/documents/by-request/:requestId` lista documentos por solicitud.
+- `POST /api/v1/documents/:documentId/sign` inserta firma posicionada.
+- `POST /api/v1/documents/:documentId/export-pdf` exporta PDF.
+
+### `files`
+- `POST /api/v1/files/upload/:requestId` carga adjuntos.
+- `GET /api/v1/files/by-request/:requestId` lista adjuntos.
+- `GET /api/v1/files/:fileId/download` descarga archivo.
+- `DELETE /api/v1/files/:fileId` elimina archivo solo si el rol esta autorizado.
+
+### `notifications`
+- `GET /api/v1/notifications` devuelve notificaciones del usuario y conteo no leido.
+- `POST /api/v1/notifications` crea notificacion; si apunta a otro usuario exige rol privilegiado.
+- `PATCH /api/v1/notifications/:id/read`, `PATCH /api/v1/notifications/read-all`, `DELETE /api/v1/notifications/clear` gestionan la bandeja.
+
+### `dashboard`
+- `GET /api/v1/dashboard/comercial/summary` devuelve resumen operacional comercial para rol autorizado.
+- `GET /api/v1/dashboard/comercial/summary?fresh=1` invalida cache y devuelve resumen fresco.
+
+### `gmail`
+- `GET /api/v1/gmail/auth/url` devuelve URL de autorizacion Gmail.
+- `GET /api/v1/gmail/auth/callback?code=*` guarda tokens del usuario y devuelve pagina de autorizacion exitosa.
+- `GET /api/v1/gmail/auth/status` informa si el usuario tiene Gmail autorizado.
+- `POST /api/v1/gmail/send` envia email usando la cuenta autorizada del usuario.
+- `DELETE /api/v1/gmail/auth/revoke` revoca el acceso y elimina los tokens.
+
+### `signature`
+- `POST /api/v1/signature/documents/:documentId/sign` calcula hash, inserta firma, crea sello y QR y bloquea documento.
+- `GET /api/v1/signature/verificar/:token` devuelve verificacion publica si el token existe y esta activo.
+- `GET /api/v1/signature/documents/:documentId/audit-trail` devuelve trail documental.
+- `GET /api/v1/signature/dashboard` devuelve metricas del modulo.
 
 ## 3. Escenarios de error a registrar
-- `401` token ausente o invalido.
-- `403` acceso por rol no autorizado.
-- `404` id o token inexistente.
-- `409` conflicto de negocio en `audit-prep`.
-- `500` error SQL, integracion Drive, correo o funcion SQL de firma.
+- `401` token ausente o invalido
+- `403` acceso por rol no autorizado
+- `404` id o token inexistente
+- `409` conflicto de negocio en `audit-prep` o `documents`
+- `500` error SQL, integracion Drive, Docs, Gmail o funcion SQL de firma
+- `503` indisponibilidad de dashboard por error de base clasificado
 
-## 4. Observaciones operativas
-- `auth` registra clock-in durante el callback de login, no en `/auth/me`.
-- `security` ya esta operativo y montado.
-- `management` usa objetos SQL alineados al esquema real.
-- `signature` es operativo solo si el entorno dispone de las funciones/vistas SQL dependientes.
-- `approvals` sigue teniendo una cola general no segmentada por aprobador real.
+## 4. Conclusiones de OQ
+La OQ del Area 01 debe demostrar no solo que autenticacion, seguridad, auditoria y firma operan, sino tambien que la gestion documental, los adjuntos, las notificaciones, el dashboard y Gmail responden de forma coherente, trazable y controlada.

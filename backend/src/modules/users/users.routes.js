@@ -15,12 +15,26 @@ const USER_ADMIN_ROLES = [
   "admin",
   "administrador",
 ];
+const USER_DIRECTORY_ROLES = [
+  ...USER_ADMIN_ROLES,
+  "gerencia_general",
+  "gerente_general",
+  "director",
+  "finanzas",
+  "financiero",
+  "jefe_finanzas",
+  "jefe_financiero",
+  "comercial",
+  "jefe_comercial",
+  "backoffice_comercial",
+  "acp_comercial",
+];
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
 
 // CRUD Usuarios
-router.get("/", controller.getUsers);
+router.get("/", requireRole(USER_DIRECTORY_ROLES), controller.getUsers);
 router.get("/:id", requireRole(USER_ADMIN_ROLES), controller.getUserById);
 router.post("/", requireRole(USER_ADMIN_ROLES), controller.createUser);
 router.put("/:id", requireRole(USER_ADMIN_ROLES), controller.updateUser);

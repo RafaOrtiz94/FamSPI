@@ -1,6 +1,6 @@
 # REVISION DE HALLAZGOS EN PRODUCCION Y SOLUCIONES
 
-## Area 01: Gobierno, Seguridad y Cumplimiento
+## Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental
 
 ## 1. Fuentes de verificacion usadas
 - Servicio desplegado en produccion: `backend/service_url.txt` -> `https://spi-backend-dp23x4filq-uc.a.run.app`
@@ -120,7 +120,7 @@
 - Necesidad real de que `auth/me` escriba ahi: NO se puede justificar desde el modelo del modulo `auth`; es una responsabilidad cruzada.
 - Solucion exacta:
   1. Quitar la insercion de asistencia de `GET /auth/me` y moverla al modulo `attendance` o a un job/endpoint explicito de clock-in.
-  2. Si por negocio se requiere mantener ese comportamiento, documentarlo formalmente y registrar auditoria especifica del side effect. Mientras eso no exista, el diseño sigue siendo defectuoso.
+  2. Si por negocio se requiere mantener ese comportamiento, documentarlo formalmente y registrar auditoria especifica del side effect. Mientras eso no exista, el diseÃ±o sigue siendo defectuoso.
 
 ### H-09 Rutas de `signature` inconsistentes entre repo y produccion
 - Estado tras verificar produccion: CONFIRMADO COMO INCONSISTENCIA, no como ausencia simple.

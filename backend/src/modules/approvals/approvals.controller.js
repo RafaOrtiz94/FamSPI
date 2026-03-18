@@ -5,8 +5,10 @@ const logger = require("../../config/logger");
 /** 📋 Listar pendientes */
 exports.listPending = asyncHandler(async (req, res) => {
   const { page = 1, pageSize = 10 } = req.query;
-  const role = req.user.role;
-  const result = await service.listPending(Number(page), Number(pageSize), role);
+  const result = await service.listPending(Number(page), Number(pageSize), {
+    id: req.user.id,
+    role: req.user.role,
+  });
   res.json(result);
 });
 

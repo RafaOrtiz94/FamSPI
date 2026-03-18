@@ -1,4 +1,4 @@
-const Joi = require('joi');
+﻿const Joi = require('joi');
 const logger = require('../../config/logger');
 const service = require('./userCertifications.service');
 
@@ -32,7 +32,7 @@ const createMyCertification = async (req, res) => {
       data: certification
     });
   } catch (err) {
-    logger.error({ err }, 'Error creando certificación');
+    logger.error({ err }, 'Error creando Certificación');
 
     const status = err.status || 500;
     const message = err.message || 'Error interno del servidor';
@@ -48,12 +48,13 @@ const createMyCertification = async (req, res) => {
 const getMyCertifications = async (req, res) => {
   try {
     const includeInactive = req.query.include_inactive === 'true';
-    const certifications = await service.getUserCertifications(req.user.id, includeInactive);
+    const result = await service.getUserCertifications(req.user.id, includeInactive);
 
     res.json({
       ok: true,
       message: 'Certificaciones obtenidas exitosamente',
-      data: certifications
+      data: result.certifications,
+      summary: result.summary
     });
   } catch (err) {
     logger.error({ err }, 'Error obteniendo certificaciones');
@@ -76,7 +77,7 @@ const getUserCertifications = async (req, res) => {
       });
     }
 
-    const certifications = await service.getCertificationsByUserId(
+    const result = await service.getCertificationsByUserId(
       targetUserId,
       req.user.id,
       req.user.role
@@ -85,7 +86,8 @@ const getUserCertifications = async (req, res) => {
     res.json({
       ok: true,
       message: 'Certificaciones obtenidas exitosamente',
-      data: certifications
+      data: result.certifications,
+      summary: result.summary
     });
   } catch (err) {
     logger.error({ err }, 'Error obteniendo certificaciones de usuario');
@@ -107,7 +109,7 @@ const deleteMyCertification = async (req, res) => {
     if (isNaN(certificationId)) {
       return res.status(400).json({
         ok: false,
-        message: 'ID de certificación inválido'
+        message: 'ID de Certificación inválido'
       });
     }
 
@@ -122,7 +124,7 @@ const deleteMyCertification = async (req, res) => {
       message: result.message
     });
   } catch (err) {
-    logger.error({ err }, 'Error eliminando certificación');
+    logger.error({ err }, 'Error eliminando Certificación');
 
     const status = err.status || 500;
     const message = err.message || 'Error interno del servidor';
@@ -173,7 +175,7 @@ const generateUserCertificationsPDF = async (req, res) => {
 // POST /api/v1/users/me/certifications/bulk - Crear múltiples certificaciones
 const createMyBulkCertifications = async (req, res) => {
   try {
-    console.log('📦 Bulk upload request received, files:', req.files?.length || 0);
+    console.log(' Bulk upload request received, files:', req.files?.length || 0);
 
     const bulkData = req.body; // Contains metadata and other form data
     const files = req.files || []; // Array of uploaded files from multer
@@ -206,3 +208,5 @@ module.exports = {
   generateUserCertificationsPDF,
   createMyBulkCertifications
 };
+
+

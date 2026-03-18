@@ -1,0 +1,319 @@
+﻿{
+    "paths":  {
+                  "templateDir":  "docs/validation/FORMATO_UNICO",
+                  "logsDir":  "docs/validation/FORMATO_UNICO/logs"
+              },
+    "templates":  {
+                      "sourcePreferred":  "Plantilla_Validacion_SPI_2.docx",
+                      "sourceFallback":  "Plantilla_Validacion_SPI.docx",
+                      "automatable":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                      "byDocumentKind":  {
+                                             "package":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "urs":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "frs":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "dds":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "dd":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "iq":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "oq":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "pq":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "findings":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx",
+                                             "evidence":  "Plantilla_Validacion_SPI_AUTOMATIZABLE.dotx"
+                                         }
+                  },
+    "styleMap":  {
+                     "title":  [
+                                   "Title",
+                                   "Titulo",
+                                   "Título"
+                               ],
+                     "subtitle":  [
+                                      "Subtitle",
+                                      "Subtitulo",
+                                      "Subtítulo"
+                                  ],
+                     "heading1":  [
+                                      "Heading 1",
+                                      "Titulo 1",
+                                      "Título 1"
+                                  ],
+                     "heading2":  [
+                                      "Heading 2",
+                                      "Titulo 2",
+                                      "Título 2"
+                                  ],
+                     "heading3":  [
+                                      "Heading 3",
+                                      "Titulo 3",
+                                      "Título 3"
+                                  ],
+                     "normal":  [
+                                    "Normal"
+                                ],
+                     "code":  [
+                                  "No Spacing",
+                                  "Sin espaciado",
+                                  "Normal"
+                              ],
+                     "table":  [
+                                   "Table Grid",
+                                   "Tabla con cuadrícula",
+                                   "Tabla con cuadricula"
+                               ]
+                 },
+    "documentOrder":  [
+                          "00_indice_paquete_validacion.md",
+                          "01_URS_requerimientos_usuario.md",
+                          "02_FRS_requerimientos_funcionales.md",
+                          "03_DDS_diseno_tecnico.md",
+                          "03A_DD_diccionario_datos.md",
+                          "04_IQ_validacion_instalacion.md",
+                          "05_OQ_validacion_funcionamiento.md",
+                          "06_PQ_validacion_operacion_real.md",
+                          "09_informe_hallazgos_area_01.md",
+                          "10_IQ_protocolo_ejecucion.md",
+                          "11_OQ_protocolo_ejecucion.md",
+                          "12_PQ_protocolo_ejecucion.md",
+                          "13_registro_evidencias_desviaciones.md"
+                      ],
+    "areas":  {
+                  "area_01_gobierno_seguridad":  {
+                                                     "label":  "Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental",
+                                                     "supportDocuments":  [
+                                                                              {
+                                                                                  "title":  "Ley Organica de Proteccion de Datos Personales",
+                                                                                  "year":  "2021",
+                                                                                  "reference":  "Asamblea Nacional del Ecuador. (2021). Ley Organica de Proteccion de Datos Personales. Registro Oficial, Quinto Suplemento No. 459. https://www.asambleanacional.gob.ec/sites/default/files/private/asambleanacional/filesasambleanacionalnameuid-29/Leyes%202013-2017/920-lmoreno/ro-459-5to-sup-26-05-2021.pdf"
+                                                                              },
+                                                                              {
+                                                                                  "title":  "Reglamento General a la Ley Organica de Proteccion de Datos Personales",
+                                                                                  "year":  "2023",
+                                                                                  "reference":  "Presidencia de la Republica del Ecuador. (2023). Reglamento General a la Ley Organica de Proteccion de Datos Personales. Registro Oficial. https://www.gob.ec/sites/default/files/regulations/2025-01/02%20Reglamento%20General%20a%20la%20Ley%20Org%C3%A1nica%20de%20Protecci%C3%B3n%20de%20Datos%20Personales_0.pdf"
+                                                                              },
+                                                                              {
+                                                                                  "title":  "ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection - Information security management systems - Requirements",
+                                                                                  "year":  "2022",
+                                                                                  "reference":  "International Organization for Standardization, \u0026 International Electrotechnical Commission. (2022). ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection - Information security management systems - Requirements. ISO."
+                                                                              }
+                                                                          ],
+                                                     "definitions":  [
+                                                                         {
+                                                                             "term":  "OAuth 2.0",
+                                                                             "definition":  "Mecanismo de federacion usado por SPI para autenticar usuarios internos mediante Google."
+                                                                         },
+                                                                         {
+                                                                             "term":  "JWT",
+                                                                             "definition":  "Token firmado que representa la sesion autenticada del usuario frente al backend."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Refresh Token",
+                                                                             "definition":  "Credencial usada para renovar un access token vigente sobre una sesion activa registrada."
+                                                                         },
+                                                                         {
+                                                                             "term":  "RBAC",
+                                                                             "definition":  "Control de acceso basado en roles aplicado por middlewares y validaciones de modulo."
+                                                                         },
+                                                                         {
+                                                                             "term":  "LOPDP",
+                                                                             "definition":  "Marco regulatorio de proteccion de datos personales considerado en el flujo de aceptacion interna del sistema."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Audit Trail",
+                                                                             "definition":  "Trazabilidad tecnica o funcional de eventos relevantes registrados por los modulos del area."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Off-hours login",
+                                                                             "definition":  "Evento de inicio de sesion detectado fuera del horario esperado y tratado como evento de seguridad."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Bitacora de auditoria",
+                                                                             "definition":  "Registro transversal de eventos del sistema consultable por roles autorizados."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Firma avanzada",
+                                                                             "definition":  "Proceso de firma documental con hash, sello, QR y evidencia tecnica asociada."
+                                                                         },
+                                                                         {
+                                                                             "term":  "Token de verificacion",
+                                                                             "definition":  "Identificador publico para consultar la validez de un documento firmado."
+                                                                         },
+                                                                         {
+                                                                             "term":  "IQ",
+                                                                             "definition":  "Calificacion de instalacion que verifica que los componentes requeridos esten desplegados y disponibles."
+                                                                         },
+                                                                         {
+                                                                             "term":  "OQ",
+                                                                             "definition":  "Calificacion de operacion que valida el funcionamiento esperado bajo condiciones normales y de error."
+                                                                         },
+                                                                         {
+                                                                             "term":  "PQ",
+                                                                             "definition":  "Calificacion de desempeno que verifica consistencia del sistema en su contexto de uso real."
+                                                                         },
+                                                                         {
+                                                                             "term":  "RTM",
+                                                                             "definition":  "Matriz de trazabilidad entre requerimientos, especificaciones, diseno y pruebas."
+                                                                         }
+                                                                     ],
+                                                     "modules":  [
+                                                                     {
+                                                                         "module":  "auth",
+                                                                         "focus":  "Autenticacion, sesiones, consentimiento interno y control de acceso"
+                                                                     },
+                                                                     {
+                                                                         "module":  "security",
+                                                                         "focus":  "Eventos de seguridad, logins fuera de horario y revision TI"
+                                                                     },
+                                                                     {
+                                                                         "module":  "auditoria",
+                                                                         "focus":  "Bitacora transversal, consulta y exportacion de evidencia"
+                                                                     },
+                                                                     {
+                                                                         "module":  "audit-prep",
+                                                                         "focus":  "Preparacion documental de auditoria y acceso externo controlado"
+                                                                     },
+                                                                     {
+                                                                         "module":  "approvals",
+                                                                         "focus":  "Cola y decision del flujo tecnico soportado"
+                                                                     },
+                                                                     {
+                                                                         "module":  "management",
+                                                                         "focus":  "Metricas gerenciales, trazabilidad y soporte documental"
+                                                                     },
+                                                                     {
+                                                                         "module":  "signature",
+                                                                         "focus":  "Firma avanzada, verificacion publica y audit trail documental"
+                                                                     },
+                                                                     {
+                                                                         "module":  "documents",
+                                                                         "focus":  "Generacion documental desde plantilla, firma posicionada y exportacion PDF"
+                                                                     },
+                                                                     {
+                                                                         "module":  "files",
+                                                                         "focus":  "Carga, descarga y custodia de adjuntos por solicitud"
+                                                                     },
+                                                                     {
+                                                                         "module":  "notifications",
+                                                                         "focus":  "Notificaciones operativas y lectura de eventos por usuario"
+                                                                     },
+                                                                     {
+                                                                         "module":  "dashboard",
+                                                                         "focus":  "Resumen operativo del dashboard comercial del dominio"
+                                                                     },
+                                                                     {
+                                                                         "module":  "gmail",
+                                                                         "focus":  "Autorizacion OAuth de Gmail y envio de correo desde la cuenta del usuario"
+                                                                     }
+                                                                 ]
+                                                 },
+                  "area_02_personas_talento_control_laboral":  {
+                                                                    "label":  "Area 02: Personas, Talento y Control Laboral",
+                                                                    "supportDocuments":  [
+                                                                                             {
+                                                                                                 "title":  "Ley Organica de Proteccion de Datos Personales",
+                                                                                                 "year":  "2021",
+                                                                                                 "reference":  "Asamblea Nacional del Ecuador. (2021). Ley Organica de Proteccion de Datos Personales. Registro Oficial, Quinto Suplemento No. 459. https://www.asambleanacional.gob.ec/sites/default/files/private/asambleanacional/filesasambleanacionalnameuid-29/Leyes%202013-2017/920-lmoreno/ro-459-5to-sup-26-05-2021.pdf"
+                                                                                             },
+                                                                                             {
+                                                                                                 "title":  "Reglamento General a la Ley Organica de Proteccion de Datos Personales",
+                                                                                                 "year":  "2023",
+                                                                                                 "reference":  "Presidencia de la Republica del Ecuador. (2023). Reglamento General a la Ley Organica de Proteccion de Datos Personales. Registro Oficial. https://www.gob.ec/sites/default/files/regulations/2025-01/02%20Reglamento%20General%20a%20la%20Ley%20Org%C3%A1nica%20de%20Protecci%C3%B3n%20de%20Datos%20Personales_0.pdf"
+                                                                                             }
+                                                                                         ],
+                                                                    "definitions":  [
+                                                                                        {
+                                                                                            "term":  "Colaborador",
+                                                                                            "definition":  "Usuario interno activo cuya informacion laboral, documental y operativa se administra dentro del dominio de talento y control laboral."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Solicitud de personal",
+                                                                                            "definition":  "Requerimiento formal para cubrir una necesidad de talento, con perfil, historial, comentarios y eventual contratacion."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Perfil de colaborador",
+                                                                                            "definition":  "Conjunto estructurado de datos personales, laborales, de onboarding y soporte documental asociado a un usuario."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Certificacion",
+                                                                                            "definition":  "Registro de competencia, formacion o habilitacion del usuario con posible archivo de respaldo y vigencia operativa."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Asistencia",
+                                                                                            "definition":  "Registro diario de entrada, almuerzo, salida, excepciones y horas extra del colaborador."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Excepcion de asistencia",
+                                                                                            "definition":  "Salida temporal no ordinaria durante la jornada con seguimiento de estado y trazabilidad de regreso."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Hora extra",
+                                                                                            "definition":  "Tiempo adicional registrado o calculado sobre la jornada ordinaria del colaborador."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Permiso recuperable",
+                                                                                            "definition":  "Permiso cuya compensacion puede coordinarse mediante plan de recuperacion dentro del plazo operativo definido."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Matricula de estudios",
+                                                                                            "definition":  "Evidencia academica previa requerida para habilitar permisos por estudios."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Saldo de vacaciones",
+                                                                                            "definition":  "Disponibilidad calculada de dias y horas de vacaciones del colaborador segun perfil, historial y solicitudes aprobadas."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "IQ",
+                                                                                            "definition":  "Calificacion de instalacion que verifica montaje, dependencias y prerrequisitos del area."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "OQ",
+                                                                                            "definition":  "Calificacion operacional que valida funcionamiento esperado y manejo de error del area."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "PQ",
+                                                                                            "definition":  "Calificacion de desempeno que evalua estabilidad y consistencia del area en uso representativo."
+                                                                                        }
+                                                                                    ],
+                                                                    "modules":  [
+                                                                                    {
+                                                                                        "module":  "talento_humano",
+                                                                                        "focus":  "Registro basico de empleados y carga documental del submodulo HR legacy"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "personnel-requests",
+                                                                                        "focus":  "Solicitud de personal, perfil, historial, comentarios, documentos y contratacion"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "users",
+                                                                                        "focus":  "Gestion de usuarios internos y su relacion con departamentos y solicitudes"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "collaborators",
+                                                                                        "focus":  "Workspace de colaborador, perfil consolidado, documentos y metricas"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "departments",
+                                                                                        "focus":  "CRUD de departamentos y estructura organizacional consumida por talento"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "user-profile",
+                                                                                        "focus":  "Perfil propio, preferencias, avatar y sincronizacion con datos de colaborador"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "user-certifications",
+                                                                                        "focus":  "Registro, consulta, baja logica y PDF de certificaciones"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "attendance",
+                                                                                        "focus":  "Jornada diaria, excepciones, sincronizacion de ubicacion, overtime y PDF RH-09"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "permisos",
+                                                                                        "focus":  "Permisos, matriculas de estudio, justificantes, coordinacion de recuperacion y cobertura legal"
+                                                                                    },
+                                                                                    {
+                                                                                        "module":  "vacaciones",
+                                                                                        "focus":  "Solicitud, resumen, aprobacion, cancelacion y saldo de vacaciones"
+                                                                                    }
+                                                                                ]
+                                                                }
+              }
+}

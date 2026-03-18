@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Personnel Requests Routes
  * Rutas para gestión de solicitudes de personal
  */
@@ -52,7 +52,7 @@ router.get(
  */
 router.get(
     '/stats',
-    requireRole(['talento_humano', 'gerente', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'admin']),
     personnelRequestsController.getStats
 );
 
@@ -74,19 +74,19 @@ router.get(
  */
 router.patch(
     '/:id/collaborator',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.linkCollaborator
 );
 
 router.patch(
     '/:id/applicant',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.linkApplicant
 );
 
 router.patch(
     '/:id/status',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.updateRequestStatus
 );
 
@@ -97,7 +97,7 @@ router.patch(
  */
 router.post(
     '/:id/hire',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.hireApplicant
 );
 
@@ -108,7 +108,7 @@ router.post(
  */
 router.get(
     '/:id/profile',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.getPersonnelProfile
 );
 
@@ -119,7 +119,7 @@ router.get(
  */
 router.put(
     '/:id/profile',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     personnelRequestsController.updatePersonnelProfile
 );
 
@@ -132,7 +132,7 @@ const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 router.post(
     '/:id/documents',
-    requireRole(['talento_humano', 'gerente', 'gerencia_general', 'admin']),
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
     upload.single('file'),
     personnelRequestsController.uploadPersonnelDocument
 );
@@ -148,3 +148,4 @@ router.post(
 );
 
 module.exports = router;
+

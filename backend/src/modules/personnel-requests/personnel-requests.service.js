@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Personnel Requests Service
  * Servicio para gestionar solicitudes de personal con perfil profesional
  */
@@ -8,83 +8,16 @@ const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { ensureFolder, uploadBase64File } = require('../../utils/drive');
 const { ensureApplicantsTables, getApplicantById } = require('../applicants/applicants.service');
-const { sendMail } = require('../../utils/mailer');
 const gmailService = require('../../services/gmail.service');
-const notificationManager = require('../notifications/notificationManager');
+const {
+    getSingleUserByRole,
+    getUserById,
+    uniqueRecipients,
+    notifyUsers,
+} = require('./personnel-requests.notifications');
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID;
 const HR_NOTIFICATION_EMAILS = process.env.HR_NOTIFICATION_EMAILS?.split(',').map(e => e.trim()) || [];
-
-async function getSingleUserByRole(role) {
-    if (!role) return null;
-    try {
-        const { rows } = await db.query(
-            'SELECT id, email, fullname, name, role FROM users WHERE LOWER(role) = LOWER($1) ORDER BY id ASC LIMIT 1',
-            [role]
-        );
-        return rows[0] || null;
-    } catch (error) {
-        logger.warn({ error, role }, 'No se pudo obtener usuario por rol');
-        return null;
-    }
-}
-
-async function getUserById(userId) {
-    if (!userId) return null;
-    try {
-        const { rows } = await db.query(
-            'SELECT id, email, fullname, name, role FROM users WHERE id = $1 LIMIT 1',
-            [userId]
-        );
-        return rows[0] || null;
-    } catch (error) {
-        logger.warn({ error, userId }, 'No se pudo obtener usuario por id');
-        return null;
-    }
-}
-
-function uniqueRecipients(...emails) {
-    const recipients = emails.flat().filter(Boolean);
-    return [...new Set(recipients.map((e) => e.trim().toLowerCase()))];
-}
-
-async function notifyUsers({ users = [], subject, html, text, notification, sendEmail = true }) {
-    if (sendEmail) {
-        const recipients = uniqueRecipients(
-            users.map((u) => u?.email).filter(Boolean)
-        );
-        if (recipients.length) {
-            try {
-                await sendMail({
-                    to: recipients,
-                    subject,
-                    html,
-                    text
-                });
-            } catch (error) {
-                logger.warn({ error }, 'No se pudo enviar correo de notificacion de personal');
-            }
-        }
-    }
-    if (notification) {
-        await Promise.all(
-            users
-                .filter((u) => u?.id)
-                .map((u) =>
-                    notificationManager.sendNotification({
-                        userId: u.id,
-                        customTitle: notification.title,
-                        customMessage: notification.message,
-                        type: notification.type || 'info',
-                        source: notification.source || 'personnel_requests',
-                        priority: notification.priority || 0,
-                        email: false,
-                        meta: notification.meta || {}
-                    })
-                )
-        );
-    }
-}
 
 async function ensurePersonnelProfileTables() {
     await db.query(`
@@ -230,6 +163,88 @@ const REQUIRED_DOC_TYPES = [
 
 const PROFILE_PATHS = REQUIRED_PROFILE_FIELDS.map((field) => field.split('.'));
 
+const PERSONNEL_WORKFLOW_STEPS = [
+  {
+    key: 'pendiente',
+    label: 'Pendiente',
+    responsibleRole: 'gerencia_general',
+    responsibleLabel: 'Gerencia General',
+    nextAction: 'Revisar la solicitud',
+    maxHours: 72,
+  },
+  {
+    key: 'en_revision',
+    label: 'En revision',
+    responsibleRole: 'talento_humano',
+    responsibleLabel: 'Talento Humano',
+    nextAction: 'Validar perfil y documentos',
+    maxHours: 72,
+  },
+  {
+    key: 'aprobada',
+    label: 'Aprobada',
+    responsibleRole: 'talento_humano',
+    responsibleLabel: 'Talento Humano',
+    nextAction: 'Completar expediente y validar contratacion',
+    maxHours: 96,
+  },
+  {
+    key: 'en_proceso',
+    label: 'En proceso',
+    responsibleRole: 'talento_humano',
+    responsibleLabel: 'Talento Humano',
+    nextAction: 'Finalizar contratacion y cierre operativo',
+    maxHours: 96,
+  },
+  {
+    key: 'completada',
+    label: 'Completada',
+    responsibleRole: null,
+    responsibleLabel: 'Cerrada',
+    nextAction: 'Solicitud cerrada',
+    maxHours: null,
+  },
+  {
+    key: 'rechazada',
+    label: 'Rechazada',
+    responsibleRole: null,
+    responsibleLabel: 'Cerrada',
+    nextAction: 'Solicitud rechazada',
+    maxHours: null,
+  },
+  {
+    key: 'cancelada',
+    label: 'Cancelada',
+    responsibleRole: null,
+    responsibleLabel: 'Cerrada',
+    nextAction: 'Solicitud cancelada',
+    maxHours: null,
+  },
+];
+
+const PERSONNEL_WORKFLOW_ORDER = PERSONNEL_WORKFLOW_STEPS.reduce((acc, step, index) => {
+  acc[step.key] = index;
+  return acc;
+}, {});
+
+const PERSONNEL_WORKFLOW_PROGRESS_ORDER = {
+  pendiente: 0,
+  en_revision: 1,
+  aprobada: 2,
+  en_proceso: 3,
+  completada: 4,
+};
+
+const PERSONNEL_REQUEST_TRANSITIONS = {
+  pendiente: ['en_revision', 'aprobada', 'rechazada', 'cancelada'],
+  en_revision: ['aprobada', 'rechazada', 'cancelada'],
+  aprobada: ['en_proceso', 'cancelada'],
+  en_proceso: ['completada', 'cancelada'],
+  completada: [],
+  rechazada: [],
+  cancelada: [],
+};
+
 const getProfileValue = (profile, path) => {
   return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), profile);
 };
@@ -257,6 +272,139 @@ const computeDocumentsCompletion = (docTypes = []) => {
   const done = REQUIRED_DOC_TYPES.filter((doc) => uploaded.has(doc)).length;
   const total = REQUIRED_DOC_TYPES.length;
   return { total, done, complete: total > 0 && done === total };
+};
+
+const normalizeWorkflowStatus = (status) => String(status || 'pendiente').trim().toLowerCase();
+
+const getWorkflowStepMeta = (status) => {
+  const normalized = normalizeWorkflowStatus(status);
+  return (
+    PERSONNEL_WORKFLOW_STEPS.find((step) => step.key === normalized) ||
+    PERSONNEL_WORKFLOW_STEPS[0]
+  );
+};
+
+const toDateValue = (value) => {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatDurationLabel = (seconds = 0) => {
+  const totalSeconds = Math.max(0, Math.floor(seconds || 0));
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  if (hours <= 0) {
+    return `${minutes} min`;
+  }
+
+  if (minutes <= 0) {
+    return `${hours} h`;
+  }
+
+  return `${hours} h ${minutes} min`;
+};
+
+const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}) => {
+  const currentStatus = normalizeWorkflowStatus(request.status || 'pendiente');
+  const currentStep = getWorkflowStepMeta(currentStatus);
+  const createdAt = toDateValue(request.created_at) || new Date();
+  const now = new Date();
+  const orderedHistory = [...(historyRows || [])]
+    .map((row) => ({
+      ...row,
+      new_status: normalizeWorkflowStatus(row.new_status),
+      previous_status: normalizeWorkflowStatus(row.previous_status),
+      created_at: toDateValue(row.created_at) || createdAt,
+    }))
+    .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
+
+  const statusEvents = [
+    {
+      status: normalizeWorkflowStatus(request.status || 'pendiente'),
+      startedAt: createdAt,
+      changedBy: request.requester_id || null,
+      source: 'created',
+    },
+  ];
+
+  orderedHistory.forEach((row) => {
+    statusEvents.push({
+      status: row.new_status,
+      startedAt: row.created_at,
+      changedBy: row.changed_by || null,
+      source: 'history',
+    });
+  });
+
+  const timeline = [];
+  for (let index = 0; index < statusEvents.length; index += 1) {
+    const current = statusEvents[index];
+    const next = statusEvents[index + 1] || null;
+    const meta = getWorkflowStepMeta(current.status);
+    const endAt = next?.startedAt || null;
+    const effectiveEnd = endAt || (PERSONNEL_REQUEST_TRANSITIONS[current.status]?.length ? null : now);
+    const durationSeconds = effectiveEnd
+      ? Math.max(0, Math.floor((effectiveEnd.getTime() - current.startedAt.getTime()) / 1000))
+      : Math.max(0, Math.floor((now.getTime() - current.startedAt.getTime()) / 1000));
+
+    timeline.push({
+      status: current.status,
+      label: meta.label,
+      started_at: current.startedAt.toISOString(),
+      ended_at: endAt ? endAt.toISOString() : null,
+      duration_seconds: durationSeconds,
+      duration_label: formatDurationLabel(durationSeconds),
+      is_current: index === statusEvents.length - 1,
+      source: current.source,
+    });
+  }
+
+  const currentStartedAt =
+    [...timeline].reverse().find((entry) => entry.status === currentStatus)?.started_at ||
+    createdAt.toISOString();
+  const stageStartedAt = toDateValue(currentStartedAt) || createdAt;
+  const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - stageStartedAt.getTime()) / 1000));
+  const maxHours = Number.isFinite(currentStep.maxHours) ? currentStep.maxHours : null;
+  const deadlineAt = maxHours ? new Date(stageStartedAt.getTime() + maxHours * 60 * 60 * 1000) : null;
+  const stalled = Boolean(deadlineAt && now.getTime() > deadlineAt.getTime());
+  const stalledForSeconds = stalled ? Math.floor((now.getTime() - deadlineAt.getTime()) / 1000) : 0;
+  const currentIndex = Math.max(0, PERSONNEL_WORKFLOW_PROGRESS_ORDER[currentStatus] ?? 0);
+  const terminalStatuses = new Set(['completada', 'rechazada', 'cancelada']);
+  const progressPercent = terminalStatuses.has(currentStatus)
+    ? 100
+    : Math.min(100, Math.round((currentIndex / Math.max(PERSONNEL_WORKFLOW_PROGRESS_ORDER.completada, 1)) * 100));
+
+  const collaboratorName = collaborators?.fullname || collaborators?.email || null;
+  const approverName =
+    request.approved_by_manager_name ||
+    request.approved_by_hr_name ||
+    request.approved_by_finance_name ||
+    null;
+  const responsibleName = collaboratorName || approverName || currentStep.responsibleLabel;
+
+  return {
+    current_status: currentStatus,
+    current_stage: currentStep.key,
+    current_stage_label: currentStep.label,
+    current_responsible_role: currentStep.responsibleRole,
+    current_responsible_label: currentStep.responsibleLabel,
+    current_responsible_name: responsibleName,
+    next_action: currentStep.nextAction,
+    started_at: stageStartedAt.toISOString(),
+    elapsed_seconds: elapsedSeconds,
+    elapsed_label: formatDurationLabel(elapsedSeconds),
+    deadline_at: deadlineAt ? deadlineAt.toISOString() : null,
+    stalled,
+    stalled_for_seconds: stalledForSeconds,
+    stalled_for_label: stalledForSeconds > 0 ? formatDurationLabel(stalledForSeconds) : null,
+    progress_percent: progressPercent,
+    progress_label: `${progressPercent}%`,
+    is_terminal: terminalStatuses.has(currentStatus),
+    timeline,
+  };
 };
 
 
@@ -292,12 +440,46 @@ async function createPersonnelRequest(data, userId) {
         priority = 3,
     } = data;
 
-    // Validaciones básicas
-    if (!position_title || !position_type || !education_level || !main_responsibilities || !justification) {
-        throw new Error('Faltan campos obligatorios');
+    const requiredFields = [
+        ['position_title', position_title],
+        ['position_type', position_type],
+        ['education_level', education_level],
+        ['main_responsibilities', main_responsibilities],
+        ['justification', justification],
+        ['work_schedule', work_schedule],
+        ['salary_range', salary_range],
+        ['work_location', work_location],
+        ['benefits', benefits],
+    ];
+    const missingFields = requiredFields
+        .filter(([, value]) => value === null || value === undefined || String(value).trim() === '')
+        .map(([field]) => field);
+
+    if (missingFields.length > 0) {
+        throw new Error(`Faltan campos obligatorios: ${missingFields.join(', ')}`);
     }
 
-    // Obtener información del usuario solicitante
+    if (!Number.isInteger(Number(quantity)) || Number(quantity) < 1) {
+        throw new Error('La cantidad de vacantes debe ser un numero entero mayor o igual a 1');
+    }
+
+    const normalizedType = String(position_type || '').trim().toLowerCase();
+    if (!['permanente', 'temporal', 'reemplazo', 'proyecto'].includes(normalizedType)) {
+        throw new Error(`Tipo de contratacion invalido: ${position_type}`);
+    }
+
+    const normalizedUrgency = String(urgency_level || 'normal').trim().toLowerCase();
+    if (!['baja', 'normal', 'alta', 'urgente'].includes(normalizedUrgency)) {
+        throw new Error(`Nivel de urgencia invalido: ${urgency_level}`);
+    }
+
+    const normalizedQuantity = Number(quantity);
+    const normalizedPriority = Number.isFinite(Number(priority)) ? Number(priority) : 3;
+    if (!Number.isInteger(normalizedPriority) || normalizedPriority < 1 || normalizedPriority > 5) {
+        throw new Error('La prioridad debe ser un numero entero entre 1 y 5');
+    }
+
+    // Obtener informaciÃ³n del usuario solicitante
     const userQuery = await db.query(
         'SELECT id, email, fullname, department_id FROM users WHERE id = $1',
         [userId]
@@ -361,8 +543,8 @@ async function createPersonnelRequest(data, userId) {
         userId,
         user.department_id,
         position_title,
-        position_type,
-        quantity,
+        normalizedType,
+        normalizedQuantity,
         start_date || null,
         end_date || null,
         education_level,
@@ -382,15 +564,15 @@ async function createPersonnelRequest(data, userId) {
         benefits || null,
         work_location || null,
         justification,
-        urgency_level,
-        priority,
+        normalizedUrgency,
+        normalizedPriority,
         driveFolderId,
     ];
 
     const result = await db.query(insertQuery, values);
     const request = result.rows[0];
 
-    // Registrar en auditoría
+    // Registrar en auditorÃ­a
     await logAction({
         user_id: userId,
         module: 'personnel_requests',
@@ -457,10 +639,13 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
       pr.*,
       u.fullname as requester_name,
       u.email as requester_email,
+      cu.fullname as collaborator_name,
+      cu.email as collaborator_email,
       d.name as department_name,
       d.code as department_code
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
+    LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
     LEFT JOIN departments d ON pr.department_id = d.id
     WHERE ${whereConditions.join(' AND ')}
     ORDER BY 
@@ -488,7 +673,13 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     const total = parseInt(countResult.rows[0].total, 10);
 
     return {
-        data: result.rows,
+        data: result.rows.map((row) => ({
+            ...row,
+            workflow: buildWorkflowSummary(row, [], row.collaborator_name || row.collaborator_email ? {
+                fullname: row.collaborator_name || null,
+                email: row.collaborator_email || null,
+            } : null),
+        })),
         pagination: {
             page,
             pageSize,
@@ -499,7 +690,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
 }
 
 /**
- * Obtener una solicitud específica por ID
+ * Obtener una solicitud especÃ­fica por ID
  */
 async function getPersonnelRequestById(id) {
     const query = `
@@ -507,6 +698,8 @@ async function getPersonnelRequestById(id) {
       pr.*,
       u.fullname as requester_name,
       u.email as requester_email,
+      cu.fullname as collaborator_name,
+      cu.email as collaborator_email,
       d.name as department_name,
       d.code as department_code,
       am.fullname as approved_by_manager_name,
@@ -514,6 +707,7 @@ async function getPersonnelRequestById(id) {
       af.fullname as approved_by_finance_name
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
+    LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
     LEFT JOIN departments d ON pr.department_id = d.id
     LEFT JOIN users am ON pr.approved_by_manager = am.id
     LEFT JOIN users ah ON pr.approved_by_hr = ah.id
@@ -528,10 +722,6 @@ async function getPersonnelRequestById(id) {
     }
 
     const request = result.rows[0];
-    if (request.status === 'completada') {
-        return null;
-    }
-
     // Obtener historial
     const historyQuery = `
     SELECT 
@@ -559,6 +749,10 @@ async function getPersonnelRequestById(id) {
 
     return {
         ...request,
+        workflow: buildWorkflowSummary(request, historyResult.rows, request.collaborator_name || request.collaborator_email ? {
+            fullname: request.collaborator_name || null,
+            email: request.collaborator_email || null,
+        } : null),
         history: historyResult.rows,
         comments: commentsResult.rows
     };
@@ -568,21 +762,43 @@ async function getPersonnelRequestById(id) {
  * Actualizar estado de solicitud
  */
 async function updatePersonnelRequestStatus(id, status, userId, notes = null, userRole = null) {
-    const validStatuses = ['pendiente', 'en_revision', 'aprobada', 'rechazada', 'en_proceso', 'completada', 'cancelada'];
+    const normalizedStatus = normalizeWorkflowStatus(status);
+    const validStatuses = Object.keys(PERSONNEL_REQUEST_TRANSITIONS);
 
-    if (!validStatuses.includes(status)) {
-        throw new Error(`Estado inválido: ${status}`);
+    if (!validStatuses.includes(normalizedStatus)) {
+        throw new Error(`Estado invalido: ${status}`);
+    }
+
+    const currentQuery = await db.query(
+        'SELECT id, status FROM personnel_requests WHERE id = $1',
+        [id]
+    );
+    if (currentQuery.rows.length === 0) {
+        throw new Error('Solicitud no encontrada');
+    }
+
+    const currentStatus = normalizeWorkflowStatus(currentQuery.rows[0].status);
+    if (currentStatus === normalizedStatus) {
+        return currentQuery.rows[0];
+    }
+
+    const allowedTransitions = PERSONNEL_REQUEST_TRANSITIONS[currentStatus] || [];
+    if (!allowedTransitions.includes(normalizedStatus)) {
+        throw new Error(`No es posible pasar de ${currentStatus} a ${normalizedStatus}`);
+    }
+
+    if (normalizedStatus === 'rechazada' && !String(notes || '').trim()) {
+        throw new Error('Debes incluir un motivo para rechazar la solicitud');
     }
 
     const updateFields = ['status = $1', 'updated_at = NOW()'];
-    const params = [status];
+    const params = [normalizedStatus];
     let paramIndex = 2;
     const role = (userRole || '').toLowerCase();
     const isManager = ['gerencia_general', 'gerente', 'gerencia', 'admin'].includes(role);
     const isHr = ['talento_humano'].includes(role);
 
-    // Agregar campos específicos según el estado
-    if (status === 'aprobada') {
+    if (normalizedStatus === 'aprobada') {
         if (isManager) {
             updateFields.push(`approved_by_manager = $${paramIndex++}`);
             updateFields.push(`manager_approval_date = NOW()`);
@@ -594,12 +810,12 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
         }
     }
 
-    if (status === 'rechazada' && notes) {
+    if (normalizedStatus === 'rechazada') {
         updateFields.push(`rejection_reason = $${paramIndex++}`);
         params.push(notes);
     }
 
-    if (status === 'completada') {
+    if (normalizedStatus === 'completada') {
         updateFields.push(`completed_at = NOW()`);
     }
 
@@ -629,14 +845,13 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
         throw new Error('Solicitud no encontrada');
     }
 
-    // Registrar en auditoría
     await logAction({
         user_id: userId,
         module: 'personnel_requests',
         action: 'update_status',
         entity: 'personnel_requests',
         entity_id: id,
-        details: { new_status: status, notes }
+        details: { new_status: normalizedStatus, notes }
     });
 
     try {
@@ -645,7 +860,7 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
         const hrUser = await getSingleUserByRole('talento_humano');
         const managerUser = await getSingleUserByRole('gerencia_general');
         const usersToNotify = [requesterUser, hrUser, managerUser].filter(Boolean);
-        const statusLabel = status.replace('_', ' ');
+        const statusLabel = normalizedStatus.replace('_', ' ');
         const subject = `Solicitud de personal #${id} ${statusLabel}`;
         const html = `
           <h2>Solicitud de personal ${statusLabel}</h2>
@@ -661,11 +876,11 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
             text: `Solicitud #${id} - ${updated.position_title} (${statusLabel})`,
             notification: {
                 title: `Solicitud ${statusLabel}`,
-                message: `Solicitud #${id} (${updated.position_title}) ahora está ${statusLabel}.`,
-                type: status === 'rechazada' ? 'alert' : 'info',
-                priority: status === 'rechazada' ? 2 : 0,
+                message: `Solicitud #${id} (${updated.position_title}) ahora esta ${statusLabel}.`,
+                type: normalizedStatus === 'rechazada' ? 'alert' : 'info',
+                priority: normalizedStatus === 'rechazada' ? 2 : 0,
                 source: 'personnel_requests',
-                meta: { request_id: id, status }
+                meta: { request_id: id, status: normalizedStatus }
             }
         });
     } catch (notifyErr) {
@@ -678,7 +893,17 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
 /**
  * Agregar comentario a una solicitud
  */
-async function addComment(requestId, userId, comment, isInternal = false) {
+async function addComment(requestId, userId, comment, isInternal = false, userRole = null) {
+    const cleanComment = String(comment || '').trim();
+    if (!cleanComment) {
+        throw new Error('El comentario no puede estar vacio');
+    }
+
+    const internalRoles = new Set(['talento_humano', 'gerencia_general', 'admin']);
+    const normalizedRole = String(userRole || '').trim().toLowerCase();
+    const allowInternal = internalRoles.has(normalizedRole);
+    const internalComment = allowInternal && Boolean(isInternal);
+
     const query = `
     INSERT INTO personnel_request_comments (
       personnel_request_id,
@@ -689,7 +914,7 @@ async function addComment(requestId, userId, comment, isInternal = false) {
     RETURNING *
   `;
 
-    const result = await db.query(query, [requestId, userId, comment, isInternal]);
+    const result = await db.query(query, [requestId, userId, cleanComment, internalComment]);
 
     await logAction({
         user_id: userId,
@@ -714,7 +939,7 @@ async function notifyHRNewRequest(request, requester) {
     <p><strong>Tipo:</strong> ${request.position_type}</p>
     <p><strong>Cantidad:</strong> ${request.quantity}</p>
     <p><strong>Urgencia:</strong> ${request.urgency_level}</p>
-    <p><strong>Justificación:</strong></p>
+    <p><strong>JustificaciÃ³n:</strong></p>
     <p>${request.justification}</p>
     <hr>
     <p>Accede al sistema para revisar los detalles completos del perfil profesional.</p>
@@ -740,7 +965,7 @@ async function notifyHRNewRequest(request, requester) {
             });
         }
     } catch (error) {
-        logger.warn('Error enviando notificación con Gmail API, usando SMTP:', error.message);
+        logger.warn('Error enviando notificaciÃ³n con Gmail API, usando SMTP:', error.message);
         const smtpRecipients = uniqueRecipients(
             processUsers.map((u) => u?.email),
             HR_NOTIFICATION_EMAILS
@@ -777,7 +1002,7 @@ async function notifyHRNewRequest(request, requester) {
 }
 
 /**
- * Obtener estadísticas de solicitudes de personal
+ * Obtener estadÃ­sticas de solicitudes de personal
  */
 async function getPersonnelRequestStats(departmentId = null) {
     let whereClause = '1=1';
@@ -797,6 +1022,10 @@ async function getPersonnelRequestStats(departmentId = null) {
       COUNT(*) FILTER (WHERE status = 'en_proceso') as en_proceso,
       COUNT(*) FILTER (WHERE status = 'completada') as completadas,
       COUNT(*) FILTER (WHERE urgency_level = 'urgente') as urgentes,
+      COUNT(*) FILTER (
+        WHERE status IN ('pendiente', 'en_revision', 'aprobada', 'en_proceso')
+          AND NOW() - COALESCE(updated_at, created_at) > INTERVAL '72 hours'
+      ) as estancadas,
       COUNT(*) as total
     FROM personnel_requests
     WHERE ${whereClause}
@@ -856,7 +1085,7 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
 
     const status = requestQuery.rows[0].status;
     if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('El perfil solo puede actualizarse cuando la solicitud esté aprobada');
+        throw new Error('El perfil solo puede actualizarse cuando la solicitud estÃ© aprobada');
     }
 
     const query = `
@@ -900,7 +1129,7 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
 
     const status = requestQuery.rows[0].status;
     if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('Solo puedes subir documentos cuando la solicitud esté aprobada');
+        throw new Error('Solo puedes subir documentos cuando la solicitud estÃ© aprobada');
     }
 
     let folderId = requestQuery.rows[0].drive_folder_id;
@@ -1002,14 +1231,14 @@ async function hirePersonnelRequest(requestId, userId) {
     let email = null;
     let fullname = null;
 
-    // Intentar obtener datos del postulante normalizado si está vinculado
+    // Intentar obtener datos del postulante normalizado si estÃ¡ vinculado
     if (applicant_id) {
         const applicantData = await getApplicantById(applicant_id);
         if (applicantData) {
             email = applicantData.email;
             fullname = applicantData.fullname;
             // Reconstruir perfil para collaborator_profiles si es necesario, 
-            // o usar el que ya tiene la solicitud (que debería estar sincronizado)
+            // o usar el que ya tiene la solicitud (que deberÃ­a estar sincronizado)
         }
     }
 
@@ -1245,3 +1474,4 @@ module.exports = {
     updatePersonnelRequestCollaborator,
     linkApplicantToRequest
 };
+

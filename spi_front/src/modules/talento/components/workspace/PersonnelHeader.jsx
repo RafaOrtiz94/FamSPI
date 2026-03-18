@@ -6,6 +6,7 @@ const PersonnelHeader = ({
   selectedRequest,
   selectedCollaborator,
   selectedApplicant,
+  workflow,
   onSave,
   saving,
   loading,
@@ -90,6 +91,25 @@ const PersonnelHeader = ({
               </>
             )}
           </div>
+          {workflow && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+              <span className="rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700">
+                {workflow.current_stage_label}
+              </span>
+              <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
+                Responsable: {workflow.current_responsible_name || workflow.current_responsible_label}
+              </span>
+              <span
+                className={`rounded-full px-2 py-0.5 font-semibold ${
+                  workflow.stalled ? "bg-rose-100 text-rose-700" : "bg-emerald-50 text-emerald-700"
+                }`}
+              >
+                {workflow.stalled
+                  ? `Estancada ${workflow.stalled_for_label || ""}`.trim()
+                  : `En etapa ${workflow.elapsed_label || "N/A"}`}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
