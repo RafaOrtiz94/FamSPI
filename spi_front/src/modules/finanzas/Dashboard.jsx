@@ -8,16 +8,16 @@ import {
     FiShield,
     FiUser,
 } from "react-icons/fi";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import Card from "../../core/ui/components/Card";
 import ActionCard from "../../core/ui/patterns/ActionCard";
-import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import { DashboardLayout, DashboardHeader } from "../../core/ui/layouts/DashboardLayout";
 
 const DashboardFinanzas = () => {
     const navigate = useNavigate();
+    const location = useLocation();
     const handleRefresh = useCallback(() => { }, []);
 
     return (
@@ -79,12 +79,8 @@ const DashboardFinanzas = () => {
                     subtitle="Cuenta"
                     title="Mi Perfil"
                     color="emerald"
-                    onClick={() => navigate("/dashboard/mi-perfil")}
+                    onClick={() => navigate("/dashboard/mi-perfil", { state: { backgroundLocation: location } })}
                 />
-            </div>
-
-            <div className="grid grid-cols-1 gap-4">
-                <AttendanceWidget />
             </div>
 
             <PermisosStatusWidget />

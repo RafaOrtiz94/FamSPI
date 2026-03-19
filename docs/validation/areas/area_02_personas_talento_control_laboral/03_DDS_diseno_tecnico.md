@@ -48,6 +48,8 @@ Nucleo del proceso de requerimiento de personal. Persiste solicitudes, historial
 
 El servicio formaliza una maquina de estados interna que permite calcular progreso, etapa actual, responsable actual, accion siguiente, tiempos por etapa y estancamiento. La informacion se arma desde `personnel_requests`, `personnel_request_history` y la vinculacion con `users` o colaboradores asociados.
 
+El backend normaliza el contrato de perfil para aceptar payload directo o anidado, devuelve la coleccion documental actualizada despues de cada carga y restringe la edicion del expediente a etapas operativas abiertas. La contratacion, la reasignacion y la vinculacion de postulantes dejan rastro tecnico en `personnel_request_history` para sostener la linea de tiempo operativa.
+
 El workspace frontend complementa ese modelo con componentes especificos para:
 - visualizar el avance operativo y el plazo de la solicitud;
 - registrar comentarios trazables con visibilidad interna o externa;
@@ -59,11 +61,15 @@ El workspace frontend complementa ese modelo con componentes especificos para:
 ### `users`
 Administra usuarios internos y su relacion con departamentos. Aunque es transversal, en este dominio se usa como base de identidad administrativa y de asignacion laboral. El controlador distingue entre directorio visible para ciertos roles y vista administrativa completa, y la baja operativa se resuelve con desactivacion logica.
 
+En UI, `users` ya no se presenta como acceso aislado, sino como parte de un hub administrativo unico junto a `departments`. Esto reduce ambiguedad de navegacion y concentra el mantenimiento de estructura y acceso en una sola vista.
+
 ### `collaborators`
 Consolida el workspace del colaborador activo. Mezcla informacion de `users`, `departments`, `collaborator_profiles`, `user_profile`, certificaciones y documentos. El servicio calcula completitud del expediente, revision anual pendiente y alertas por vigencia de certificaciones.
 
 ### `departments`
 CRUD administrativo de la estructura organizacional consumida por talento y otras areas. El modelo ya contempla estado activo/inactivo para preservar historico sin eliminar referencias previas.
+
+Su consumo principal en frontend comparte entrada y contenedor con `users`, lo que simplifica el acceso y evita duplicidad de accesos administrativos en dashboards y barra de navegacion.
 
 ### `user-profile`
 Gestiona el perfil propio del usuario: metadata, preferencias y avatar. Tambien sincroniza partes del perfil con `collaborator_profiles` cuando corresponde usando una utilidad compartida para no duplicar reglas de mapeo.
@@ -73,7 +79,7 @@ La capa frontend agrega una validacion operativa para la revision anual: el cier
 ### `user-certifications`
 Gestiona certificaciones individuales y exportacion PDF consolidada. Guarda soporte documental y estados activos.
 
-La vista del colaborador expone acciones tactiles permanentes de consulta y eliminacion, evita overlays dependientes de hover como unico mecanismo de accion y adapta la captura de fechas a una distribucion responsive.
+La vista del colaborador expone acciones tactiles permanentes de consulta y eliminacion, evita overlays dependientes de hover como unico mecanismo de accion, adapta la captura de fechas a una distribucion responsive y habilita el PDF consolidado dentro de la experiencia propia del usuario autenticado.
 
 ### `attendance`
 Gestiona la jornada diaria, excepciones fuera del flujo normal, overtime y reportes PDF oficiales. Usa fecha de negocio, soporta sincronizacion posterior de ubicacion y expone estados derivados para separar la consulta administrativa del reporte RH-09. El acceso a consultas de terceros se apoya en un helper de autorizacion especifico del modulo.
@@ -153,7 +159,10 @@ La autoentrada de asistencia durante login se dispara desde `auth.controller.js`
 `profileSync.js` concentra las claves compartidas entre `user-profile` y `collaborators`. Esta decision evita drift entre ambos modulos y documenta de forma explicita que `user_profile` y `collaborator_profiles` no son fuentes aisladas, sino vistas complementarias del mismo expediente.
 
 ### 8.6 Usabilidad y respuesta responsive del dominio
-La interfaz del area incorpora ajustes tecnicos especificos para mantener operacion real en dispositivos tactiles y pantallas pequeñas. Entre ellos se incluyen selector movil en `PersonnelWorkspace`, acciones permanentes en `CertificationsBoard`, cabeceras con flex-wrap en perfil propio y separacion de botones de accion dentro de `CollaboratorWorkspace`.
+La interfaz del area incorpora ajustes tecnicos especificos para mantener operacion real en dispositivos tactiles y pantallas pequenas. Entre ellos se incluyen selector movil en `PersonnelWorkspace`, acciones permanentes en `CertificationsBoard`, cabeceras con flex-wrap en perfil propio, separacion de botones de accion dentro de `CollaboratorWorkspace` y un hub administrativo unico para usuarios y departamentos visible solo para Talento Humano y TI mediante restricciones estrictas de ruta.
+
+### 8.7 Trazabilidad consistente del dominio
+`audit.js` acepta tanto el contrato historico (`usuario_id`, `modulo`, `accion`) como variantes legacy (`user_id`, `module`, `action`, `details`) usadas por servicios del dominio. Esta compatibilidad evita que los nuevos registros de `personnel-requests`, `users` y `departments` degraden a `anon/core/desconocida`. En frontend, `Auditoria.jsx` y `AuditoriaPreview.jsx` formatean los registros historicos no normalizados de manera explicita para no exponer placeholders internos como si fueran valores de negocio. A su vez, `PersonnelRequestProgress` consume la trazabilidad de etapa y muestra actor cuando el historial operativo ya lo provee.
 
 ## 9. Flujos tecnicos relevantes
 ### Flujo tecnico A - Workspace de solicitud de personal

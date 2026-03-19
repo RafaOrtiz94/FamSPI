@@ -2,7 +2,7 @@ import React from "react";
 import { motion } from "framer-motion";
 import AttendanceWidget from "../widgets/AttendanceWidget";
 
-export const DashboardLayout = ({ children, className = "", includeWidgets = true }) => {
+export const DashboardLayout = ({ children, className = "", includeWidgets = false }) => {
     return (
         <motion.div
             initial={{ opacity: 0, y: 10 }}

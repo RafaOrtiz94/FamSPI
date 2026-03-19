@@ -61,6 +61,10 @@ const ROLE_APPROVER = {
 const HR_ROLES = ["talento-humano", "talento_humano", "talento humano", "rh", "rrhh"];
 const MGMT_ROLES = ["gerencia_general", "gerente_general"];
 const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS || "")
+  .split(",")
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
 
 function normalizeRole(role) {
   return String(role || "").trim().toLowerCase();
@@ -215,8 +219,18 @@ async function getHistoricVacationBalance({ userId, userEmail, year }) {
 async function findApprover(targetRole) {
   if (!targetRole) return null;
   const { rows } = await db.query(
-    "SELECT id FROM users WHERE LOWER(role) = LOWER($1) ORDER BY id LIMIT 1",
-    [targetRole]
+    `SELECT id
+       FROM users
+      WHERE LOWER(role) = LOWER($1) AND active = true
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(email, '')) = ANY($2) THEN 0
+          WHEN LOWER(COALESCE(email, '')) LIKE 'administrador@%' THEN 2
+          ELSE 1
+        END,
+        id ASC
+      LIMIT 1`,
+    [targetRole, PREFERRED_APPROVER_EMAILS]
   );
   return rows[0]?.id || null;
 }

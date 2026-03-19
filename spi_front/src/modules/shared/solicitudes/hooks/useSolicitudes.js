@@ -9,55 +9,55 @@ import { useState, useCallback, useEffect, useRef } from 'react';
  * @param {boolean} config.autoLoad - Si debe cargar automáticamente al montar (default: true)
  */
 export const useSolicitudes = (config) => {
-    const {
-        fetchFunction,
-        parseResponse,
-        defaultFilters = {},
-        autoLoad = true,
-        dependencies = []
-    } = config;
+ const {
+ fetchFunction,
+ parseResponse,
+ defaultFilters = {},
+ autoLoad = true,
+ dependencies = []
+ } = config;
 
-    const [solicitudes, setSolicitudes] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState(null);
-    const [filters, setFilters] = useState(defaultFilters);
-    const parseResponseRef = useRef(parseResponse);
+ const [solicitudes, setSolicitudes] = useState([]);
+ const [loading, setLoading] = useState(false);
+ const [error, setError] = useState(null);
+ const [filters, setFilters] = useState(defaultFilters);
+ const parseResponseRef = useRef(parseResponse);
 
-    useEffect(() => {
-        parseResponseRef.current = parseResponse;
-    }, [parseResponse]);
+ useEffect(() => {
+ parseResponseRef.current = parseResponse;
+ }, [parseResponse]);
 
-    const dependencyValues = Array.isArray(dependencies) ? dependencies : [];
+ const dependencyValues = Array.isArray(dependencies) ? dependencies : [];
 
-    const load = useCallback(async () => {
-        setLoading(true);
-        setError(null);
-        try {
-            const response = await fetchFunction(filters);
-            const parser = parseResponseRef.current;
-            const parsed = parser ? parser(response) : response;
-            setSolicitudes(Array.isArray(parsed) ? parsed : []);
-        } catch (err) {
-            console.error('Error loading solicitudes:', err);
-            setError(err);
-            setSolicitudes([]);
-        } finally {
-            setLoading(false);
-        }
-    }, [filters, fetchFunction, ...dependencyValues]);
+ const load = useCallback(async () => {
+ setLoading(true);
+ setError(null);
+ try {
+ const response = await fetchFunction(filters);
+ const parser = parseResponseRef.current;
+ const parsed = parser ? parser(response) : response;
+ setSolicitudes(Array.isArray(parsed) ? parsed : []);
+ } catch (err) {
+ console.error('Error loading solicitudes:', err);
+ setError(err);
+ setSolicitudes([]);
+ } finally {
+ setLoading(false);
+ }
+ }, [filters, fetchFunction, ...dependencyValues]);
 
-    useEffect(() => {
-        if (autoLoad) {
-            load();
-        }
-    }, [load, autoLoad]);
+ useEffect(() => {
+ if (autoLoad) {
+ load();
+ }
+ }, [load, autoLoad]);
 
-    return {
-        solicitudes,
-        loading,
-        error,
-        filters,
-        setFilters,
-        reload: load
-    };
+ return {
+ solicitudes,
+ loading,
+ error,
+ filters,
+ setFilters,
+ reload: load
+ };
 };

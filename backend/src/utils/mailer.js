@@ -6,11 +6,13 @@
  */
 
 const { google } = require("googleapis");
+const nodemailer = require("nodemailer");
 const logger = require("../config/logger");
 const { gmail, createDelegatedJwtClient } = require("../config/google");
 const gmailService = require("../services/gmail.service");
 const { resolveDelegatedUser } = require("./googleCredentials");
 const { htmlToText, sendChatMessage } = require("./googleChat");
+const { normalizeHumanText, normalizeEmailAddress } = require("./textEncoding");
 require("dotenv").config();
 
 const EMAIL_NOTIFICATIONS_ENABLED = !["false", "0"].includes(
@@ -21,6 +23,33 @@ const EMAIL_SUPPRESS_SOURCES = String(process.env.EMAIL_SUPPRESS_SOURCES || "")
   .split(",")
   .map((value) => value.trim().toLowerCase())
   .filter(Boolean);
+const SMTP_HOST = process.env.SMTP_HOST || null;
+const SMTP_PORT = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER = process.env.SMTP_USER || null;
+const SMTP_PASS = process.env.SMTP_PASS || null;
+const SMTP_SECURE = String(process.env.SMTP_SECURE || "").trim().toLowerCase() === "true" || SMTP_PORT === 465;
+const SYSTEM_MAIL_ADDRESS =
+  process.env.SYSTEM_MAIL_ADDRESS ||
+  process.env.NOTIFICATION_MAIL_ADDRESS ||
+  process.env.GMAIL_SERVICE_ACCOUNT_SENDER ||
+  null;
+const SYSTEM_MAIL_NAME =
+  process.env.SYSTEM_MAIL_NAME ||
+  process.env.NOTIFICATION_MAIL_NAME ||
+  process.env.SMTP_FROM_NAME ||
+  "FamSPI Sistema";
+const SYSTEM_MAIL_REPLY_TO =
+  process.env.SYSTEM_MAIL_REPLY_TO ||
+  process.env.NOTIFICATION_MAIL_REPLY_TO ||
+  SYSTEM_MAIL_ADDRESS ||
+  null;
+const SYSTEM_MAIL_DELEGATED_USER =
+  resolveDelegatedUser(process.env.SYSTEM_MAIL_DELEGATED_USER) ||
+  resolveDelegatedUser(process.env.NOTIFICATION_MAIL_DELEGATED_USER) ||
+  resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
+  resolveDelegatedUser(process.env.GMAIL_DELEGATED_USER) ||
+  null;
+let smtpTransporter = null;
 
 function logGoogleApiError(err, context = {}) {
   const payload = {
@@ -40,7 +69,9 @@ const DEFAULT_GMAIL_USER_ID = process.env.GMAIL_DEFAULT_USER_ID
   : null;
 
 const normalizeRecipients = (value) =>
-  Array.isArray(value) ? value.filter(Boolean).join(",") : value;
+  Array.isArray(value)
+    ? value.filter(Boolean).map((item) => normalizeEmailAddress(item)).join(",")
+    : normalizeEmailAddress(value);
 
 const normalizeSource = (value) =>
   String(value || "")
@@ -68,6 +99,28 @@ function isSuppressedSource(source) {
   return EMAIL_SUPPRESS_SOURCES.some((item) => source === item || source.startsWith(`${item}_`));
 }
 
+function canUseSmtp() {
+  return Boolean(SMTP_HOST && SMTP_PORT && SMTP_USER && SMTP_PASS);
+}
+
+function getSmtpTransporter() {
+  if (!canUseSmtp()) {
+    throw new Error("SMTP no configurado completamente");
+  }
+  if (!smtpTransporter) {
+    smtpTransporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: {
+        user: SMTP_USER,
+        pass: SMTP_PASS,
+      },
+    });
+  }
+  return smtpTransporter;
+}
+
 const resolveFrom = ({ from, senderName }) => {
   if (from && typeof from === "object" && from.email) {
     return from.name || senderName ? `${from.name || senderName} <${from.email}>` : from.email;
@@ -76,8 +129,8 @@ const resolveFrom = ({ from, senderName }) => {
     return senderName ? `${senderName} <${from}>` : from;
   }
 
-  const defaultFrom = process.env.SMTP_FROM || process.env.SMTP_USER || null;
-  const defaultName = senderName || process.env.SMTP_FROM_NAME || null;
+  const defaultFrom = SYSTEM_MAIL_ADDRESS || process.env.SMTP_FROM || process.env.SMTP_USER || null;
+  const defaultName = senderName || SYSTEM_MAIL_NAME || null;
   if (!defaultFrom) return null;
   return defaultName ? `${defaultName} <${defaultFrom}>` : defaultFrom;
 };
@@ -128,25 +181,35 @@ async function sendViaGmail({
 
 const encodeHeaderValue = (value) => {
   if (!value) return "";
-  const encoded = Buffer.from(String(value), "utf-8").toString("base64");
+  const encoded = Buffer.from(normalizeHumanText(value), "utf-8").toString("base64");
   return `=?UTF-8?B?${encoded}?=`;
+};
+
+const encodeAddressHeader = (value) => {
+  if (!value) return "";
+  const raw = String(value);
+  const match = raw.match(/^\s*([^<]+?)\s*<([^>]+)>\s*$/);
+  if (!match) return normalizeEmailAddress(raw);
+  const displayName = normalizeHumanText(match[1].trim().replace(/^"|"$/g, ""));
+  const email = normalizeEmailAddress(match[2]);
+  return `${encodeHeaderValue(displayName)} <${email}>`;
 };
 
 const encodeMessage = ({ from, to, subject, html, text, cc, bcc, replyTo }) => {
   const lines = [
-    `From: ${from}`,
-    `To: ${Array.isArray(to) ? to.join(", ") : to}`,
+    `From: ${encodeAddressHeader(from)}`,
+    `To: ${Array.isArray(to) ? to.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(to)}`,
   ];
 
-  if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.join(", ") : cc}`);
-  if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.join(", ") : bcc}`);
-  if (replyTo) lines.push(`Reply-To: ${replyTo}`);
+  if (cc) lines.push(`Cc: ${Array.isArray(cc) ? cc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(cc)}`);
+  if (bcc) lines.push(`Bcc: ${Array.isArray(bcc) ? bcc.map((item) => normalizeEmailAddress(item)).join(", ") : normalizeEmailAddress(bcc)}`);
+  if (replyTo) lines.push(`Reply-To: ${encodeAddressHeader(replyTo)}`);
 
   lines.push(`Subject: ${encodeHeaderValue(subject)}`);
   lines.push("MIME-Version: 1.0");
   lines.push("Content-Type: text/html; charset=utf-8");
   lines.push("");
-  lines.push(html || text || "");
+  lines.push(normalizeHumanText(html || text || ""));
 
   return Buffer.from(lines.join("\r\n"))
     .toString("base64")
@@ -164,13 +227,17 @@ async function sendViaServiceAccount({
   bcc,
   replyTo,
   from,
+  delegatedUser,
   threadId = null,
 }) {
   const delegatedFrom =
+    resolveDelegatedUser(delegatedUser) ||
     resolveDelegatedUser(from) ||
+    SYSTEM_MAIL_DELEGATED_USER ||
     resolveDelegatedUser(process.env.GMAIL_SERVICE_ACCOUNT_SENDER) ||
-    resolveDelegatedUser(process.env.SMTP_FROM) ||
-    resolveDelegatedUser(process.env.SMTP_USER);
+    resolveDelegatedUser(process.env.GMAIL_DELEGATED_USER) ||
+    resolveDelegatedUser(process.env.GOOGLE_SUBJECT);
+  const fromHeader = from || delegatedFrom;
 
   if (!delegatedFrom) {
     throw new Error("No hay remitente delegado configurado para el envío de correos");
@@ -201,7 +268,7 @@ async function sendViaServiceAccount({
   }
 
   const raw = encodeMessage({
-    from: delegatedFrom,
+    from: fromHeader,
     to,
     subject,
     html,
@@ -245,6 +312,44 @@ async function sendViaServiceAccount({
     response,
     providerThreadId: response?.data?.threadId || null,
     providerMessageId: response?.data?.id || null,
+  };
+}
+
+async function sendViaSmtp({
+  to,
+  subject,
+  html,
+  text,
+  cc,
+  bcc,
+  replyTo,
+  from,
+}) {
+  const transporter = getSmtpTransporter();
+  const info = await transporter.sendMail({
+    from: from || resolveFrom({ from: null, senderName: null }) || SMTP_USER,
+    to,
+    subject,
+    html,
+    text,
+    cc,
+    bcc,
+    replyTo,
+  });
+
+  logger.info("[MAILER] Email enviado por SMTP", {
+    to: normalizeRecipients(to),
+    subject,
+    via: "smtp",
+    messageId: info?.messageId || null,
+  });
+
+  return {
+    delivered: true,
+    via: "smtp",
+    response: info,
+    providerThreadId: null,
+    providerMessageId: info?.messageId || null,
   };
 }
 
@@ -322,17 +427,70 @@ async function sendMail({
     };
   }
 
-  const fromAddress = resolveFrom({ from, senderName });
-  return await sendViaServiceAccount({
+  const fromAddress = normalizeHumanText(resolveFrom({ from, senderName }));
+  const normalizedText = normalizeHumanText(text || (!html ? undefined : htmlToText(html)));
+  const normalizedHtml = html ? normalizeHumanText(html) : html;
+  const normalizedSubject = normalizeHumanText(subject);
+  const resolvedReplyTo = normalizeHumanText(replyTo || SYSTEM_MAIL_REPLY_TO || undefined);
+
+  try {
+    return await sendViaServiceAccount({
+      to,
+      subject: normalizedSubject,
+      html: normalizedHtml,
+      text: normalizedText,
+      cc,
+      bcc,
+      replyTo: resolvedReplyTo,
+      from: fromAddress || delegatedUser || undefined,
+      delegatedUser: delegatedUser || undefined,
+      threadId,
+    });
+  } catch (serviceAccountError) {
+    logger.warn(
+      {
+        error: serviceAccountError?.message,
+        to: normalizeRecipients(to),
+        subject,
+      },
+      "[MAILER] Fallo service account; intentando SMTP",
+    );
+  }
+
+  if (canUseSmtp()) {
+    try {
+      return await sendViaSmtp({
+        to,
+        subject: normalizedSubject,
+        html: normalizedHtml,
+        text: normalizedText,
+        cc,
+        bcc,
+        replyTo: resolvedReplyTo,
+        from: fromAddress || undefined,
+      });
+    } catch (smtpError) {
+      logger.error(
+        {
+          error: smtpError?.message,
+          to: normalizeRecipients(to),
+          subject,
+        },
+        "[MAILER] Fallo SMTP",
+      );
+    }
+  }
+
+  return await sendViaChatFallback({
     to,
-    subject,
-    html,
-    text: text || (!html ? undefined : htmlToText(html)),
+    subject: normalizedSubject,
+    html: normalizedHtml,
+    text: normalizedText,
     cc,
     bcc,
-    replyTo,
+    replyTo: resolvedReplyTo,
     from: fromAddress || delegatedUser || undefined,
-    threadId,
+    reason: "service_account_and_smtp_failed",
   });
 }
 

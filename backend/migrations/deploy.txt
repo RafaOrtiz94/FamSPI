@@ -16,8 +16,13 @@ gcloud run deploy spi-backend \
   --set-env-vars GOOGLE_CLIENT_ID=18376271129-1v6irnav4n49298sspaij02qjnigeln3.apps.googleusercontent.com \
   --set-env-vars DRIVE_ROOT_FOLDER_ID=0AILKwXtcdfRFUk9PVA \
   --set-env-vars GMAIL_SERVICE_ACCOUNT_CLIENT_EMAIL=spi-cuenta-servicio@dashboard-spi.iam.gserviceaccount.com \
-  --set-env-vars GMAIL_DELEGATED_USER=administrador@famproject.com.ec \
-  --set-env-vars GOOGLE_SUBJECT=administrador@famproject.com.ec \
+  --set-env-vars GMAIL_DELEGATED_USER=administrador@fam-project.com \
+  --set-env-vars GOOGLE_SUBJECT=administrador@fam-project.com \
+  --set-env-vars SYSTEM_MAIL_ADDRESS=administrador@fam-project.com \
+  --set-env-vars SYSTEM_MAIL_DELEGATED_USER=administrador@fam-project.com \
+  --set-env-vars SYSTEM_MAIL_REPLY_TO=administrador@fam-project.com \
+  --set-env-vars SYSTEM_MAIL_NAME=FamSPI Sistema \
+  --set-env-vars GMAIL_SERVICE_ACCOUNT_SENDER=administrador@fam-project.com \
   --set-env-vars GSA_KEY_PATH=/secrets/gsa-key.json \
   --set-secrets APPLICANTS_API_KEY=APPLICANTS_API_KEY:latest \
   --set-secrets DOC_TEMPLATE_SOLICITUD_1=DOC_TEMPLATE_SOLICITUD_1:latest \

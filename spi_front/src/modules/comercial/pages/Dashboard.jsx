@@ -15,76 +15,76 @@ import { useApi } from "../../../core/hooks/useApi";
 const transformResponseIdentity = (response) => response;
 
 const ComercialDashboard = () => {
-  const { user } = useAuth();
+ const { user } = useAuth();
 
-  // API call for commercial summary
-  const { data: summaryData, execute: fetchSummary, loading: summaryLoading, error: summaryError } = useApi(
-    getCommercialSummary,
-    { globalLoader: false, transformResponse: transformResponseIdentity }
-  );
+ // API call for commercial summary
+ const { data: summaryData, execute: fetchSummary, loading: summaryLoading, error: summaryError } = useApi(
+ getCommercialSummary,
+ { globalLoader: false, transformResponse: transformResponseIdentity }
+ );
 
-  // Trigger initial fetch
-  useEffect(() => {
-    fetchSummary();
-  }, [fetchSummary]);
+ // Trigger initial fetch
+ useEffect(() => {
+ fetchSummary();
+ }, [fetchSummary]);
 
-  // Debug log in development
-  if (process.env.NODE_ENV !== 'production') {
-    console.log('Dashboard summaryData:', summaryData);
-    console.log('Dashboard summaryError:', summaryError);
-    console.log('Dashboard summaryLoading:', summaryLoading);
-  }
+ // Debug log in development
+ if (process.env.NODE_ENV !== 'production') {
+ console.log('Dashboard summaryData:', summaryData);
+ console.log('Dashboard summaryError:', summaryError);
+ console.log('Dashboard summaryLoading:', summaryLoading);
+ }
 
-  const handleRefresh = async () => {
-    await fetchSummary();
-  };
+ const handleRefresh = async () => {
+ await fetchSummary();
+ };
 
-  const renderView = () => {
-    const role = user?.role?.toLowerCase() || "";
+ const renderView = () => {
+ const role = user?.role?.toLowerCase() || "";
 
-    if (role.includes("jefe") || role.includes("gerente") || role.includes("director")) {
-      return (
-        <JefeComercialView
-          onRefresh={handleRefresh}
-          summaryData={summaryData}
-          summaryLoading={summaryLoading}
-          summaryError={summaryError}
-        />
-      );
-    }
+ if (role.includes("jefe") || role.includes("gerente") || role.includes("director")) {
+ return (
+ <JefeComercialView
+ onRefresh={handleRefresh}
+ summaryData={summaryData}
+ summaryLoading={summaryLoading}
+ summaryError={summaryError}
+ />
+ );
+ }
 
-    if (role.includes("backoffice")) {
-      return (
-        <BackofficeView
-          onRefresh={handleRefresh}
-        />
-      );
-    }
+ if (role.includes("backoffice")) {
+ return (
+ <BackofficeView
+ onRefresh={handleRefresh}
+ />
+ );
+ }
 
-    if (role.includes("acp")) {
-      return (
-        <ACPComercialView
-          onRefresh={handleRefresh}
-        />
-      );
-    }
+ if (role.includes("acp")) {
+ return (
+ <ACPComercialView
+ onRefresh={handleRefresh}
+ />
+ );
+ }
 
-    // Default to Comercial (Sales Rep) view
-    return (
-      <ComercialView
-        onRefresh={handleRefresh}
-        summaryData={summaryData}
-        summaryLoading={summaryLoading}
-        summaryError={summaryError}
-      />
-    );
-  };
+ // Default to Comercial (Sales Rep) view
+ return (
+ <ComercialView
+ onRefresh={handleRefresh}
+ summaryData={summaryData}
+ summaryLoading={summaryLoading}
+ summaryError={summaryError}
+ />
+ );
+ };
 
-  return (
-    <DashboardLayout>
-      {renderView()}
-    </DashboardLayout>
-  );
+ return (
+ <DashboardLayout>
+ {renderView()}
+ </DashboardLayout>
+ );
 };
 
 export default ComercialDashboard;

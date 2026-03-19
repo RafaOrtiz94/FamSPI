@@ -1,6 +1,7 @@
 ﻿  // src/modules/users/users.controller.js
   const db = require("../../config/db");
   const logger = require("../../config/logger");
+  const { logAction } = require("../../utils/audit");
 
 const ADMIN_VIEW_ROLES = new Set([
     "talento_humano",
@@ -85,6 +86,15 @@ const collectRoles = (user = {}) => {
   if (Array.isArray(user.roles)) user.roles.forEach((role) => roles.add(normalizeRole(role)));
   if (Array.isArray(user.scopes)) user.scopes.forEach((scope) => roles.add(normalizeRole(scope)));
   return roles;
+};
+
+const getActorContext = (req) => {
+  const roles = Array.from(collectRoles(req.user || {}));
+  return {
+    usuario_id: req.user?.id || null,
+    usuario_email: req.user?.email || req.user?.correo || "anon",
+    rol: roles[0] || "sin-rol",
+  };
 };
 
 const ensureDepartmentExists = async (departmentId, { requireActive = false } = {}) => {
@@ -287,6 +297,21 @@ const createUser = async (req, res) => {
         [googleId, email, fullname, role || "pendiente", departmentId, active]
       );
 
+      await logAction({
+        ...getActorContext(req),
+        modulo: "users",
+        accion: "create",
+        descripcion: `Creación de usuario ${email}`,
+        datos_nuevos: {
+          target_user_id: rows[0]?.id,
+          email,
+          fullname,
+          role,
+          department_id: departmentId,
+          active,
+        },
+      });
+
       res.status(201).json({ ok: true, data: rows[0] });
     } catch (err) {
       logger.error({ err }, "Error creando usuario");
@@ -331,6 +356,14 @@ const createUser = async (req, res) => {
       await ensureDepartmentExists(departmentId, { requireActive: true });
       await ensureUniqueUserIdentity({ email, googleId, excludeId: userId });
 
+      const previousResult = await db.query(
+        `SELECT id, email, fullname, role, department_id, active
+           FROM users
+          WHERE id = $1
+          LIMIT 1`,
+        [userId]
+      );
+
       const { rows } = await db.query(
         `
         UPDATE users
@@ -350,6 +383,15 @@ const createUser = async (req, res) => {
 
       if (rows.length === 0)
         return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
+
+      await logAction({
+        ...getActorContext(req),
+        modulo: "users",
+        accion: "update",
+        descripcion: `Actualización de usuario ${rows[0]?.email || userId}`,
+        datos_anteriores: previousResult.rows[0] || null,
+        datos_nuevos: rows[0],
+      });
 
       res.status(200).json({ ok: true, data: rows[0] });
     } catch (err) {
@@ -411,6 +453,16 @@ const createUser = async (req, res) => {
       );
 
       await client.query("COMMIT");
+
+      await logAction({
+        ...getActorContext(req),
+        modulo: "users",
+        accion: "deactivate",
+        descripcion: `Desactivación de usuario ${rows[0]?.email || userId}`,
+        datos_anteriores: existingUser.rows[0] || null,
+        datos_nuevos: rows[0],
+      });
+
       res.status(200).json({
         ok: true,
         message: "Usuario desactivado correctamente",

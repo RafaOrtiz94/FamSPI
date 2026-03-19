@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Personnel Requests Service
  * Servicio para gestionar solicitudes de personal con perfil profesional
  */
@@ -46,6 +46,30 @@ async function ensurePersonnelProfileTables() {
       file_name TEXT,
       mime_type TEXT,
       uploaded_by INTEGER REFERENCES users(id),
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+    await db.query(`
+    CREATE TABLE IF NOT EXISTS personnel_request_comments (
+      id SERIAL PRIMARY KEY,
+      personnel_request_id INTEGER REFERENCES personnel_requests(id) ON DELETE CASCADE,
+      user_id INTEGER REFERENCES users(id),
+      comment TEXT NOT NULL,
+      is_internal BOOLEAN DEFAULT false,
+      created_at TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+
+    await db.query(`
+    CREATE TABLE IF NOT EXISTS personnel_request_history (
+      id SERIAL PRIMARY KEY,
+      personnel_request_id INTEGER REFERENCES personnel_requests(id) ON DELETE CASCADE,
+      previous_status TEXT,
+      new_status TEXT,
+      changed_by INTEGER REFERENCES users(id),
+      notes TEXT,
+      metadata JSONB DEFAULT '{}'::jsonb,
       created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
@@ -307,6 +331,70 @@ const formatDurationLabel = (seconds = 0) => {
   return `${hours} h ${minutes} min`;
 };
 
+const normalizePersonnelProfilePayload = (payload = {}) => {
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    !Array.isArray(payload) &&
+    payload.profile &&
+    typeof payload.profile === 'object' &&
+    !Array.isArray(payload.profile)
+  ) {
+    return payload.profile;
+  }
+
+  return payload || {};
+};
+
+const recordPersonnelRequestHistory = async (
+  personnelRequestId,
+  {
+    previousStatus = null,
+    newStatus = null,
+    changedBy = null,
+    notes = null,
+    metadata = {},
+  } = {}
+) => {
+  await ensurePersonnelProfileTables();
+
+  await db.query(
+    `
+    INSERT INTO personnel_request_history (
+      personnel_request_id,
+      previous_status,
+      new_status,
+      changed_by,
+      notes,
+      metadata
+    )
+    VALUES ($1, $2, $3, $4, $5, $6)
+    `,
+    [
+      personnelRequestId,
+      previousStatus,
+      newStatus,
+      changedBy,
+      notes,
+      metadata && typeof metadata === 'object' ? metadata : {},
+    ]
+  );
+};
+
+const listPersonnelRequestDocuments = async (requestId) => {
+  const result = await db.query(
+    `
+    SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, uploaded_by, created_at
+    FROM personnel_request_documents
+    WHERE personnel_request_id = $1
+    ORDER BY created_at DESC
+    `,
+    [requestId]
+  );
+
+  return result.rows || [];
+};
+
 const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}) => {
   const currentStatus = normalizeWorkflowStatus(request.status || 'pendiente');
   const currentStep = getWorkflowStepMeta(currentStatus);
@@ -319,6 +407,7 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
       previous_status: normalizeWorkflowStatus(row.previous_status),
       created_at: toDateValue(row.created_at) || createdAt,
     }))
+    .filter((row) => row.new_status && row.new_status !== row.previous_status)
     .sort((a, b) => a.created_at.getTime() - b.created_at.getTime());
 
   const statusEvents = [
@@ -326,6 +415,7 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
       status: normalizeWorkflowStatus(request.status || 'pendiente'),
       startedAt: createdAt,
       changedBy: request.requester_id || null,
+      changedByName: request.requester_name || request.requester_email || null,
       source: 'created',
     },
   ];
@@ -335,6 +425,7 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
       status: row.new_status,
       startedAt: row.created_at,
       changedBy: row.changed_by || null,
+      changedByName: row.changed_by_name || null,
       source: 'history',
     });
   });
@@ -358,6 +449,8 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
       duration_seconds: durationSeconds,
       duration_label: formatDurationLabel(durationSeconds),
       is_current: index === statusEvents.length - 1,
+      changed_by: current.changedBy,
+      changed_by_name: current.changedByName || null,
       source: current.source,
     });
   }
@@ -413,6 +506,9 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
  * Crear una nueva solicitud de personal
  */
 async function createPersonnelRequest(data, userId) {
+    await ensurePersonnelProfileTables();
+    await ensureCollaboratorTables();
+
     const {
         position_title,
         position_type,
@@ -479,7 +575,7 @@ async function createPersonnelRequest(data, userId) {
         throw new Error('La prioridad debe ser un numero entero entre 1 y 5');
     }
 
-    // Obtener informaciÃ³n del usuario solicitante
+    // Obtener información del usuario solicitante
     const userQuery = await db.query(
         'SELECT id, email, fullname, department_id FROM users WHERE id = $1',
         [userId]
@@ -572,7 +668,7 @@ async function createPersonnelRequest(data, userId) {
     const result = await db.query(insertQuery, values);
     const request = result.rows[0];
 
-    // Registrar en auditorÃ­a
+    // Registrar en auditoría
     await logAction({
         user_id: userId,
         module: 'personnel_requests',
@@ -592,6 +688,8 @@ async function createPersonnelRequest(data, userId) {
  * Obtener solicitudes de personal con filtros
  */
 async function getPersonnelRequests(filters = {}, userId = null, userRole = null) {
+    await ensurePersonnelProfileTables();
+
     const {
         status,
         department_id,
@@ -690,9 +788,11 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
 }
 
 /**
- * Obtener una solicitud especÃ­fica por ID
+ * Obtener una solicitud específica por ID
  */
 async function getPersonnelRequestById(id) {
+    await ensurePersonnelProfileTables();
+
     const query = `
     SELECT 
       pr.*,
@@ -762,6 +862,8 @@ async function getPersonnelRequestById(id) {
  * Actualizar estado de solicitud
  */
 async function updatePersonnelRequestStatus(id, status, userId, notes = null, userRole = null) {
+    await ensurePersonnelProfileTables();
+
     const normalizedStatus = normalizeWorkflowStatus(status);
     const validStatuses = Object.keys(PERSONNEL_REQUEST_TRANSITIONS);
 
@@ -854,6 +956,17 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
         details: { new_status: normalizedStatus, notes }
     });
 
+    await recordPersonnelRequestHistory(id, {
+        previousStatus: currentStatus,
+        newStatus: normalizedStatus,
+        changedBy: userId,
+        notes,
+        metadata: {
+            action: 'status_change',
+            role,
+        },
+    });
+
     try {
         const updated = result.rows[0];
         const requesterUser = await getUserById(updated.requester_id);
@@ -894,6 +1007,8 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
  * Agregar comentario a una solicitud
  */
 async function addComment(requestId, userId, comment, isInternal = false, userRole = null) {
+    await ensurePersonnelProfileTables();
+
     const cleanComment = String(comment || '').trim();
     if (!cleanComment) {
         throw new Error('El comentario no puede estar vacio');
@@ -939,7 +1054,7 @@ async function notifyHRNewRequest(request, requester) {
     <p><strong>Tipo:</strong> ${request.position_type}</p>
     <p><strong>Cantidad:</strong> ${request.quantity}</p>
     <p><strong>Urgencia:</strong> ${request.urgency_level}</p>
-    <p><strong>JustificaciÃ³n:</strong></p>
+    <p><strong>Justificación:</strong></p>
     <p>${request.justification}</p>
     <hr>
     <p>Accede al sistema para revisar los detalles completos del perfil profesional.</p>
@@ -965,7 +1080,7 @@ async function notifyHRNewRequest(request, requester) {
             });
         }
     } catch (error) {
-        logger.warn('Error enviando notificaciÃ³n con Gmail API, usando SMTP:', error.message);
+        logger.warn('Error enviando notificación con Gmail API, usando SMTP:', error.message);
         const smtpRecipients = uniqueRecipients(
             processUsers.map((u) => u?.email),
             HR_NOTIFICATION_EMAILS
@@ -1002,9 +1117,11 @@ async function notifyHRNewRequest(request, requester) {
 }
 
 /**
- * Obtener estadÃ­sticas de solicitudes de personal
+ * Obtener estadísticas de solicitudes de personal
  */
 async function getPersonnelRequestStats(departmentId = null) {
+    await ensurePersonnelProfileTables();
+
     let whereClause = '1=1';
     const params = [];
 
@@ -1055,19 +1172,11 @@ async function getPersonnelProfile(requestId) {
         [requestId]
     );
 
-    const documentsQuery = await db.query(
-        `SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, uploaded_by, created_at
-         FROM personnel_request_documents
-         WHERE personnel_request_id = $1
-         ORDER BY created_at DESC`,
-        [requestId]
-    );
-
     return {
         profile: profileQuery.rows[0]?.profile || {},
         updated_at: profileQuery.rows[0]?.updated_at || null,
         updated_by: profileQuery.rows[0]?.updated_by || null,
-        documents: documentsQuery.rows || [],
+        documents: await listPersonnelRequestDocuments(requestId),
     };
 }
 
@@ -1084,9 +1193,11 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
     }
 
     const status = requestQuery.rows[0].status;
-    if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('El perfil solo puede actualizarse cuando la solicitud estÃ© aprobada');
+    if (!['aprobada', 'en_proceso'].includes(status)) {
+        throw new Error('El perfil solo puede actualizarse cuando la solicitud este aprobada');
     }
+
+    const normalizedPayload = normalizePersonnelProfilePayload(profilePayload);
 
     const query = `
       INSERT INTO personnel_request_profiles (personnel_request_id, profile, updated_by)
@@ -1096,7 +1207,7 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
       RETURNING *
     `;
 
-    const result = await db.query(query, [requestId, profilePayload, userId]);
+    const result = await db.query(query, [requestId, normalizedPayload, userId]);
 
     const collaboratorUserId = requestQuery.rows[0]?.collaborator_user_id;
     if (collaboratorUserId) {
@@ -1108,7 +1219,7 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
             ON CONFLICT (user_id)
             DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()
             `,
-            [collaboratorUserId, profilePayload, userId]
+            [collaboratorUserId, normalizedPayload, userId]
         );
     }
 
@@ -1128,8 +1239,8 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
     }
 
     const status = requestQuery.rows[0].status;
-    if (!['aprobada', 'en_proceso', 'completada'].includes(status)) {
-        throw new Error('Solo puedes subir documentos cuando la solicitud estÃ© aprobada');
+    if (!['aprobada', 'en_proceso'].includes(status)) {
+        throw new Error('Solo puedes subir documentos cuando la solicitud este aprobada');
     }
 
     let folderId = requestQuery.rows[0].drive_folder_id;
@@ -1205,7 +1316,10 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
         );
     }
 
-    return insertResult.rows[0];
+    return {
+        document: insertResult.rows[0],
+        documents: await listPersonnelRequestDocuments(requestId),
+    };
 }
 
 async function hirePersonnelRequest(requestId, userId) {
@@ -1231,14 +1345,14 @@ async function hirePersonnelRequest(requestId, userId) {
     let email = null;
     let fullname = null;
 
-    // Intentar obtener datos del postulante normalizado si estÃ¡ vinculado
+    // Intentar obtener datos del postulante normalizado si está vinculado
     if (applicant_id) {
         const applicantData = await getApplicantById(applicant_id);
         if (applicantData) {
             email = applicantData.email;
             fullname = applicantData.fullname;
             // Reconstruir perfil para collaborator_profiles si es necesario, 
-            // o usar el que ya tiene la solicitud (que deberÃ­a estar sincronizado)
+            // o usar el que ya tiene la solicitud (que debería estar sincronizado)
         }
     }
 
@@ -1304,6 +1418,27 @@ async function hirePersonnelRequest(requestId, userId) {
 
         await client.query(
             `
+            INSERT INTO personnel_request_history (
+              personnel_request_id,
+              previous_status,
+              new_status,
+              changed_by,
+              notes,
+              metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6)
+            `,
+            [
+                requestId,
+                status,
+                'completada',
+                userId,
+                'Contratacion finalizada',
+                JSON.stringify({ action: 'hire_applicant', collaborator_user_id: user.id }),
+            ]
+        );
+
+        await client.query(
+            `
             INSERT INTO collaborator_profiles (user_id, profile, updated_by)
             VALUES ($1, $2, $3)
             ON CONFLICT (user_id)
@@ -1362,7 +1497,7 @@ async function hirePersonnelRequest(requestId, userId) {
 
 async function updatePersonnelRequestCollaborator(requestId, collaboratorUserId, userId) {
     const requestQuery = await db.query(
-        'SELECT id FROM personnel_requests WHERE id = $1',
+        'SELECT id, status, collaborator_user_id FROM personnel_requests WHERE id = $1',
         [requestId]
     );
 
@@ -1384,6 +1519,18 @@ async function updatePersonnelRequestCollaborator(requestId, collaboratorUserId,
         details: { collaborator_user_id: collaboratorUserId }
     });
 
+    await recordPersonnelRequestHistory(requestId, {
+        previousStatus: requestQuery.rows[0].status,
+        newStatus: requestQuery.rows[0].status,
+        changedBy: userId,
+        notes: collaboratorUserId ? 'Responsable operativo reasignado' : 'Responsable operativo liberado',
+        metadata: {
+            action: 'link_collaborator',
+            previous_collaborator_user_id: requestQuery.rows[0].collaborator_user_id || null,
+            collaborator_user_id: collaboratorUserId,
+        },
+    });
+
     return result.rows[0];
 }
 
@@ -1392,7 +1539,7 @@ async function linkApplicantToRequest(requestId, applicantId, userId) {
     await ensureApplicantsTables();
 
     const requestQuery = await db.query(
-        'SELECT id FROM personnel_requests WHERE id = $1',
+        'SELECT id, status, applicant_id FROM personnel_requests WHERE id = $1',
         [requestId]
     );
 
@@ -1455,6 +1602,18 @@ async function linkApplicantToRequest(requestId, applicantId, userId) {
         entity: 'personnel_requests',
         entity_id: requestId,
         details: { applicant_id: applicantId }
+    });
+
+    await recordPersonnelRequestHistory(requestId, {
+        previousStatus: requestQuery.rows[0].status,
+        newStatus: requestQuery.rows[0].status,
+        changedBy: userId,
+        notes: applicantId ? 'Postulante vinculado a la solicitud' : 'Postulante desvinculado de la solicitud',
+        metadata: {
+            action: 'link_applicant',
+            previous_applicant_id: requestQuery.rows[0].applicant_id || null,
+            applicant_id: applicantId,
+        },
     });
 
     return result.rows[0];

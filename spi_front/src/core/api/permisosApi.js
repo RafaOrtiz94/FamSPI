@@ -8,133 +8,133 @@ import api from "./index";
  * Crear solicitud de permiso o vacación
  */
 export const createSolicitud = async (data) => {
-  const response = await api.post("/permisos", data);
-  return response.data;
+ const response = await api.post("/permisos", data);
+ return response.data;
 };
 
 export const registerStudyEnrollment = async (data) => {
-  const formData = new FormData();
-  formData.append("institution_name", data.institution_name);
-  formData.append("program_name", data.program_name);
-  formData.append("valid_from", data.valid_from);
-  formData.append("valid_until", data.valid_until);
-  if (data.matricula_file) {
-    formData.append("matricula", data.matricula_file);
-  }
-  const response = await api.post("/permisos/estudios/matricula", formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return response.data;
+ const formData = new FormData();
+ formData.append("institution_name", data.institution_name);
+ formData.append("program_name", data.program_name);
+ formData.append("valid_from", data.valid_from);
+ formData.append("valid_until", data.valid_until);
+ if (data.matricula_file) {
+ formData.append("matricula", data.matricula_file);
+ }
+ const response = await api.post("/permisos/estudios/matricula", formData, {
+ headers: { "Content-Type": "multipart/form-data" },
+ });
+ return response.data;
 };
 
 export const getActiveStudyEnrollment = async (date = null) => {
-  const response = await api.get("/permisos/estudios/matricula/activa", {
-    params: date ? { date } : {},
-  });
-  return response.data;
+ const response = await api.get("/permisos/estudios/matricula/activa", {
+ params: date ? { date } : {},
+ });
+ return response.data;
 };
 
 export const getMyStudyEnrollments = async () => {
-  const response = await api.get("/permisos/estudios/matriculas");
-  return response.data;
+ const response = await api.get("/permisos/estudios/matriculas");
+ return response.data;
 };
 
 export const getPendingStudyEnrollments = async () => {
-  const response = await api.get("/permisos/estudios/matriculas/pendientes");
-  return response.data;
+ const response = await api.get("/permisos/estudios/matriculas/pendientes");
+ return response.data;
 };
 
 export const reviewStudyEnrollment = async (id, decision, reason) => {
-  const response = await api.post(`/permisos/estudios/matriculas/${id}/revisar`, { decision, reason });
-  return response.data;
+ const response = await api.post(`/permisos/estudios/matriculas/${id}/revisar`, { decision, reason });
+ return response.data;
 };
 
 /**
  * Listar mis solicitudes
  */
 export const getMisSolicitudes = async () => {
-  const response = await api.get("/permisos/mis-solicitudes");
-  return response.data;
+ const response = await api.get("/permisos/mis-solicitudes");
+ return response.data;
 };
 
 /**
  * Resumen por colaborador (talento humano)
  */
 export const getResumenColaboradores = async () => {
-  const response = await api.get("/permisos/resumen-colaboradores");
-  return response.data;
+ const response = await api.get("/permisos/resumen-colaboradores");
+ return response.data;
 };
 
 /**
  * Listar solicitudes pendientes (para jefes)
  */
 export const getPendientes = async (stage = "pending") => {
-  const response = await api.get(`/permisos/pendientes?stage=${stage}`);
-  return response.data;
+ const response = await api.get(`/permisos/pendientes?stage=${stage}`);
+ return response.data;
 };
 
 /**
  * Aprobar parcialmente
  */
 export const aprobarParcial = async (id) => {
-  const response = await api.post(`/permisos/${id}/aprobar-parcial`);
-  return response.data;
+ const response = await api.post(`/permisos/${id}/aprobar-parcial`);
+ return response.data;
 };
 
 /**
  * Subir justificantes
  */
 export const subirJustificantes = async (id, files) => {
-  const formData = new FormData();
-  files.forEach((file, index) => {
-    formData.append(`justificante_${index}`, file);
-  });
+ const formData = new FormData();
+ files.forEach((file, index) => {
+ formData.append(`justificante_${index}`, file);
+ });
 
-  const response = await api.post(`/permisos/${id}/justificantes`, formData, {
-    headers: {
-      "Content-Type": "multipart/form-data",
-    },
-  });
-  return response.data;
+ const response = await api.post(`/permisos/${id}/justificantes`, formData, {
+ headers: {
+ "Content-Type": "multipart/form-data",
+ },
+ });
+ return response.data;
 };
 
 /**
  * Aprobar finalmente
  */
 export const aprobarFinal = async (id) => {
-  const response = await api.post(`/permisos/${id}/aprobar-final`);
-  return response.data;
+ const response = await api.post(`/permisos/${id}/aprobar-final`);
+ return response.data;
 };
 
 /**
  * Rechazar solicitud
  */
 export const rechazar = async (id, observaciones) => {
-  const response = await api.post(`/permisos/${id}/rechazar`, { observaciones });
-  return response.data;
+ const response = await api.post(`/permisos/${id}/rechazar`, { observaciones });
+ return response.data;
 };
 
 export const cancelarSolicitud = async (id, reason) => {
-  const response = await api.post(`/permisos/${id}/cancelar`, { reason });
-  return response.data;
+ const response = await api.post(`/permisos/${id}/cancelar`, { reason });
+ return response.data;
 };
 
 export const revisarCancelacionSolicitud = async (id, decision, reason) => {
-  const response = await api.post(`/permisos/${id}/cancelar/revisar`, { decision, reason });
-  return response.data;
+ const response = await api.post(`/permisos/${id}/cancelar/revisar`, { decision, reason });
+ return response.data;
 };
 
 export const updateRecoveryPlan = async (id, recovery_plan, action = "propose") => {
-  const response = await api.post(`/permisos/${id}/recovery-plan`, { recovery_plan, action });
-  return response.data;
+ const response = await api.post(`/permisos/${id}/recovery-plan`, { recovery_plan, action });
+ return response.data;
 };
 
 /**
  * Obtener resumen de vacaciones (días disponibles)
  */
 export const getVacationSummary = async () => {
-  const response = await api.get("/vacaciones/summary/data?all=false");
-  return response.data;
+ const response = await api.get("/vacaciones/summary/data?all=false");
+ return response.data;
 };
 
 // Aliases para compatibilidad con código existente

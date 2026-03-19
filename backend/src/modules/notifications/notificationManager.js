@@ -12,12 +12,35 @@
 const { sendMail } = require('../../utils/mailer');
 const db = require('../../config/db');
 const logger = require('../../config/logger');
+const { normalizeHumanText } = require('../../utils/textEncoding');
 const loadNotificationService = () => require('./notifications.service');
 const DEFAULT_NOTIFICATION_TIMEZONE =
   process.env.NOTIFICATION_TIMEZONE ||
   process.env.APP_TIMEZONE ||
   process.env.GOOGLE_CALENDAR_TZ ||
   "America/Guayaquil";
+const SYSTEM_NOTIFICATION_ADDRESS =
+  process.env.SYSTEM_MAIL_ADDRESS ||
+  process.env.NOTIFICATION_MAIL_ADDRESS ||
+  process.env.GMAIL_SERVICE_ACCOUNT_SENDER ||
+  process.env.SMTP_FROM ||
+  null;
+const SYSTEM_NOTIFICATION_NAME =
+  process.env.SYSTEM_MAIL_NAME ||
+  process.env.NOTIFICATION_MAIL_NAME ||
+  process.env.SMTP_FROM_NAME ||
+  "FamSPI Sistema";
+const SYSTEM_NOTIFICATION_REPLY_TO =
+  process.env.SYSTEM_MAIL_REPLY_TO ||
+  process.env.NOTIFICATION_MAIL_REPLY_TO ||
+  SYSTEM_NOTIFICATION_ADDRESS ||
+  null;
+const SYSTEM_NOTIFICATION_DELEGATED_USER =
+  process.env.SYSTEM_MAIL_DELEGATED_USER ||
+  process.env.NOTIFICATION_MAIL_DELEGATED_USER ||
+  process.env.GMAIL_SERVICE_ACCOUNT_SENDER ||
+  process.env.GMAIL_DELEGATED_USER ||
+  null;
 
 function formatNotificationDateTime(value) {
   const parsed = value ? new Date(value) : null;
@@ -358,8 +381,8 @@ class NotificationManager {
 
       const notificationData = {
         user_id: userId,
-        title: customTitle || this.interpolate(templateData.title, data),
-        message: customMessage || this.interpolate(templateData.message, data),
+        title: normalizeHumanText(customTitle || this.interpolate(templateData.title, data)),
+        message: normalizeHumanText(customMessage || this.interpolate(templateData.message, data)),
         type: type || templateData?.type || 'info',
         source: source || template,
         priority: priority || templateData?.priority || 0,
@@ -631,11 +654,13 @@ class NotificationManager {
       const threadContext = processKey ? await this.getEmailThreadContext(processKey) : null;
 
       const resolvedSubject =
-        data?.email_subject ||
-        data?.subject ||
-        notification?.meta?.email_subject ||
-        notification?.meta?.subject ||
-        notification.title;
+        normalizeHumanText(
+          data?.email_subject ||
+            data?.subject ||
+            notification?.meta?.email_subject ||
+            notification?.meta?.subject ||
+            notification.title,
+        );
       const subject = threadContext?.root_subject || resolvedSubject;
       const html = this.generateEmailHTML(notification, data);
 
@@ -644,8 +669,10 @@ class NotificationManager {
         cc: explicitCc || null,
         subject,
         html,
-        from: process.env.SMTP_FROM,
-        senderName: "FamSPI Sistema",
+        from: SYSTEM_NOTIFICATION_ADDRESS,
+        senderName: SYSTEM_NOTIFICATION_NAME,
+        replyTo: SYSTEM_NOTIFICATION_REPLY_TO,
+        delegatedUser: SYSTEM_NOTIFICATION_DELEGATED_USER,
         source: notification.source,
         threadId: threadContext?.thread_id || null,
       });
@@ -722,20 +749,32 @@ class NotificationManager {
     };
 
     const color = typeColors[notification.type] || '#6B7280';
+    const title = normalizeHumanText(notification.title);
+    const message = normalizeHumanText(notification.message);
 
     return `
+      <!DOCTYPE html>
+      <html lang="es">
+      <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+        <title>${title}</title>
+      </head>
+      <body>
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
         <div style="background-color: ${color}; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-          <h2 style="margin: 0; font-size: 24px;">${notification.title}</h2>
+          <h2 style="margin: 0; font-size: 24px;">${title}</h2>
         </div>
         <div style="background-color: #f8f9fa; padding: 20px; border-radius: 0 0 8px 8px;">
-          <p style="margin: 0; font-size: 16px; line-height: 1.5;">${notification.message}</p>
+          <p style="margin: 0; font-size: 16px; line-height: 1.5;">${message}</p>
           <hr style="border: none; border-top: 1px solid #e9ecef; margin: 20px 0;">
           <p style="margin: 0; color: #6c757d; font-size: 14px;">
             Recibido: ${formatNotificationDateTime(notification.created_at)}
           </p>
         </div>
       </div>
+      </body>
+      </html>
     `;
   }
 

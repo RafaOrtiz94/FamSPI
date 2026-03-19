@@ -8,44 +8,44 @@ import NewPublicPurchaseRequestModal from "../../modules/comercial/components/Ne
  * para mantener exactamente la misma UI/UX que RequestModals.jsx.
  */
 const NewPurchaseRequestModal = ({
-  isOpen: externalIsOpen,
-  onOpenChange,
-  mode = "acp_required",
-  onSuccess,
+ isOpen: externalIsOpen,
+ onOpenChange,
+ mode = "acp_required",
+ onSuccess,
 }) => {
-  const [internalIsOpen, setInternalIsOpen] = useState(false);
+ const [internalIsOpen, setInternalIsOpen] = useState(false);
 
-  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
-  const setIsOpen = (value) => {
-    if (typeof onOpenChange === "function") {
-      onOpenChange(value);
-      return;
-    }
-    setInternalIsOpen(value);
-  };
+ const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalIsOpen;
+ const setIsOpen = (value) => {
+ if (typeof onOpenChange === "function") {
+ onOpenChange(value);
+ return;
+ }
+ setInternalIsOpen(value);
+ };
 
-  const handleClose = () => setIsOpen(false);
-  const handleSuccess = (result) => {
-    onSuccess?.(result);
-  };
+ const handleClose = () => setIsOpen(false);
+ const handleSuccess = (result) => {
+ onSuccess?.(result);
+ };
 
-  if (mode === "private_direct") {
-    return (
-      <PrivatePurchaseRequestModal
-        isOpen={isOpen}
-        onClose={handleClose}
-        onSuccess={handleSuccess}
-      />
-    );
-  }
+ if (mode === "private_direct") {
+ return (
+ <PrivatePurchaseRequestModal
+ isOpen={isOpen}
+ onClose={handleClose}
+ onSuccess={handleSuccess}
+ />
+ );
+ }
 
-  return (
-    <NewPublicPurchaseRequestModal
-      isOpen={isOpen}
-      onClose={handleClose}
-      onSuccess={handleSuccess}
-    />
-  );
+ return (
+ <NewPublicPurchaseRequestModal
+ isOpen={isOpen}
+ onClose={handleClose}
+ onSuccess={handleSuccess}
+ />
+ );
 };
 
 export default NewPurchaseRequestModal;

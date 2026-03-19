@@ -1,131 +1,147 @@
 import React from "react";
-import { FiSave, FiMenu } from "react-icons/fi";
+import { FiSave } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
 
+const STATUS_META = {
+ pendiente: { label: "Pendiente", className: "text-yellow-600" },
+ en_revision: { label: "En revisión", className: "text-sky-600" },
+ aprobada: { label: "Aprobada", className: "text-blue-600" },
+ en_proceso: { label: "En proceso", className: "text-indigo-600" },
+ completada: { label: "Completada", className: "text-emerald-600" },
+ rechazada: { label: "Rechazada", className: "text-rose-600" },
+ cancelada: { label: "Cancelada", className: "text-slate-600" },
+};
+
 const PersonnelHeader = ({
-  selectedRequest,
-  selectedCollaborator,
-  selectedApplicant,
-  workflow,
-  onSave,
-  saving,
-  loading,
-  onToggleSidebar, // For mobile if needed
+ selectedRequest,
+ selectedCollaborator,
+ selectedApplicant,
+ workflow,
+ onSave,
+ saving,
+ loading,
+ onToggleSidebar, // For mobile if needed
 }) => {
-  if (!selectedRequest && !selectedCollaborator) {
-    return (
-      <div className="flex h-16 items-center border-b border-gray-200 bg-white px-6">
-        <h1 className="text-lg font-bold text-gray-900">Workspace de Personal</h1>
-      </div>
-    );
-  }
+ const normalizedStatus = String(selectedRequest?.status || "").trim().toLowerCase();
+ const statusMeta = STATUS_META[normalizedStatus] || { label: "En seguimiento", className: "text-blue-600" };
 
-  if (selectedCollaborator) {
-    return (
-      <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-gray-200 bg-white px-6 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-3">
-          <div>
-            <h1 className="text-xl font-bold text-gray-900 leading-tight">
-              {selectedCollaborator.fullname || selectedCollaborator.email}
-            </h1>
-            <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-              <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-                Colaborador activo
-              </span>
-              {selectedCollaborator.department_name && (
-                <>
-                  <span></span>
-                  <span>{selectedCollaborator.department_name}</span>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+ if (!selectedRequest && !selectedCollaborator) {
+ return (
+ <div className="flex h-16 items-center border-b border-gray-200 bg-white px-6">
+ <h1 className="text-lg font-bold text-gray-900">Workspace de Personal</h1>
+ </div>
+ );
+ }
 
-        <div className="flex items-center gap-2">
-          <Button
-            variant="primary"
-            icon={FiSave}
-            onClick={onSave}
-            disabled={saving || loading}
-            className="w-full sm:w-auto"
-          >
-            {saving ? "Guardando..." : "Guardar Cambios"}
-          </Button>
-        </div>
-      </div>
-    );
-  }
+ if (selectedCollaborator) {
+ return (
+ <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-gray-200 bg-white px-6 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+ <div className="flex items-center gap-3">
+ <div>
+ <h1 className="text-xl font-bold text-gray-900 leading-tight">
+ {selectedCollaborator.fullname || selectedCollaborator.email}
+ </h1>
+ <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+ <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+ Colaborador activo
+ </span>
+ {selectedCollaborator.department_name && (
+ <>
+ <span></span>
+ <span>{selectedCollaborator.department_name}</span>
+ </>
+ )}
+ </div>
+ </div>
+ </div>
 
-  return (
-    <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-gray-200 bg-white px-6 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-center gap-3">
-        {/* Mobile menu button could go here */}
-        <div>
-          <h1 className="text-xl font-bold text-gray-900 leading-tight">
-            {selectedRequest.position_title}
-          </h1>
-          <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
-            <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
-              {selectedRequest.request_number}
-            </span>
-            <span>•</span>
-            <span>{selectedRequest.department_name}</span>
-            <span>•</span>
-            <span
-              className={`font-semibold ${selectedRequest.status === "completada"
-                ? "text-emerald-600"
-                : "text-blue-600"
-                }`}
-            >
-              {selectedRequest.status === "completada"
-                ? "Completada"
-                : "En Proceso"}
-            </span>
-            {selectedApplicant?.fullname && (
-              <>
-                <span></span>
-                <span className="text-blue-600 font-semibold">
-                  Postulante: {selectedApplicant.fullname}
-                </span>
-              </>
-            )}
-          </div>
-          {workflow && (
-            <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-              <span className="rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700">
-                {workflow.current_stage_label}
-              </span>
-              <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
-                Responsable: {workflow.current_responsible_name || workflow.current_responsible_label}
-              </span>
-              <span
-                className={`rounded-full px-2 py-0.5 font-semibold ${
-                  workflow.stalled ? "bg-rose-100 text-rose-700" : "bg-emerald-50 text-emerald-700"
-                }`}
-              >
-                {workflow.stalled
-                  ? `Estancada ${workflow.stalled_for_label || ""}`.trim()
-                  : `En etapa ${workflow.elapsed_label || "N/A"}`}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
+ <div className="flex items-center gap-2">
+ <Button
+ variant="primary"
+ icon={FiSave}
+ onClick={onSave}
+ disabled={saving || loading}
+ className="w-full sm:w-auto"
+ >
+ {saving ? "Guardando..." : "Guardar Cambios"}
+ </Button>
+ </div>
+ </div>
+ );
+ }
 
-      <div className="flex items-center gap-2">
-        <Button
-          variant="primary"
-          icon={FiSave}
-          onClick={onSave}
-          disabled={saving || loading}
-          className="w-full sm:w-auto"
-        >
-          {saving ? "Guardando..." : "Guardar Cambios"}
-        </Button>
-      </div>
-    </div>
-  );
+ return (
+ <div className="sticky top-0 z-10 flex flex-col gap-4 border-b border-gray-200 bg-white px-6 py-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+ <div className="flex items-center gap-3">
+ {/* Mobile menu button could go here */}
+ <div>
+ <h1 className="text-xl font-bold text-gray-900 leading-tight">
+ {selectedRequest.position_title}
+ </h1>
+ <div className="mt-1 flex items-center gap-2 text-xs text-gray-500">
+ <span className="font-mono bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">
+ {selectedRequest.request_number}
+ </span>
+ <span>•</span>
+ <span>{selectedRequest.department_name}</span>
+ <span>•</span>
+ <span className={`font-semibold ${statusMeta.className}`}>
+ {statusMeta.label}
+ </span>
+ {selectedApplicant?.fullname && (
+ <>
+ <span></span>
+ <span className="text-blue-600 font-semibold">
+ Postulante: {selectedApplicant.fullname}
+ </span>
+ </>
+ )}
+ </div>
+ {workflow && (
+ <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
+ <span className="rounded-full bg-blue-50 px-2 py-0.5 font-semibold text-blue-700">
+ {workflow.current_stage_label}
+ </span>
+ <span className="rounded-full bg-gray-100 px-2 py-0.5 font-medium text-gray-700">
+ Responsable: {workflow.current_responsible_name || workflow.current_responsible_label}
+ </span>
+ <span
+ className={`rounded-full px-2 py-0.5 font-semibold ${
+ workflow.stalled ? "bg-rose-100 text-rose-700" : "bg-emerald-50 text-emerald-700"
+ }`}
+ >
+ {workflow.stalled
+ ? `Estancada ${workflow.stalled_for_label || ""}`.trim()
+ : `En etapa ${workflow.elapsed_label || "N/A"}`}
+ </span>
+ {workflow.next_action && (
+ <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+ Siguiente acción: {workflow.next_action}
+ </span>
+ )}
+ {workflow.deadline_at && (
+ <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+ Límite: {new Date(workflow.deadline_at).toLocaleDateString("es-EC")}
+ </span>
+ )}
+ </div>
+ )}
+ </div>
+ </div>
+
+ <div className="flex items-center gap-2">
+ <Button
+ variant="primary"
+ icon={FiSave}
+ onClick={onSave}
+ disabled={saving || loading}
+ className="w-full sm:w-auto"
+ >
+ {saving ? "Guardando..." : "Guardar Cambios"}
+ </Button>
+ </div>
+ </div>
+ );
 };
 
 export default PersonnelHeader;

@@ -37,10 +37,10 @@ async function notifyPendingPermisosVacaciones(summary) {
     try {
       await notificationManager.sendNotification({
         userId: row.approver_user_id,
-        customTitle: "Solicitud pendiente de aprobacion",
+        customTitle: "Solicitud pendiente de aprobaci\u00F3n",
         customMessage: `${row.user_fullname || row.user_email} tiene una solicitud de ${row.tipo_solicitud}${
           row.tipo_permiso ? ` (${row.tipo_permiso})` : ""
-        } pendiente de tu decision.`,
+        } pendiente de tu decisi\u00F3n.`,
         type: "task",
         source: "permisos_vacaciones",
         priority: 2,
@@ -91,7 +91,7 @@ async function notifyPendingVacaciones(summary) {
         await notificationManager.sendNotification({
           userId: row.approver_id,
           customTitle: "Solicitud de vacaciones pendiente",
-          customMessage: `${row.requester_name || row.requester_email} tiene una solicitud de vacaciones pendiente de tu decision.`,
+          customMessage: `${row.requester_name || row.requester_email} tiene una solicitud de vacaciones pendiente de tu decisi\u00F3n.`,
           type: "task",
           source: "vacaciones",
           priority: 2,
@@ -148,4 +148,3 @@ async function main() {
 }
 
 main();
-

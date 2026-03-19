@@ -53,6 +53,10 @@ const ROLE_APPROVER = {
 
 const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
 const AUTO_FINAL_PERMISO_TYPES = new Set(["estudios", "personal"]);
+const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS || "")
+  .split(",")
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
 
 function resolveApproverRole(requesterRole = "") {
   const normalized = String(requesterRole || "").trim().toLowerCase();
@@ -82,9 +86,15 @@ async function findApproverByRole(role) {
     `SELECT id, email, fullname
        FROM users
       WHERE LOWER(role) = LOWER($1) AND active = true
-      ORDER BY id ASC
+      ORDER BY
+        CASE
+          WHEN LOWER(COALESCE(email, '')) = ANY($2) THEN 0
+          WHEN LOWER(COALESCE(email, '')) LIKE 'administrador@%' THEN 2
+          ELSE 1
+        END,
+        id ASC
       LIMIT 1`,
-    [role]
+    [role, PREFERRED_APPROVER_EMAILS]
   );
   return rows[0] || null;
 }

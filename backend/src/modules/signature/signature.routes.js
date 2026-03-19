@@ -22,7 +22,7 @@ router.get("/signature/verify/:token", ctrl.verifyDocument);
 // =============================================================================
 
 // GET /api/signature/documents/:documentId/audit-trail
-// Trail completo de auditorÃ­a de un documento
+// Trail completo de auditoría de un documento
 router.get("/documents/:documentId/audit-trail", verifyToken, ctrl.getDocumentAuditTrail);
 router.get("/signature/documents/:documentId/audit-trail", verifyToken, ctrl.getDocumentAuditTrail);
 

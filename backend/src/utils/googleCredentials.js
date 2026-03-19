@@ -26,9 +26,15 @@ if (!rawSubject) {
   logger.info(`GOOGLE_SUBJECT configurado -> ${googleDelegatedUser}`);
 }
 
-const googleKeyPath = process.env.GSA_KEY_PATH
-  ? path.resolve(process.env.GSA_KEY_PATH)
-  : null;
+const backendRoot = path.resolve(__dirname, "..", "..");
+const resolveGoogleKeyPath = () => {
+  const raw = String(process.env.GSA_KEY_PATH || "").trim();
+  if (!raw) return null;
+  if (path.isAbsolute(raw)) return raw;
+  return path.resolve(backendRoot, raw);
+};
+
+const googleKeyPath = resolveGoogleKeyPath();
 
 if (!googleKeyPath) {
   logger.info(

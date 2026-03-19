@@ -12,6 +12,7 @@
  */
 
 const db = require("../../config/db");
+const { logAction } = require("../../utils/audit");
 
 const ensureDepartmentSchema = async () => {
   await db.query(`
@@ -46,6 +47,17 @@ const normalizeDepartmentStatus = (value) => {
   }
   return "active";
 };
+
+const getActorContext = (req) => ({
+  usuario_id: req.user?.id || null,
+  usuario_email: req.user?.email || req.user?.correo || "anon",
+  rol:
+    req.user?.role ||
+    req.user?.role_name ||
+    req.user?.scope ||
+    req.user?.rol ||
+    "sin-rol",
+});
 
 /* ======================================================
    1. Listar todos los departamentos
@@ -126,6 +138,14 @@ const createDepartment = async (req, res) => {
       [code, name, description || null, status]
     );
 
+    await logAction({
+      ...getActorContext(req),
+      modulo: "departments",
+      accion: "create",
+      descripcion: `Creación de departamento ${name}`,
+      datos_nuevos: rows[0],
+    });
+
     res.status(201).json({ ok: true, data: rows[0] });
   } catch (err) {
     console.error("Error al crear el departamento:", err);
@@ -148,6 +168,14 @@ const updateDepartment = async (req, res) => {
         ? normalizeDepartmentStatus(req.body.active)
         : undefined;
 
+    const previousResult = await db.query(
+      `SELECT id, code, name, description, status
+         FROM departments
+        WHERE id = $1
+        LIMIT 1`,
+      [id]
+    );
+
     const { rows } = await db.query(
       `UPDATE departments
        SET code = COALESCE($1, code),
@@ -164,6 +192,15 @@ const updateDepartment = async (req, res) => {
       return res.status(404).json({ ok: false, message: "Departamento no encontrado" });
     }
 
+    await logAction({
+      ...getActorContext(req),
+      modulo: "departments",
+      accion: "update",
+      descripcion: `Actualización de departamento ${rows[0]?.name || id}`,
+      datos_anteriores: previousResult.rows[0] || null,
+      datos_nuevos: rows[0],
+    });
+
     res.status(200).json({ ok: true, data: rows[0] });
   } catch (err) {
     console.error("Error al actualizar el departamento:", err);
@@ -178,6 +215,14 @@ const deleteDepartment = async (req, res) => {
   try {
     await ensureDepartmentSchema();
     const { id } = req.params;
+    const previousResult = await db.query(
+      `SELECT id, code, name, description, status
+         FROM departments
+        WHERE id = $1
+        LIMIT 1`,
+      [id]
+    );
+
     const result = await db.query(
       `UPDATE departments
           SET status = 'inactive',
@@ -190,6 +235,15 @@ const deleteDepartment = async (req, res) => {
     if (result.rowCount === 0) {
       return res.status(404).json({ ok: false, message: "Departamento no encontrado" });
     }
+
+    await logAction({
+      ...getActorContext(req),
+      modulo: "departments",
+      accion: "deactivate",
+      descripcion: `Desactivación de departamento ${previousResult.rows[0]?.name || id}`,
+      datos_anteriores: previousResult.rows[0] || null,
+      datos_nuevos: { id: result.rows[0]?.id, status: "inactive" },
+    });
 
     res.status(200).json({ ok: true, message: "Departamento desactivado correctamente" });
   } catch (err) {

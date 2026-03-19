@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from "react";
-import { Routes, Route, Navigate } from "react-router-dom";
+import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 
 
 // 🧠 Contextos y protecciones
@@ -29,6 +29,7 @@ import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
 import PersonnelWorkspace from "../modules/talento/pages/PersonnelWorkspace";
 import ColaboradoresHub from "../modules/talento/pages/ColaboradoresHub";
 import CollaboratorWorkspace from "../modules/talento/pages/CollaboratorWorkspace";
+import PeopleAdminHub from "../modules/talento/pages/PeopleAdminHub";
 
 // 🧾 Páginas compartidas
 import RequestsPage from "../modules/RequestsPage";
@@ -38,6 +39,7 @@ import Auditoria from "../modules/gerencia/Auditoria";
 import ConfigurationPage from "../pages/ConfigurationPage";
 import MyProfilePage from "../modules/profile/MyProfilePage";
 import AuditPrepPage from "../modules/audit-prep/AuditPrepPage";
+import Modal from "../core/ui/components/Modal";
 
 // 📝 Sistema de Firma Digital
 import DocumentSigner from "../modules/signature/components/DocumentSigner";
@@ -105,24 +107,41 @@ const commercialDashboardRoles = [
   "director",
 ];
 
-const peopleAdminRoles = [
+const peopleNavigationRoles = [
   "talento_humano",
   "jefe_talento_humano",
-  "gerencia",
-  "gerencia_general",
-  "gerente_general",
-  "director",
   "ti",
   "jefe_ti",
   "admin_ti",
-  "admin",
-  "administrador",
 ];
 
 const AppRoutes = () => {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const backgroundLocation = location.state?.backgroundLocation;
+
+  const closeProfileModal = () => {
+    if (backgroundLocation) {
+      navigate(-1);
+      return;
+    }
+    navigate("/dashboard", { replace: true });
+  };
+
+  const profileModalElement = (
+    <Modal
+      open
+      onClose={closeProfileModal}
+      title="Mi Perfil"
+      maxWidth="max-w-6xl"
+    >
+      <MyProfilePage embedded />
+    </Modal>
+  );
+
   return (
     <Suspense fallback={routeFallback}>
-      <Routes>
+      <Routes location={backgroundLocation || location}>
       {/* Ruta directa para /registro-en-proceso (fallback duro) */}
       <Route path="/registro-en-proceso" element={<RolePending />} />
       {/* =======================================
@@ -275,7 +294,16 @@ const AppRoutes = () => {
             <Route path="/dashboard/servicio-tecnico/entregas-privadas" element={<ServicioPrivatePurchaseDeliveries />} />
             <Route path="/dashboard/servicio-tecnico/compras-privadas" element={<TecnicoPrivatePurchases />} />
           </Route>
-          <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={["talento_humano", "jefe_talento_humano", "ti", "jefe_ti", "admin_ti"]}
+                strictRoles
+              />
+            }
+          >
+            <Route path="/dashboard/talento-humano" element={<DashboardTalento />} />
+          </Route>
           <Route element={<ProtectedRoute allowedRoles={["ti", "jefe_ti", "admin_ti"]} />}>
             <Route path="/dashboard/ti" element={<DashboardTI />} />
             <Route path="/dashboard/ti/workspace" element={<TicketsWorkspace />} />
@@ -300,9 +328,10 @@ const AppRoutes = () => {
           {/* Subrutas Talento Humano */}
           <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub initialTab="colaboradores" />} />
           <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorWorkspace />} />
-          <Route element={<ProtectedRoute allowedRoles={peopleAdminRoles} />}>
-            <Route path="/dashboard/talento-humano/usuarios" element={<ColaboradoresHub initialTab="usuarios" />} />
-            <Route path="/dashboard/talento-humano/departamentos" element={<ColaboradoresHub initialTab="departamentos" />} />
+          <Route element={<ProtectedRoute allowedRoles={peopleNavigationRoles} strictRoles />}>
+            <Route path="/dashboard/talento-humano/gestion" element={<PeopleAdminHub initialTab="usuarios" />} />
+            <Route path="/dashboard/talento-humano/usuarios" element={<PeopleAdminHub initialTab="usuarios" />} />
+            <Route path="/dashboard/talento-humano/departamentos" element={<PeopleAdminHub initialTab="departamentos" />} />
           </Route>
           <Route
             path="/dashboard/talento-humano/solicitudes"
@@ -320,12 +349,22 @@ const AppRoutes = () => {
                 allowedRoles={[
                   "talento_humano",
                   "jefe_talento_humano",
+                  "jefe_de_talento_humano",
+                  "analista_talento_humano",
+                  "asistente_talento_humano",
+                  "auxiliar_talento_humano",
+                  "rh",
+                  "rrhh",
                   "gerencia",
                   "gerencia_general",
+                  "gerente_general",
+                  "director",
                   "finanzas",
                   "financiero",
                   "jefe_finanzas",
                   "jefe_financiero",
+                  "admin",
+                  "administrador",
                 ]}
               />
             }
@@ -395,7 +434,7 @@ const AppRoutes = () => {
           <Route path="/mantenimientos" element={<MantenimientosPage />} />
           <Route path="/documents" element={<DocumentsPage />} />
           <Route path="/configuration" element={<ConfigurationPage />} />
-          <Route path="/dashboard/mi-perfil" element={<MyProfilePage />} />
+          <Route path="/dashboard/mi-perfil" element={backgroundLocation ? null : profileModalElement} />
           <Route path="/first-login-signature" element={<FirstLoginSignature />} />
 
           {/* 📝 Sistema de Firma Digital */}
@@ -487,6 +526,16 @@ const AppRoutes = () => {
       <Route path="/" element={<Navigate to="/login" replace />} />
       <Route path="*" element={<NotFound />} />
       </Routes>
+      {backgroundLocation ? (
+        <Routes>
+          <Route
+            path="/dashboard/mi-perfil"
+            element={
+              profileModalElement
+            }
+          />
+        </Routes>
+      ) : null}
     </Suspense>
   );
 };

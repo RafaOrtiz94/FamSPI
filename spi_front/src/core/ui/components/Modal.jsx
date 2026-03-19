@@ -1,28 +1,65 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { FiX } from "react-icons/fi";
 
-const Modal = ({ open, isOpen, title, onClose, children, maxWidth = "max-w-lg" }) => {
+const Modal = ({
+  open,
+  isOpen,
+  title,
+  onClose,
+  children,
+  maxWidth = "max-w-lg",
+  disableClose = false,
+  closeOnBackdrop = true,
+}) => {
   const visible = typeof open !== "undefined" ? open : isOpen;
+
+  useEffect(() => {
+    if (!visible || disableClose) return undefined;
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        onClose?.();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [disableClose, onClose, visible]);
+
   if (!visible) return null;
 
+  const handleBackdropClick = () => {
+    if (!disableClose && closeOnBackdrop) {
+      onClose?.();
+    }
+  };
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className={`bg-white rounded-xl shadow-2xl w-full ${maxWidth} max-h-[90vh] flex flex-col relative`}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-gray-200">
-          {title && <h2 className="text-xl font-bold text-gray-900">{title}</h2>}
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+      role="presentation"
+      onClick={handleBackdropClick}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || "Modal"}
+        className={`relative flex max-h-[90vh] w-full flex-col overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_30px_80px_rgba(15,23,42,0.20)] ${maxWidth}`}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 sm:px-6">
+          {title ? <h2 className="text-lg font-bold text-slate-900 sm:text-xl">{title}</h2> : <span />}
           <button
-            onClick={onClose}
-            className="ml-auto text-gray-400 hover:text-gray-600 transition-colors p-1 hover:bg-gray-100 rounded-lg"
+            type="button"
+            onClick={() => !disableClose && onClose?.()}
+            disabled={disableClose}
+            className="ml-auto rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <FiX className="w-6 h-6" />
+            <FiX className="h-5 w-5" />
           </button>
         </div>
 
-        {/* Content con scroll */}
-        <div className="overflow-y-auto flex-1 p-6">
-          {children}
-        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-5 sm:px-6">{children}</div>
       </div>
     </div>
   );

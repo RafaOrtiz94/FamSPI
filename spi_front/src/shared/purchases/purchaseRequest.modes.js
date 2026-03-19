@@ -6,67 +6,67 @@
  * Mode configurations for purchase request modals
  */
 export const PURCHASE_MODES = {
-    acp_required: {
-        id: 'acp_required',
-        label: 'ACP Obligatorio',
-        description: 'Asignación ACP mandatoria para gestión de proveedores',
+ acp_required: {
+ id: 'acp_required',
+ label: 'ACP Obligatorio',
+ description: 'Asignación ACP mandatoria para gestión de proveedores',
 
-        // Validation rules
-        validations: {
-            assignedToRequired: true,
-            equipmentRequired: true,
-            clientRequired: true,
-            acpAutoAssign: false
-        },
+ // Validation rules
+ validations: {
+ assignedToRequired: true,
+ equipmentRequired: true,
+ clientRequired: true,
+ acpAutoAssign: false
+ },
 
-        // UI configuration
-        ui: {
-            acpLabel: 'Asignar a',
-            acpPlaceholder: 'Selecciona un ACP Comercial',
-            acpRequired: true,
-            acpHelpText: null,
-            lisLabel: 'El cliente requiere LIS',
-            lisOptions: ['Cobas Infinity', 'Orion'],
-            buttonText: 'Enviar a ACP',
-            successMessage: 'Solicitud enviada al ACP Comercial'
-        },
+ // UI configuration
+ ui: {
+ acpLabel: 'Asignar a',
+ acpPlaceholder: 'Selecciona un ACP Comercial',
+ acpRequired: true,
+ acpHelpText: null,
+ lisLabel: 'El cliente requiere LIS',
+ lisOptions: ['Cobas Infinity', 'Orion'],
+ buttonText: 'Enviar a ACP',
+ successMessage: 'Solicitud enviada al ACP Comercial'
+ },
 
-        // Default values
-        defaults: {
-            assignedTo: 'first_available' // Auto-select first ACP
-        }
-    },
+ // Default values
+ defaults: {
+ assignedTo: 'first_available' // Auto-select first ACP
+ }
+ },
 
-    private_direct: {
-        id: 'private_direct',
-        label: 'Compra Privada Directa',
-        description: 'Gestión directa con cliente privado sin proceso ACP',
+ private_direct: {
+ id: 'private_direct',
+ label: 'Compra Privada Directa',
+ description: 'Gestión directa con cliente privado sin proceso ACP',
 
-        // Validation rules
-        validations: {
-            assignedToRequired: false,
-            equipmentRequired: true,
-            clientRequired: true,
-            acpAutoAssign: false
-        },
+ // Validation rules
+ validations: {
+ assignedToRequired: false,
+ equipmentRequired: true,
+ clientRequired: true,
+ acpAutoAssign: false
+ },
 
-        // UI configuration
-        ui: {
-            acpLabel: null, // No ACP assignment for private purchases
-            acpPlaceholder: null,
-            acpRequired: false,
-            acpHelpText: null,
-            lisLabel: 'El cliente requiere LIS',
-            lisOptions: ['Cobas Infinity', 'Orion'],
-            buttonText: 'Crear Solicitud Privada',
-            successMessage: 'Solicitud de compra privada creada correctamente'
-        },
+ // UI configuration
+ ui: {
+ acpLabel: null, // No ACP assignment for private purchases
+ acpPlaceholder: null,
+ acpRequired: false,
+ acpHelpText: null,
+ lisLabel: 'El cliente requiere LIS',
+ lisOptions: ['Cobas Infinity', 'Orion'],
+ buttonText: 'Crear Solicitud Privada',
+ successMessage: 'Solicitud de compra privada creada correctamente'
+ },
 
-        // Default values
-        defaults: {
-            assignedTo: null // No default assignment
-        }
-    }
+ // Default values
+ defaults: {
+ assignedTo: null // No default assignment
+ }
+ }
 };
 
 /**
@@ -75,11 +75,11 @@ export const PURCHASE_MODES = {
  * @returns {Object} Mode configuration
  */
 export const getModeConfig = (modeId) => {
-    const config = PURCHASE_MODES[modeId];
-    if (!config) {
-        throw new Error(`Unknown purchase mode: ${modeId}`);
-    }
-    return config;
+ const config = PURCHASE_MODES[modeId];
+ if (!config) {
+ throw new Error(`Unknown purchase mode: ${modeId}`);
+ }
+ return config;
 };
 
 /**
@@ -89,34 +89,34 @@ export const getModeConfig = (modeId) => {
  * @returns {Object} Validation result { isValid, errors }
  */
 export const validateFormForMode = (formData, modeId) => {
-    const mode = getModeConfig(modeId);
-    const errors = [];
+ const mode = getModeConfig(modeId);
+ const errors = [];
 
-    // Required field validations
-    if (mode.validations.clientRequired && !formData.clientId) {
-        errors.push('Cliente es requerido');
-    }
+ // Required field validations
+ if (mode.validations.clientRequired && !formData.clientId) {
+ errors.push('Cliente es requerido');
+ }
 
-    if (mode.validations.equipmentRequired &&
-        (!formData.equipment || !Array.isArray(formData.equipment) || formData.equipment.length === 0)) {
-        errors.push('Al menos un equipo es requerido');
-    }
+ if (mode.validations.equipmentRequired &&
+ (!formData.equipment || !Array.isArray(formData.equipment) || formData.equipment.length === 0)) {
+ errors.push('Al menos un equipo es requerido');
+ }
 
-    if (mode.validations.assignedToRequired && !formData.assignedTo) {
-        errors.push('Debes asignar la solicitud a un ACP Comercial');
-    }
+ if (mode.validations.assignedToRequired && !formData.assignedTo) {
+ errors.push('Debes asignar la solicitud a un ACP Comercial');
+ }
 
-    if (formData.requiresLis && !formData.lisOption) {
-        const lisError = modeId === 'acp_required'
-            ? "Selecciona la plataforma LIS solicitada"
-            : "Selecciona el tipo de LIS";
-        errors.push(lisError);
-    }
+ if (formData.requiresLis && !formData.lisOption) {
+ const lisError = modeId === 'acp_required'
+ ? "Selecciona la plataforma LIS solicitada"
+ : "Selecciona el tipo de LIS";
+ errors.push(lisError);
+ }
 
-    return {
-        isValid: errors.length === 0,
-        errors
-    };
+ return {
+ isValid: errors.length === 0,
+ errors
+ };
 };
 
 /**
@@ -125,8 +125,8 @@ export const validateFormForMode = (formData, modeId) => {
  * @returns {Array} LIS options
  */
 export const getLisOptionsForMode = (modeId) => {
-    const mode = getModeConfig(modeId);
-    return mode.ui.lisOptions;
+ const mode = getModeConfig(modeId);
+ return mode.ui.lisOptions;
 };
 
 /**
@@ -135,8 +135,8 @@ export const getLisOptionsForMode = (modeId) => {
  * @returns {boolean} True if extended fields are supported
  */
 export const modeSupportsExtendedFields = (modeId) => {
-    const mode = getModeConfig(modeId);
-    return !!(mode.extendedFields && mode.extendedFields.length > 0);
+ const mode = getModeConfig(modeId);
+ return !!(mode.extendedFields && mode.extendedFields.length > 0);
 };
 
 /**
@@ -145,6 +145,6 @@ export const modeSupportsExtendedFields = (modeId) => {
  * @returns {Array} Extended field names
  */
 export const getExtendedFieldsForMode = (modeId) => {
-    const mode = getModeConfig(modeId);
-    return mode.extendedFields || [];
+ const mode = getModeConfig(modeId);
+ return mode.extendedFields || [];
 };

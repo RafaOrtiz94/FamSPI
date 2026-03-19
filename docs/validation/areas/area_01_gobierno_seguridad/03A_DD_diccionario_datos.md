@@ -63,11 +63,11 @@ Cada entidad documentada incluye:
 - `public.users` (table)
 
 ## 7. Cuando intervienen estas entidades
-- `users`, `departments`, `user_sessions`, `user_profile` y `user_lopdp_consents` intervienen durante autenticaciÃ³n, perfil, sesiones y aceptaciÃ³n interna.
+- `users`, `departments`, `user_sessions`, `user_profile` y `user_lopdp_consents` intervienen durante autenticación, perfil, sesiones y aceptación interna.
 - `auditoria.logs` y `notifications` intervienen cuando el sistema registra, expone o revisa eventos relevantes.
-- `audit_*` intervienen durante preparaciÃ³n documental y control de auditorÃ­a.
+- `audit_*` intervienen durante preparación documental y control de auditoría.
 - `requests`, `request_types`, `request_approvals`, `request_attachments` y `request_versions` intervienen durante decisiones operativas y visibilidad gerencial.
-- `documents` y `document_*` intervienen durante firma avanzada, verificaciÃ³n pÃºblica y audit trail documental.
+- `documents` y `document_*` intervienen durante firma avanzada, verificación pública y audit trail documental.
 
 ## 8. Diccionario por entidad
 
@@ -82,13 +82,13 @@ Cada entidad documentada incluye:
 |---|---|---|---|---|
 | id | integer | NO | nextval('auditoria.logs_id_seq'::regclass) |  |
 | usuario_id | integer | YES |  |  |
-| usuario_email | character varying | YES |  | Correo del usuario que realizÃƒÂ³ la acciÃƒÂ³n |
+| usuario_email | character varying | YES |  | Correo del usuario que realizó la acción |
 | rol | character varying | YES |  |  |
-| modulo | character varying | YES |  | MÃƒÂ³dulo afectado (auth, solicitudes, mantenimientos, etc.) |
-| accion | character varying | YES |  | Tipo de acciÃƒÂ³n (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
-| descripcion | text | YES |  | DescripciÃƒÂ³n amigable de la acciÃƒÂ³n realizada |
+| modulo | character varying | YES |  | Módulo afectado (auth, solicitudes, mantenimientos, etc.) |
+| accion | character varying | YES |  | Tipo de acción (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.) |
+| descripcion | text | YES |  | Descripción amigable de la acción realizada |
 | datos_anteriores | jsonb | YES |  | JSON con los datos antes del cambio |
-| datos_nuevos | jsonb | YES |  | JSON con los datos despuÃƒÂ©s del cambio |
+| datos_nuevos | jsonb | YES |  | JSON con los datos después del cambio |
 | ip | character varying | YES |  |  |
 | user_agent | text | YES |  |  |
 | fecha | timestamp without time zone | YES | CURRENT_TIMESTAMP | Fecha y hora del evento registrado |
@@ -602,7 +602,7 @@ Cada entidad documentada incluye:
 | legacy_purchase_id | uuid | YES |  | Reverse mapping to legacy purchase for debugging |
 | drive_comercial_folder_id | text | YES |  | Google Drive folder ID for the main "Comercial" folder at root level |
 | drive_user_folder_id | text | YES |  | Google Drive folder ID for the user-specific folder within "Comercial" |
-| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "InspecciÃƒÂ³n de Ambiente") |
+| drive_type_folder_id | text | YES |  | Google Drive folder ID for the request type folder (e.g., "Inspección de Ambiente") |
 | drive_request_folder_id | text | YES |  | Google Drive folder ID for the specific request folder (REQ-xxxx) |
 | origin_department_id | integer | YES |  |  |
 | origin_department_name | text | YES |  |  |
@@ -771,7 +771,7 @@ Cada entidad documentada incluye:
 | can_sign_documents | boolean | YES | false | Whether user has permission to sign documents |
 | signature_role | character varying | YES |  | Role for signature authorization (DPD, Manager, etc.) |
 | signature_certificate_id | character varying | YES |  | ID of digital certificate for qualified signatures |
-| active | boolean | NO | true | Indica si el usuario estÃƒÂ¡ activo en el sistema. Los usuarios inactivos no pueden acceder. |
+| active | boolean | NO | true | Indica si el usuario está activo en el sistema. Los usuarios inactivos no pueden acceder. |
 
 - Indices visibles:
   - idx_users_active: CREATE INDEX idx_users_active ON public.users USING btree (active)

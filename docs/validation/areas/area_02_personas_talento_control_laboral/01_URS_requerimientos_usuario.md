@@ -50,6 +50,8 @@ El area existe para ordenar la relacion entre la organizacion y sus colaboradore
 
 ## 7. Requerimientos de usuario
 - REQ-PT-001: El sistema debe permitir a talento humano y roles autorizados administrar usuarios internos y departamentos.
+- REQ-PT-001A: El sistema debe unificar la gestion de usuarios y departamentos en una sola entrada de navegacion para simplificar el acceso administrativo.
+- REQ-PT-001B: El sistema debe restringir esa entrada unificada a Talento Humano y TI, tanto en navegacion como en acceso directo a la ruta.
 - REQ-PT-002: El sistema debe permitir consolidar la informacion del colaborador en un workspace verificable.
 - REQ-PT-003: El sistema debe permitir al propio usuario mantener actualizado su perfil y preferencias.
 - REQ-PT-004: El sistema debe permitir registrar certificaciones con soporte documental y consultar su vigencia.
@@ -80,6 +82,7 @@ El area existe para ordenar la relacion entre la organizacion y sus colaboradore
 - REQ-PT-018: El sistema debe permitir aprobar, rechazar, cancelar y revisar cancelaciones de vacaciones.
 - REQ-PT-019: El sistema debe permitir a talento humano y gerencia ver resumen consolidado por colaborador en permisos y vacaciones.
 - REQ-PT-020: El sistema debe conservar trazabilidad suficiente sobre acciones criticas del area y sus soportes documentales.
+- REQ-PT-020A: El sistema debe registrar auditoria con actor, modulo y accion identificables para evitar registros degradados a valores internos no interpretables por el usuario.
 
 ## 8. Requerimientos no funcionales
 - Toda operacion del area debe estar protegida por autenticacion y, cuando corresponda, por control de rol.

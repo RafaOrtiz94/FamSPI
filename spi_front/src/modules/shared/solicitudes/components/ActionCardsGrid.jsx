@@ -9,32 +9,32 @@ import ActionCard from "../../../../core/ui/patterns/ActionCard";
  * @param {Object} props.columns - Configuración de columnas por breakpoint
  */
 const ActionCardsGrid = ({ cards, onClick, columns = {} }) => {
-    const {
-        sm = 1,
-        md = 2,
-        lg = cards.length >= 6 ? 3 : cards.length >= 4 ? 2 : 3
-    } = columns;
+ const {
+ sm = 1,
+ md = 2,
+ lg = cards.length >= 6 ? 3 : cards.length >= 4 ? 2 : 3
+ } = columns;
 
-    const gridClasses = `grid grid-cols-${sm} md:grid-cols-${md} lg:grid-cols-${lg} gap-5`;
+ const gridClasses = `grid grid-cols-${sm} md:grid-cols-${md} lg:grid-cols-${lg} gap-5`;
 
-    return (
-        <div className={gridClasses}>
-            {cards.map((card) => (
-                <div key={card.id} className="flex">
-                    <ActionCard
-                        icon={card.icon}
-                        subtitle={card.subtitle}
-                        title={card.title}
-                        color={card.color}
-                        description={card.description}
-                        chips={card.chips}
-                        onClick={() => onClick(card.id)}
-                        disabled={card.disabled}
-                    />
-                </div>
-            ))}
-        </div>
-    );
+ return (
+ <div className={gridClasses}>
+ {cards.map((card) => (
+ <div key={card.id} className="flex">
+ <ActionCard
+ icon={card.icon}
+ subtitle={card.subtitle}
+ title={card.title}
+ color={card.color}
+ description={card.description}
+ chips={card.chips}
+ onClick={() => onClick(card.id)}
+ disabled={card.disabled}
+ />
+ </div>
+ ))}
+ </div>
+ );
 };
 
 export default ActionCardsGrid;

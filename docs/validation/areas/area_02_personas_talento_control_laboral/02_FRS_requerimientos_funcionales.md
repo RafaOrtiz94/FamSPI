@@ -13,7 +13,7 @@ El alcance funcional comprende administracion de personal y estructura, perfil d
 ### FR-PT-001 Gestion de usuarios y departamentos
 - Endpoints: `GET/POST/PUT/DELETE /api/v1/users*`, `GET/POST/PUT/DELETE /api/v1/departments*`.
 - Proposito: permitir administracion de usuarios y estructura organizacional.
-- Como opera: lista usuarios con alcance diferenciado entre directorio y vista administrativa, permite filtrar por texto, rol, departamento y estado activo, valida que el departamento destino siga activo y usa baja logica para desactivar usuarios sin perder trazabilidad. En departamentos, permite alta, edicion, desactivacion y reactivacion controlada.
+- Como opera: lista usuarios con alcance diferenciado entre directorio y vista administrativa, permite filtrar por texto, rol, departamento y estado activo, valida que el departamento destino siga activo y usa baja logica para desactivar usuarios sin perder trazabilidad. En departamentos, permite alta, edicion, desactivacion y reactivacion controlada. En frontend, ambas capacidades se presentan bajo una vista unica `Usuarios y Departamentos`, accesible desde la barra de navegacion y por ruta directa solo para Talento Humano y TI mediante restriccion estricta de roles.
 - Cuando aplica: mantenimiento administrativo del personal, control de estructura interna y saneamiento de usuarios o departamentos sin destruccion del historico.
 
 ### FR-PT-002 Modulo HR legacy de empleados
@@ -37,25 +37,25 @@ El alcance funcional comprende administracion de personal y estructura, perfil d
 ### FR-PT-005 Certificaciones del usuario
 - Endpoints: `POST /api/v1/users/me/certifications`, `POST /api/v1/users/me/certifications/bulk`, `GET /api/v1/users/me/certifications`, `DELETE /api/v1/users/me/certifications/:certId`, `GET /api/v1/users/:id/certifications`, `GET /api/v1/users/:id/certifications/pdf`.
 - Proposito: registrar y consultar competencias con soporte documental.
-- Como opera: crea registros activos, permite baja logica y genera un PDF consolidado para roles autorizados como `acp_comercial`, `talento_humano`, `gerencia` y `gerencia_general`. Las acciones de ver y eliminar permanecen visibles en interfaces tactiles y los formularios de vigencia se adaptan a una sola columna en pantallas pequenas.
+- Como opera: crea registros activos, permite baja logica y genera un PDF consolidado desde la vista propia del colaborador o desde roles autorizados. Las acciones de ver y eliminar permanecen visibles en interfaces tactiles y los formularios de vigencia se adaptan a una sola columna en pantallas pequenas.
 - Cuando aplica: gestion de vigencias, soporte de habilitaciones y auditoria interna de certificaciones.
 
 ### FR-PT-006 Solicitudes de personal
 - Endpoints: `POST /api/v1/personnel-requests`, `GET /api/v1/personnel-requests`, `GET /api/v1/personnel-requests/stats`, `GET /api/v1/personnel-requests/:id`.
 - Proposito: abrir requerimientos de personal y seguir su ciclo de aprobacion.
-- Como opera: registra solicitud, historial, comentarios, perfil esperado, documentos y responsables. La navegacion del hub respeta la vista inicial solicitada para `solicitudes`, `usuarios`, `departamentos` y `colaboradores`, evitando desviar al usuario a una pantalla no esperada.
+- Como opera: registra solicitud, historial, comentarios, perfil esperado, documentos y responsables. La navegacion del hub respeta la vista inicial solicitada para `solicitudes`, `usuarios`, `departamentos` y `colaboradores`, evitando desviar al usuario a una pantalla no esperada. Las solicitudes cerradas siguen visibles para consulta y trazabilidad sin reabrir el flujo editable.
 - Cuando aplica: cuando un area necesita cubrir una necesidad de talento.
 
 ### FR-PT-007 Perfil y documentos de la solicitud de personal
 - Endpoints: `GET/PUT /api/v1/personnel-requests/:id/profile`, `POST /api/v1/personnel-requests/:id/documents`, `POST /api/v1/personnel-requests/:id/comments`.
 - Proposito: completar el expediente del proceso de incorporacion.
-- Como opera: persiste perfil especifico de la solicitud, registra archivos y comentarios asociados.
+- Como opera: persiste perfil especifico de la solicitud, registra archivos y comentarios asociados. El contrato de intercambio entre frontend y backend admite perfil directo o anidado y devuelve la coleccion documental actualizada para mantener la UI sincronizada despues de cada carga.
 - Cuando aplica: durante evaluacion, seleccion y preparacion de incorporacion.
 
 ### FR-PT-008 Vinculacion y contratacion en solicitud de personal
 - Endpoints: `PATCH /api/v1/personnel-requests/:id/collaborator`, `PATCH /api/v1/personnel-requests/:id/applicant`, `PATCH /api/v1/personnel-requests/:id/status`, `POST /api/v1/personnel-requests/:id/hire`.
 - Proposito: asociar candidato o colaborador y cerrar la solicitud mediante contratacion.
-- Como opera: actualiza la solicitud, migra o replica informacion documental y crea o actualiza relacion con colaborador.
+- Como opera: actualiza la solicitud, migra o replica informacion documental y crea o actualiza relacion con colaborador. La reasignacion operativa tambien admite liberar el responsable cuando el selector vuelve a vacio y deja constancia trazable del cambio.
 - Cuando aplica: en la fase de seleccion, aprobacion y cierre del requerimiento.
 
 ### FR-PT-008A Validacion de avance por bloque en la creacion de la solicitud
@@ -73,20 +73,26 @@ El alcance funcional comprende administracion de personal y estructura, perfil d
 ### FR-PT-008C Tiempos por etapa y deteccion de estancamiento
 - Interfaz consumidora: `PersonnelRequestProgress.jsx`, `PersonnelHeader.jsx`, `RequestList.jsx`.
 - Proposito: mostrar cuanto tiempo lleva la solicitud en la etapa actual y alertar cuando excede el limite operativo previsto.
-- Como opera: calcula tiempo transcurrido, fecha limite y bandera de estancamiento a partir de la fecha de inicio de etapa y de la configuracion de cada estado.
+- Como opera: calcula tiempo transcurrido, fecha limite y bandera de estancamiento a partir de la fecha de inicio de etapa y de la configuracion de cada estado. La UI muestra ademas siguiente accion, responsable vigente y actor disponible en la linea de tiempo de etapas.
 - Cuando aplica: en la vista principal del workspace, en listados y en el detalle de aprobacion.
 
 ### FR-PT-008D Responsable actual y reasignacion operacional
 - Interfaz consumidora: `PersonnelWorkspace.jsx`.
 - Proposito: reflejar el responsable vigente de la etapa y permitir su reasignacion cuando el rol lo autoriza.
-- Como opera: expone el responsable actual en la cabecera y habilita un selector para vincular un colaborador operativo a la solicitud. En movil, el workspace incorpora un selector visible de contexto para navegar entre solicitudes, postulantes y colaboradores sin depender de un sidebar oculto.
+- Como opera: expone el responsable actual en la cabecera y habilita un selector para vincular, reasignar o liberar un colaborador operativo de la solicitud. En movil, el workspace incorpora un selector visible de contexto para navegar entre solicitudes, postulantes y colaboradores sin depender de un sidebar oculto.
 - Cuando aplica: cuando talento humano o gerencia deben cambiar el operador que atiende una solicitud activa.
 
 ### FR-PT-008E Comentarios internos trazables
 - Interfaz consumidora: `PersonnelRequestComments.jsx`, `PersonnelWorkspace.jsx`.
 - Proposito: dejar constancia textual de decisiones, observaciones y notas operativas asociadas al expediente.
-- Como opera: registra comentario con usuario, fecha y marca de visibilidad interna; la marca interna solo aplica para roles autorizados y los comentarios se listan en orden cronologico dentro del workspace.
+- Como opera: registra comentario con usuario, fecha y marca de visibilidad interna; la marca interna solo aplica para roles autorizados y los comentarios se listan en orden cronologico dentro del workspace. El backend persiste historial tecnico de cambios de estado y eventos operativos para sostener la trazabilidad del flujo.
 - Cuando aplica: durante revisiones, observaciones, reasignaciones y seguimiento de la solicitud.
+
+### FR-PT-008G Auditoria legible del workspace de talento humano
+- Componentes consumidores: `Auditoria.jsx`, `AuditoriaPreview.jsx`.
+- Proposito: exponer trazabilidad comprensible para operaciones del workspace de talento sin mostrar placeholders internos crudos como actor anonimo o modulo sin clasificar.
+- Como opera: los nuevos eventos del dominio se registran aceptando contratos legacy y actuales del helper de auditoria, y la UI normaliza la presentacion de registros historicos cuando la fila original no quedo completamente enriquecida.
+- Cuando aplica: durante consulta de auditoria, revision de trazabilidad y seguimiento de cambios sobre solicitudes, usuarios o departamentos.
 
 ### FR-PT-008F Progreso de contratacion y checklist
 - Interfaz consumidora: `PersonnelChecklist.jsx`, `PersonnelDocuments.jsx`, `PersonnelRequestReview.jsx`, `PersonnelWorkspace.jsx`.

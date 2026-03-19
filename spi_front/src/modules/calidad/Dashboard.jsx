@@ -3,7 +3,6 @@ import { FiRefreshCw, FiClipboard, FiBookOpen, FiCheckSquare, FiActivity } from 
 
 import { useUI } from "../../core/ui/useUI";
 
-import AttendanceWidget from "../../core/ui/widgets/AttendanceWidget";
 import ClientRequestWidget from "../../core/ui/widgets/ClientRequestWidget";
 import PermisosStatusWidget from "../shared/solicitudes/components/PermisosStatusWidget";
 import Button from "../../core/ui/components/Button";
@@ -68,8 +67,7 @@ const DashboardCalidad = () => {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <AttendanceWidget />
+      <div className="grid grid-cols-1 gap-4">
         <ClientRequestWidget />
       </div>
 

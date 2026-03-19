@@ -50,30 +50,130 @@ const logger = require("../config/logger");
  * @param {number|null} [params.contexto.inventario_id]
  * @param {boolean} [params.contexto.auto]
  */
-async function logAction({
-  usuario_id = null,
-  usuario_email = "anon",
-  rol = "sin-rol",
-  modulo = "core",
-  accion = "desconocida",
-  descripcion = "",
-  datos_anteriores = null,
-  datos_nuevos = null,
-  ip = null,
-  user_agent = null,
-  duracion_ms = null,
-  contexto = {},
-}) {
+async function logAction(params = {}) {
   try {
+    const {
+      usuario_id,
+      user_id,
+      userId,
+      usuario_email,
+      user_email,
+      userEmail,
+      email,
+      rol,
+      role,
+      modulo,
+      module,
+      accion,
+      action,
+      descripcion,
+      description,
+      datos_anteriores,
+      previous_data,
+      before,
+      datos_nuevos,
+      details,
+      data,
+      after,
+      ip = null,
+      user_agent,
+      userAgent,
+      duracion_ms = null,
+      duration_ms,
+      contexto = {},
+      context = {},
+      entity,
+      entity_id,
+      entityId,
+      request_id,
+      mantenimiento_id,
+      inventario_id,
+      auto,
+    } = params;
+
+    const actorId =
+      usuario_id ??
+      user_id ??
+      userId ??
+      null;
+    let actorEmail =
+      usuario_email ??
+      user_email ??
+      userEmail ??
+      email ??
+      "anon";
+    let actorRole =
+      rol ??
+      role ??
+      "sin-rol";
+    const moduleName =
+      modulo ??
+      module ??
+      "core";
+    const actionName =
+      accion ??
+      action ??
+      "desconocida";
+    const descriptionText =
+      descripcion ??
+      description ??
+      "";
+    const previousData =
+      datos_anteriores ??
+      previous_data ??
+      before ??
+      null;
+    const nextData =
+      datos_nuevos ??
+      details ??
+      data ??
+      after ??
+      null;
+    const durationMs =
+      duracion_ms ??
+      duration_ms ??
+      null;
+
+    if (actorId && (actorEmail === "anon" || actorRole === "sin-rol")) {
+      const { rows } = await db.query(
+        `SELECT email, role
+           FROM users
+          WHERE id = $1
+          LIMIT 1`,
+        [actorId]
+      );
+      if (rows[0]) {
+        actorEmail = actorEmail === "anon" ? rows[0].email || actorEmail : actorEmail;
+        actorRole = actorRole === "sin-rol" ? rows[0].role || actorRole : actorRole;
+      }
+    }
+
     // 🧩 Desestructurar contexto relacional
     const {
-      request_id = null,
-      mantenimiento_id = null,
-      inventario_id = null,
-      auto = false,
-    } = contexto || {};
+      request_id: contextRequestId = null,
+      mantenimiento_id: contextMaintenanceId = null,
+      inventario_id: contextInventoryId = null,
+      auto: contextAuto = false,
+    } = { ...context, ...contexto };
 
-    if (!accion || !modulo) {
+    const resolvedRequestId =
+      request_id ??
+      contextRequestId ??
+      (entity === "requests" || entity === "personnel_requests" ? (entity_id ?? entityId ?? null) : null);
+    const resolvedMaintenanceId =
+      mantenimiento_id ??
+      contextMaintenanceId ??
+      (entity === "mantenimientos" ? (entity_id ?? entityId ?? null) : null);
+    const resolvedInventoryId =
+      inventario_id ??
+      contextInventoryId ??
+      (entity === "inventario" ? (entity_id ?? entityId ?? null) : null);
+    const isAuto =
+      auto ??
+      contextAuto ??
+      false;
+
+    if (!actionName || !moduleName) {
       logger.warn("⚠️ logAction llamado sin acción o módulo válido");
       return;
     }
@@ -102,42 +202,52 @@ async function logAction({
     `;
 
     const values = [
-      usuario_id,
-      usuario_email,
-      rol,
-      modulo,
-      accion,
-      descripcion,
-      datos_anteriores,
-      datos_nuevos,
+      actorId,
+      actorEmail,
+      actorRole,
+      moduleName,
+      actionName,
+      descriptionText,
+      previousData,
+      nextData,
       ip,
-      user_agent,
-      duracion_ms,
-      request_id,
-      mantenimiento_id,
-      inventario_id,
-      auto,
+      user_agent ?? userAgent ?? null,
+      durationMs,
+      resolvedRequestId,
+      resolvedMaintenanceId,
+      resolvedInventoryId,
+      isAuto,
     ];
 
     await db.query(query, values);
 
     logger.audit(
-      `🧾 Auditoría registrada → ${modulo}.${accion}`,
+      `🧾 Auditoría registrada → ${moduleName}.${actionName}`,
       {
-        usuario_email,
-        rol,
-        modulo,
-        accion,
-        request_id,
-        mantenimiento_id,
-        inventario_id,
-        auto,
+        usuario_email: actorEmail,
+        rol: actorRole,
+        modulo: moduleName,
+        accion: actionName,
+        request_id: resolvedRequestId,
+        mantenimiento_id: resolvedMaintenanceId,
+        inventario_id: resolvedInventoryId,
+        auto: isAuto,
       }
     );
   } catch (err) {
     // Nunca romper flujo principal
     logger.error(
-      { err, modulo, accion, usuario_email },
+      {
+        err,
+        modulo: params.modulo ?? params.module ?? "core",
+        accion: params.accion ?? params.action ?? "desconocida",
+        usuario_email:
+          params.usuario_email ??
+          params.user_email ??
+          params.userEmail ??
+          params.email ??
+          "anon",
+      },
       "❌ Error registrando auditoría en DB"
     );
 
@@ -146,10 +256,15 @@ async function logAction({
       console.error(
         "[AUDIT FALLBACK]",
         JSON.stringify({
-          modulo,
-          accion,
-          usuario_email,
-          descripcion,
+          modulo: params.modulo ?? params.module ?? "core",
+          accion: params.accion ?? params.action ?? "desconocida",
+          usuario_email:
+            params.usuario_email ??
+            params.user_email ??
+            params.userEmail ??
+            params.email ??
+            "anon",
+          descripcion: params.descripcion ?? params.description ?? "",
         })
       );
     } catch {

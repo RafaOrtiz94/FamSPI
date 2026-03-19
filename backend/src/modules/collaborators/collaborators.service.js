@@ -489,7 +489,18 @@ const addCollaboratorDocument = async (userId, docType, file, actorId = null) =>
     details: { target_user_id: userId, doc_type: docType },
   });
 
-  return insertResult.rows[0];
+  const docsQuery = await db.query(
+    `SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, uploaded_by, created_at
+     FROM collaborator_documents
+     WHERE user_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  return {
+    document: insertResult.rows[0],
+    documents: docsQuery.rows || [],
+  };
 };
 
 

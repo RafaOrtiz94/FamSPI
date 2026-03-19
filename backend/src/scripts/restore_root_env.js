@@ -19,16 +19,20 @@ DB_SSL=false
 GOOGLE_CLIENT_ID=
 GOOGLE_CLIENT_SECRET=
 GOOGLE_REDIRECT_URI=http://localhost:3000/api/v1/auth/google/callback
-GOOGLE_SUBJECT=automatizaciones@famproject.com.ec
+GOOGLE_SUBJECT=
 GSA_KEY_PATH=
 ENABLE_GOOGLE_SELF_TEST=false
 
 # --- EMAIL (GMAIL/SMTP) ---
 GMAIL_DEFAULT_USER_ID=
+SYSTEM_MAIL_ADDRESS=administrador@fam-project.com
+SYSTEM_MAIL_DELEGATED_USER=administrador@fam-project.com
+SYSTEM_MAIL_REPLY_TO=administrador@fam-project.com
+SYSTEM_MAIL_NAME=FamSPI Sistema
 SMTP_FROM=
 SMTP_USER=
 SMTP_FROM_NAME=SPI System
-GMAIL_SERVICE_ACCOUNT_SENDER=
+GMAIL_SERVICE_ACCOUNT_SENDER=administrador@fam-project.com
 
 # --- SECURITY ---
 JWT_SECRET=please_set_this_secret

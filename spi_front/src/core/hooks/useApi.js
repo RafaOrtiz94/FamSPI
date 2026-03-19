@@ -10,50 +10,50 @@ import { useUI } from "../ui/UIContext";
  * - Soporta loaders globales
  */
 export const useApi = (apiFunction, options = {}) => {
-  const {
-    globalLoader = false,
-    successMsg = null,
-    errorMsg = null,
-    transformResponse = null,
-  } = options;
-  const { showToast, showLoader, hideLoader } = useUI();
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+ const {
+ globalLoader = false,
+ successMsg = null,
+ errorMsg = null,
+ transformResponse = null,
+ } = options;
+ const { showToast, showLoader, hideLoader } = useUI();
+ const [data, setData] = useState(null);
+ const [error, setError] = useState(null);
+ const [loading, setLoading] = useState(false);
 
-  const execute = useCallback(
-    async (...params) => {
-      try {
-        setLoading(true);
-        setError(null);
-        if (globalLoader) showLoader();
+ const execute = useCallback(
+ async (...params) => {
+ try {
+ setLoading(true);
+ setError(null);
+ if (globalLoader) showLoader();
 
-        const response = await apiFunction(...params);
+ const response = await apiFunction(...params);
 
-        const normalized =
-          typeof transformResponse === "function"
-            ? transformResponse(response)
-            : response?.rows || response?.result?.rows
-            ? response
-            : Array.isArray(response)
-            ? { rows: response }
-            : { rows: response };
+ const normalized =
+ typeof transformResponse === "function"
+ ? transformResponse(response)
+ : response?.rows || response?.result?.rows
+ ? response
+ : Array.isArray(response)
+ ? { rows: response }
+ : { rows: response };
 
-        setData(normalized);
-        if (successMsg) showToast(successMsg, "success");
-        return normalized;
-      } catch (err) {
-        console.error("⚠️ API error:", err);
-        setError(err);
-        if (errorMsg) showToast(errorMsg, "error");
-        throw err;
-      } finally {
-        setLoading(false);
-        if (globalLoader) hideLoader();
-      }
-    },
-    [apiFunction, globalLoader, successMsg, errorMsg, transformResponse, showToast, showLoader, hideLoader],
-  );
+ setData(normalized);
+ if (successMsg) showToast(successMsg, "success");
+ return normalized;
+ } catch (err) {
+ console.error("⚠️ API error:", err);
+ setError(err);
+ if (errorMsg) showToast(errorMsg, "error");
+ throw err;
+ } finally {
+ setLoading(false);
+ if (globalLoader) hideLoader();
+ }
+ },
+ [apiFunction, globalLoader, successMsg, errorMsg, transformResponse, showToast, showLoader, hideLoader],
+ );
 
-  return { data, error, loading, execute, setData };
+ return { data, error, loading, execute, setData };
 };

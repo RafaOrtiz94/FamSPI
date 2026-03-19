@@ -21,220 +21,220 @@ import PurchaseHandoffWidget from "../../../comercial/components/PurchaseHandoff
  * Tiene acceso completo a todas las funcionalidades
  */
 const JefeTecnicoSolicitudesView = () => {
-    const [filters, setFilters] = useState({});
-    const [viewType, setViewType] = useState(null); // 'orden-servicio', 'repuestos', etc.
-    const [viewTitle, setViewTitle] = useState("");
-    const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
-    const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
+ const [filters, setFilters] = useState({});
+ const [viewType, setViewType] = useState(null); // 'orden-servicio', 'repuestos', etc.
+ const [viewTitle, setViewTitle] = useState("");
+ const [showPurchaseTypeModal, setShowPurchaseTypeModal] = useState(false);
+ const [showPurchaseHandoff, setShowPurchaseHandoff] = useState(false);
 
-    const { solicitudes, loading, reload } = useSolicitudes({
-        fetchFunction: async (filters) => {
-            const response = await getRequests({
-                page: 1,
-                limit: 100,
-                ...filters
-            });
-            return response;
-        },
-        parseResponse: (res) => res.rows || res.data || [],
-        defaultFilters: {},
-        autoLoad: false // Desactivamos carga automática de la grilla global
-    });
+ const { solicitudes, loading, reload } = useSolicitudes({
+ fetchFunction: async (filters) => {
+ const response = await getRequests({
+ page: 1,
+ limit: 100,
+ ...filters
+ });
+ return response;
+ },
+ parseResponse: (res) => res.rows || res.data || [],
+ defaultFilters: {},
+ autoLoad: false // Desactivamos carga automática de la grilla global
+ });
 
-    const { openModal, closeModal, isOpen } = useModalManager();
+ const { openModal, closeModal, isOpen } = useModalManager();
 
-    const handlePurchaseTypeSelection = (type) => {
-        setShowPurchaseTypeModal(false);
-        if (type === "public") {
-            setShowPurchaseHandoff(true);
-        } else if (type === "private") {
-            // ✅ USAR MODAL GLOBAL DETALLADO
-            window.dispatchEvent(new CustomEvent('open-request-modal', { detail: { type: 'PRIVATE_PURCHASE' } }));
-        }
-    };
+ const handlePurchaseTypeSelection = (type) => {
+ setShowPurchaseTypeModal(false);
+ if (type === "public") {
+ setShowPurchaseHandoff(true);
+ } else if (type === "private") {
+ // ✅ USAR MODAL GLOBAL DETALLADO
+ window.dispatchEvent(new CustomEvent('open-request-modal', { detail: { type: 'PRIVATE_PURCHASE' } }));
+ }
+ };
 
-    const handleActionCardClick = (cardId) => {
-        if (cardId === "compra") {
-            setShowPurchaseTypeModal(true);
-            return;
-        }
-        openModal(cardId);
-    };
+ const handleActionCardClick = (cardId) => {
+ if (cardId === "compra") {
+ setShowPurchaseTypeModal(true);
+ return;
+ }
+ openModal(cardId);
+ };
 
-    const handleFilterChange = (newFilters) => {
-        setFilters(newFilters);
-    };
+ const handleFilterChange = (newFilters) => {
+ setFilters(newFilters);
+ };
 
-    const handleModalSuccess = () => {
-        reload();
-    };
+ const handleModalSuccess = () => {
+ reload();
+ };
 
-    const handleViewList = (type, title) => {
-        setViewType(type);
-        setViewTitle(title);
-    };
+ const handleViewList = (type, title) => {
+ setViewType(type);
+ setViewTitle(title);
+ };
 
-    // Widgets de estadísticas definidos localmente
-    const statWidgets = [
-        {
-            id: 'orden-servicio',
-            title: 'Mantenimientos',
-            icon: FiTool,
-            color: 'blue',
-            type: 'Orden de Servicio' // Debe coincidir con Title o Code en DB
-        },
-        {
-            id: 'repuestos',
-            title: 'Compras de Repuestos',
-            icon: FiPackage,
-            color: 'purple',
-            type: 'compra'
-        },
-        {
-            id: 'inspeccion',
-            title: 'Inspecciones Técnicas',
-            icon: FiClipboard,
-            color: 'amber',
-            type: 'inspeccion'
-        },
-        {
-            id: 'prestamo',
-            title: 'Préstamos de Equipos',
-            icon: FiSettings,
-            color: 'indigo',
-            type: 'Préstamo'
-        },
-        {
-            id: 'vacaciones',
-            title: 'Vacaciones',
-            icon: FiCalendar,
-            color: 'orange',
-            type: 'Vacaciones'
-        }
-    ];
+ // Widgets de estadísticas definidos localmente
+ const statWidgets = [
+ {
+ id: 'orden-servicio',
+ title: 'Mantenimientos',
+ icon: FiTool,
+ color: 'blue',
+ type: 'Orden de Servicio' // Debe coincidir con Title o Code en DB
+ },
+ {
+ id: 'repuestos',
+ title: 'Compras de Repuestos',
+ icon: FiPackage,
+ color: 'purple',
+ type: 'compra'
+ },
+ {
+ id: 'inspeccion',
+ title: 'Inspecciones Técnicas',
+ icon: FiClipboard,
+ color: 'amber',
+ type: 'inspeccion'
+ },
+ {
+ id: 'prestamo',
+ title: 'Préstamos de Equipos',
+ icon: FiSettings,
+ color: 'indigo',
+ type: 'Préstamo'
+ },
+ {
+ id: 'vacaciones',
+ title: 'Vacaciones',
+ icon: FiCalendar,
+ color: 'orange',
+ type: 'Vacaciones'
+ }
+ ];
 
-    const statsSection = (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-            {statWidgets.map(widget => (
-                <RequestStatWidget
-                    key={widget.id}
-                    title={widget.title}
-                    icon={widget.icon}
-                    color={widget.color}
-                    onClick={() => handleViewList(widget.type, widget.title)}
-                />
-            ))}
-        </div>
-    );
+ const statsSection = (
+ <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+ {statWidgets.map(widget => (
+ <RequestStatWidget
+ key={widget.id}
+ title={widget.title}
+ icon={widget.icon}
+ color={widget.color}
+ onClick={() => handleViewList(widget.type, widget.title)}
+ />
+ ))}
+ </div>
+ );
 
-    return (
-        <>
-            <BaseSolicitudesView
-                // Action Cards
-                actionCards={servicioActionCards}
-                onActionCardClick={handleActionCardClick}
+ return (
+ <>
+ <BaseSolicitudesView
+ // Action Cards
+ actionCards={servicioActionCards}
+ onActionCardClick={handleActionCardClick}
 
-                // Desactivar filtros y grilla global
-                enableFilters={false}
-                enableGrid={false}
+ // Desactivar filtros y grilla global
+ enableFilters={false}
+ enableGrid={false}
 
-                // Secciones personalizadas
-                customSections={[
-                    {
-                        id: "stats",
-                        title: "Resumen de Solicitudes",
-                        subtitle: "Consulta el historial de solicitudes por tipo",
-                        content: statsSection
-                    }
-                ]}
+ // Secciones personalizadas
+ customSections={[
+ {
+ id: "stats",
+ title: "Resumen de Solicitudes",
+ subtitle: "Consulta el historial de solicitudes por tipo",
+ content: statsSection
+ }
+ ]}
 
-                // Títulos personalizados
-                createSectionTitle="Crear Nueva Solicitud"
-                createSectionSubtitle="Selecciona el tipo de solicitud de servicio técnico"
-            />
+ // Títulos personalizados
+ createSectionTitle="Crear Nueva Solicitud"
+ createSectionSubtitle="Selecciona el tipo de solicitud de servicio técnico"
+ />
 
-            {/* PURCHASE SELECTOR MODAL */}
-            <Modal
-                open={showPurchaseTypeModal}
-                onClose={() => setShowPurchaseTypeModal(false)}
-                title="Selecciona el tipo de compra"
-            >
-                <div className="space-y-4">
-                    <p className="text-sm text-gray-600 font-medium">¿Qué tipo de requerimiento de compra deseas realizar?</p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <Button
-                            variant="secondary"
-                            onClick={() => handlePurchaseTypeSelection("public")}
-                            className="flex flex-col items-center gap-3 p-6 h-auto border-2 border-emerald-100 hover:border-emerald-300 hover:bg-emerald-50 transition-all"
-                        >
-                            <FiClipboard className="w-8 h-8 text-emerald-600" />
-                            <div className="text-center">
-                                <span className="block font-bold text-gray-900">Compra Pública</span>
-                                <span className="text-[10px] text-gray-500 uppercase tracking-wider">Flujo ACP</span>
-                            </div>
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={() => handlePurchaseTypeSelection("private")}
-                            className="flex flex-col items-center gap-3 p-6 h-auto"
-                        >
-                            <FiCreditCard className="w-8 h-8" />
-                            <div className="text-center">
-                                <span className="block font-bold">Compra Privada</span>
-                                <span className="text-[10px] opacity-80 uppercase tracking-wider">Flujo Interno</span>
-                            </div>
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
+ {/* PURCHASE SELECTOR MODAL */}
+ <Modal
+ open={showPurchaseTypeModal}
+ onClose={() => setShowPurchaseTypeModal(false)}
+ title="Selecciona el tipo de compra"
+ >
+ <div className="space-y-4">
+ <p className="text-sm text-gray-600 font-medium">¿Qué tipo de requerimiento de compra deseas realizar?</p>
+ <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+ <Button
+ variant="secondary"
+ onClick={() => handlePurchaseTypeSelection("public")}
+ className="flex flex-col items-center gap-3 p-6 h-auto border-2 border-emerald-100 hover:border-emerald-300 hover:bg-emerald-50 transition-all"
+ >
+ <FiClipboard className="w-8 h-8 text-emerald-600" />
+ <div className="text-center">
+ <span className="block font-bold text-gray-900">Compra Pública</span>
+ <span className="text-[10px] text-gray-500 uppercase tracking-wider">Flujo ACP</span>
+ </div>
+ </Button>
+ <Button
+ variant="primary"
+ onClick={() => handlePurchaseTypeSelection("private")}
+ className="flex flex-col items-center gap-3 p-6 h-auto"
+ >
+ <FiCreditCard className="w-8 h-8" />
+ <div className="text-center">
+ <span className="block font-bold">Compra Privada</span>
+ <span className="text-[10px] opacity-80 uppercase tracking-wider">Flujo Interno</span>
+ </div>
+ </Button>
+ </div>
+ </div>
+ </Modal>
 
-            {/* PURCHASE HANDOFF MODAL */}
-            <PurchaseHandoffWidget
-                isOpen={showPurchaseHandoff}
-                onOpenChange={setShowPurchaseHandoff}
-                hideButton={true}
-            />
+ {/* PURCHASE HANDOFF MODAL */}
+ <PurchaseHandoffWidget
+ isOpen={showPurchaseHandoff}
+ onOpenChange={setShowPurchaseHandoff}
+ hideButton={true}
+ />
 
-            {/* Modal de Listado de Solicitudes */}
-            <RequestsListModal
-                open={!!viewType}
-                onClose={() => setViewType(null)}
-                type={viewType}
-                title={viewTitle}
-            />
+ {/* Modal de Listado de Solicitudes */}
+ <RequestsListModal
+ open={!!viewType}
+ onClose={() => setViewType(null)}
+ type={viewType}
+ title={viewTitle}
+ />
 
-            {/* Modales específicos de Servicio Técnico */}
-            <OrdenServicioModal
-                open={isOpen("orden-servicio")}
-                onClose={() => closeModal("orden-servicio")}
-                onSuccess={handleModalSuccess}
-            />
+ {/* Modales específicos de Servicio Técnico */}
+ <OrdenServicioModal
+ open={isOpen("orden-servicio")}
+ onClose={() => closeModal("orden-servicio")}
+ onSuccess={handleModalSuccess}
+ />
 
-            <RequerimientoRepuestosModal
-                open={isOpen("repuestos")}
-                onClose={() => closeModal("repuestos")}
-                onSuccess={handleModalSuccess}
-            />
+ <RequerimientoRepuestosModal
+ open={isOpen("repuestos")}
+ onClose={() => closeModal("repuestos")}
+ onSuccess={handleModalSuccess}
+ />
 
-            <InspeccionModal
-                open={isOpen("inspeccion")}
-                onClose={() => closeModal("inspeccion")}
-                onSuccess={handleModalSuccess}
-            />
+ <InspeccionModal
+ open={isOpen("inspeccion")}
+ onClose={() => closeModal("inspeccion")}
+ onSuccess={handleModalSuccess}
+ />
 
-            <PrestamoEquiposModal
-                open={isOpen("prestamo")}
-                onClose={() => closeModal("prestamo")}
-                onSuccess={handleModalSuccess}
-            />
+ <PrestamoEquiposModal
+ open={isOpen("prestamo")}
+ onClose={() => closeModal("prestamo")}
+ onSuccess={handleModalSuccess}
+ />
 
-            <PermisoVacacionModal
-                open={isOpen("vacaciones")}
-                onClose={() => closeModal("vacaciones")}
-                onSuccess={handleModalSuccess}
-            />
-        </>
-    );
+ <PermisoVacacionModal
+ open={isOpen("vacaciones")}
+ onClose={() => closeModal("vacaciones")}
+ onSuccess={handleModalSuccess}
+ />
+ </>
+ );
 };
 
 export default JefeTecnicoSolicitudesView;

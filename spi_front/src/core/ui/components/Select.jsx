@@ -8,21 +8,17 @@ const Select = ({
   children,
   className = "",
   containerClassName = "mb-3",
+  includePlaceholder = true,
+  placeholderLabel = "Seleccione...",
 }) => (
   <div className={containerClassName}>
-    {label && (
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label}
-      </label>
-    )}
+    {label && <label className="mb-1 block text-sm font-medium text-gray-700">{label}</label>}
     <select
       value={value}
       onChange={onChange}
-      className={`w-full border border-gray-300 rounded-md px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-blue-400 ${className}`}
+      className={`w-full rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400 ${className}`}
     >
-      <option value="">Seleccione...</option>
-
-      {/* ✅ Si hay "options", se mapean; si no, se renderizan los children */}
+      {includePlaceholder ? <option value="">{placeholderLabel}</option> : null}
       {Array.isArray(options)
         ? options.map((opt) => (
             <option key={opt.value} value={opt.value}>

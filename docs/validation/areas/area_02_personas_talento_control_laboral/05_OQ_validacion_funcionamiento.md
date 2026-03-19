@@ -10,17 +10,19 @@ Validar el comportamiento funcional observable del area en usuarios, colaborador
 | ID | Modulo | Escenario | Resultado esperado |
 |---|---|---|---|
 | OQ-PT-001 | users/departments | Listado, filtros, activacion y desactivacion administrativa | El sistema devuelve o persiste informacion sin romper relaciones, respeta el alcance por rol y preserva el historico con estados activos/inactivos |
+| OQ-PT-001A | users/departments | Navegacion unificada del hub administrativo | Talento Humano y TI ven `Usuarios y Departamentos` en la barra, pueden abrir usuarios o departamentos desde la misma vista y otros roles no ven ni acceden a esa entrada |
 | OQ-PT-002 | collaborators | Consulta y actualizacion de perfil de colaborador | El workspace refleja cambios y documentos asociados |
 | OQ-PT-002A | collaborators | Uso del workspace en movil | El usuario puede seleccionar contexto y operar sin depender de un sidebar oculto |
 | OQ-PT-003 | user-profile | Actualizacion del perfil propio | Metadata, preferencias y avatar quedan persistidos |
 | OQ-PT-003A | user-profile | Cierre de revision anual | El sistema impide cerrar la revision si faltan campos criticos y muestra con claridad los pendientes |
-| OQ-PT-004 | user-certifications | Alta, consulta, baja logica y PDF | Las certificaciones se administran y exportan correctamente para los roles autorizados |
+| OQ-PT-004 | user-certifications | Alta, consulta, baja logica y PDF | Las certificaciones se administran y exportan correctamente desde la vista propia del colaborador y para los roles autorizados |
 | OQ-PT-004A | user-certifications | Uso tactil y responsive | Las acciones de ver y eliminar permanecen visibles en touch y el formulario se adapta a movil |
-| OQ-PT-005 | personnel-requests | Creacion y seguimiento de solicitud de personal | La solicitud cambia de estado y conserva historial y comentarios |
+| OQ-PT-005 | personnel-requests | Creacion y seguimiento de solicitud de personal | La solicitud cambia de estado y conserva historial, comentarios, actor por etapa y expediente sincronizado |
 | OQ-PT-005F | personnel-requests | Apertura por ruta del hub de talento | Cada ruta del hub abre la vista esperada sin desviar al usuario a otro contexto |
+| OQ-PT-005G | auditoria | Trazabilidad del workspace de talento | Los nuevos eventos de solicitudes, usuarios y departamentos muestran actor, modulo y accion identificables; los registros historicos no normalizados se presentan con etiquetas explicitas y no con placeholders tecnicos crudos |
 | OQ-PT-005A | personnel-requests | Avance por bloque de captura | El formulario no permite pasar de paso si faltan datos obligatorios del bloque actual |
 | OQ-PT-005B | personnel-requests | Estado, responsable y progreso | El workspace muestra estado actual, responsable, siguiente accion, tiempo por etapa y estancamiento |
-| OQ-PT-005C | personnel-requests | Reasignacion operativa | El rol autorizado puede cambiar el colaborador operativo vinculado a la solicitud |
+| OQ-PT-005C | personnel-requests | Reasignacion operativa | El rol autorizado puede cambiar o liberar el colaborador operativo vinculado a la solicitud |
 | OQ-PT-005D | personnel-requests | Comentarios trazables | El sistema registra comentarios con autor, fecha y marca de visibilidad interna |
 | OQ-PT-005E | personnel-requests | Checklist y documentos | El sistema muestra avance documental y habilita la contratacion solo con expediente completo |
 | OQ-PT-006 | attendance | Registro diario de jornada | La secuencia entrada-almuerzo-salida queda validada |

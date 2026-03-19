@@ -4,37 +4,37 @@
 import { STATUS_CONFIG } from "./EquipmentPurchaseWidget.constants";
 import { formatDateTimeEC } from "../../../core/utils/dateUtils";
 import {
-    FiClock,
-    FiAlertCircle,
-    FiMail,
-    FiFileText,
-    FiCheckCircle,
-    FiCalendar,
-    FiTruck,
-    FiPackage,
-    FiUser,
-    FiSearch,
-    FiDownload,
+ FiClock,
+ FiAlertCircle,
+ FiMail,
+ FiFileText,
+ FiCheckCircle,
+ FiCalendar,
+ FiTruck,
+ FiPackage,
+ FiUser,
+ FiSearch,
+ FiDownload,
 } from "react-icons/fi";
 
 // Icon mapping for dynamic icon rendering
 const ICON_COMPONENTS = {
-    FiClock,
-    FiAlertCircle,
-    FiMail,
-    FiFileText,
-    FiCheckCircle,
-    FiCalendar,
-    FiTruck,
-    FiPackage,
-    FiUser,
-    FiSearch,
-    FiDownload,
+ FiClock,
+ FiAlertCircle,
+ FiMail,
+ FiFileText,
+ FiCheckCircle,
+ FiCalendar,
+ FiTruck,
+ FiPackage,
+ FiUser,
+ FiSearch,
+ FiDownload,
 };
 
 const normalizeEquipmentType = (type) => {
-    if (type === "new") return "new_available";
-    return type || "none";
+ if (type === "new") return "new_available";
+ return type || "none";
 };
 
 /**
@@ -43,7 +43,7 @@ const normalizeEquipmentType = (type) => {
  * @returns {React.Component} Icon component
  */
 export const getIconComponent = (iconName) => {
-    return ICON_COMPONENTS[iconName] || ICON_COMPONENTS.FiPackage;
+ return ICON_COMPONENTS[iconName] || ICON_COMPONENTS.FiPackage;
 };
 
 /**
@@ -52,11 +52,11 @@ export const getIconComponent = (iconName) => {
  * @returns {object} Status config with resolved icon
  */
 export const getStatusConfig = (status) => {
-    const config = STATUS_CONFIG[status] || STATUS_CONFIG.waiting_provider_response;
-    return {
-        ...config,
-        Icon: getIconComponent(config.iconName),
-    };
+ const config = STATUS_CONFIG[status] || STATUS_CONFIG.waiting_provider_response;
+ return {
+ ...config,
+ Icon: getIconComponent(config.iconName),
+ };
 };
 
 /**
@@ -65,16 +65,16 @@ export const getStatusConfig = (status) => {
  * @returns {string} Formatted outcome text
  */
 export const formatProviderOutcome = (outcome) => {
-    switch (outcome) {
-        case "new":
-            return "El proveedor confirmó disponibilidad de equipos";
-        case "cu":
-            return "El proveedor confirmó disponibilidad de equipos CU";
-        case "none":
-            return "El proveedor indicó que no hay stock disponible";
-        default:
-            return "Respuesta registrada del proveedor";
-    }
+ switch (outcome) {
+ case "new":
+ return "El proveedor confirmó disponibilidad de equipos";
+ case "cu":
+ return "El proveedor confirmó disponibilidad de equipos CU";
+ case "none":
+ return "El proveedor indicó que no hay stock disponible";
+ default:
+ return "Respuesta registrada del proveedor";
+ }
 };
 
 /**
@@ -83,17 +83,17 @@ export const formatProviderOutcome = (outcome) => {
  * @returns {Array} Normalized items array
  */
 export const normalizeResponseItems = (request) => {
-    const equipment = Array.isArray(request?.equipment) ? request.equipment : [];
+ const equipment = Array.isArray(request?.equipment) ? request.equipment : [];
 
-    return equipment.map((item, index) => ({
-        id: item.equipment_id || item.inventory_id || item.id || `eq_${index + 1}`,
-        name: item.name || item.label || item.sku || "Equipo",
-        sku: item.sku,
-        serial: item.serial,
-        requested_type: item.type,
-        available_type: normalizeEquipmentType(item.type),
-        decision: normalizeEquipmentType(item.type) === "none" ? "reject" : "accept",
-    }));
+ return equipment.map((item, index) => ({
+ id: item.equipment_id || item.inventory_id || item.id || `eq_${index + 1}`,
+ name: item.name || item.label || item.sku || "Equipo",
+ sku: item.sku,
+ serial: item.serial,
+ requested_type: item.type,
+ available_type: normalizeEquipmentType(item.type),
+ decision: normalizeEquipmentType(item.type) === "none" ? "reject" : "accept",
+ }));
 };
 
 /**
@@ -102,13 +102,13 @@ export const normalizeResponseItems = (request) => {
  * @returns {Array} Deduplicated list
  */
 export const dedupeEquipmentList = (list = []) => {
-    const seen = new Set();
-    return (list || []).filter((item) => {
-        const key = `${item.sku || item.name || item.label || item.id || ""}`.toLowerCase().trim();
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-    });
+ const seen = new Set();
+ return (list || []).filter((item) => {
+ const key = `${item.sku || item.name || item.label || item.id || ""}`.toLowerCase().trim();
+ if (seen.has(key)) return false;
+ seen.add(key);
+ return true;
+ });
 };
 
 /**
@@ -118,36 +118,36 @@ export const dedupeEquipmentList = (list = []) => {
  * @returns {object} Equipment list info
  */
 export const getEquipmentDisplayList = (req, providerResponse) => {
-    const requestedMap = new Map(
-        (req.equipment || []).map((item, index) => [item.id || item.equipment_id || item.inventory_id || `eq_${index + 1}`, item]),
-    );
-    const availableItems = Array.isArray(providerResponse?.items)
-        ? providerResponse.items.map((item) => {
-            const requestedItem = requestedMap.get(item.id) || {};
-            return {
-                ...item,
-                name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || "Equipo",
-                requested_type: item.requested_type || requestedItem.type,
-                available_type: normalizeEquipmentType(item.available_type || item.type),
-                decision: item.decision || (normalizeEquipmentType(item.available_type || item.type) === "none" ? "reject" : "accept"),
-            };
-        })
-        : [];
+ const requestedMap = new Map(
+ (req.equipment || []).map((item, index) => [item.id || item.equipment_id || item.inventory_id || `eq_${index + 1}`, item]),
+ );
+ const availableItems = Array.isArray(providerResponse?.items)
+ ? providerResponse.items.map((item) => {
+ const requestedItem = requestedMap.get(item.id) || {};
+ return {
+ ...item,
+ name: item.name || requestedItem.name || requestedItem.label || requestedItem.sku || "Equipo",
+ requested_type: item.requested_type || requestedItem.type,
+ available_type: normalizeEquipmentType(item.available_type || item.type),
+ decision: item.decision || (normalizeEquipmentType(item.available_type || item.type) === "none" ? "reject" : "accept"),
+ };
+ })
+ : [];
 
-    const showAvailableItems = !!providerResponse && availableItems.length > 0;
-    const equipmentList = showAvailableItems
-        ? availableItems
-        : (req.equipment || []).map((item) => ({
-            ...item,
-            requested_type: item.type,
-            available_type: normalizeEquipmentType(item.type),
-        }));
+ const showAvailableItems = !!providerResponse && availableItems.length > 0;
+ const equipmentList = showAvailableItems
+ ? availableItems
+ : (req.equipment || []).map((item) => ({
+ ...item,
+ requested_type: item.type,
+ available_type: normalizeEquipmentType(item.type),
+ }));
 
-    const equipmentTitle = showAvailableItems
-        ? "Equipos disponibles (respuesta del proveedor):"
-        : "Equipos solicitados:";
+ const equipmentTitle = showAvailableItems
+ ? "Equipos disponibles (respuesta del proveedor):"
+ : "Equipos solicitados:";
 
-    return { equipmentList, equipmentTitle, showAvailableItems };
+ return { equipmentList, equipmentTitle, showAvailableItems };
 };
 
 /**
@@ -157,21 +157,21 @@ export const getEquipmentDisplayList = (req, providerResponse) => {
  * @returns {object} Formatted date info
  */
 export const getFormattedProviderResponse = (providerResponse, req) => {
-    const providerText = providerResponse
-        ? formatProviderOutcome(providerResponse.outcome)
-        : "Sin respuesta del proveedor";
+ const providerText = providerResponse
+ ? formatProviderOutcome(providerResponse.outcome)
+ : "Sin respuesta del proveedor";
 
-    const providerTimestamp =
-        providerResponse?.updated_at ||
-        req.provider_response_at ||
-        req.updated_at ||
-        req.created_at;
+ const providerTimestamp =
+ providerResponse?.updated_at ||
+ req.provider_response_at ||
+ req.updated_at ||
+ req.created_at;
 
-    const formattedResponseDate = providerTimestamp
-        ? formatDateTimeEC(providerTimestamp)
-        : null;
+ const formattedResponseDate = providerTimestamp
+ ? formatDateTimeEC(providerTimestamp)
+ : null;
 
-    return { providerText, formattedResponseDate };
+ return { providerText, formattedResponseDate };
 };
 
 /**
@@ -182,20 +182,20 @@ export const getFormattedProviderResponse = (providerResponse, req) => {
  * @returns {object} Pagination info
  */
 export const getPaginationInfo = (filteredRequests, compactList, currentPage) => {
-    const perPage = compactList ? 9 : Math.max(filteredRequests.length, 1);
-    const totalPages = Math.max(1, Math.ceil((filteredRequests.length || 0) / perPage));
-    const page = Math.min(currentPage, totalPages);
+ const perPage = compactList ? 9 : Math.max(filteredRequests.length, 1);
+ const totalPages = Math.max(1, Math.ceil((filteredRequests.length || 0) / perPage));
+ const page = Math.min(currentPage, totalPages);
 
-    const visibleRequests = compactList
-        ? filteredRequests.slice((page - 1) * perPage, page * perPage)
-        : filteredRequests;
+ const visibleRequests = compactList
+ ? filteredRequests.slice((page - 1) * perPage, page * perPage)
+ : filteredRequests;
 
-    return {
-        perPage,
-        totalPages,
-        currentPage: page,
-        visibleRequests,
-    };
+ return {
+ perPage,
+ totalPages,
+ currentPage: page,
+ visibleRequests,
+ };
 };
 
 /**
@@ -206,25 +206,25 @@ export const getPaginationInfo = (filteredRequests, compactList, currentPage) =>
  * @returns {object} Validation result
  */
 export const validateForm = (form, isManager, meta) => {
-    const errors = [];
+ const errors = [];
 
-    const hasClient = Boolean(form?.clientId) || Boolean(String(form?.clientName || "").trim());
-    if (!hasClient) {
-        errors.push("Nombre del cliente es obligatorio");
-    }
+ const hasClient = Boolean(form?.clientId) || Boolean(String(form?.clientName || "").trim());
+ if (!hasClient) {
+ errors.push("Nombre del cliente es obligatorio");
+ }
 
-    if (!form.equipment.length) {
-        errors.push("Debe seleccionar al menos un equipo");
-    }
+ if (!form.equipment.length) {
+ errors.push("Debe seleccionar al menos un equipo");
+ }
 
-    if (!isManager && !form.assignedTo) {
-        errors.push("Debe asignar la solicitud a un ACP Comercial");
-    }
+ if (!isManager && !form.assignedTo) {
+ errors.push("Debe asignar la solicitud a un ACP Comercial");
+ }
 
-    return {
-        isValid: errors.length === 0,
-        errors,
-    };
+ return {
+ isValid: errors.length === 0,
+ errors,
+ };
 };
 
 /**
@@ -235,19 +235,19 @@ export const validateForm = (form, isManager, meta) => {
  * @returns {object} Validation result
  */
 export const validateFile = (file, allowedTypes = ['application/pdf'], maxSize = 10) => {
-    if (!file) {
-        return { isValid: false, error: "Selecciona un archivo" };
-    }
+ if (!file) {
+ return { isValid: false, error: "Selecciona un archivo" };
+ }
 
-    if (!allowedTypes.includes(file.type)) {
-        return { isValid: false, error: `Tipo de archivo no permitido. Solo: ${allowedTypes.join(', ')}` };
-    }
+ if (!allowedTypes.includes(file.type)) {
+ return { isValid: false, error: `Tipo de archivo no permitido. Solo: ${allowedTypes.join(', ')}` };
+ }
 
-    if (file.size > maxSize * 1024 * 1024) {
-        return { isValid: false, error: `Archivo demasiado grande. Máximo: ${maxSize}MB` };
-    }
+ if (file.size > maxSize * 1024 * 1024) {
+ return { isValid: false, error: `Archivo demasiado grande. Máximo: ${maxSize}MB` };
+ }
 
-    return { isValid: true };
+ return { isValid: true };
 };
 
 /**
@@ -257,15 +257,15 @@ export const validateFile = (file, allowedTypes = ['application/pdf'], maxSize =
  * @returns {Array} Formatted equipment payload
  */
 export const getEquipmentPayload = (equipment, metaEquipment) => {
-    return equipment.map((formEq) => {
-        const eq = metaEquipment.find((e) => e.id === formEq.id);
-        return {
-            equipment_id: eq.id,
-            name: eq.name,
-            sku: eq.sku,
-            serial: eq.serial,
-            status: eq.status,
-            type: formEq.type
-        };
-    });
+ return equipment.map((formEq) => {
+ const eq = metaEquipment.find((e) => e.id === formEq.id);
+ return {
+ equipment_id: eq.id,
+ name: eq.name,
+ sku: eq.sku,
+ serial: eq.serial,
+ status: eq.status,
+ type: formEq.type
+ };
+ });
 };

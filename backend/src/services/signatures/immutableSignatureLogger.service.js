@@ -8,7 +8,7 @@ const logger = require("../../config/logger");
  * Registra eventos encadenados mediante hash para garantizar
  * trazabilidad y evitar alteraciones (append-only). Cada nuevo evento
  * enlaza el hash previo cumpliendo con los principios de integridad y
- * rendición de cuentas exigidos por la LOPDP.
+ * rendiciÃ³n de cuentas exigidos por la LOPDP.
  */
 class ImmutableSignatureLogger {
   /**

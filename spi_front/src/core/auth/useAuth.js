@@ -7,41 +7,41 @@ import { AuthContext } from "./AuthContext";
  * Incluye atajos comunes como isGerencia(), isTecnico(), etc.
  */
 export const useAuth = () => {
-  const {
-    user,
-    isAuthenticated,
-    login,
-    logout,
-    refresh,
-    reloadProfile,
-    loading,
-  } = useContext(AuthContext);
+ const {
+ user,
+ isAuthenticated,
+ login,
+ logout,
+ refresh,
+ reloadProfile,
+ loading,
+ } = useContext(AuthContext);
 
-  const role = user?.role?.toLowerCase?.() || "";
-  const scope = user?.scope?.toLowerCase?.() || role;
+ const role = user?.role?.toLowerCase?.() || "";
+ const scope = user?.scope?.toLowerCase?.() || role;
 
-  const isGerencia = scope === "gerencia";
-  const isTecnico = scope === "servicio_tecnico";
-  const isComercial = scope === "comercial";
-  const isFinanzas = scope === "finanzas";
-  const isTalento = scope === "talento_humano";
-  const isAdmin = scope === "ti" || scope === "admin";
+ const isGerencia = scope === "gerencia";
+ const isTecnico = scope === "servicio_tecnico";
+ const isComercial = scope === "comercial";
+ const isFinanzas = scope === "finanzas";
+ const isTalento = scope === "talento_humano";
+ const isAdmin = scope === "ti" || scope === "admin";
 
-  return {
-    user,
-    role,
-    loading,
-    isAuthenticated,
-    login,
-    logout,
-    refresh,
-    reloadProfile, // 👈 Se agrega para permitir recargas manuales
-    scope,
-    isGerencia,
-    isTecnico,
-    isComercial,
-    isFinanzas,
-    isTalento,
-    isAdmin,
-  };
+ return {
+ user,
+ role,
+ loading,
+ isAuthenticated,
+ login,
+ logout,
+ refresh,
+ reloadProfile, // 👈 Se agrega para permitir recargas manuales
+ scope,
+ isGerencia,
+ isTecnico,
+ isComercial,
+ isFinanzas,
+ isTalento,
+ isAdmin,
+ };
 };
