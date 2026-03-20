@@ -19,12 +19,12 @@ const ADMIN_TABS = [
     path: "/dashboard/talento-humano/usuarios",
     label: "Usuarios",
     description:
-      "Gestiona accesos, roles, estado operativo y asignaci髇 departamental en una sola consola.",
+      "Gestiona accesos, roles, estado operativo y asignaci贸n departamental en una sola consola.",
     shortDescription: "Control de accesos internos",
     icon: FiUsers,
     accent: "from-blue-600 via-cyan-600 to-sky-500",
     softAccent: "bg-blue-50 text-blue-700 border-blue-100",
-    bullets: ["Alta y edici髇 manual", "Control de estado", "Asignaci髇 de rol y 醨ea"],
+    bullets: ["Alta y edici贸n manual", "Control de estado", "Asignaci贸n de rol y 谩rea"],
   },
   {
     key: "departamentos",
@@ -36,7 +36,7 @@ const ADMIN_TABS = [
     icon: FiSettings,
     accent: "from-slate-800 via-slate-700 to-slate-600",
     softAccent: "bg-slate-100 text-slate-700 border-slate-200",
-    bullets: ["Cat醠ogo operativo", "Estado activo o inactivo", "Base para asignaci髇 de usuarios"],
+    bullets: ["Cat谩logo operativo", "Estado activo o inactivo", "Base para asignaci贸n de usuarios"],
   },
 ];
 
@@ -77,7 +77,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
             <div className="max-w-3xl space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700">
                 <FiShield className="text-sm" />
-                Gesti髇 administrativa segura
+                Gesti贸n administrativa segura
               </div>
 
               <div className="space-y-3">
@@ -98,7 +98,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                   </div>
                   <p className="text-sm font-semibold text-slate-900">Identidades internas</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Roles, correo, estado operativo y trazabilidad b醩ica del acceso.
+                    Roles, correo, estado operativo y trazabilidad b谩sica del acceso.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
@@ -107,16 +107,16 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                   </div>
                   <p className="text-sm font-semibold text-slate-900">Estructura activa</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Departamentos disponibles para asignaci髇 y organizaci髇 interna.
+                    Departamentos disponibles para asignaci贸n y organizaci贸n interna.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                   <div className="mb-2 inline-flex rounded-2xl bg-emerald-100 p-2 text-emerald-700">
                     <FiActivity />
                   </div>
-                  <p className="text-sm font-semibold text-slate-900">Operaci髇 continua</p>
+                  <p className="text-sm font-semibold text-slate-900">Operaci贸n continua</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Trabajo optimizado para escritorio y adaptable a tablet o m髒il.
+                    Trabajo optimizado para escritorio y adaptable a tablet o m贸vil.
                   </p>
                 </div>
               </div>
@@ -156,7 +156,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                 <FiCompass />
               </div>
               <div>
-                <p className="font-semibold text-slate-900">Navegaci髇 operativa</p>
+                <p className="font-semibold text-slate-900">Navegaci贸n operativa</p>
                 <p className="text-xs leading-5 text-slate-500">
                   Cambia entre identidades y estructura sin salir del mismo espacio administrativo.
                 </p>

@@ -79,11 +79,11 @@ const ActionConfirmModal = ({ state, onClose, onConfirm, loading }) => {
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           <p>
             {isActivate
-              ? "El departamento volverá a quedar disponible para asignaciones internas."
-              : "El departamento dejará de estar disponible para nuevas asignaciones, pero conservará trazabilidad histórica."}
+              ? "El departamento volverÃ¡ a quedar disponible para asignaciones internas."
+              : "El departamento dejarÃ¡ de estar disponible para nuevas asignaciones, pero conservarÃ¡ trazabilidad histÃ³rica."}
           </p>
           <p className="mt-3 font-semibold text-slate-900">{state.department.name || state.department.nombre}</p>
-          <p className="text-xs text-slate-500">Código: {state.department.code || "N/D"}</p>
+          <p className="text-xs text-slate-500">CÃ³digo: {state.department.code || "N/D"}</p>
         </div>
 
         <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
@@ -126,7 +126,7 @@ const Departamentos = () => {
     } catch (error) {
       console.error("Error al cargar departamentos:", error);
       setDepartamentos([]);
-      setErrorMessage("No se pudo cargar la gestión de departamentos. Intenta nuevamente.");
+      setErrorMessage("No se pudo cargar la gestiÃ³n de departamentos. Intenta nuevamente.");
       toast.error("Error al cargar los departamentos");
     } finally {
       setLoading(false);
@@ -255,12 +255,12 @@ const Departamentos = () => {
           <div className="max-w-2xl space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-700">
               <FiGrid size={12} />
-              Gestión de departamentos
+              GestiÃ³n de departamentos
             </div>
             <div>
               <h2 className="text-2xl font-black tracking-tight text-slate-900">Estructura organizacional y disponibilidad operativa</h2>
               <p className="mt-2 text-sm leading-7 text-slate-600">
-                Mantén el catálogo de áreas con nombre, código, estado y descripción operativa. Esta vista
+                MantÃ©n el catÃ¡logo de Ã¡reas con nombre, cÃ³digo, estado y descripciÃ³n operativa. Esta vista
                 prioriza claridad de disponibilidad para asignaciones internas y control estructural continuo.
               </p>
             </div>
@@ -286,7 +286,7 @@ const Departamentos = () => {
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Buscar por nombre o código"
+            placeholder="Buscar por nombre o cÃ³digo"
             containerClassName="mb-0"
             className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50 pl-11"
           />
@@ -322,15 +322,15 @@ const Departamentos = () => {
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <SummaryCard icon={FiFolder} label="Departamentos visibles" value={summary.total} helper="Resultado actual" tone="slate" />
-        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para asignación" tone="emerald" />
+        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para asignaciÃ³n" tone="emerald" />
         <SummaryCard icon={FiXCircle} label="Inactivos" value={summary.inactive} helper="Fuera de uso operativo" tone="blue" />
       </section>
 
       <section className="rounded-[28px] border border-white/80 bg-white/92 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">Catálogo operativo</h3>
-            <p className="text-sm text-slate-500">Comparación rápida en escritorio y tarjetas compactas en móvil.</p>
+            <h3 className="text-lg font-bold text-slate-900">CatÃ¡logo operativo</h3>
+            <p className="text-sm text-slate-500">ComparaciÃ³n rÃ¡pida en escritorio y tarjetas compactas en mÃ³vil.</p>
           </div>
           {errorMessage ? (
             <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
@@ -349,8 +349,8 @@ const Departamentos = () => {
             </div>
           ) : errorMessage ? (
             <div className="rounded-[24px] border border-dashed border-red-200 bg-red-50/70 p-6 text-center">
-              <p className="text-base font-semibold text-red-800">No se pudo cargar la gestión de departamentos</p>
-              <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar el catálogo actual.</p>
+              <p className="text-base font-semibold text-red-800">No se pudo cargar la gestiÃ³n de departamentos</p>
+              <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar el catÃ¡logo actual.</p>
               <div className="mt-4 flex justify-center">
                 <Button variant="secondary" leftIcon={FiRefreshCw} onClick={() => fetchDepartamentos()}>
                   Reintentar
@@ -360,11 +360,11 @@ const Departamentos = () => {
           ) : filteredDepartamentos.length === 0 ? (
             <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
               <p className="text-lg font-semibold text-slate-900">
-                {hasActiveFilters ? "No hay departamentos que coincidan con los filtros actuales" : "Aún no hay departamentos registrados"}
+                {hasActiveFilters ? "No hay departamentos que coincidan con los filtros actuales" : "AÃºn no hay departamentos registrados"}
               </p>
               <p className="mt-2 text-sm text-slate-500">
                 {hasActiveFilters
-                  ? "Ajusta la búsqueda o limpia filtros para recuperar la estructura completa."
+                  ? "Ajusta la bÃºsqueda o limpia filtros para recuperar la estructura completa."
                   : "Crea el primer departamento para estructurar asignaciones internas."}
               </p>
               <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
@@ -386,8 +386,8 @@ const Departamentos = () => {
                     <thead>
                       <tr className="text-xs uppercase tracking-[0.18em] text-slate-400">
                         <th className="px-4 py-3 font-semibold">Departamento</th>
-                        <th className="px-4 py-3 font-semibold">Código</th>
-                        <th className="px-4 py-3 font-semibold">Descripción</th>
+                        <th className="px-4 py-3 font-semibold">CÃ³digo</th>
+                        <th className="px-4 py-3 font-semibold">DescripciÃ³n</th>
                         <th className="px-4 py-3 font-semibold">Estado</th>
                         <th className="px-4 py-3 text-right font-semibold">Acciones</th>
                       </tr>
@@ -409,7 +409,7 @@ const Departamentos = () => {
                               </div>
                             </td>
                             <td className="px-4 py-4 font-medium text-slate-700">{department.code || "N/D"}</td>
-                            <td className="px-4 py-4 text-slate-500">{department.description || "Sin descripción registrada"}</td>
+                            <td className="px-4 py-4 text-slate-500">{department.description || "Sin descripciÃ³n registrada"}</td>
                             <td className="px-4 py-4">
                               <StatusBadge active={active} />
                             </td>
@@ -466,8 +466,8 @@ const Departamentos = () => {
                           </div>
                         </div>
                         <div className="rounded-2xl bg-slate-50 px-3 py-2 sm:min-w-[220px]">
-                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Descripción</p>
-                          <p className="mt-1 text-sm text-slate-700">{department.description || "Sin descripción registrada"}</p>
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">DescripciÃ³n</p>
+                          <p className="mt-1 text-sm text-slate-700">{department.description || "Sin descripciÃ³n registrada"}</p>
                         </div>
                       </div>
 
@@ -504,7 +504,7 @@ const Departamentos = () => {
       >
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-            Registra la unidad organizacional con nombre, código y una descripción breve que ayude a su uso
+            Registra la unidad organizacional con nombre, cÃ³digo y una descripciÃ³n breve que ayude a su uso
             operativo dentro del sistema.
           </div>
 
@@ -513,13 +513,13 @@ const Departamentos = () => {
               label="Nombre del departamento"
               value={nombre}
               onChange={(event) => setNombre(event.target.value)}
-              placeholder="Ej. Servicio Técnico"
+              placeholder="Ej. Servicio TÃ©cnico"
               containerClassName="mb-0"
               autoFocus
               required
             />
             <Input
-              label="Código"
+              label="CÃ³digo"
               value={codigo}
               onChange={(event) => setCodigo(event.target.value.toUpperCase())}
               placeholder="Ej. STC"
@@ -528,11 +528,11 @@ const Departamentos = () => {
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-gray-700">Descripción</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">DescripciÃ³n</label>
             <textarea
               value={descripcion}
               onChange={(event) => setDescripcion(event.target.value)}
-              placeholder="Describe el propósito o alcance operativo del departamento"
+              placeholder="Describe el propÃ³sito o alcance operativo del departamento"
               rows={4}
               className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
