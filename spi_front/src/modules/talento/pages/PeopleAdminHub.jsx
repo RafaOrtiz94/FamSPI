@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   FiActivity,
   FiArrowRight,
@@ -15,17 +16,19 @@ import Departamentos from "./Departamentos";
 const ADMIN_TABS = [
   {
     key: "usuarios",
+    path: "/dashboard/talento-humano/usuarios",
     label: "Usuarios",
     description:
-      "Gestiona accesos, roles, estado operativo y asignacion departamental en una sola consola.",
+      "Gestiona accesos, roles, estado operativo y asignación departamental en una sola consola.",
     shortDescription: "Control de accesos internos",
     icon: FiUsers,
     accent: "from-blue-600 via-cyan-600 to-sky-500",
     softAccent: "bg-blue-50 text-blue-700 border-blue-100",
-    bullets: ["Alta y edicion manual", "Control de estado", "Asignacion de rol y area"],
+    bullets: ["Alta y edición manual", "Control de estado", "Asignación de rol y área"],
   },
   {
     key: "departamentos",
+    path: "/dashboard/talento-humano/departamentos",
     label: "Departamentos",
     description:
       "Administra la estructura organizacional activa y mantiene consistencia para asignaciones internas.",
@@ -33,7 +36,7 @@ const ADMIN_TABS = [
     icon: FiSettings,
     accent: "from-slate-800 via-slate-700 to-slate-600",
     softAccent: "bg-slate-100 text-slate-700 border-slate-200",
-    bullets: ["Catalogo operativo", "Estado activo o inactivo", "Base para asignacion de usuarios"],
+    bullets: ["Catálogo operativo", "Estado activo o inactivo", "Base para asignación de usuarios"],
   },
 ];
 
@@ -43,6 +46,8 @@ const normalizeTab = (value) => {
 };
 
 const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
+  const navigate = useNavigate();
+  const location = useLocation();
   const normalizedInitialTab = useMemo(() => normalizeTab(initialTab), [initialTab]);
   const [activeTab, setActiveTab] = useState(normalizedInitialTab);
 
@@ -52,6 +57,15 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
 
   const currentTab = ADMIN_TABS.find((tab) => tab.key === activeTab) || ADMIN_TABS[0];
   const CurrentIcon = currentTab.icon;
+
+  const handleChangeTab = (key) => {
+    const targetTab = ADMIN_TABS.find((tab) => tab.key === key) || ADMIN_TABS[0];
+    if (location.pathname !== targetTab.path) {
+      navigate(targetTab.path);
+      return;
+    }
+    setActiveTab(targetTab.key);
+  };
 
   return (
     <div className="min-h-full bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_35%),radial-gradient(circle_at_top_right,_rgba(14,165,233,0.10),_transparent_30%),linear-gradient(180deg,_#f8fbff_0%,_#eef4ff_45%,_#f8fafc_100%)] px-4 py-5 sm:px-6 lg:px-8">
@@ -63,7 +77,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
             <div className="max-w-3xl space-y-4">
               <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50/90 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-blue-700">
                 <FiShield className="text-sm" />
-                Gestion Administrativa Segura
+                Gestión administrativa segura
               </div>
 
               <div className="space-y-3">
@@ -84,7 +98,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                   </div>
                   <p className="text-sm font-semibold text-slate-900">Identidades internas</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Roles, correo, estado operativo y trazabilidad basica del acceso.
+                    Roles, correo, estado operativo y trazabilidad básica del acceso.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
@@ -93,16 +107,16 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                   </div>
                   <p className="text-sm font-semibold text-slate-900">Estructura activa</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Departamentos disponibles para asignacion y organizacion interna.
+                    Departamentos disponibles para asignación y organización interna.
                   </p>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
                   <div className="mb-2 inline-flex rounded-2xl bg-emerald-100 p-2 text-emerald-700">
                     <FiActivity />
                   </div>
-                  <p className="text-sm font-semibold text-slate-900">Operacion continua</p>
+                  <p className="text-sm font-semibold text-slate-900">Operación continua</p>
                   <p className="mt-1 text-xs leading-6 text-slate-500">
-                    Trabajo optimizado para escritorio y adaptable a tablet o movil.
+                    Trabajo optimizado para escritorio y adaptable a tablet o móvil.
                   </p>
                 </div>
               </div>
@@ -142,7 +156,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                 <FiCompass />
               </div>
               <div>
-                <p className="font-semibold text-slate-900">Navegacion operativa</p>
+                <p className="font-semibold text-slate-900">Navegación operativa</p>
                 <p className="text-xs leading-5 text-slate-500">
                   Cambia entre identidades y estructura sin salir del mismo espacio administrativo.
                 </p>
@@ -157,7 +171,7 @@ const PeopleAdminHub = ({ initialTab = "usuarios" }) => {
                   <button
                     key={tab.key}
                     type="button"
-                    onClick={() => setActiveTab(tab.key)}
+                    onClick={() => handleChangeTab(tab.key)}
                     className={`group flex w-full items-start gap-3 rounded-[24px] border px-4 py-4 text-left transition-all lg:min-w-[280px] ${
                       isActive
                         ? "border-transparent bg-slate-950 text-white shadow-[0_20px_45px_rgba(15,23,42,0.24)]"

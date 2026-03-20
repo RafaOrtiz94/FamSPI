@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FiAlertCircle,
   FiCheckCircle,
@@ -28,8 +28,8 @@ const ROLE_OPTIONS = [
   { label: "Pendiente", value: "pendiente" },
   { label: "Gerencia", value: "gerencia" },
   { label: "Comercial", value: "comercial" },
-  { label: "Servicio Técnico", value: "servicio_tecnico" },
-  { label: "Técnico", value: "tecnico" },
+  { label: "Servicio TÃ©cnico", value: "servicio_tecnico" },
+  { label: "TÃ©cnico", value: "tecnico" },
   { label: "Finanzas", value: "finanzas" },
   { label: "Talento Humano", value: "talento_humano" },
   { label: "TI", value: "ti" },
@@ -119,8 +119,8 @@ const ActionConfirmModal = ({ state, onClose, onConfirm, loading }) => {
         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
           <p>
             {isActivate
-              ? "El usuario volverá a quedar disponible para acceso y operación interna."
-              : "El usuario dejará de estar disponible para operación interna, pero conservará su trazabilidad."}
+              ? "El usuario volverÃ¡ a quedar disponible para acceso y operaciÃ³n interna."
+              : "El usuario dejarÃ¡ de estar disponible para operaciÃ³n interna, pero conservarÃ¡ su trazabilidad."}
           </p>
           <p className="mt-3 font-semibold text-slate-900">{state.user.fullname || state.user.email}</p>
           <p className="text-xs text-slate-500">{state.user.email}</p>
@@ -163,17 +163,17 @@ const Usuarios = () => {
     return () => window.clearTimeout(handler);
   }, [search]);
 
-  const loadDepartments = async () => {
+  const loadDepartments = useCallback(async () => {
     try {
       const depData = await getDepartments({ include_inactive: true });
       setDepartments(Array.isArray(depData) ? depData : []);
     } catch (error) {
       console.error("Error cargando departamentos:", error);
-      toast.error("No se pudo cargar el catálogo de departamentos");
+      toast.error("No se pudo cargar el catÃ¡logo de departamentos");
     }
-  };
+  }, []);
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     const initialLoad = !initializedRef.current;
     setErrorMessage("");
     if (initialLoad) setLoading(true);
@@ -190,21 +190,21 @@ const Usuarios = () => {
       initializedRef.current = true;
     } catch (error) {
       console.error("Error cargando usuarios:", error);
-      setErrorMessage("No se pudo cargar la gestión de usuarios. Intenta nuevamente.");
+      setErrorMessage("No se pudo cargar la gestiÃ³n de usuarios. Intenta nuevamente.");
       toast.error("Error al cargar usuarios");
     } finally {
       setLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [debouncedSearch, departmentFilter, roleFilter, statusFilter]);
 
   useEffect(() => {
     loadDepartments();
-  }, []);
+  }, [loadDepartments]);
 
   useEffect(() => {
     loadUsers();
-  }, [debouncedSearch, roleFilter, departmentFilter, statusFilter]);
+  }, [loadUsers]);
 
   const resetForm = () => {
     setEditing(null);
@@ -334,14 +334,14 @@ const Usuarios = () => {
           <div className="max-w-2xl space-y-3">
             <div className="inline-flex items-center gap-2 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.22em] text-blue-700">
               <FiShield size={12} />
-              Gestión de usuarios
+              GestiÃ³n de usuarios
             </div>
             <div>
               <h2 className="text-2xl font-black tracking-tight text-slate-900">Identidades internas y control operativo</h2>
               <p className="mt-2 text-sm leading-7 text-slate-600">
-                Administra accesos, roles, estados y asignación departamental desde una vista preparada
-                para operación diaria. La consola prioriza velocidad de búsqueda, claridad de estado y
-                acción directa por registro.
+                Administra accesos, roles, estados y asignaciÃ³n departamental desde una vista preparada
+                para operaciÃ³n diaria. La consola prioriza velocidad de bÃºsqueda, claridad de estado y
+                acciÃ³n directa por registro.
               </p>
             </div>
           </div>
@@ -370,7 +370,7 @@ const Usuarios = () => {
             containerClassName="mb-0"
             className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50 pl-11"
           />
-          <div className="relative lg:col-start-1 lg:row-start-1 pointer-events-none">
+          <div className="relative pointer-events-none lg:col-start-1 lg:row-start-1">
             <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
           </div>
           <Select
@@ -427,16 +427,16 @@ const Usuarios = () => {
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryCard icon={FiUsers} label="Usuarios visibles" value={summary.total} helper="Resultado actual" tone="slate" />
-        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para operación" tone="emerald" />
+        <SummaryCard icon={FiCheckCircle} label="Activos" value={summary.active} helper="Disponibles para operaciÃ³n" tone="emerald" />
         <SummaryCard icon={FiXCircle} label="Inactivos" value={summary.inactive} helper="Fuera de uso operativo" tone="amber" />
-        <SummaryCard icon={FiMail} label="Con departamento" value={summary.withDepartment} helper="Asignación estructural" tone="blue" />
+        <SummaryCard icon={FiMail} label="Con departamento" value={summary.withDepartment} helper="AsignaciÃ³n estructural" tone="blue" />
       </section>
 
       <section className="rounded-[28px] border border-white/80 bg-white/92 shadow-[0_18px_45px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex flex-col gap-2 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 className="text-lg font-bold text-slate-900">Listado operativo</h3>
-            <p className="text-sm text-slate-500">Comparación rápida en escritorio y tarjetas legibles en móvil.</p>
+            <p className="text-sm text-slate-500">ComparaciÃ³n rÃ¡pida en escritorio y tarjetas legibles en mÃ³vil.</p>
           </div>
           {errorMessage ? (
             <div className="inline-flex items-center gap-2 rounded-full bg-red-50 px-3 py-1 text-xs font-semibold text-red-700">
@@ -455,8 +455,8 @@ const Usuarios = () => {
             </div>
           ) : errorMessage ? (
             <div className="rounded-[24px] border border-dashed border-red-200 bg-red-50/70 p-6 text-center">
-              <p className="text-base font-semibold text-red-800">No se pudo cargar la gestión de usuarios</p>
-              <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar la información actual.</p>
+              <p className="text-base font-semibold text-red-800">No se pudo cargar la gestiÃ³n de usuarios</p>
+              <p className="mt-2 text-sm text-red-700">Reintenta la consulta para recuperar la informaciÃ³n actual.</p>
               <div className="mt-4 flex justify-center">
                 <Button variant="secondary" leftIcon={FiRefreshCw} onClick={loadUsers}>
                   Reintentar
@@ -466,11 +466,11 @@ const Usuarios = () => {
           ) : visibleUsers.length === 0 ? (
             <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50/80 p-8 text-center">
               <p className="text-lg font-semibold text-slate-900">
-                {hasActiveFilters ? "No hay usuarios que coincidan con los filtros actuales" : "Aún no hay usuarios registrados"}
+                {hasActiveFilters ? "No hay usuarios que coincidan con los filtros actuales" : "AÃºn no hay usuarios registrados"}
               </p>
               <p className="mt-2 text-sm text-slate-500">
                 {hasActiveFilters
-                  ? "Ajusta la búsqueda o limpia filtros para recuperar el listado completo."
+                  ? "Ajusta la bÃºsqueda o limpia filtros para recuperar el listado completo."
                   : "Crea el primer usuario manual para empezar a operar esta consola."}
               </p>
               <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
@@ -627,7 +627,7 @@ const Usuarios = () => {
       >
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="rounded-[24px] border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-600">
-            Define identidad base, rol operativo y asignación estructural. El correo será el identificador
+            Define identidad base, rol operativo y asignaciÃ³n estructural. El correo serÃ¡ el identificador
             principal para uso interno.
           </div>
 
@@ -636,7 +636,7 @@ const Usuarios = () => {
               label="Nombre completo"
               value={form.fullname}
               onChange={(event) => setForm((current) => ({ ...current, fullname: event.target.value }))}
-              placeholder="Ej. María Pérez"
+              placeholder="Ej. MarÃ­a PÃ©rez"
               containerClassName="mb-0"
               autoFocus
               required
