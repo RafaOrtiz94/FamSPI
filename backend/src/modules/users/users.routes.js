@@ -5,6 +5,41 @@ const controller = require("./users.controller");
 const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 
+const ALLOWED_USER_ROLES = new Set([
+  "pendiente",
+  "gerencia",
+  "gerencia_general",
+  "gerente_general",
+  "director",
+  "comercial",
+  "asesor_comercial",
+  "acp_comercial",
+  "backoffice_comercial",
+  "marketing",
+  "jefe_comercial",
+  "servicio_tecnico",
+  "tecnico",
+  "jefe_servicio_tecnico",
+  "jefe_tecnico",
+  "finanzas",
+  "jefe_finanzas",
+  "jefe_financiero",
+  "talento_humano",
+  "jefe_talento_humano",
+  "ti",
+  "jefe_ti",
+  "admin_ti",
+  "operaciones",
+  "jefe_operaciones",
+  "calidad",
+  "jefe_calidad",
+  "logistica",
+  "jefe_logistica",
+  "usuario",
+  "admin",
+  "administrador",
+]);
+
 const USER_ADMIN_ROLES = [
   "talento_humano",
   "jefe_talento_humano",
@@ -32,6 +67,17 @@ const USER_DIRECTORY_ROLES = [
 
 // Todas las rutas requieren autenticación
 router.use(verifyToken);
+
+// Catálogo de roles (para selects del frontend)
+router.get("/roles", requireRole(USER_DIRECTORY_ROLES), (req, res) => {
+  res.status(200).json({
+    ok: true,
+    data: Array.from(ALLOWED_USER_ROLES).sort().map((role) => ({
+      value: role,
+      label: role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    })),
+  });
+});
 
 // CRUD Usuarios
 router.get("/", requireRole(USER_DIRECTORY_ROLES), controller.getUsers);

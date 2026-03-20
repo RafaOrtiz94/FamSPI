@@ -31,7 +31,7 @@ El alcance funcional comprende administracion de personal y estructura, perfil d
 ### FR-PT-004 Perfil propio del usuario
 - Endpoints: `GET/POST/PUT /api/v1/users/me/profile`.
 - Proposito: mantener metadata personal, preferencias y avatar del usuario autenticado.
-- Como opera: crea o actualiza `user_profile` y sincroniza un conjunto unico de claves compartidas con `collaborator_profiles` mediante una utilidad comun de sincronizacion. La revision anual solo puede cerrarse cuando los campos criticos de contacto personal, domicilio y emergencia estan completos; la pantalla expone solo preferencias con efecto real en la aplicacion.
+- Como opera: crea o actualiza `user_profile` y sincroniza un conjunto unico de claves compartidas con `collaborator_profiles` mediante una utilidad comun de sincronizacion. La edicion de datos personales criticos es accesible de forma continua desde el perfil propio, y el cierre de revision anual se valida tanto en frontend como en backend para exigir completitud de contacto personal, domicilio y emergencia. La pantalla expone solo preferencias con efecto real en la aplicacion.
 - Cuando aplica: revision anual de datos, cambios personales o ajuste de preferencias.
 
 ### FR-PT-005 Certificaciones del usuario

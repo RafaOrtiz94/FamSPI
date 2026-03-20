@@ -5,7 +5,10 @@ const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { logAction } = require("../../utils/audit");
 const { ensureFolder } = require("../../utils/drive");
-const { PROFILE_SYNC_KEYS, applyNestedFields } = require("../shared/profileSync");
+const {
+  PROFILE_SYNC_KEYS,
+  applyNestedFields,
+} = require("../shared/profileSync");
 
 const ALLOWED_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/webp"]);
 const BLOCKED_METADATA_KEYS = new Set([
@@ -17,11 +20,20 @@ const BLOCKED_METADATA_KEYS = new Set([
   "oauth_id",
 ]);
 
+const REVIEW_REQUIRED_PATHS = [
+  "personal.telefono_personal",
+  "personal.email_personal",
+  "domicilio.ciudad_domicilio",
+  "domicilio.direccion_domicilio",
+  "emergencia.persona_contacto",
+  "emergencia.telefono_contacto",
+];
+
 const sanitizeMetadata = (metadata = {}) => {
   if (!metadata || typeof metadata !== "object") return {};
 
   const safeEntries = Object.entries(metadata).filter(([key]) =>
-    key ? !BLOCKED_METADATA_KEYS.has(String(key).toLowerCase()) : false
+    key ? !BLOCKED_METADATA_KEYS.has(String(key).toLowerCase()) : false,
   );
 
   const safeMetadata = {};
@@ -46,7 +58,12 @@ const sanitizeMetadata = (metadata = {}) => {
 const sanitizePreferences = (preferences = {}) => {
   if (!preferences || typeof preferences !== "object") return {};
 
-  const allowedKeys = new Set(["theme", "language", "density", "notifications"]);
+  const allowedKeys = new Set([
+    "theme",
+    "language",
+    "density",
+    "notifications",
+  ]);
   const normalized = {};
 
   Object.entries(preferences).forEach(([key, value]) => {
@@ -54,7 +71,9 @@ const sanitizePreferences = (preferences = {}) => {
 
     switch (key) {
       case "theme":
-        normalized.theme = ["dark", "light"].includes(String(value)) ? value : undefined;
+        normalized.theme = ["dark", "light"].includes(String(value))
+          ? value
+          : undefined;
         break;
       case "language":
         normalized.language = String(value || "es").slice(0, 10);
@@ -65,7 +84,8 @@ const sanitizePreferences = (preferences = {}) => {
           : undefined;
         break;
       case "notifications":
-        normalized.notifications = typeof value === "object" ? value : undefined;
+        normalized.notifications =
+          typeof value === "object" ? value : undefined;
         break;
       default:
         break;
@@ -73,7 +93,7 @@ const sanitizePreferences = (preferences = {}) => {
   });
 
   return Object.fromEntries(
-    Object.entries(normalized).filter(([, v]) => v !== undefined)
+    Object.entries(normalized).filter(([, v]) => v !== undefined),
   );
 };
 
@@ -116,29 +136,45 @@ const getIdentity = async (userId) => {
   const { rows } = await db.query(
     `SELECT id, email, fullname, role, department_id, google_id, created_at, updated_at
      FROM users WHERE id = $1`,
-    [userId]
+    [userId],
   );
 
   if (!rows[0]) return null;
   return rows[0];
 };
 
-const mergeCollaboratorIntoProfile = (metadata = {}, collaboratorProfile = {}) => {
+const mergeCollaboratorIntoProfile = (
+  metadata = {},
+  collaboratorProfile = {},
+) => {
   const safe = sanitizeMetadata(metadata);
   return applyNestedFields(safe, collaboratorProfile, PROFILE_SYNC_KEYS);
 };
 
+const getByPath = (source, path) =>
+  path
+    .split(".")
+    .reduce(
+      (acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined),
+      source,
+    );
+
+const getMissingAnnualReviewFields = (metadata = {}) =>
+  REVIEW_REQUIRED_PATHS.filter((path) => {
+    const value = getByPath(metadata, path);
+    return String(value || "").trim() === "";
+  });
+
 const mergeProfileIntoCollaborator = (collabProfile = {}, metadata = {}) => {
   return applyNestedFields(collabProfile, metadata, PROFILE_SYNC_KEYS);
 };
-
 
 const getProfile = async (userId) => {
   const { rows } = await db.query(
     `SELECT id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at
      FROM user_profile
      WHERE user_id = $1`,
-    [userId]
+    [userId],
   );
 
   if (!rows[0]) return null;
@@ -152,17 +188,42 @@ const ensureUserProfileMeta = async (userId, defaults = {}) => {
      ON CONFLICT (user_id)
      DO UPDATE SET metadata = user_profile.metadata
      RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
-    [userId, defaults, {}]
+    [userId, defaults, {}],
   );
   return mapProfileRow(rows[0]);
 };
 
-
-const createProfile = async ({ userId, metadata = {}, preferences = {}, avatar }) => {
+const createProfile = async ({
+  userId,
+  metadata = {},
+  preferences = {},
+  avatar,
+}) => {
   const identity = await getIdentity(userId);
   const safeMetadata = sanitizeMetadata(metadata);
   const safePreferences = sanitizePreferences(preferences);
-  const avatarInfo = avatar ? await uploadAvatar(userId, avatar, null, identity) : {};
+
+  if (safeMetadata.profile_last_reviewed_at) {
+    const reviewDate = new Date(safeMetadata.profile_last_reviewed_at);
+    if (Number.isNaN(reviewDate.getTime())) {
+      const err = new Error("La fecha de revision anual no es valida");
+      err.status = 400;
+      throw err;
+    }
+
+    const missingFields = getMissingAnnualReviewFields(safeMetadata);
+    if (missingFields.length > 0) {
+      const err = new Error(
+        `No se puede cerrar la revision anual: faltan campos obligatorios (${missingFields.join(", ")})`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
+  const avatarInfo = avatar
+    ? await uploadAvatar(userId, avatar, null, identity)
+    : {};
 
   const { rows } = await db.query(
     `INSERT INTO user_profile (user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at)
@@ -174,7 +235,7 @@ const createProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
       avatarInfo.avatar_drive_id || null,
       safeMetadata,
       safePreferences,
-    ]
+    ],
   );
 
   const profile = mapProfileRow(rows[0]);
@@ -182,7 +243,12 @@ const createProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
   return profile;
 };
 
-const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }) => {
+const updateProfile = async ({
+  userId,
+  metadata = {},
+  preferences = {},
+  avatar,
+}) => {
   const identity = await getIdentity(userId);
   if (!identity) {
     const err = new Error("Usuario no encontrado");
@@ -201,6 +267,29 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
 
   const mergedMetadata = { ...current.metadata, ...safeMetadata };
   const mergedPreferences = { ...current.preferences, ...safePreferences };
+
+  const hasReviewUpdate = Object.prototype.hasOwnProperty.call(
+    safeMetadata,
+    "profile_last_reviewed_at",
+  );
+  if (hasReviewUpdate && safeMetadata.profile_last_reviewed_at) {
+    const reviewDate = new Date(safeMetadata.profile_last_reviewed_at);
+    if (Number.isNaN(reviewDate.getTime())) {
+      const err = new Error("La fecha de revision anual no es valida");
+      err.status = 400;
+      throw err;
+    }
+
+    const missingFields = getMissingAnnualReviewFields(mergedMetadata);
+    if (missingFields.length > 0) {
+      const err = new Error(
+        `No se puede cerrar la revision anual: faltan campos obligatorios (${missingFields.join(", ")})`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
   const avatarInfo = avatar
     ? await uploadAvatar(userId, avatar, current.avatar_drive_id, identity)
     : {};
@@ -220,7 +309,7 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
       mergedPreferences,
       avatarInfo.avatar_url || null,
       avatarInfo.avatar_drive_id || null,
-    ]
+    ],
   );
 
   const profile = mapProfileRow(rows[0]);
@@ -228,23 +317,34 @@ const updateProfile = async ({ userId, metadata = {}, preferences = {}, avatar }
   try {
     const { rows: collabRows } = await db.query(
       `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
-      [userId]
+      [userId],
     );
     const collabProfile = collabRows[0]?.profile || {};
-    const mergedCollaboratorProfile = mergeProfileIntoCollaborator(collabProfile, mergedMetadata);
+    const mergedCollaboratorProfile = mergeProfileIntoCollaborator(
+      collabProfile,
+      mergedMetadata,
+    );
 
     await db.query(
       `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
        VALUES ($1, $2, $3)
        ON CONFLICT (user_id)
        DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
-      [userId, mergedCollaboratorProfile, userId]
+      [userId, mergedCollaboratorProfile, userId],
     );
   } catch (syncErr) {
-    logger.warn({ syncErr, userId }, "No se pudo sincronizar perfil con colaborador");
+    logger.warn(
+      { syncErr, userId },
+      "No se pudo sincronizar perfil con colaborador",
+    );
   }
 
-  await auditChange({ userId, action: "actualizar", before: current, after: profile });
+  await auditChange({
+    userId,
+    action: "actualizar",
+    before: current,
+    after: profile,
+  });
   return profile;
 };
 
@@ -259,7 +359,8 @@ const resolveAvatarFolder = async (identity) => {
   if (!base) return null;
 
   const usersRoot = await ensureFolder("Usuarios", base);
-  const userFolderName = identity?.email || identity?.fullname || `user-${identity?.id || "na"}`;
+  const userFolderName =
+    identity?.email || identity?.fullname || `user-${identity?.id || "na"}`;
   const userFolder = await ensureFolder(userFolderName, usersRoot.id);
   const avatarFolder = await ensureFolder("Avatar", userFolder.id);
   return avatarFolder.id;
@@ -272,12 +373,11 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
     throw err;
   }
 
-  const avatarBuffer =
-    Buffer.isBuffer(file?.buffer)
-      ? file.buffer
-      : file?.path
-        ? fs.readFileSync(file.path)
-        : null;
+  const avatarBuffer = Buffer.isBuffer(file?.buffer)
+    ? file.buffer
+    : file?.path
+      ? fs.readFileSync(file.path)
+      : null;
 
   if (!avatarBuffer || avatarBuffer.length === 0) {
     const err = new Error("El archivo de imagen está vacío o no se pudo leer");
@@ -294,8 +394,13 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
 
   if (!folderBase) {
     // Entorno sin Drive: guardar como data URI para no romper la UX
-    logger.warn("Sin carpeta Drive para avatar, se guardará como data URI en BD.");
-    return { avatar_url: buildDataUri(), avatar_drive_id: previousDriveId || null };
+    logger.warn(
+      "Sin carpeta Drive para avatar, se guardará como data URI en BD.",
+    );
+    return {
+      avatar_url: buildDataUri(),
+      avatar_drive_id: previousDriveId || null,
+    };
   }
 
   try {
@@ -303,7 +408,7 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
     const safeName = `profile-${userId}-${Date.now()}.${extension}`;
 
     const stream = new Readable();
-    stream._read = () => { };
+    stream._read = () => {};
     stream.push(avatarBuffer);
     stream.push(null);
 
@@ -322,13 +427,18 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
         requestBody: { role: "reader", type: "anyone" },
       });
     } catch (permErr) {
-      logger.warn({ permErr }, "No se pudo hacer público el avatar (se usa link por defecto)");
+      logger.warn(
+        { permErr },
+        "No se pudo hacer público el avatar (se usa link por defecto)",
+      );
     }
 
     if (previousDriveId) {
       drive.files
         .delete({ fileId: previousDriveId, supportsAllDrives: true })
-        .catch((err) => logger.warn({ err }, "No se pudo eliminar avatar anterior"));
+        .catch((err) =>
+          logger.warn({ err }, "No se pudo eliminar avatar anterior"),
+        );
     }
 
     // Usar thumbnail URL de Drive para mejor performance y compatibilidad
@@ -343,8 +453,14 @@ const uploadAvatar = async (userId, file, previousDriveId, identity) => {
       avatar_data_uri: dataUri,
     };
   } catch (err) {
-    logger.warn({ err }, "No se pudo subir avatar a Drive, guardando data URI en BD");
-    return { avatar_url: buildDataUri(), avatar_drive_id: previousDriveId || null };
+    logger.warn(
+      { err },
+      "No se pudo subir avatar a Drive, guardando data URI en BD",
+    );
+    return {
+      avatar_url: buildDataUri(),
+      avatar_drive_id: previousDriveId || null,
+    };
   }
 };
 
@@ -371,7 +487,7 @@ const getProfileWithIdentity = async (userId) => {
 
   const { rows: collabRows } = await db.query(
     `SELECT profile FROM collaborator_profiles WHERE user_id = $1 LIMIT 1`,
-    [userId]
+    [userId],
   );
   const collaboratorProfile = collabRows[0]?.profile || {};
 
@@ -379,16 +495,21 @@ const getProfileWithIdentity = async (userId) => {
     profile = await ensureUserProfileMeta(userId, {});
   }
 
-  const mergedMetadata = mergeCollaboratorIntoProfile(profile.metadata || {}, collaboratorProfile);
+  const mergedMetadata = mergeCollaboratorIntoProfile(
+    profile.metadata || {},
+    collaboratorProfile,
+  );
 
-  if (JSON.stringify(mergedMetadata) !== JSON.stringify(profile.metadata || {})) {
+  if (
+    JSON.stringify(mergedMetadata) !== JSON.stringify(profile.metadata || {})
+  ) {
     const { rows } = await db.query(
       `UPDATE user_profile
        SET metadata = $2,
            updated_at = NOW()
        WHERE user_id = $1
        RETURNING id, user_id, avatar_url, avatar_drive_id, metadata, preferences, created_at, updated_at`,
-      [userId, mergedMetadata]
+      [userId, mergedMetadata],
     );
     profile = mapProfileRow(rows[0]);
   } else {

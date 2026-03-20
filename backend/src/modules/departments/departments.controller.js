@@ -12,33 +12,6 @@
  */
 
 const db = require("../../config/db");
-const { logAction } = require("../../utils/audit");
-
-const ensureDepartmentSchema = async () => {
-  await db.query(`
-    ALTER TABLE departments
-      ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active';
-  `);
-  await db.query(`
-    UPDATE departments
-       SET status = 'active'
-     WHERE status IS NULL OR trim(status) = '';
-  `);
-  await db.query(`
-    DO $$
-    BEGIN
-      IF NOT EXISTS (
-        SELECT 1
-          FROM pg_constraint
-         WHERE conname = 'departments_status_check'
-      ) THEN
-        ALTER TABLE departments
-          ADD CONSTRAINT departments_status_check
-          CHECK (status IN ('active', 'inactive'));
-      END IF;
-    END $$;
-  `);
-};
 
 const normalizeDepartmentStatus = (value) => {
   const normalized = String(value || "").trim().toLowerCase();
@@ -48,23 +21,16 @@ const normalizeDepartmentStatus = (value) => {
   return "active";
 };
 
-const getActorContext = (req) => ({
-  usuario_id: req.user?.id || null,
-  usuario_email: req.user?.email || req.user?.correo || "anon",
-  rol:
-    req.user?.role ||
-    req.user?.role_name ||
-    req.user?.scope ||
-    req.user?.rol ||
-    "sin-rol",
-});
+const normalizeText = (value, max = 255) => {
+  const normalized = String(value || "").trim();
+  return normalized ? normalized.slice(0, max) : "";
+};
 
 /* ======================================================
    1. Listar todos los departamentos
 ====================================================== */
 const getDepartments = async (req, res) => {
   try {
-    await ensureDepartmentSchema();
     const includeInactive = String(req.query?.include_inactive || "").toLowerCase() === "true";
     const { rows } = await db.query(
       `SELECT id, code, name, description, status, (status = 'active') AS active, created_at, updated_at
@@ -84,7 +50,6 @@ const getDepartments = async (req, res) => {
 ====================================================== */
 const getDepartmentById = async (req, res) => {
   try {
-    await ensureDepartmentSchema();
     const { id } = req.params;
     const { rows } = await db.query(
       `SELECT id, code, name, description, status, (status = 'active') AS active, created_at, updated_at
@@ -109,8 +74,9 @@ const getDepartmentById = async (req, res) => {
 ====================================================== */
 const createDepartment = async (req, res) => {
   try {
-    await ensureDepartmentSchema();
-    const { code, name, description } = req.body;
+    const code = normalizeText(req.body?.code, 50).toUpperCase();
+    const name = normalizeText(req.body?.name);
+    const description = normalizeText(req.body?.description, 500) || null;
     const status = normalizeDepartmentStatus(req.body?.status || req.body?.active);
 
     if (!code || !name) {
@@ -121,7 +87,7 @@ const createDepartment = async (req, res) => {
     }
 
     const existing = await db.query(
-      `SELECT id FROM departments WHERE code = $1 OR name = $2`,
+      `SELECT id FROM departments WHERE LOWER(code) = LOWER($1) OR LOWER(name) = LOWER($2)`,
       [code, name]
     );
     if (existing.rows.length > 0) {
@@ -135,16 +101,8 @@ const createDepartment = async (req, res) => {
       `INSERT INTO departments (code, name, description, status)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
-      [code, name, description || null, status]
+      [code, name, description, status]
     );
-
-    await logAction({
-      ...getActorContext(req),
-      modulo: "departments",
-      accion: "create",
-      descripcion: `Creación de departamento ${name}`,
-      datos_nuevos: rows[0],
-    });
 
     res.status(201).json({ ok: true, data: rows[0] });
   } catch (err) {
@@ -154,19 +112,48 @@ const createDepartment = async (req, res) => {
 };
 
 /* ======================================================
-   4. Actualizar un depart
-   amento existente
+   4. Actualizar un departamento existente
 ====================================================== */
 const updateDepartment = async (req, res) => {
   try {
-    await ensureDepartmentSchema();
     const { id } = req.params;
-    const { code, name, description } = req.body;
+    const code = req.body?.code !== undefined ? normalizeText(req.body.code, 50).toUpperCase() : undefined;
+    const name = req.body?.name !== undefined ? normalizeText(req.body.name) : undefined;
+    const description = req.body?.description !== undefined ? (normalizeText(req.body.description, 500) || null) : undefined;
     const status = req.body?.status !== undefined
       ? normalizeDepartmentStatus(req.body.status)
       : req.body?.active !== undefined
         ? normalizeDepartmentStatus(req.body.active)
         : undefined;
+
+    // Revalidar unicidad de code/name si se están cambiando
+    if (code !== undefined || name !== undefined) {
+      const uniquenessChecks = [];
+      const uniquenessValues = [];
+      
+      if (code !== undefined) {
+        uniquenessValues.push(code);
+        uniquenessChecks.push(`(LOWER(code) = LOWER($${uniquenessValues.length}) AND id <> $${uniquenessValues.length + 1})`);
+      }
+      if (name !== undefined) {
+        uniquenessValues.push(name);
+        uniquenessChecks.push(`(LOWER(name) = LOWER($${uniquenessValues.length}) AND id <> $${uniquenessValues.length + 1})`);
+      }
+      
+      uniquenessValues.push(id);
+      const whereClause = uniquenessChecks.join(" OR ");
+      
+      const existing = await db.query(
+        `SELECT id FROM departments WHERE ${whereClause}`,
+        uniquenessValues
+      );
+      if (existing.rows.length > 0) {
+        return res.status(400).json({
+          ok: false,
+          message: "Ya existe otro departamento con ese codigo o nombre",
+        });
+      }
+    }
 
     const previousResult = await db.query(
       `SELECT id, code, name, description, status
@@ -176,30 +163,46 @@ const updateDepartment = async (req, res) => {
       [id]
     );
 
-    const { rows } = await db.query(
-      `UPDATE departments
-       SET code = COALESCE($1, code),
-           name = COALESCE($2, name),
-           description = COALESCE($3, description),
-           status = COALESCE($4, status),
-           updated_at = NOW()
-       WHERE id = $5
-       RETURNING *`,
-      [code, name, description, status, id]
-    );
-
-    if (rows.length === 0) {
+    if (previousResult.rows.length === 0) {
       return res.status(404).json({ ok: false, message: "Departamento no encontrado" });
     }
 
-    await logAction({
-      ...getActorContext(req),
-      modulo: "departments",
-      accion: "update",
-      descripcion: `Actualización de departamento ${rows[0]?.name || id}`,
-      datos_anteriores: previousResult.rows[0] || null,
-      datos_nuevos: rows[0],
-    });
+    // Construir SET dinámicamente para permitir limpiar campos nullable
+    const sets = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (code !== undefined) {
+      sets.push(`code = $${paramIndex++}`);
+      values.push(code);
+    }
+    if (name !== undefined) {
+      sets.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+    if (description !== undefined) {
+      sets.push(`description = $${paramIndex++}`);
+      values.push(description);
+    }
+    if (status !== undefined) {
+      sets.push(`status = $${paramIndex++}`);
+      values.push(status);
+    }
+
+    if (sets.length === 0) {
+      return res.status(400).json({ ok: false, message: "No hay campos para actualizar" });
+    }
+
+    sets.push("updated_at = NOW()");
+    values.push(id);
+
+    const { rows } = await db.query(
+      `UPDATE departments
+       SET ${sets.join(", ")}
+       WHERE id = $${paramIndex}
+       RETURNING *`,
+      values
+    );
 
     res.status(200).json({ ok: true, data: rows[0] });
   } catch (err) {
@@ -213,7 +216,6 @@ const updateDepartment = async (req, res) => {
 ====================================================== */
 const deleteDepartment = async (req, res) => {
   try {
-    await ensureDepartmentSchema();
     const { id } = req.params;
     const previousResult = await db.query(
       `SELECT id, code, name, description, status
@@ -236,15 +238,6 @@ const deleteDepartment = async (req, res) => {
       return res.status(404).json({ ok: false, message: "Departamento no encontrado" });
     }
 
-    await logAction({
-      ...getActorContext(req),
-      modulo: "departments",
-      accion: "deactivate",
-      descripcion: `Desactivación de departamento ${previousResult.rows[0]?.name || id}`,
-      datos_anteriores: previousResult.rows[0] || null,
-      datos_nuevos: { id: result.rows[0]?.id, status: "inactive" },
-    });
-
     res.status(200).json({ ok: true, message: "Departamento desactivado correctamente" });
   } catch (err) {
     console.error("Error al eliminar el departamento:", err);
@@ -262,4 +255,3 @@ module.exports = {
   updateDepartment,
   deleteDepartment,
 };
-

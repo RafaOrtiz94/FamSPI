@@ -16,7 +16,7 @@ import {
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 
-import { createUser, getUsers, updateUser } from "../../../core/api/usersApi";
+import { createUser, getUsers, updateUser, getUserRoles } from "../../../core/api/usersApi";
 import { getDepartments } from "../../../core/api/departmentsApi";
 import Button from "../../../core/ui/components/Button";
 import Card from "../../../core/ui/components/Card";
@@ -142,6 +142,7 @@ const ActionConfirmModal = ({ state, onClose, onConfirm, loading }) => {
 const Usuarios = () => {
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
+  const [roleOptions, setRoleOptions] = useState(ROLE_OPTIONS);
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -198,9 +199,22 @@ const Usuarios = () => {
     }
   }, [debouncedSearch, departmentFilter, roleFilter, statusFilter]);
 
+  const loadRoles = useCallback(async () => {
+    try {
+      const rolesData = await getUserRoles();
+      if (Array.isArray(rolesData) && rolesData.length > 0) {
+        setRoleOptions(rolesData);
+      }
+    } catch (error) {
+      console.error("Error cargando roles:", error);
+      // Mantener ROLE_OPTIONS como fallback
+    }
+  }, []);
+
   useEffect(() => {
     loadDepartments();
-  }, [loadDepartments]);
+    loadRoles();
+  }, [loadDepartments, loadRoles]);
 
   useEffect(() => {
     loadUsers();
@@ -376,7 +390,7 @@ const Usuarios = () => {
           <Select
             value={roleFilter}
             onChange={(event) => setRoleFilter(event.target.value)}
-            options={[{ label: "Todos los roles", value: "all" }, ...ROLE_OPTIONS]}
+            options={[{ label: "Todos los roles", value: "all" }, ...roleOptions]}
             includePlaceholder={false}
             containerClassName="mb-0"
             className="min-h-[46px] rounded-2xl border-slate-200 bg-slate-50"
@@ -657,7 +671,7 @@ const Usuarios = () => {
               label="Rol"
               value={form.role}
               onChange={(event) => setForm((current) => ({ ...current, role: event.target.value }))}
-              options={ROLE_OPTIONS}
+              options={roleOptions}
               includePlaceholder={false}
               containerClassName="mb-0"
             />

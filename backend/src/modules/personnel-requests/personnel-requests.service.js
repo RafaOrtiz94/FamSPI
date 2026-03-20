@@ -73,6 +73,16 @@ async function ensurePersonnelProfileTables() {
       created_at TIMESTAMPTZ DEFAULT now()
     );
   `);
+
+    await db.query(`
+    ALTER TABLE personnel_request_history
+    ADD COLUMN IF NOT EXISTS previous_status TEXT,
+    ADD COLUMN IF NOT EXISTS new_status TEXT,
+    ADD COLUMN IF NOT EXISTS changed_by INTEGER REFERENCES users(id),
+    ADD COLUMN IF NOT EXISTS notes TEXT,
+    ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
+  `);
 }
 
 async function ensureCollaboratorTables() {

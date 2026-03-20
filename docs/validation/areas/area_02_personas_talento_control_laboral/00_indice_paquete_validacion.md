@@ -27,6 +27,9 @@ Consolidar la documentacion tecnica y funcional necesaria para validar el domini
 7. PQ - Calificacion de desempeno
 8. Informe de hallazgos vigentes del area
 
+## Auditorias por requerimiento
+1. `14_auditoria_requerimiento_REQ-PT-001.md` - Auditoria individual de gestion de usuarios y departamentos
+
 ## Protocolos de ejecucion
 1. Protocolo IQ
 2. Protocolo OQ

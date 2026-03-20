@@ -364,21 +364,46 @@ const createUser = async (req, res) => {
         [userId]
       );
 
+      // Construir SET dinámicamente para permitir limpiar campos nullable
+      const sets = [];
+      const values = [];
+      let paramIndex = 1;
+
+      if (role !== undefined) {
+        sets.push(`role = $${paramIndex++}`);
+        values.push(role);
+      }
+      if (departmentId !== undefined) {
+        sets.push(`department_id = $${paramIndex++}`);
+        values.push(departmentId);
+      }
+      if (fullname !== undefined) {
+        sets.push(`fullname = $${paramIndex++}`);
+        values.push(fullname);
+      }
+      if (email !== undefined) {
+        sets.push(`email = $${paramIndex++}`);
+        values.push(email);
+      }
+      if (googleId !== undefined) {
+        sets.push(`google_id = $${paramIndex++}`);
+        values.push(googleId);
+      }
+      if (active !== undefined) {
+        sets.push(`active = $${paramIndex++}`);
+        values.push(active);
+      }
+
+      if (sets.length === 0) {
+        return res.status(400).json({ ok: false, message: "No hay campos para actualizar" });
+      }
+
+      sets.push("updated_at = NOW()");
+      values.push(userId);
+
       const { rows } = await db.query(
-        `
-        UPDATE users
-        SET 
-          role = COALESCE($1, role),
-          department_id = COALESCE($2, department_id),
-          fullname = COALESCE($3, fullname),
-          email = COALESCE($4, email),
-          google_id = COALESCE($5, google_id),
-          active = COALESCE($6, active),
-          updated_at = NOW()
-        WHERE id = $7
-        RETURNING *
-        `,
-        [role, departmentId, fullname, email, googleId, active, userId]
+        `UPDATE users SET ${sets.join(", ")} WHERE id = $${paramIndex} RETURNING *`,
+        values
       );
 
       if (rows.length === 0)
@@ -484,5 +509,4 @@ const createUser = async (req, res) => {
     updateUser,
     deleteUser,
   };
-
 

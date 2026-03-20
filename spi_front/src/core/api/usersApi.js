@@ -32,3 +32,11 @@ export const deleteUser = async (id) => {
   const { data } = await api.delete(`/users/${id}`);
   return data;
 };
+
+/**
+ * Obtener catálogo de roles
+ */
+export const getUserRoles = async () => {
+  const { data } = await api.get("/users/roles");
+  return data.data;
+};

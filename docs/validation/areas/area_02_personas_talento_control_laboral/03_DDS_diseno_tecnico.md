@@ -74,7 +74,7 @@ Su consumo principal en frontend comparte entrada y contenedor con `users`, lo q
 ### `user-profile`
 Gestiona el perfil propio del usuario: metadata, preferencias y avatar. Tambien sincroniza partes del perfil con `collaborator_profiles` cuando corresponde usando una utilidad compartida para no duplicar reglas de mapeo.
 
-La capa frontend agrega una validacion operativa para la revision anual: el cierre de la revision solo se habilita cuando los campos criticos de contacto y emergencia estan completos. Ademas, la pantalla oculta preferencias sin efecto real para evitar configuraciones engañosas.
+La capa frontend agrega una validacion operativa para la revision anual y la capa backend la refuerza al persistir `profile_last_reviewed_at`: el cierre de la revision solo se permite cuando los campos criticos de contacto, domicilio y emergencia estan completos. Ademas, la pantalla oculta preferencias sin efecto real para evitar configuraciones engañosas.
 
 ### `user-certifications`
 Gestiona certificaciones individuales y exportacion PDF consolidada. Guarda soporte documental y estados activos.
