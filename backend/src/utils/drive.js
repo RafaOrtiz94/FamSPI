@@ -13,7 +13,7 @@ const logger = require("../config/logger");
 // Convierte buffer/base64 en stream
 function bufferToStream(buffer) {
   const readable = new Readable();
-  readable._read = () => {};
+  readable._read = () => { };
   readable.push(buffer);
   readable.push(null);
   return readable;
@@ -150,26 +150,11 @@ async function uploadBase64File(name, base64, mimeType = "image/png", parentId) 
 }
 
 /** 📤 Subir archivo desde multer (file.buffer) */
-async function uploadFileToDrive(file, path) {
+async function uploadFileToDrive(file, path, parentId) {
   try {
-    const { data } = await drive.files.create({
-      supportsAllDrives: true,
-      requestBody: { name: path.split('/').pop() }, // Extract filename from path
-      media: { mimeType: file.mimetype, body: bufferToStream(file.buffer) },
-      fields: "id, name, mimeType, webViewLink, webContentLink",
-    });
-
-    // Make file publicly accessible
-    try {
-      await drive.permissions.create({
-        fileId: data.id,
-        supportsAllDrives: true,
-        requestBody: { role: "reader", type: "anyone" },
-      });
-    } catch (permErr) {
-      logger.warn({ permErr }, "No se pudo hacer público el archivo (se usa link por defecto)");
-    }
-
+    const filename = path.split('/').pop();
+    const base64 = file.buffer.toString('base64');
+    const data = await uploadBase64File(filename, base64, file.mimetype, parentId);
     return data;
   } catch (err) {
     logger.error({ err }, "❌ uploadFileToDrive");

@@ -110,9 +110,12 @@ const commercialDashboardRoles = [
 const peopleNavigationRoles = [
   "talento_humano",
   "jefe_talento_humano",
+  "gerencia",
   "ti",
   "jefe_ti",
   "admin_ti",
+  "admin",
+  "administrador",
 ];
 
 const AppRoutes = () => {

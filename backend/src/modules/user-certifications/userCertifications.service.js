@@ -10,13 +10,13 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/webp"
 ]);
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
+const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 
 const resolveUserCertificationsFolder = async (userEmail) => {
   const base = process.env.DRIVE_PROFILE_FOLDER_ID ||
-               process.env.DRIVE_DOCS_FOLDER_ID ||
-               process.env.DRIVE_ROOT_FOLDER_ID ||
-               process.env.DRIVE_FOLDER_ID;
+    process.env.DRIVE_DOCS_FOLDER_ID ||
+    process.env.DRIVE_ROOT_FOLDER_ID ||
+    process.env.DRIVE_FOLDER_ID;
 
   if (!base) return null;
 
@@ -161,7 +161,7 @@ const createCertification = async (userId, certificationData, file = null) => {
 
       if (folderId) {
         // Upload file to Drive
-        const driveResult = await uploadFileToDrive(file, `cert-${Date.now()}-${file.originalname}`);
+        const driveResult = await uploadFileToDrive(file, `cert-${Date.now()}-${file.originalname}`, folderId);
         driveInfo = {
           drive_file_id: driveResult.id,
           drive_folder_id: folderId,
@@ -391,9 +391,9 @@ const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUser
     // Información básica
     const certInfo = [
       `Tipo: ${cert.credential_type === 'certification' ? 'Certificación' :
-                cert.credential_type === 'course' ? 'Curso' :
-                cert.credential_type === 'diploma' ? 'Diplomado' :
-                cert.credential_type === 'title' ? 'Título' : 'Otro'}`,
+        cert.credential_type === 'course' ? 'Curso' :
+          cert.credential_type === 'diploma' ? 'Diplomado' :
+            cert.credential_type === 'title' ? 'Título' : 'Otro'}`,
       cert.issuer ? `Emisor: ${cert.issuer}` : null,
       cert.issue_date ? `Fecha de emisión: ${new Date(cert.issue_date).toLocaleDateString('es-ES')}` : null,
       cert.expiry_date ? `Fecha de expiración: ${new Date(cert.expiry_date).toLocaleDateString('es-ES')}` : null,
@@ -410,7 +410,7 @@ const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUser
     const statusText = cert.expiry_date ?
       (new Date(cert.expiry_date) > new Date() ? 'Vigente' : 'Expirada') : 'Sin fecha de expiración';
     doc.fontSize(10).font('Helvetica-Bold').fillColor(statusText === 'Vigente' ? 'green' : 'red')
-       .text(`Estado: ${statusText}`, { align: 'right' });
+      .text(`Estado: ${statusText}`, { align: 'right' });
     doc.fillColor('black');
 
     doc.moveDown(0.8);
@@ -424,7 +424,7 @@ const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUser
 
   // Footer
   doc.fontSize(8).font('Helvetica').fillColor('gray')
-     .text('Documento generado por SPI FAM - Sistema de Gestión Profesional', 50, 750, { align: 'center' });
+    .text('Documento generado por SPI FAM - Sistema de Gestión Profesional', 50, 750, { align: 'center' });
 
   // Finalizar documento
   doc.end();
@@ -551,7 +551,7 @@ const createBulkCertifications = async (userId, bulkData, files = []) => {
       let driveInfo = {};
       if (folderId) {
         try {
-          const driveResult = await uploadFileToDrive(file, `cert-bulk-${Date.now()}-${file.originalname}`);
+          const driveResult = await uploadFileToDrive(file, `cert-bulk-${Date.now()}-${file.originalname}`, folderId);
           driveInfo = {
             drive_file_id: driveResult.id,
             drive_folder_id: folderId,

@@ -30,7 +30,7 @@ function Assert-Command {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
-$image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/$ServiceName:$ImageTag"
+$image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
 
 Assert-Command "gcloud"
 

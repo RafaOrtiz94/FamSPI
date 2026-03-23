@@ -53,16 +53,22 @@ async function auditMiddleware(req, res, next) {
         const accion = mapHttpMethodToAction(method, pathParts);
         const success = res.statusCode < 400;
 
-        // Descripción breve
-        const descripcion = `${method} ${req.originalUrl} (${res.statusCode})`;
+        // Determinar ID del recurso afectado
+        const resourceId = pathParts.find((p) => /^\d+$/.test(p)) || null;
 
-        // 🧩 Nuevo: contexto relacional (para trazabilidad entre módulos)
+        // Descripción más informativa
+        const descripcion = resourceId
+          ? `${method} ${modulo}/${resourceId} (${res.statusCode})`
+          : `${method} ${req.originalUrl} (${res.statusCode})`;
+
+        // 🧩 Contexto relacional mejorado
         const contexto = buildContext({
           modulo,
           pathParts,
           body: req.body,
           query: req.query,
         });
+        contexto.resource_id = resourceId ? parseInt(resourceId, 10) : null;
 
         // Registrar acción manual o automática
         if (usuario_id || req.body?.auto_generated) {

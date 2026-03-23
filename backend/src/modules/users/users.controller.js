@@ -1,7 +1,6 @@
 ﻿  // src/modules/users/users.controller.js
   const db = require("../../config/db");
   const logger = require("../../config/logger");
-  const { logAction } = require("../../utils/audit");
 
 const ADMIN_VIEW_ROLES = new Set([
     "talento_humano",
@@ -297,21 +296,6 @@ const createUser = async (req, res) => {
         [googleId, email, fullname, role || "pendiente", departmentId, active]
       );
 
-      await logAction({
-        ...getActorContext(req),
-        modulo: "users",
-        accion: "create",
-        descripcion: `Creación de usuario ${email}`,
-        datos_nuevos: {
-          target_user_id: rows[0]?.id,
-          email,
-          fullname,
-          role,
-          department_id: departmentId,
-          active,
-        },
-      });
-
       res.status(201).json({ ok: true, data: rows[0] });
     } catch (err) {
       logger.error({ err }, "Error creando usuario");
@@ -409,15 +393,6 @@ const createUser = async (req, res) => {
       if (rows.length === 0)
         return res.status(404).json({ ok: false, message: "Usuario no encontrado" });
 
-      await logAction({
-        ...getActorContext(req),
-        modulo: "users",
-        accion: "update",
-        descripcion: `Actualización de usuario ${rows[0]?.email || userId}`,
-        datos_anteriores: previousResult.rows[0] || null,
-        datos_nuevos: rows[0],
-      });
-
       res.status(200).json({ ok: true, data: rows[0] });
     } catch (err) {
       logger.error({ err }, "Error actualizando usuario");
@@ -446,7 +421,7 @@ const createUser = async (req, res) => {
       await client.query("BEGIN");
 
       const existingUser = await client.query(
-        `SELECT id, email, COALESCE(active, true) AS active FROM users WHERE id = $1 LIMIT 1`,
+        `SELECT id, email, role, COALESCE(active, true) AS active FROM users WHERE id = $1 LIMIT 1`,
         [userId]
       );
 
@@ -466,6 +441,24 @@ const createUser = async (req, res) => {
         });
       }
 
+      // Verificar si es el último admin activo
+      const userRole = normalizeRole(existingUser.rows[0].role);
+      const adminRoles = ["admin", "administrador", "ti", "jefe_ti", "admin_ti"];
+      if (adminRoles.includes(userRole)) {
+        const activeAdminsResult = await client.query(
+          `SELECT COUNT(*) AS count FROM users WHERE LOWER(COALESCE(role, '')) = ANY($1) AND COALESCE(active, true) = true`,
+          [adminRoles.map((r) => r.toLowerCase())]
+        );
+        const activeAdminsCount = parseInt(activeAdminsResult.rows[0].count, 10);
+        if (activeAdminsCount <= 1) {
+          await client.query("ROLLBACK");
+          return res.status(400).json({
+            ok: false,
+            message: "No se puede desactivar el último administrador activo del sistema",
+          });
+        }
+      }
+
       const { rows } = await client.query(
         `
         UPDATE users
@@ -478,15 +471,6 @@ const createUser = async (req, res) => {
       );
 
       await client.query("COMMIT");
-
-      await logAction({
-        ...getActorContext(req),
-        modulo: "users",
-        accion: "deactivate",
-        descripcion: `Desactivación de usuario ${rows[0]?.email || userId}`,
-        datos_anteriores: existingUser.rows[0] || null,
-        datos_nuevos: rows[0],
-      });
 
       res.status(200).json({
         ok: true,
