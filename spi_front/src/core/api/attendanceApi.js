@@ -61,6 +61,34 @@ export const clockOut = async (location = null) => {
 };
 
 /**
+ * ==========================================================
+ * 📱 iPhone Shortcut Aliases (Spanish)
+ * ----------------------------------------------------------
+ * Use simplified paths for iOS Shortcuts integration
+ * ==========================================================
+ */
+
+export const marcarEntrada = async (location = null) => {
+ const { data } = await api.post("/attendance/marcar/entrada", { location });
+ return data;
+};
+
+export const marcarAlmuerzoSalida = async (location = null) => {
+ const { data } = await api.post("/attendance/marcar/almuerzo-salida", { location });
+ return data;
+};
+
+export const marcarAlmuerzoEntrada = async (location = null) => {
+ const { data } = await api.post("/attendance/marcar/almuerzo-entrada", { location });
+ return data;
+};
+
+export const marcarSalida = async (location = null) => {
+ const { data } = await api.post("/attendance/marcar/salida", { location });
+ return data;
+};
+
+/**
  * Attach location to an already saved attendance or exception mark
  */
 export const syncAttendanceLocation = async (target, location) => {

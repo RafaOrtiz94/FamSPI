@@ -1,4 +1,4 @@
-﻿const authRoutes = require("../modules/auth/auth.routes");
+const authRoutes = require("../modules/auth/auth.routes");
 const requestRoutes = require("../modules/requests/requests.routes");
 const approvalRoutes = require("../modules/approvals/approvals.routes");
 const finRoutes = require("../modules/finanzas/finanzas.routes");
@@ -70,6 +70,8 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/collaborators", collaboratorsRoutes);
   app.use("/api/v1/inventario", inventarioRoutes);
   app.use("/api/v1/attendance", attendanceRoutes);
+  // Alias for iPhone shortcuts and Spanish-speaking users
+  app.use("/asistencia", attendanceRoutes);
   app.use("/api/v1/gmail", gmailRoutes);
   app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
   app.use("/api/v1/private-purchases", privatePurchasesRoutes);

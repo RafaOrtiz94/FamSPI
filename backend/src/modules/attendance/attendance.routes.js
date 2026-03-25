@@ -14,6 +14,12 @@ router.post("/clock-in", verifyToken, controller.clockIn);
 router.post("/clock-out-lunch", verifyToken, controller.clockOutLunch);
 router.post("/clock-in-lunch", verifyToken, controller.clockInLunch);
 router.post("/clock-out", verifyToken, controller.clockOut);
+
+// Spanish aliases for iPhone shortcuts
+router.post("/marcar/entrada", verifyToken, controller.clockIn);
+router.post("/marcar/almuerzo-salida", verifyToken, controller.clockOutLunch);
+router.post("/marcar/almuerzo-entrada", verifyToken, controller.clockInLunch);
+router.post("/marcar/salida", verifyToken, controller.clockOut);
 router.post("/location-sync", verifyToken, controller.syncLocation);
 router.post("/exception", verifyToken, controller.registerException);
 router.post("/exception/status", verifyToken, controller.updateExceptionStatus);
