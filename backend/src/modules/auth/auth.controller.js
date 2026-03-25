@@ -2,7 +2,7 @@
  * src/modules/auth/auth.controller.js
  * ------------------------------------
  * 🔐 Autenticación Google OAuth2 → JWT Header-Based
- * - Tokens: accessToken (8h), refreshToken (7d)
+ * - Tokens: accessToken (8h), refreshToken (30d)
  * - Frontend: recibe tokens vía fragment #accessToken=&refreshToken=
  * - Endpoints:
  *    /auth/google        → Redirige a Google OAuth
@@ -129,7 +129,7 @@ const signRefresh = (payload) =>
       sub: payload.id?.toString(),
     },
     process.env.REFRESH_SECRET_KEY,
-    { expiresIn: "7d" }
+    { expiresIn: "30d" }
   );
 
 const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";

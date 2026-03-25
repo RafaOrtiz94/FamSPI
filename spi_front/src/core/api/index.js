@@ -89,20 +89,22 @@ export const getRefreshToken = () => {
  return refreshToken;
 };
 
-const redirectToLogin = () => {
+const redirectToLogin = (error = null) => {
  if (!window.location.pathname.startsWith("/login")) {
- window.location.replace("/login");
+  const url = error ? `/login?error=${error}` : "/login";
+  window.location.replace(url);
  }
 };
 
-const handleSessionExpiration = () => {
+const handleSessionExpiration = (error = null) => {
  try {
- window.dispatchEvent(new CustomEvent("auth:session-expired"));
+  const event = new CustomEvent("auth:session-expired", { detail: { error } });
+  window.dispatchEvent(event);
  } catch (_err) {
- // no-op
+  // no-op
  }
  clearTokens();
- redirectToLogin();
+ redirectToLogin(error);
 };
 
 const refreshAccessTokenSingleFlight = async () => {
@@ -180,8 +182,8 @@ api.interceptors.response.use(
  }
 
  if (error.response?.status === 401 && activeAccessToken && !activeRefreshToken) {
- console.warn("⚠️ Sesión inválida sin refresh token, redirigiendo a login");
- handleSessionExpiration();
+  console.warn("⚠️ Sesión inválida sin refresh token, redirigiendo a login");
+  handleSessionExpiration("missing_refresh_token");
  }
 
  return Promise.reject(error);

@@ -26,9 +26,7 @@ import PurchasesWorkspace from "../modules/shared/purchases-workspace/PurchasesW
 
 // 📋 Páginas de Talento Humano
 import PermisosPage from "../modules/shared/solicitudes/pages/PermisosPage";
-import PersonnelWorkspace from "../modules/talento/pages/PersonnelWorkspace";
-import ColaboradoresHub from "../modules/talento/pages/ColaboradoresHub";
-import CollaboratorWorkspace from "../modules/talento/pages/CollaboratorWorkspace";
+import CollaboratorCommandCenter from "../modules/talento/pages/CollaboratorCommandCenter";
 import PeopleAdminHub from "../modules/talento/pages/PeopleAdminHub";
 
 // 🧾 Páginas compartidas
@@ -329,8 +327,10 @@ const AppRoutes = () => {
           </Route>
 
           {/* Subrutas Talento Humano */}
-          <Route path="/dashboard/talento-humano/colaboradores" element={<ColaboradoresHub initialTab="colaboradores" />} />
-          <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorWorkspace />} />
+          <Route path="/dashboard/talento-humano/command-center" element={<CollaboratorCommandCenter />} />
+          <Route path="/dashboard/talento-humano/command-center/:kind/:id" element={<CollaboratorCommandCenter />} />
+          <Route path="/dashboard/talento-humano/colaboradores" element={<CollaboratorCommandCenter initialView="colaboradores" />} />
+          <Route path="/dashboard/talento-humano/colaboradores/:id" element={<CollaboratorCommandCenter initialView="colaboradores" />} />
           <Route element={<ProtectedRoute allowedRoles={peopleNavigationRoles} strictRoles />}>
             <Route path="/dashboard/talento-humano/gestion" element={<PeopleAdminHub initialTab="usuarios" />} />
             <Route path="/dashboard/talento-humano/usuarios" element={<PeopleAdminHub initialTab="usuarios" />} />
@@ -338,13 +338,13 @@ const AppRoutes = () => {
           </Route>
           <Route
             path="/dashboard/talento-humano/solicitudes"
-            element={<ColaboradoresHub initialTab="solicitudes" />}
+            element={<CollaboratorCommandCenter initialView="solicitudes" />}
           />
           <Route
             element={<ProtectedRoute allowedRoles={["talento_humano", "gerencia", "gerencia_general", "admin"]} />}
           >
-            <Route path="/dashboard/talento-humano/workspace-personal" element={<PersonnelWorkspace />} />
-            <Route path="/dashboard/talento-humano/workspace-personal/:id" element={<PersonnelWorkspace />} />
+            <Route path="/dashboard/talento-humano/workspace-personal" element={<CollaboratorCommandCenter initialView="solicitudes" />} />
+            <Route path="/dashboard/talento-humano/workspace-personal/:id" element={<CollaboratorCommandCenter initialView="solicitudes" />} />
           </Route>
           <Route
             element={

@@ -705,6 +705,10 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
         department_id,
         urgency_level,
         position_type,
+        q,
+        search,
+        sort_by,
+        sort_dir,
         page = 1,
         pageSize = 20,
         my_requests = false
@@ -740,6 +744,38 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
         params.push(position_type);
     }
 
+    const normalizedSearch = String(q || search || '').trim().toLowerCase();
+    if (normalizedSearch) {
+        whereConditions.push(`(
+          LOWER(COALESCE(pr.position_title, '')) LIKE $${paramIndex}
+          OR LOWER(COALESCE(pr.request_number, '')) LIKE $${paramIndex}
+          OR LOWER(COALESCE(d.name, '')) LIKE $${paramIndex}
+          OR LOWER(COALESCE(u.fullname, '')) LIKE $${paramIndex}
+          OR LOWER(COALESCE(cu.fullname, '')) LIKE $${paramIndex}
+        )`);
+        params.push(`%${normalizedSearch}%`);
+        paramIndex += 1;
+    }
+
+    const sortByMap = {
+        created_at: 'pr.created_at',
+        updated_at: 'pr.updated_at',
+        position_title: 'pr.position_title',
+        status: 'pr.status',
+        urgency_level: 'pr.urgency_level',
+    };
+    const safeSortBy = sortByMap[String(sort_by || '').toLowerCase()] || null;
+    const safeSortDir = String(sort_dir || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const orderBy = safeSortBy
+        ? `${safeSortBy} ${safeSortDir}, pr.created_at DESC`
+        : `CASE pr.urgency_level
+        WHEN 'urgente' THEN 1
+        WHEN 'alta' THEN 2
+        WHEN 'normal' THEN 3
+        WHEN 'baja' THEN 4
+      END,
+      pr.created_at DESC`;
+
     const offset = (page - 1) * pageSize;
 
     const query = `
@@ -756,14 +792,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
     LEFT JOIN departments d ON pr.department_id = d.id
     WHERE ${whereConditions.join(' AND ')}
-    ORDER BY 
-      CASE pr.urgency_level
-        WHEN 'urgente' THEN 1
-        WHEN 'alta' THEN 2
-        WHEN 'normal' THEN 3
-        WHEN 'baja' THEN 4
-      END,
-      pr.created_at DESC
+    ORDER BY ${orderBy}
     LIMIT $${paramIndex++} OFFSET $${paramIndex++}
   `;
 
@@ -794,6 +823,57 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
             total,
             totalPages: Math.ceil(total / pageSize)
         }
+    };
+}
+
+async function getPersonnelRequestApplicants(requestId, filters = {}) {
+    await ensurePersonnelProfileTables();
+    await ensureApplicantsTables();
+
+    const requestQuery = await db.query(
+        `SELECT id, position_title, applicant_id
+         FROM personnel_requests
+         WHERE id = $1`,
+        [requestId]
+    );
+
+    if (requestQuery.rows.length === 0) {
+        throw new Error('Solicitud no encontrada');
+    }
+
+    const request = requestQuery.rows[0];
+    const {
+        search = '',
+        page = 1,
+        pageSize = 25,
+    } = filters || {};
+
+    const applicantResult = await listApplicants({
+        cargo: request.position_title,
+        search,
+        page,
+        pageSize,
+    });
+
+    let data = Array.isArray(applicantResult?.data) ? applicantResult.data : [];
+    if (request.applicant_id && !data.some((item) => String(item.id) === String(request.applicant_id))) {
+        const linkedApplicant = await getApplicantById(request.applicant_id);
+        if (linkedApplicant) {
+            data = [linkedApplicant, ...data];
+        }
+    }
+
+    return {
+        request_id: request.id,
+        request_position_title: request.position_title,
+        linked_applicant_id: request.applicant_id || null,
+        data,
+        pagination: applicantResult?.pagination || {
+            page,
+            pageSize,
+            total: data.length,
+            totalPages: 1,
+        },
     };
 }
 
@@ -1187,6 +1267,44 @@ async function getPersonnelProfile(requestId) {
         updated_at: profileQuery.rows[0]?.updated_at || null,
         updated_by: profileQuery.rows[0]?.updated_by || null,
         documents: await listPersonnelRequestDocuments(requestId),
+    };
+}
+
+async function getPersonnelRequestWorkspace(requestId, filters = {}) {
+    await ensurePersonnelProfileTables();
+    await ensureCollaboratorTables();
+    await ensureApplicantsTables();
+
+    const request = await getPersonnelRequestById(requestId);
+    if (!request) {
+        throw new Error('Solicitud no encontrada');
+    }
+
+    const profileQuery = await db.query(
+        'SELECT profile, updated_at, updated_by FROM personnel_request_profiles WHERE personnel_request_id = $1',
+        [requestId]
+    );
+
+    const profile = profileQuery.rows[0]?.profile || {};
+    const documents = await listPersonnelRequestDocuments(requestId);
+    const applicants = await getPersonnelRequestApplicants(requestId, filters);
+    const documentTypes = documents.map((doc) => doc.doc_type).filter(Boolean);
+
+    return {
+        request,
+        profile: {
+            profile,
+            updated_at: profileQuery.rows[0]?.updated_at || null,
+            updated_by: profileQuery.rows[0]?.updated_by || null,
+            documents,
+        },
+        applicants,
+        summary: {
+            profile_completion: computeProfileCompletion(profile),
+            documents_completion: computeDocumentsCompletion(documentTypes),
+            linked_applicant_id: request.applicant_id || null,
+            linked_collaborator_user_id: request.collaborator_user_id || null,
+        },
     };
 }
 
@@ -1633,6 +1751,8 @@ module.exports = {
     createPersonnelRequest,
     getPersonnelRequests,
     getPersonnelRequestById,
+    getPersonnelRequestWorkspace,
+    getPersonnelRequestApplicants,
     updatePersonnelRequestStatus,
     addComment,
     getPersonnelRequestStats,

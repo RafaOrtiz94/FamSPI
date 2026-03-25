@@ -26,6 +26,22 @@ export const getPersonnelRequestById = async (id) => {
 };
 
 /**
+ * Obtener workspace agregado de una solicitud
+ */
+export const getPersonnelRequestWorkspace = async (id, params = {}) => {
+ const response = await api.get(`/personnel-requests/${id}/workspace`, { params });
+ return response.data;
+};
+
+/**
+ * Obtener postulantes sugeridos o vinculados a una solicitud
+ */
+export const getPersonnelRequestApplicants = async (id, params = {}) => {
+ const response = await api.get(`/personnel-requests/${id}/applicants`, { params });
+ return response.data;
+};
+
+/**
  * Actualizar estado de solicitud
  */
 export const updatePersonnelRequestStatus = async (id, status, notes = null) => {
@@ -94,6 +110,8 @@ export default {
  createPersonnelRequest,
  getPersonnelRequests,
  getPersonnelRequestById,
+ getPersonnelRequestWorkspace,
+ getPersonnelRequestApplicants,
  updatePersonnelRequestStatus,
  addPersonnelRequestComment,
  getPersonnelRequestStats,

@@ -53,6 +53,14 @@ El area existe para ordenar la relacion entre la organizacion y sus colaboradore
 - REQ-PT-001A: El sistema debe unificar la gestion de usuarios y departamentos en una sola entrada de navegacion para simplificar el acceso administrativo.
 - REQ-PT-001B: El sistema debe restringir esa entrada unificada a Talento Humano y TI, tanto en navegacion como en acceso directo a la ruta.
 - REQ-PT-002: El sistema debe permitir consolidar la informacion del colaborador en un workspace verificable.
+- REQ-PT-002A: El sistema debe presentar solicitudes, postulantes y colaboradores dentro de una experiencia de trabajo unificada, evitando que el usuario deba saltar entre pantallas inconexas para completar un mismo proceso.
+- REQ-PT-002B: El sistema debe evitar que la operacion principal dependa de menus tipo sidebar o paneles laterales persistentes que oculten contenido critico o reduzcan de forma excesiva el espacio util de trabajo.
+- REQ-PT-002C: El sistema debe priorizar una navegacion contextual visible y directa, basada en tabs, segmentos o controles equivalentes, para cambiar entre solicitudes, postulantes, colaboradores y detalle operativo sin perder el contexto actual.
+- REQ-PT-002D: El sistema debe mostrar en todo momento un encabezado operativo con el contexto activo, el estado del proceso, el responsable actual y la siguiente accion esperada cuando aplique.
+- REQ-PT-002E: El sistema debe organizar el contenido operativo siguiendo una jerarquia visual consistente, de modo que resumen, progreso, checklist, documentos y acciones principales tengan ubicacion predecible y comprensible.
+- REQ-PT-002F: El sistema debe minimizar scrolls anidados y evitar disposiciones que obliguen al usuario a desplazar multiples paneles internos para completar una tarea principal.
+- REQ-PT-002G: El sistema debe adaptar esa experiencia unificada a desktop y movil sin ocultar funciones clave detras de patrones ambiguos o de dificil descubrimiento.
+- REQ-PT-002H: El sistema debe permitir trabajar el ciclo de ingreso, seguimiento del colaborador activo y salida del colaborador bajo una logica visual coherente y reconocible dentro del mismo dominio.
 - REQ-PT-003: El sistema debe permitir al propio usuario mantener actualizado su perfil y preferencias.
 - REQ-PT-004: El sistema debe permitir registrar certificaciones con soporte documental y consultar su vigencia.
 - REQ-PT-004A: El sistema debe sincronizar de forma controlada las claves compartidas entre el perfil propio del usuario y el expediente laboral del colaborador.
@@ -89,6 +97,9 @@ El area existe para ordenar la relacion entre la organizacion y sus colaboradore
 - La informacion personal y laboral debe tratarse con criterio de minima exposicion y trazabilidad.
 - Los formularios del area deben permitir calculo automatico de fechas, horas o duraciones cuando la logica del proceso asi lo exija.
 - Los procesos diarios como asistencia deben ser simples de usar y no depender de pasos manuales innecesarios.
+- La navegacion principal del area debe privilegiar claridad operativa, consistencia visual y acceso directo al contenido, evitando layouts que dependan de sidebars intrusivos o de paneles que comprometan la legibilidad.
+- Las vistas de trabajo del area deben mantener una jerarquia visual estable entre contexto, progreso, contenido y acciones, para reducir errores de operacion y mejorar aprendizaje del usuario.
+- La experiencia responsive del area debe preservar tareas criticas, visibilidad de acciones y lectura del contenido sin degradarse por compresion excesiva del layout.
 - Los documentos y archivos asociados a colaboradores, solicitudes, permisos o certificaciones deben quedar vinculados de forma recuperable.
 - El area debe sostener reportes y evidencia objetiva suficiente para fines administrativos y de control interno.
 

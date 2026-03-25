@@ -41,6 +41,9 @@ async function getRequests(req, res) {
             department_id: req.query.department_id,
             urgency_level: req.query.urgency_level,
             position_type: req.query.position_type,
+            q: req.query.q || req.query.search || null,
+            sort_by: req.query.sort_by || null,
+            sort_dir: req.query.sort_dir || null,
             page: parseInt(req.query.page) || 1,
             pageSize: parseInt(req.query.pageSize) || 20,
             my_requests: req.query.my_requests === 'true'
@@ -85,6 +88,56 @@ async function getRequestById(req, res) {
         res.status(500).json({
             success: false,
             message: 'Error al obtener solicitud de personal'
+        });
+    }
+}
+
+async function getRequestWorkspace(req, res) {
+    try {
+        const { id } = req.params;
+        const filters = {
+            search: req.query.search || req.query.q || '',
+            page: parseInt(req.query.page, 10) || 1,
+            pageSize: parseInt(req.query.pageSize, 10) || 25,
+        };
+        const workspace = await personnelRequestsService.getPersonnelRequestWorkspace(id, filters);
+
+        res.json({
+            success: true,
+            data: workspace
+        });
+    } catch (error) {
+        logger.error('Error obteniendo workspace de solicitud de personal:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error al obtener workspace de solicitud'
+        });
+    }
+}
+
+async function getRequestApplicants(req, res) {
+    try {
+        const { id } = req.params;
+        const filters = {
+            search: req.query.search || req.query.q || '',
+            page: parseInt(req.query.page, 10) || 1,
+            pageSize: parseInt(req.query.pageSize, 10) || 25,
+        };
+        const result = await personnelRequestsService.getPersonnelRequestApplicants(id, filters);
+
+        res.json({
+            success: true,
+            data: result.data,
+            pagination: result.pagination,
+            request_id: result.request_id,
+            request_position_title: result.request_position_title,
+            linked_applicant_id: result.linked_applicant_id,
+        });
+    } catch (error) {
+        logger.error('Error obteniendo postulantes de solicitud:', error);
+        res.status(500).json({
+            success: false,
+            message: error.message || 'Error al obtener postulantes de la solicitud'
         });
     }
 }
@@ -221,15 +274,16 @@ async function updatePersonnelProfile(req, res) {
 async function uploadPersonnelDocument(req, res) {
     try {
         const id = parseInt(req.params.id, 10);
-        const { doc_type } = req.body || {};
+        const { doc_type, docType } = req.body || {};
+        const resolvedDocType = doc_type || docType;
         const file = req.file;
-        if (!doc_type) {
-            return res.status(400).json({ success: false, message: 'doc_type requerido' });
+        if (!resolvedDocType) {
+            return res.status(400).json({ success: false, message: 'doc_type o docType requerido' });
         }
         if (!file) {
             return res.status(400).json({ success: false, message: 'archivo requerido' });
         }
-        const result = await personnelRequestsService.addPersonnelDocument(id, doc_type, file, req.user?.id);
+        const result = await personnelRequestsService.addPersonnelDocument(id, resolvedDocType, file, req.user?.id);
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Error subiendo documento de personal:', error);
@@ -298,6 +352,8 @@ module.exports = {
     createRequest,
     getRequests,
     getRequestById,
+    getRequestWorkspace,
+    getRequestApplicants,
     updateRequestStatus,
     addComment,
     getStats,

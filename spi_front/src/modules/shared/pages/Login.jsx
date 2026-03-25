@@ -31,6 +31,9 @@ export default function Login() {
  case "missing_tokens":
  setError("Error: no se recibieron credenciales. Inténtalo de nuevo.");
  break;
+ case "missing_refresh_token":
+ setError("Tu sesión no tiene habilitada la renovación automática. Por favor, inicia sesión de nuevo para habilitarla (30 días).");
+ break;
  default:
  setError("Error durante la autenticación. Inténtalo de nuevo.");
  }

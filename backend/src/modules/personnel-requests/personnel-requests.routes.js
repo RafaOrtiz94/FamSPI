@@ -56,6 +56,18 @@ router.get(
     personnelRequestsController.getStats
 );
 
+router.get(
+    '/:id/workspace',
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
+    personnelRequestsController.getRequestWorkspace
+);
+
+router.get(
+    '/:id/applicants',
+    requireRole(['talento_humano', 'gerencia', 'gerencia_general', 'admin']),
+    personnelRequestsController.getRequestApplicants
+);
+
 /**
  * @route   GET /api/personnel-requests/:id
  * @desc    Obtener solicitud específica por ID

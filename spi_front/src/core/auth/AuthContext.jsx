@@ -26,9 +26,10 @@ export const AuthProvider = ({ children }) => {
  const [loading, setLoading] = useState(true);
  const sessionTimerRef = useRef(null);
 
- const redirectToLogin = () => {
+ const redirectToLogin = (error = null) => {
  if (!window.location.pathname.startsWith("/login")) {
- window.location.replace("/login");
+  const url = error ? `/login?error=${error}` : "/login";
+  window.location.replace(url);
  }
  };
 
@@ -39,12 +40,12 @@ export const AuthProvider = ({ children }) => {
  }
  };
 
- const forceLogoutAndRedirect = () => {
+ const forceLogoutAndRedirect = (error = null) => {
  clearSessionTimer();
  setUser(null);
  setIsAuthenticated(false);
  clearTokens();
- redirectToLogin();
+ redirectToLogin(error);
  };
 
  const decodeJwtExp = (token) => {
@@ -146,7 +147,11 @@ export const AuthProvider = ({ children }) => {
  }
 
  if (activeAccessToken && (!activeExp || activeExp > nowSeconds)) {
- const profile = await getProfile();
+  if (!hasRefreshToken()) {
+   forceLogoutAndRedirect("missing_refresh_token");
+   return false;
+  }
+  const profile = await getProfile();
  setUser(profile);
  setIsAuthenticated(true);
  localStorage.setItem("user", JSON.stringify(profile));
@@ -219,6 +224,11 @@ export const AuthProvider = ({ children }) => {
  Boolean(activeAccessToken) && (!activeExp || activeExp > nowSeconds);
 
  if (storedUser && hasValidAccessToken) {
+ if (!hasRefreshToken()) {
+  console.warn("⚠️ Usuario tiene accessToken pero falta refreshToken (requerido para renovación continua)");
+  forceLogoutAndRedirect("missing_refresh_token");
+  return;
+ }
  setUser(JSON.parse(storedUser));
  setIsAuthenticated(true);
  setLoading(false);
