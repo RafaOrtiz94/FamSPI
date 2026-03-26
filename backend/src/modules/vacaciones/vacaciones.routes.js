@@ -14,6 +14,7 @@ router.post("/", controller.create);
 router.get("/", controller.list);
 router.patch("/:id/status", controller.updateStatus);
 router.post("/:id/cancel", controller.cancel);
+router.patch("/:id/dates", controller.updateDates);
 router.post("/:id/cancel/review", controller.reviewCancel);
 router.get("/summary/data", controller.getSummary);
 

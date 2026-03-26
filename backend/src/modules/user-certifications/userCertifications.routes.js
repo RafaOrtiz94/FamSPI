@@ -27,4 +27,7 @@ router.delete('/me/certifications/:certId', ctrl.deleteMyCertification);
 // GET /api/v1/users/:id/certifications/pdf - Generar PDF consolidado (solo roles autorizados)
 router.get('/:id/certifications/pdf', requireRole(['acp_comercial', 'talento_humano', 'gerencia', 'gerencia_general']), ctrl.generateUserCertificationsPDF);
 
+// GET /api/v1/users/:id/certifications/dossier - Dossier consolidado con enlace/QR por certificación
+router.get('/:id/certifications/dossier', ctrl.generateUserCertificationsDossier);
+
 module.exports = router;

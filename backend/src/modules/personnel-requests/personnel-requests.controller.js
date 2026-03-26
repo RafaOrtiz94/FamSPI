@@ -42,6 +42,7 @@ async function getRequests(req, res) {
             urgency_level: req.query.urgency_level,
             position_type: req.query.position_type,
             q: req.query.q || req.query.search || null,
+            stalled_only: req.query.stalled_only === 'true' || req.query.stalled === 'true' || req.query.stagnant === 'true',
             sort_by: req.query.sort_by || null,
             sort_dir: req.query.sort_dir || null,
             page: parseInt(req.query.page) || 1,
@@ -175,7 +176,8 @@ async function updateRequestStatus(req, res) {
         logger.error('Error actualizando estado de solicitud:', error);
         res.status(400).json({
             success: false,
-            message: error.message || 'Error al actualizar estado'
+            message: error.message || 'Error al actualizar estado',
+            details: error.details || null,
         });
     }
 }
@@ -264,7 +266,12 @@ async function updatePersonnelProfile(req, res) {
         res.json({ success: true, data: result });
     } catch (error) {
         logger.error('Error actualizando perfil de personal:', error);
-        res.status(500).json({ success: false, message: 'Error al actualizar perfil' });
+        const isValidationError = error?.code === 'PROFILE_VALIDATION_ERROR';
+        res.status(isValidationError ? 400 : 500).json({
+            success: false,
+            message: error?.message || 'Error al actualizar perfil',
+            details: error?.details || null,
+        });
     }
 }
 

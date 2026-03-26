@@ -105,7 +105,7 @@ const getTodayLocalDate = () => {
 const canCancelByDateRule = (solicitud = {}) => {
  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
  if (!startDate) return false;
- return getTodayLocalDate() <= startDate;
+ return getTodayLocalDate() < startDate;
 };
 
 const RECOVERY_COORDINATION_LABELS = {

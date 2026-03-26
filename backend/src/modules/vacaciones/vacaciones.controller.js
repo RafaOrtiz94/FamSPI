@@ -2,6 +2,14 @@
 const logger = require("../../config/logger");
 const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
 
+const getErrorStatus = (err, fallback = 400) => {
+  const status = Number(err?.status || err?.statusCode);
+  if (Number.isInteger(status) && status >= 400 && status < 600) {
+    return status;
+  }
+  return fallback;
+};
+
 const getRequestMeta = (req) => ({
   ipAddress: req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.ip || null,
   userAgent: req.headers["user-agent"] || null,
@@ -14,7 +22,7 @@ async function create(req, res) {
     res.status(201).json({ ok: true, data: request });
   } catch (err) {
     logger.error(err, "Error creando solicitud de vacaciones");
-    res.status(400).json({ ok: false, message: err.message || "No se pudo crear la solicitud" });
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message || "No se pudo crear la solicitud" });
   }
 }
 
@@ -34,7 +42,7 @@ async function updateStatus(req, res) {
     res.json({ ok: true, data: updated });
   } catch (err) {
     logger.error(err, "Error actualizando vacaciones");
-    res.status(400).json({ ok: false, message: err.message || "No se pudo actualizar" });
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message || "No se pudo actualizar" });
   }
 }
 
@@ -42,13 +50,31 @@ async function cancel(req, res) {
   try {
     const updated = await service.cancelVacationRequest(
       req.params.id,
-      req.body?.reason,
-      req.user
+      req.user.id,
+      {
+        actor: req.user,
+        reason: req.body?.reason || null,
+      }
     );
     res.json({ ok: true, data: updated });
   } catch (err) {
     logger.error(err, "Error cancelando vacaciones");
-    res.status(400).json({ ok: false, message: err.message || "No se pudo cancelar" });
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message || "No se pudo cancelar" });
+  }
+}
+
+async function updateDates(req, res) {
+  try {
+    const updated = await service.updateVacationDates(
+      req.params.id,
+      req.user.id,
+      req.body || {},
+      { actor: req.user }
+    );
+    res.json({ ok: true, data: updated });
+  } catch (err) {
+    logger.error(err, "Error reprogramando vacaciones");
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message || "No se pudo reprogramar" });
   }
 }
 
@@ -63,7 +89,7 @@ async function reviewCancel(req, res) {
     res.json({ ok: true, data: updated });
   } catch (err) {
     logger.error(err, "Error revisando cancelación de vacaciones");
-    res.status(400).json({ ok: false, message: err.message || "No se pudo revisar cancelación" });
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message || "No se pudo revisar cancelación" });
   }
 }
 
@@ -137,4 +163,4 @@ async function getSummary(req, res) {
   }
 }
 
-module.exports = { create, list, updateStatus, cancel, reviewCancel, getSummary, verifyLegalToken };
+module.exports = { create, list, updateStatus, cancel, updateDates, reviewCancel, getSummary, verifyLegalToken };

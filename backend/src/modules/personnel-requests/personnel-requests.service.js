@@ -7,7 +7,7 @@ const db = require('../../config/db');
 const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
 const { ensureFolder, uploadBase64File } = require('../../utils/drive');
-const { ensureApplicantsTables, getApplicantById } = require('../applicants/applicants.service');
+const { ensureApplicantsTables, getApplicantById, listApplicants } = require('../applicants/applicants.service');
 const gmailService = require('../../services/gmail.service');
 const {
     getSingleUserByRole,
@@ -279,6 +279,28 @@ const PERSONNEL_REQUEST_TRANSITIONS = {
   cancelada: [],
 };
 
+const PROFILE_REQUIRED_BY_STATUS = {
+  en_revision: [
+    'personal.nombres',
+    'personal.apellidos',
+    'personal.email_personal',
+    'laboral.cargo',
+    'laboral.area',
+  ],
+  aprobada: [
+    'personal.nombres',
+    'personal.apellidos',
+    'personal.cedula',
+    'personal.email_personal',
+    'laboral.cargo',
+    'laboral.area',
+    'laboral.tipo_contrato',
+    'laboral.fecha_ingreso',
+  ],
+  en_proceso: REQUIRED_PROFILE_FIELDS,
+  completada: REQUIRED_PROFILE_FIELDS,
+};
+
 const getProfileValue = (profile, path) => {
   return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), profile);
 };
@@ -356,6 +378,48 @@ const normalizePersonnelProfilePayload = (payload = {}) => {
   return payload || {};
 };
 
+const getRequiredProfileFieldsForStatus = (status) => {
+  const normalized = normalizeWorkflowStatus(status);
+  return PROFILE_REQUIRED_BY_STATUS[normalized] || [];
+};
+
+/**
+ * Valida perfil JSONB por estado de flujo. Devuelve errores normalizados por campo.
+ */
+const validateProfileByStatus = (profile = {}, status = 'pendiente') => {
+  const requiredFields = getRequiredProfileFieldsForStatus(status);
+  if (requiredFields.length === 0) {
+    return { valid: true, errors: [] };
+  }
+
+  const errors = requiredFields.reduce((acc, fieldPath) => {
+    const path = fieldPath.split('.');
+    const value = getProfileValue(profile, path);
+    if (!isFieldFilled(value) && !isNAValue(value)) {
+      acc.push({
+        path,
+        message: `Campo obligatorio faltante para etapa ${normalizeWorkflowStatus(status)}: ${fieldPath}`,
+      });
+    }
+    return acc;
+  }, []);
+
+  return { valid: errors.length === 0, errors };
+};
+
+const ensureProfileValidationOrThrow = (profile = {}, status = 'pendiente') => {
+  const validation = validateProfileByStatus(profile, status);
+  if (validation.valid) return;
+
+  const error = new Error(`Perfil incompleto para la etapa ${normalizeWorkflowStatus(status)}`);
+  error.code = 'PROFILE_VALIDATION_ERROR';
+  error.details = {
+    status: normalizeWorkflowStatus(status),
+    validation_errors: validation.errors,
+  };
+  throw error;
+};
+
 const recordPersonnelRequestHistory = async (
   personnelRequestId,
   {
@@ -409,6 +473,10 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
   const currentStatus = normalizeWorkflowStatus(request.status || 'pendiente');
   const currentStep = getWorkflowStepMeta(currentStatus);
   const createdAt = toDateValue(request.created_at) || new Date();
+  const explicitStageStartedAt =
+    toDateValue(request.current_stage_started_at) ||
+    toDateValue(request.stage_started_at) ||
+    null;
   const now = new Date();
   const orderedHistory = [...(historyRows || [])]
     .map((row) => ({
@@ -468,14 +536,37 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
   const currentStartedAt =
     [...timeline].reverse().find((entry) => entry.status === currentStatus)?.started_at ||
     createdAt.toISOString();
-  const stageStartedAt = toDateValue(currentStartedAt) || createdAt;
+  const stageStartedAt = explicitStageStartedAt || toDateValue(currentStartedAt) || createdAt;
   const elapsedSeconds = Math.max(0, Math.floor((now.getTime() - stageStartedAt.getTime()) / 1000));
+  const terminalStatuses = new Set(['completada', 'rechazada', 'cancelada']);
   const maxHours = Number.isFinite(currentStep.maxHours) ? currentStep.maxHours : null;
+  const maxSeconds = maxHours ? maxHours * 60 * 60 : null;
   const deadlineAt = maxHours ? new Date(stageStartedAt.getTime() + maxHours * 60 * 60 * 1000) : null;
   const stalled = Boolean(deadlineAt && now.getTime() > deadlineAt.getTime());
   const stalledForSeconds = stalled ? Math.floor((now.getTime() - deadlineAt.getTime()) / 1000) : 0;
+  const remainingSeconds = maxSeconds !== null ? Math.max(0, maxSeconds - elapsedSeconds) : null;
+  const nearSla = Boolean(
+    !terminalStatuses.has(currentStatus) &&
+    maxSeconds !== null &&
+    !stalled &&
+    elapsedSeconds >= Math.floor(maxSeconds * 0.75)
+  );
+  const slaProgressPercent = maxSeconds ? Math.min(999, Math.round((elapsedSeconds / maxSeconds) * 100)) : null;
+  const slaAlertLevel = terminalStatuses.has(currentStatus)
+    ? 'normal'
+    : stalled
+      ? 'stalled'
+      : nearSla
+        ? 'warning'
+        : 'normal';
+  const slaAlertMessage = stalled
+    ? `Estancada por ${formatDurationLabel(stalledForSeconds)}`
+    : nearSla
+      ? `Etapa cercana al limite (${elapsedSeconds > 0 ? formatDurationLabel(elapsedSeconds) : '0m'} de ${maxHours}h)`
+      : maxHours
+        ? `Dentro de SLA (${elapsedSeconds > 0 ? formatDurationLabel(elapsedSeconds) : '0m'} de ${maxHours}h)`
+        : 'Sin SLA configurado para esta etapa';
   const currentIndex = Math.max(0, PERSONNEL_WORKFLOW_PROGRESS_ORDER[currentStatus] ?? 0);
-  const terminalStatuses = new Set(['completada', 'rechazada', 'cancelada']);
   const progressPercent = terminalStatuses.has(currentStatus)
     ? 100
     : Math.min(100, Math.round((currentIndex / Math.max(PERSONNEL_WORKFLOW_PROGRESS_ORDER.completada, 1)) * 100));
@@ -503,6 +594,14 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
     stalled,
     stalled_for_seconds: stalledForSeconds,
     stalled_for_label: stalledForSeconds > 0 ? formatDurationLabel(stalledForSeconds) : null,
+    max_hours: maxHours,
+    max_seconds: maxSeconds,
+    remaining_seconds: remainingSeconds,
+    remaining_label: remainingSeconds !== null ? formatDurationLabel(remainingSeconds) : null,
+    near_sla: nearSla,
+    sla_progress_percent: slaProgressPercent,
+    sla_alert_level: slaAlertLevel,
+    sla_alert_message: slaAlertMessage,
     progress_percent: progressPercent,
     progress_label: `${progressPercent}%`,
     is_terminal: terminalStatuses.has(currentStatus),
@@ -515,6 +614,21 @@ const buildWorkflowSummary = (request = {}, historyRows = [], collaborators = {}
 /**
  * Crear una nueva solicitud de personal
  */
+const provisionRequestDriveFolderAsync = async (requestId, positionTitle) => {
+  if (!DRIVE_ROOT_FOLDER_ID) return;
+
+  try {
+    const folderName = `Solicitud Personal - ${positionTitle || requestId} - ${new Date().toISOString().split('T')[0]}`;
+    const folder = await ensureFolder(folderName, DRIVE_ROOT_FOLDER_ID);
+    await db.query(
+      'UPDATE personnel_requests SET drive_folder_id = $1, updated_at = NOW() WHERE id = $2 AND drive_folder_id IS NULL',
+      [folder?.id || null, requestId]
+    );
+  } catch (error) {
+    logger.warn({ requestId, error: error?.message }, 'No se pudo provisionar carpeta de Drive de forma asincrona');
+  }
+};
+
 async function createPersonnelRequest(data, userId) {
     await ensurePersonnelProfileTables();
     await ensureCollaboratorTables();
@@ -597,15 +711,8 @@ async function createPersonnelRequest(data, userId) {
 
     const user = userQuery.rows[0];
 
-    // Crear carpeta en Drive para la solicitud
-    let driveFolderId = null;
-    try {
-        const folderName = `Solicitud Personal - ${position_title} - ${new Date().toISOString().split('T')[0]}`;
-        const folder = await ensureFolder(folderName, DRIVE_ROOT_FOLDER_ID);
-        driveFolderId = folder.id;
-    } catch (error) {
-        logger.warn('No se pudo crear carpeta en Drive:', error.message);
-    }
+    // Provisionamiento asincrono de carpeta: no bloquea la respuesta del API.
+    const driveFolderId = null;
 
     // Insertar solicitud
     const insertQuery = `
@@ -685,11 +792,20 @@ async function createPersonnelRequest(data, userId) {
         action: 'create',
         entity: 'personnel_requests',
         entity_id: request.id,
-        details: { position_title, position_type, urgency_level }
+        details: {
+            position_title,
+            position_type,
+            urgency_level: normalizedUrgency,
+            quantity: normalizedQuantity,
+            async_drive_provision: true,
+        }
     });
 
     // Notificar a Talento Humano + Gerencia (usuarios especificos)
     await notifyHRNewRequest(request, user);
+
+    // Fire-and-forget para evitar bloqueo de la solicitud.
+    void provisionRequestDriveFolderAsync(request.id, position_title);
 
     return request;
 }
@@ -713,6 +829,38 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
         pageSize = 20,
         my_requests = false
     } = filters;
+    const stalledFilterRaw = filters.stalled_only ?? filters.stalled ?? filters.stagnant ?? null;
+    const stalledOnly = stalledFilterRaw === true || String(stalledFilterRaw).toLowerCase() === 'true';
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
+    const safePageSize = Math.min(200, Math.max(parseInt(pageSize, 10) || 20, 1));
+    const stageStartedAtExpression = `
+      COALESCE(
+        (
+          SELECT h.created_at
+          FROM personnel_request_history h
+          WHERE h.personnel_request_id = pr.id
+            AND LOWER(COALESCE(h.new_status, '')) = LOWER(COALESCE(pr.status, ''))
+          ORDER BY h.created_at DESC
+          LIMIT 1
+        ),
+        pr.created_at
+      )
+    `;
+    const stageMaxHoursExpression = `
+      CASE LOWER(COALESCE(pr.status, ''))
+        WHEN 'pendiente' THEN 72
+        WHEN 'en_revision' THEN 72
+        WHEN 'aprobada' THEN 96
+        WHEN 'en_proceso' THEN 96
+        ELSE NULL
+      END
+    `;
+    const stalledExpression = `
+      CASE
+        WHEN (${stageMaxHoursExpression}) IS NULL THEN FALSE
+        ELSE NOW() > (${stageStartedAtExpression} + ((${stageMaxHoursExpression}) * INTERVAL '1 hour'))
+      END
+    `;
 
     let whereConditions = ['1=1'];
     let params = [];
@@ -742,6 +890,10 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     if (position_type) {
         whereConditions.push(`pr.position_type = $${paramIndex++}`);
         params.push(position_type);
+    }
+
+    if (stalledOnly) {
+        whereConditions.push(`(${stalledExpression}) = TRUE`);
     }
 
     const normalizedSearch = String(q || search || '').trim().toLowerCase();
@@ -776,7 +928,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
       END,
       pr.created_at DESC`;
 
-    const offset = (page - 1) * pageSize;
+    const offset = (safePage - 1) * safePageSize;
 
     const query = `
     SELECT 
@@ -786,7 +938,8 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
       cu.fullname as collaborator_name,
       cu.email as collaborator_email,
       d.name as department_name,
-      d.code as department_code
+      d.code as department_code,
+      ${stageStartedAtExpression} as current_stage_started_at
     FROM personnel_requests pr
     LEFT JOIN users u ON pr.requester_id = u.id
     LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
@@ -796,7 +949,7 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     LIMIT $${paramIndex++} OFFSET $${paramIndex++}
   `;
 
-    params.push(pageSize, offset);
+    params.push(safePageSize, offset);
 
     const result = await db.query(query, params);
 
@@ -804,24 +957,39 @@ async function getPersonnelRequests(filters = {}, userId = null, userRole = null
     const countQuery = `
     SELECT COUNT(*) as total
     FROM personnel_requests pr
+    LEFT JOIN users u ON pr.requester_id = u.id
+    LEFT JOIN users cu ON pr.collaborator_user_id = cu.id
+    LEFT JOIN departments d ON pr.department_id = d.id
     WHERE ${whereConditions.join(' AND ')}
   `;
     const countResult = await db.query(countQuery, params.slice(0, -2));
     const total = parseInt(countResult.rows[0].total, 10);
 
     return {
-        data: result.rows.map((row) => ({
-            ...row,
-            workflow: buildWorkflowSummary(row, [], row.collaborator_name || row.collaborator_email ? {
+        data: result.rows.map((row) => {
+            const workflow = buildWorkflowSummary(row, [], row.collaborator_name || row.collaborator_email ? {
                 fullname: row.collaborator_name || null,
                 email: row.collaborator_email || null,
-            } : null),
-        })),
+            } : null);
+
+            return {
+                ...row,
+                workflow,
+                stalled: workflow.stalled,
+                stalled_for_seconds: workflow.stalled_for_seconds,
+                stalled_for_label: workflow.stalled
+                    ? `Estancada por ${workflow.stalled_for_label || formatDurationLabel(workflow.stalled_for_seconds || 0)}`
+                    : null,
+                near_sla: workflow.near_sla,
+                sla_alert_level: workflow.sla_alert_level,
+                sla_alert_message: workflow.sla_alert_message,
+            };
+        }),
         pagination: {
-            page,
-            pageSize,
+            page: safePage,
+            pageSize: safePageSize,
             total,
-            totalPages: Math.ceil(total / pageSize)
+            totalPages: Math.ceil(total / safePageSize)
         }
     };
 }
@@ -842,11 +1010,9 @@ async function getPersonnelRequestApplicants(requestId, filters = {}) {
     }
 
     const request = requestQuery.rows[0];
-    const {
-        search = '',
-        page = 1,
-        pageSize = 25,
-    } = filters || {};
+    const search = filters?.search || '';
+    const page = parseInt(filters?.page || 1, 10);
+    const pageSize = parseInt(filters?.pageSize || 25, 10);
 
     const applicantResult = await listApplicants({
         cargo: request.position_title,
@@ -977,6 +1143,27 @@ async function updatePersonnelRequestStatus(id, status, userId, notes = null, us
     const allowedTransitions = PERSONNEL_REQUEST_TRANSITIONS[currentStatus] || [];
     if (!allowedTransitions.includes(normalizedStatus)) {
         throw new Error(`No es posible pasar de ${currentStatus} a ${normalizedStatus}`);
+    }
+
+    if (['aprobada', 'en_proceso'].includes(normalizedStatus)) {
+        const profileResult = await getPersonnelProfile(id);
+        const profile = profileResult?.profile || {};
+        const profileCompletion = computeProfileCompletion(profile);
+        const completionPercent =
+            profileCompletion.total > 0
+                ? Math.round((profileCompletion.done / profileCompletion.total) * 100)
+                : 0;
+
+        if (!profileCompletion.complete || completionPercent < 100) {
+            const error = new Error('No se puede avanzar: El perfil profesional debe estar completo al 100%');
+            error.code = 'PROFILE_INCOMPLETE_FOR_TRANSITION';
+            error.details = {
+                profile_completion: profileCompletion,
+                completion_percent: completionPercent,
+                target_status: normalizedStatus,
+            };
+            throw error;
+        }
     }
 
     if (normalizedStatus === 'rechazada' && !String(notes || '').trim()) {
@@ -1231,7 +1418,14 @@ async function getPersonnelRequestStats(departmentId = null) {
       COUNT(*) FILTER (WHERE urgency_level = 'urgente') as urgentes,
       COUNT(*) FILTER (
         WHERE status IN ('pendiente', 'en_revision', 'aprobada', 'en_proceso')
-          AND NOW() - COALESCE(updated_at, created_at) > INTERVAL '72 hours'
+          AND NOW() - COALESCE(updated_at, created_at) >
+            CASE status
+              WHEN 'pendiente' THEN INTERVAL '72 hours'
+              WHEN 'en_revision' THEN INTERVAL '72 hours'
+              WHEN 'aprobada' THEN INTERVAL '96 hours'
+              WHEN 'en_proceso' THEN INTERVAL '96 hours'
+              ELSE INTERVAL '9999 hours'
+            END
       ) as estancadas,
       COUNT(*) as total
     FROM personnel_requests
@@ -1320,12 +1514,13 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
         throw new Error('Solicitud no encontrada');
     }
 
-    const status = requestQuery.rows[0].status;
+    const status = normalizeWorkflowStatus(requestQuery.rows[0].status);
     if (!['aprobada', 'en_proceso'].includes(status)) {
         throw new Error('El perfil solo puede actualizarse cuando la solicitud este aprobada');
     }
 
     const normalizedPayload = normalizePersonnelProfilePayload(profilePayload);
+    ensureProfileValidationOrThrow(normalizedPayload, status);
 
     const query = `
       INSERT INTO personnel_request_profiles (personnel_request_id, profile, updated_by)
@@ -1351,6 +1546,19 @@ async function upsertPersonnelProfile(requestId, profilePayload = {}, userId = n
         );
     }
 
+    await logAction({
+        user_id: userId,
+        module: 'personnel_requests',
+        action: 'upsert_profile',
+        entity: 'personnel_requests',
+        entity_id: requestId,
+        details: {
+            stage: status,
+            collaborator_user_id: requestQuery.rows[0]?.collaborator_user_id || null,
+            validation_profile_required_fields: getRequiredProfileFieldsForStatus(status).length,
+        },
+    });
+
     return result.rows[0];
 }
 
@@ -1373,17 +1581,11 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
 
     let folderId = requestQuery.rows[0].drive_folder_id;
     if (!folderId) {
-        try {
-            const folderName = `Solicitud Personal - ${requestId} - Documentos`;
-            const folder = await ensureFolder(folderName, DRIVE_ROOT_FOLDER_ID);
-            folderId = folder.id;
-            await db.query(
-                'UPDATE personnel_requests SET drive_folder_id = $1 WHERE id = $2',
-                [folderId, requestId]
-            );
-        } catch (error) {
-            logger.warn('No se pudo crear carpeta en Drive para documentos:', error.message);
-        }
+        folderId = DRIVE_ROOT_FOLDER_ID || null;
+        void provisionRequestDriveFolderAsync(requestId, `REQ-${requestId}-Documentos`);
+    }
+    if (!folderId) {
+        throw new Error('No se pudo resolver carpeta de Drive para documentos');
     }
 
     const base64 = file.buffer.toString('base64');
@@ -1444,83 +1646,117 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
         );
     }
 
+    try {
+        await logAction({
+            user_id: userId,
+            module: 'personnel_requests',
+            action: 'upload_document',
+            entity: 'personnel_requests',
+            entity_id: requestId,
+            details: {
+                doc_type: docType,
+                file_name: file.originalname || uploaded.name || `${docType}`,
+                drive_file_id: uploaded.id || null,
+                collaborator_user_id: collaboratorUserId || null,
+            },
+        });
+    } catch (auditError) {
+        logger.warn({ requestId, error: auditError?.message }, 'No se pudo registrar auditoria de subida de documento');
+    }
+
     return {
         document: insertResult.rows[0],
         documents: await listPersonnelRequestDocuments(requestId),
     };
 }
 
+/**
+ * Finaliza la contratacion en una transaccion atomica para evitar estados parciales.
+ */
 async function hirePersonnelRequest(requestId, userId) {
     await ensurePersonnelProfileTables();
     await ensureCollaboratorTables();
     await ensureApplicantsTables();
 
-    const requestQuery = await db.query(
-        'SELECT id, status, collaborator_user_id, applicant_id FROM personnel_requests WHERE id = $1',
-        [requestId]
-    );
-
-    if (requestQuery.rows.length === 0) {
-        throw new Error('Solicitud no encontrada');
-    }
-
-    const { status, applicant_id } = requestQuery.rows[0];
-    if (!['aprobada', 'en_proceso'].includes(status)) {
-        throw new Error('La solicitud debe estar aprobada o en proceso para contratar');
-    }
-
-    let profile = null;
-    let email = null;
-    let fullname = null;
-
-    // Intentar obtener datos del postulante normalizado si está vinculado
-    if (applicant_id) {
-        const applicantData = await getApplicantById(applicant_id);
-        if (applicantData) {
-            email = applicantData.email;
-            fullname = applicantData.fullname;
-            // Reconstruir perfil para collaborator_profiles si es necesario, 
-            // o usar el que ya tiene la solicitud (que debería estar sincronizado)
-        }
-    }
-
-    const profileQuery = await db.query(
-        'SELECT profile FROM personnel_request_profiles WHERE personnel_request_id = $1',
-        [requestId]
-    );
-
-    profile = profileQuery.rows[0]?.profile || null;
-    if (!profile) {
-        throw new Error('No hay perfil registrado para contratar');
-    }
-
-    if (!email) email = (profile?.personal?.email_personal || '').toLowerCase().trim();
-    if (!fullname) fullname = `${profile?.personal?.nombres || ''} ${profile?.personal?.apellidos || ''}`.trim();
-
-    if (!email) {
-        throw new Error('Email personal es obligatorio para contratar');
-    }
-
-    const docRows = await db.query(
-        'SELECT doc_type FROM personnel_request_documents WHERE personnel_request_id = $1',
-        [requestId]
-    );
-    const docTypes = docRows.rows.map((row) => row.doc_type).filter(Boolean);
-
-    const profileCompletion = computeProfileCompletion(profile);
-    const documentsCompletion = computeDocumentsCompletion(docTypes);
-    if (!profileCompletion.complete || !documentsCompletion.complete) {
-        const error = new Error('Perfil o documentos incompletos para contratar');
-        error.details = {
-            profile_completion: profileCompletion,
-            documents_completion: documentsCompletion,
-        };
-        throw error;
-    }
-
     const client = await db.getClient();
+    let resultPayload = null;
+    let auditDetails = null;
+
     try {
         await client.query('BEGIN');
+
+        const requestQuery = await client.query(
+            `
+            SELECT id, status, collaborator_user_id, applicant_id, request_number, position_title
+            FROM personnel_requests
+            WHERE id = $1
+            FOR UPDATE
+            `,
+            [requestId]
+        );
+
+        if (requestQuery.rows.length === 0) {
+            throw new Error('Solicitud no encontrada');
+        }
+
+        const request = requestQuery.rows[0];
+        const previousStatus = normalizeWorkflowStatus(request.status);
+
+        if (previousStatus === 'completada' && request.collaborator_user_id) {
+            await client.query('COMMIT');
+            return { collaborator_user_id: request.collaborator_user_id, email: null };
+        }
+
+        if (!['aprobada', 'en_proceso'].includes(previousStatus)) {
+            throw new Error('La solicitud debe estar aprobada o en proceso para contratar');
+        }
+
+        const profileQuery = await client.query(
+            'SELECT profile FROM personnel_request_profiles WHERE personnel_request_id = $1 FOR UPDATE',
+            [requestId]
+        );
+
+        const profile = profileQuery.rows[0]?.profile || null;
+        if (!profile) {
+            throw new Error('No hay perfil registrado para contratar');
+        }
+
+        ensureProfileValidationOrThrow(profile, 'en_proceso');
+
+        const docRows = await client.query(
+            'SELECT doc_type FROM personnel_request_documents WHERE personnel_request_id = $1',
+            [requestId]
+        );
+        const docTypes = docRows.rows.map((row) => row.doc_type).filter(Boolean);
+
+        const profileCompletion = computeProfileCompletion(profile);
+        const documentsCompletion = computeDocumentsCompletion(docTypes);
+        if (!profileCompletion.complete || !documentsCompletion.complete) {
+            const error = new Error('Perfil o documentos incompletos para contratar');
+            error.details = {
+                profile_completion: profileCompletion,
+                documents_completion: documentsCompletion,
+            };
+            throw error;
+        }
+
+        let email = (profile?.personal?.email_personal || '').toLowerCase().trim();
+        let fullname = `${profile?.personal?.nombres || ''} ${profile?.personal?.apellidos || ''}`.trim();
+
+        if (request.applicant_id) {
+            const applicantQuery = await client.query(
+                'SELECT id, email, fullname FROM applicants WHERE id = $1',
+                [request.applicant_id]
+            );
+            if (applicantQuery.rows.length > 0) {
+                email = (applicantQuery.rows[0]?.email || email || '').toLowerCase().trim();
+                fullname = applicantQuery.rows[0]?.fullname || fullname;
+            }
+        }
+
+        if (!email) {
+            throw new Error('Email personal es obligatorio para contratar');
+        }
 
         const userUpsert = `
           INSERT INTO users (email, fullname, name, role)
@@ -1535,13 +1771,15 @@ async function hirePersonnelRequest(requestId, userId) {
             profile?.personal?.nombres || 'Colaborador',
             'colaborador',
         ]);
-        const user = userResult.rows[0];
+        const collaboratorUser = userResult.rows[0];
 
         await client.query(
-            `UPDATE personnel_requests
-             SET collaborator_user_id = $1, status = 'completada', completed_at = NOW(), updated_at = NOW()
-             WHERE id = $2`,
-            [user.id, requestId]
+            `
+            UPDATE personnel_requests
+            SET collaborator_user_id = $1, status = 'completada', completed_at = NOW(), updated_at = NOW()
+            WHERE id = $2
+            `,
+            [collaboratorUser.id, requestId]
         );
 
         await client.query(
@@ -1557,11 +1795,16 @@ async function hirePersonnelRequest(requestId, userId) {
             `,
             [
                 requestId,
-                status,
+                previousStatus,
                 'completada',
                 userId,
                 'Contratacion finalizada',
-                JSON.stringify({ action: 'hire_applicant', collaborator_user_id: user.id }),
+                {
+                    action: 'hire_applicant',
+                    collaborator_user_id: collaboratorUser.id,
+                    applicant_id: request.applicant_id || null,
+                    email,
+                },
             ]
         );
 
@@ -1572,7 +1815,7 @@ async function hirePersonnelRequest(requestId, userId) {
             ON CONFLICT (user_id)
             DO UPDATE SET profile = EXCLUDED.profile, updated_by = EXCLUDED.updated_by, updated_at = NOW()
             `,
-            [user.id, profile, userId]
+            [collaboratorUser.id, profile, userId]
         );
 
         await client.query(
@@ -1594,34 +1837,96 @@ async function hirePersonnelRequest(requestId, userId) {
                 WHERE cd.user_id = $1 AND cd.doc_type = personnel_request_documents.doc_type
               )
             `,
-            [user.id, userId, requestId]
+            [collaboratorUser.id, userId, requestId]
         );
 
         await client.query(
-            `UPDATE applicants SET status = 'hired', updated_at = NOW() WHERE id = $1 OR email = $2`,
-            [applicant_id, email]
+            `
+            UPDATE applicants
+            SET status = 'hired', updated_at = NOW()
+            WHERE ($1::INTEGER IS NOT NULL AND id = $1)
+               OR (COALESCE($2, '') <> '' AND LOWER(email) = LOWER($2))
+            `,
+            [request.applicant_id || null, email]
         );
 
         await client.query('COMMIT');
 
-        await logAction({
-            user_id: userId,
-            module: 'personnel_requests',
-            action: 'hire_applicant',
-            entity: 'personnel_requests',
-            entity_id: requestId,
-            details: { collaborator_user_id: user.id, email },
-        });
+        // --- Post-Commit: Notificar a TI ---
+        try {
+            const tiUser = await getSingleUserByRole('ti');
+            const managerTiUser = await getSingleUserByRole('jefe_ti');
+            const hrUser = await getSingleUserByRole('talento_humano');
+            const tiRecipients = [tiUser, managerTiUser, hrUser].filter(Boolean);
 
-        return { collaborator_user_id: user.id, email };
+            if (tiRecipients.length > 0) {
+                const tiSubject = `🚀 Nueva Contratación: Creación de Credenciales - ${fullname}`;
+                const tiHtml = `
+                    <h2>Solicitud de Creación de Credenciales</h2>
+                    <p>Se ha finalizado el proceso de contratación para el siguiente colaborador:</p>
+                    <ul>
+                        <li><strong>Nombre:</strong> ${fullname}</li>
+                        <li><strong>Email Personal:</strong> ${email}</li>
+                        <li><strong>Cargo:</strong> ${request.position_title}</li>
+                        <li><strong>Número de Solicitud:</strong> ${request.request_number || requestId}</li>
+                        <li><strong>Fecha de Contratación:</strong> ${new Date().toLocaleDateString()}</li>
+                    </ul>
+                    <p>Por favor, proceder con la creación de las credenciales de acceso corporativas (Email, SPI, etc.) y la configuración de los accesos correspondientes.</p>
+                    <hr>
+                    <p>Este es un mensaje automático del sistema SPI.</p>
+                `;
+
+                await notifyUsers({
+                    users: tiRecipients,
+                    subject: tiSubject,
+                    html: tiHtml,
+                    text: `Nueva contratación: ${fullname} (${request.position_title}). Por favor crear credenciales de TI.`,
+                    notification: {
+                        title: 'Nueva Contratación',
+                        message: `Crear credenciales para ${fullname}`,
+                        type: 'info',
+                        source: 'personnel_requests'
+                    }
+                });
+            }
+        } catch (notifError) {
+            logger.warn({ requestId, error: notifError?.message }, 'No se pudo enviar notificación a TI tras contratación');
+        }
+
+        resultPayload = { collaborator_user_id: collaboratorUser.id, email };
+        auditDetails = {
+            request_number: request.request_number || null,
+            position_title: request.position_title || null,
+            previous_status: previousStatus,
+            new_status: 'completada',
+            collaborator_user_id: collaboratorUser.id,
+            applicant_id: request.applicant_id || null,
+            email,
+        };
     } catch (error) {
         await client.query('ROLLBACK');
         throw error;
     } finally {
         client.release();
     }
-}
 
+    if (auditDetails) {
+        try {
+            await logAction({
+                user_id: userId,
+                module: 'personnel_requests',
+                action: 'hire_applicant',
+                entity: 'personnel_requests',
+                entity_id: requestId,
+                details: auditDetails,
+            });
+        } catch (auditError) {
+            logger.warn({ requestId, error: auditError?.message }, 'No se pudo registrar auditoria de contratacion');
+        }
+    }
+
+    return resultPayload;
+}
 
 async function updatePersonnelRequestCollaborator(requestId, collaboratorUserId, userId) {
     const requestQuery = await db.query(
@@ -1763,4 +2068,6 @@ module.exports = {
     updatePersonnelRequestCollaborator,
     linkApplicantToRequest
 };
+
+
 

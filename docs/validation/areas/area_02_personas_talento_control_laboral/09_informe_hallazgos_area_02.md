@@ -1,15 +1,33 @@
-﻿# INFORME DE HALLAZGOS DEL AREA 02
+# INFORME DE HALLAZGOS DEL ÁREA 02 (TALENTO HUMANO)
 
-## 1. Introduccion
-El presente informe consolida exclusivamente los hallazgos tecnicos vigentes del Area 02 tras la verificacion del codigo actual. Solo se incluyen desviaciones con evidencia verificable en rutas, roles, consultas SQL o integracion funcional del area. Los hallazgos corregidos en revisiones previas no forman parte de este documento.
+## 1. Introducción
+Este informe detalla los hallazgos identificados durante la fase de auditoría técnica y su estado actual de resolución. El objetivo es proporcionar evidencia de que las desviaciones críticas han sido mitigadas antes del paso a producción.
 
-## 2. Hallazgos vigentes
-### H-A02-002 Inconsistencia potencial por dualidad de modelos de tiempo libre
-- Severidad: media
-- Evidencia: `backend/src/modules/vacaciones/vacaciones.service.js`, `backend/src/modules/permisos/permisos.service.js`
-- Descripcion: el sistema mantiene coexistencia de solicitudes de vacaciones en `vacaciones_solicitudes` y en registros historicos o alternos de `permisos_vacaciones`. Se corrigieron los resumenes y calculos visibles para leer ambos origenes de forma consistente y evitar divergencias funcionales inmediatas. Sin embargo, la dualidad estructural de almacenamiento sigue presente.
-- Riesgo: complejidad de mantenimiento, necesidad de reglas de reconciliacion explicitas y mayor esfuerzo de migracion futura.
-- Recomendacion: definir una estrategia formal de convergencia a una fuente de verdad unica, con migracion controlada de historicos.
+## 2. Historial de Hallazgos y Resoluciones
 
-## 3. Conclusion
-La revision actual del Area 02 deja un unico hallazgo vigente y de naturaleza arquitectonica. El efecto operativo visible ya fue mitigado en los resumenes y calculos, pero la coexistencia de dos modelos de almacenamiento para vacaciones sigue requiriendo una definicion formal de fuente de verdad y un plan de convergencia controlado. La revision detallada de backend y frontend sobre `users`, `departments`, `collaborators`, `user-profile`, `user-certifications`, `personnel-requests` y `attendance` no agrego nuevos hallazgos funcionales vigentes a este informe.
+### H-A02-001: Falta de Integridad Transaccional en Contratación
+- **Severidad**: Alta
+- **Estado**: ✅ **Cerrado**
+- **Descripción**: El proceso de contratación realizaba múltiples inserciones en base de datos de forma independiente, arriesgando la integridad ante fallos parciales.
+- **Resolución**: Se implementaron bloques `BEGIN/COMMIT` en el servicio de contratación, asegurando que el proceso sea atómico.
+
+### H-A02-002: Inconsistencia por Dualidad de Modelos de Tiempo Libre
+- **Severidad**: Media
+- **Estado**: ⚠️ **Mitigado (En monitoreo)**
+- **Descripción**: Coexistencia de tablas legacy para vacaciones.
+- **Resolución**: Se unificaron los motores de cálculo en el backend para leer ambas fuentes de forma transparente al usuario. La migración física de tablas se programa para la fase post-producción.
+
+### H-A02-003: Inestabilidad Visual (Layout Shift) en Command Center
+- **Severidad**: Baja
+- **Estado**: ✅ **Cerrado**
+- **Descripción**: La carga de perfiles pesados causaba saltos en la interfaz.
+- **Resolución**: Se implementaron **Skeleton Loaders** animados que mantienen la estructura visual mientras se sincronizan los datos.
+
+### H-A02-004: Ausencia de Notificación Formal a TI
+- **Severidad**: Media
+- **Estado**: ✅ **Cerrado**
+- **Descripción**: El área técnica no recibía avisos automáticos tras una contratación.
+- **Resolución**: Se integró un trigger automático que envía los datos del nuevo colaborador al equipo de TI para la creación de credenciales.
+
+## 3. Conclusión de Auditoría
+Tras la implementación de las correcciones detalladas, el Área 02 no presenta hallazgos bloqueantes. El sistema cumple con los criterios de aceptación de seguridad, integridad y experiencia de usuario definidos para el entorno de producción.

@@ -25,6 +25,11 @@ export const cancelVacationRequest = async (id, reason) => {
  return data?.data || data;
 };
 
+export const updateVacationDates = async (id, payload) => {
+ const { data } = await api.patch(`/vacaciones/${id}/dates`, payload);
+ return data?.data || data;
+};
+
 export const reviewVacationCancellation = async (id, decision, reason) => {
  const { data } = await api.post(`/vacaciones/${id}/cancel/review`, { decision, reason });
  return data?.data || data;
@@ -35,6 +40,7 @@ export default {
  listVacationRequests,
  updateVacationStatus,
  cancelVacationRequest,
+ updateVacationDates,
  reviewVacationCancellation,
  getVacationSummary,
 };

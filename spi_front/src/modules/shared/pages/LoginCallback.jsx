@@ -106,9 +106,10 @@ const LoginCallback = () => {
  jefe_calidad: "/dashboard/calidad",
  };
 
- const target = isPendingRole
+ const target = sessionStorage.getItem("redirectTo") || (isPendingRole
  ? "/registro-en-proceso"
- : stored.dashboard || roleRoutes[scope] || roleRoutes[role] || "/unauthorized";
+ : stored.dashboard || roleRoutes[scope] || roleRoutes[role] || "/unauthorized");
+ sessionStorage.removeItem("redirectTo");
  console.log(`🚀 Redirigiendo a: ${target}`);
  navigate(target, { replace: true });
  } catch (err) {

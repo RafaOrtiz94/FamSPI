@@ -10,10 +10,11 @@
 
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { normalizeDateTime, toNumberOrZero, normalizeRow } = require("../../utils/normalizers");
+const { normalizeDateTime, normalizeRow } = require("../../utils/normalizers");
 const { getBusinessDate, ensureDailyClockIn } = require("./attendance.utils");
 const { generateAttendancePDF } = require("./attendance.service");
 const { hasReportingAccess } = require("./attendance.auth");
+const notificationManager = require("../notifications/notificationManager");
 
 const ATTENDANCE_LOCATION_TARGETS = Object.freeze({
   entry: { timeColumn: "entry_time", locationColumn: "entry_location" },
@@ -35,6 +36,20 @@ const ATTENDANCE_STATUS_LABELS = Object.freeze({
   lunch_open: "Almuerzo abierto",
   completed: "Jornada cerrada",
 });
+
+const TALENTO_HUMANO_ALERT_ROLES = Object.freeze([
+  "talento_humano",
+  "jefe_talento_humano",
+  "jefe_de_talento_humano",
+  "analista_talento_humano",
+  "asistente_talento_humano",
+  "auxiliar_talento_humano",
+  "rh",
+  "rrhh",
+]);
+
+const ATTENDANCE_EXIT_ALLOWED_START = process.env.ATTENDANCE_EXIT_ALLOWED_START || "16:00";
+const ATTENDANCE_EXIT_ALLOWED_END = process.env.ATTENDANCE_EXIT_ALLOWED_END || "22:00";
 
 const ATTENDANCE_STATUS_ALIASES = Object.freeze({
   no_entry: "no_entry",
@@ -90,6 +105,152 @@ const matchesAttendanceState = (record, statusFilter) => {
   const normalizedFilter = normalizeAttendanceStateFilter(statusFilter);
   if (!normalizedFilter) return true;
   return deriveAttendanceState(record) === normalizedFilter;
+};
+
+const parseClockHHMM = (value) => {
+  const match = String(value || "").trim().match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  return (hours * 60) + minutes;
+};
+
+const isOutsideAllowedExitSchedule = (dateValue) => {
+  const date = dateValue instanceof Date ? dateValue : new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+
+  const startMinutes = parseClockHHMM(ATTENDANCE_EXIT_ALLOWED_START);
+  const endMinutes = parseClockHHMM(ATTENDANCE_EXIT_ALLOWED_END);
+  if (startMinutes === null || endMinutes === null) return false;
+
+  const currentMinutes = (date.getHours() * 60) + date.getMinutes();
+  if (startMinutes <= endMinutes) {
+    return currentMinutes < startMinutes || currentMinutes > endMinutes;
+  }
+  // Rango que cruza medianoche (ej. 22:00-06:00)
+  return currentMinutes > endMinutes && currentMinutes < startMinutes;
+};
+
+const parseBooleanFlag = (value) => {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["true", "1", "yes", "si", "on"].includes(normalized);
+};
+
+const isExceptionMarkedAsJustified = (payload = {}) => {
+  const rawFlag = payload?.isJustified ?? payload?.is_justified ?? payload?.justified;
+  if (rawFlag === undefined || rawFlag === null || rawFlag === "") {
+    return false;
+  }
+  return parseBooleanFlag(rawFlag);
+};
+
+const resolveActorDisplayName = (user = {}) =>
+  String(user.fullname || user.name || user.email || user.username || `Usuario ${user.id || ""}`).trim();
+
+const buildIrregularityNotificationText = ({
+  collaboratorName,
+  collaboratorEmail,
+  exceptionType,
+  detail,
+  occurredAt,
+}) => {
+  const whenLabel = normalizeDateTime(occurredAt) || new Date(occurredAt).toISOString();
+  return [
+    `Colaborador: ${collaboratorName || collaboratorEmail || "No disponible"}`,
+    `Email: ${collaboratorEmail || "No disponible"}`,
+    `Tipo de excepcion: ${exceptionType}`,
+    `Detalle: ${detail}`,
+    `Fecha/Hora: ${whenLabel}`,
+  ].join("\n");
+};
+
+const notifyTalentoHumanoAttendanceIrregularity = async ({
+  collaboratorId,
+  collaboratorName,
+  collaboratorEmail,
+  exceptionType,
+  detail,
+  occurredAt = new Date(),
+  meta = {},
+}) => {
+  try {
+    const { rows } = await db.query(
+      `
+      SELECT id, email, fullname
+      FROM users
+      WHERE LOWER(COALESCE(role, '')) = ANY($1)
+      `,
+      [TALENTO_HUMANO_ALERT_ROLES]
+    );
+
+    const recipients = (rows || [])
+      .filter((row) => Number(row.id) > 0)
+      .reduce((acc, row) => {
+        if (!acc.some((item) => Number(item.id) === Number(row.id))) {
+          acc.push(row);
+        }
+        return acc;
+      }, []);
+
+    if (!recipients.length) {
+      logger.warn(
+        { collaboratorId, exceptionType },
+        "[ATTENDANCE] No hay usuarios de Talento Humano para notificar irregularidad"
+      );
+      return;
+    }
+
+    const title = "Irregularidad de asistencia detectada";
+    const customMessage = buildIrregularityNotificationText({
+      collaboratorName,
+      collaboratorEmail,
+      exceptionType,
+      detail,
+      occurredAt,
+    });
+
+    for (const recipient of recipients) {
+      try {
+        await notificationManager.sendNotification({
+          userId: recipient.id,
+          template: "custom_html",
+          customTitle: title,
+          customMessage,
+          type: "alert",
+          priority: 3,
+          source: "attendance.irregularity",
+          meta: {
+            collaborator_id: collaboratorId || null,
+            collaborator_email: collaboratorEmail || null,
+            collaborator_name: collaboratorName || null,
+            exception_type: exceptionType,
+            occurred_at: new Date(occurredAt).toISOString(),
+            ...meta,
+          },
+          email: true,
+          chat: false,
+        });
+      } catch (notifyError) {
+        logger.error(
+          {
+            error: notifyError?.message,
+            recipientId: recipient.id,
+            recipientEmail: recipient.email,
+            collaboratorId,
+            exceptionType,
+          },
+          "[ATTENDANCE] Error notificando irregularidad a Talento Humano"
+        );
+      }
+    }
+  } catch (error) {
+    logger.error(
+      { error: error?.message, collaboratorId, exceptionType },
+      "[ATTENDANCE] Fallo preparando notificaciones de irregularidad"
+    );
+  }
 };
 
 /**
@@ -270,7 +431,7 @@ const clockInLunch = async (req, res) => {
  */
 const clockOut = async (req, res) => {
   try {
-    const { id: userId, email } = req.user || {};
+    const { id: userId, email, fullname, name } = req.user || {};
     const { location, isOvertime } = req.body;
 
     if (!userId) {
@@ -320,6 +481,8 @@ const clockOut = async (req, res) => {
     const workedHours = workedMs / (1000 * 60 * 60);
     const standardWorkHours = 8; // Jornada laboral estándar
     const overtimeHours = workedHours > standardWorkHours ? workedHours - standardWorkHours : 0;
+    const overtimeDeclared = parseBooleanFlag(isOvertime);
+    const isOvertimeMarked = overtimeDeclared || overtimeHours > 0;
 
     // Update exit time, location, and overtime info
     const result = await db.query(
@@ -329,8 +492,52 @@ const clockOut = async (req, res) => {
       WHERE user_id = $2 AND date = $3
       RETURNING *;
       `,
-      [now, userId, today, location || null, isOvertime || overtimeHours > 0, overtimeHours, workedHours]
+      [now, userId, today, location || null, isOvertimeMarked, overtimeHours, workedHours]
     );
+
+    const collaboratorName = resolveActorDisplayName({
+      id: userId,
+      email,
+      fullname,
+      name,
+    });
+
+    const irregularities = [];
+    if (isOutsideAllowedExitSchedule(now)) {
+      irregularities.push({
+        type: "SALIDA_FUERA_HORARIO_PERMITIDO",
+        detail: `Salida registrada fuera del horario permitido (${ATTENDANCE_EXIT_ALLOWED_START}-${ATTENDANCE_EXIT_ALLOWED_END}).`,
+      });
+    }
+
+    if (overtimeDeclared && overtimeHours > 3) {
+      irregularities.push({
+        type: "HORAS_EXTRA_MAYOR_A_3",
+        detail: `Se marcaron horas extra con ${overtimeHours.toFixed(2)} horas acumuladas.`,
+      });
+    }
+
+    if (irregularities.length) {
+      await Promise.all(
+        irregularities.map((irregularity) =>
+          notifyTalentoHumanoAttendanceIrregularity({
+            collaboratorId: userId,
+            collaboratorName,
+            collaboratorEmail: email || null,
+            exceptionType: irregularity.type,
+            detail: irregularity.detail,
+            occurredAt: now,
+            meta: {
+              attendance_date: today,
+              location: location || null,
+              overtime_declared: overtimeDeclared,
+              overtime_hours: Number(overtimeHours.toFixed(2)),
+              worked_hours: Number(workedHours.toFixed(2)),
+            },
+          })
+        )
+      );
+    }
 
     const message = overtimeHours > 0
       ? `Salida registrada. Has trabajado ${overtimeHours.toFixed(1)} horas extra.`
@@ -359,17 +566,19 @@ const clockOut = async (req, res) => {
 /**
  * ⚠️ Register Exception (Salida Inesperada - Step 1/4)
  * POST /api/attendance/exception
- * Body: { type, description, location }
+ * Body: { type, description, location, isJustified?: boolean }
  */
 const registerException = async (req, res) => {
   try {
-    const { id: userId, email } = req.user || {};
+    const { id: userId, email, fullname, name } = req.user || {};
     const { type, description, location } = req.body;
+    const descriptionText = String(description || "").trim();
+    const exceptionIsJustified = isExceptionMarkedAsJustified(req.body);
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
     }
-    if (!type || !description) {
+    if (!type || !descriptionText) {
       return res.status(400).json({ ok: false, message: "Tipo y descripción requeridos" });
     }
 
@@ -397,8 +606,26 @@ const registerException = async (req, res) => {
       VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $4, 'ACTIVE')
       RETURNING *;
       `,
-      [userId, type, description, location || null]
+      [userId, type, descriptionText, location || null]
     );
+
+    if (!exceptionIsJustified) {
+      await notifyTalentoHumanoAttendanceIrregularity({
+        collaboratorId: userId,
+        collaboratorName: resolveActorDisplayName({ id: userId, email, fullname, name }),
+        collaboratorEmail: email || null,
+        exceptionType: "EXCEPCION_NO_JUSTIFICADA",
+        detail: `${descriptionText} (Tipo: ${String(type || "GENERAL").toUpperCase()})`,
+        occurredAt: new Date(),
+        meta: {
+          exception_id: result.rows[0]?.id || null,
+          exception_status: result.rows[0]?.status || "ACTIVE",
+          exception_type_input: String(type || "").trim() || null,
+          exception_justified: false,
+          location: location || null,
+        },
+      });
+    }
 
     logger.info(`[ATTENDANCE] Exception Start: ${email} - ${type}`);
 

@@ -20,12 +20,26 @@ const statusStyles = {
     text: "text-amber-700",
     dot: "border-amber-300 bg-amber-100 text-amber-600",
   },
+  stalled: {
+    border: "border-rose-200",
+    bg: "bg-rose-50",
+    text: "text-rose-700",
+    dot: "border-rose-300 bg-rose-100 text-rose-600",
+  },
   pending: {
     border: "border-slate-200",
     bg: "bg-white",
     text: "text-slate-700",
     dot: "border-slate-300 bg-slate-100 text-slate-500",
   },
+};
+
+const statusLabels = {
+  complete: "Completado",
+  current: "En curso",
+  warning: "Alerta",
+  stalled: "Estancada",
+  pending: "Pendiente",
 };
 
 const clampPercent = (value) => Math.max(0, Math.min(100, value ?? 0));
@@ -104,10 +118,10 @@ const CommandCenterJourneyPanel = ({
                     {step.status === "complete"
                       ? "C"
                       : step.status === "current"
-                      ? "O"
-                      : step.status === "warning"
-                      ? "!"
-                      : step.key || "o"}
+                        ? "O"
+                        : step.status === "warning" || step.status === "stalled"
+                        ? "!"
+                        : step.key || "o"}
                   </div>
                   <div className="flex flex-col gap-1">
                     <p className={clsx("text-sm font-semibold", status.text)}>{label}</p>
@@ -115,8 +129,8 @@ const CommandCenterJourneyPanel = ({
                   </div>
                 </div>
                 <div className="flex flex-1 flex-col items-end justify-between gap-2 sm:flex-row sm:items-center sm:justify-end">
-                  <span className="text-xs font-semibold uppercase tracking-[0.3em] text-slate-400">
-                    {step.status}
+                  <span className={clsx("text-xs font-semibold uppercase tracking-[0.3em]", status.text)}>
+                    {statusLabels[step.status] || step.status}
                   </span>
                   {step.actionLabel && step.onAction && (
                     <button

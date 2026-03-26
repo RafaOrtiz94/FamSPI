@@ -103,10 +103,11 @@ export const syncAttendanceLocation = async (target, location) => {
 /**
  * Register Exception (Salida Inesperada)
  */
-export const registerException = async (type, description, location = null) => {
+export const registerException = async (type, description, location = null, options = {}) => {
+ const { isJustified } = options || {};
  const { data } = await api.post(
  "/attendance/exception",
- { type, description, location }
+ { type, description, location, ...(isJustified !== undefined ? { isJustified } : {}) }
  );
 
  return data;

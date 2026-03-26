@@ -2,6 +2,9 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { uploadFileToDrive, ensureFolder } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
+const crypto = require("crypto");
+const { PDFDocument: PdfLibDocument, StandardFonts, rgb } = require("pdf-lib");
+const QRCode = require("qrcode");
 
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
@@ -313,9 +316,289 @@ const softDeleteCertification = async (certificationId, userId, requesterRole) =
   return { success: true, message: "Certificación eliminada correctamente" };
 };
 
-const PDFDocument = require('pdfkit');
-const fs = require('fs');
-const path = require('path');
+const CREDENTIAL_TYPE_LABELS = {
+  certification: "Certificacion",
+  course: "Curso",
+  diploma: "Diplomado",
+  title: "Titulo",
+  other: "Otro",
+};
+
+const normalizeUserId = (value) => {
+  const normalized = Number.parseInt(value, 10);
+  if (!Number.isFinite(normalized) || normalized <= 0) {
+    const err = new Error("ID de usuario invalido");
+    err.status = 400;
+    throw err;
+  }
+  return normalized;
+};
+
+const formatDateLabel = (value, fallback = "No registrada") => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return fallback;
+  return date.toLocaleDateString("es-EC", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+};
+
+const buildCertificationFileLink = (cert = {}) => {
+  const fileUrl = String(cert.file_url || "").trim();
+  if (fileUrl) return fileUrl;
+  const driveFileId = String(cert.drive_file_id || "").trim();
+  if (!driveFileId) return null;
+  return `https://drive.google.com/file/d/${driveFileId}/view`;
+};
+
+const truncateText = (value, max = 95) => {
+  const parsed = String(value || "");
+  if (parsed.length <= max) return parsed;
+  return `${parsed.slice(0, max - 3)}...`;
+};
+
+const drawLabelValue = ({ page, x, y, label, value, fontBold, fontRegular, size = 11 }) => {
+  page.drawText(`${label}:`, {
+    x,
+    y,
+    size,
+    font: fontBold,
+    color: rgb(0.11, 0.16, 0.24),
+  });
+  page.drawText(String(value || "No registrado"), {
+    x: x + 132,
+    y,
+    size,
+    font: fontRegular,
+    color: rgb(0.17, 0.23, 0.33),
+  });
+};
+
+/**
+ * Genera un dossier PDF con todas las certificaciones activas del colaborador.
+ * Cada certificacion se renderiza en su propia pagina, incluyendo link/QR a Drive.
+ *
+ * @param {number|string} userId
+ * @returns {Promise<{buffer: Buffer, filename: string, user: {id:number, fullname:string, email:string}, certificationsCount: number}>}
+ */
+const generateCertificationsDossier = async (userId) => {
+  const targetUserId = normalizeUserId(userId);
+
+  const result = await db.query(
+    `
+      SELECT
+        u.id AS user_id,
+        u.fullname,
+        u.email,
+        uc.id,
+        uc.title,
+        uc.issuer,
+        uc.issue_date,
+        uc.expiry_date,
+        uc.credential_type,
+        uc.description,
+        uc.file_url,
+        uc.drive_file_id,
+        uc.created_at
+      FROM users u
+      LEFT JOIN user_certifications uc
+        ON uc.user_id = u.id
+       AND uc.is_active = true
+      WHERE u.id = $1
+      ORDER BY uc.issue_date DESC NULLS LAST, uc.created_at DESC NULLS LAST
+    `,
+    [targetUserId]
+  );
+
+  if (!result.rows.length) {
+    const err = new Error("Usuario no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  const user = {
+    id: result.rows[0].user_id,
+    fullname: result.rows[0].fullname || "Sin nombre",
+    email: result.rows[0].email || "",
+  };
+  const certifications = result.rows.filter((row) => row.id).map((row) => enrichCertification(row));
+
+  if (!certifications.length) {
+    const err = new Error("El usuario no tiene certificaciones activas");
+    err.status = 404;
+    throw err;
+  }
+
+  const pdfDoc = await PdfLibDocument.create();
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  for (let index = 0; index < certifications.length; index += 1) {
+    const cert = certifications[index];
+    const page = pdfDoc.addPage([595.28, 841.89]);
+    const { width, height } = page.getSize();
+
+    let y = height - 54;
+    page.drawText("DOSSIER DE CERTIFICACIONES", {
+      x: 44,
+      y,
+      size: 17,
+      font: fontBold,
+      color: rgb(0.11, 0.16, 0.24),
+    });
+
+    y -= 24;
+    page.drawText(`${index + 1}. ${cert.title || "Sin titulo"}`, {
+      x: 44,
+      y,
+      size: 14,
+      font: fontBold,
+      color: rgb(0.13, 0.2, 0.31),
+    });
+
+    y -= 22;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Colaborador",
+      value: `${user.fullname} (${user.email || "sin correo"})`,
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 18;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Tipo",
+      value: CREDENTIAL_TYPE_LABELS[cert.credential_type] || CREDENTIAL_TYPE_LABELS.other,
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 18;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Emisor",
+      value: cert.issuer || "No registrado",
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 18;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Fecha de Emision",
+      value: formatDateLabel(cert.issue_date),
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 18;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Fecha de Vencimiento",
+      value: cert.expiry_date ? formatDateLabel(cert.expiry_date) : "Sin vencimiento",
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 18;
+    drawLabelValue({
+      page,
+      x: 44,
+      y,
+      label: "Estado",
+      value: cert.status_label || "Sin estado",
+      fontBold,
+      fontRegular,
+    });
+
+    y -= 30;
+    page.drawText("Documento (Drive):", {
+      x: 44,
+      y,
+      size: 11,
+      font: fontBold,
+      color: rgb(0.11, 0.16, 0.24),
+    });
+
+    y -= 16;
+    const fileLink = buildCertificationFileLink(cert);
+    page.drawText(truncateText(fileLink || "Sin enlace disponible", 96), {
+      x: 44,
+      y,
+      size: 10,
+      font: fontRegular,
+      color: fileLink ? rgb(0.07, 0.31, 0.66) : rgb(0.32, 0.37, 0.45),
+    });
+
+    if (fileLink) {
+      try {
+        const qrDataUrl = await QRCode.toDataURL(fileLink, { width: 180, margin: 1 });
+        const base64Png = String(qrDataUrl).split(",")[1];
+        if (base64Png) {
+          const qrImage = await pdfDoc.embedPng(Buffer.from(base64Png, "base64"));
+          page.drawImage(qrImage, {
+            x: width - 158,
+            y: 110,
+            width: 92,
+            height: 92,
+          });
+          page.drawText("Escanear para abrir", {
+            x: width - 164,
+            y: 96,
+            size: 8,
+            font: fontRegular,
+            color: rgb(0.29, 0.35, 0.44),
+          });
+        }
+      } catch (qrError) {
+        logger.warn({ certId: cert.id, qrError: qrError?.message }, "No se pudo generar QR de certificacion");
+      }
+    }
+
+    page.drawText(`Generado: ${formatDateLabel(new Date(), "-")}`, {
+      x: 44,
+      y: 32,
+      size: 9,
+      font: fontRegular,
+      color: rgb(0.39, 0.44, 0.52),
+    });
+    page.drawText(`Pagina ${index + 1} de ${certifications.length}`, {
+      x: width - 138,
+      y: 32,
+      size: 9,
+      font: fontRegular,
+      color: rgb(0.39, 0.44, 0.52),
+    });
+  }
+
+  const pdfBuffer = Buffer.from(await pdfDoc.save());
+  const safeName = String(user.fullname || "usuario")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+
+  return {
+    buffer: pdfBuffer,
+    filename: `dossier_certificaciones_${safeName || "usuario"}_${new Date().toISOString().split("T")[0]}.pdf`,
+    user,
+    certificationsCount: certifications.length,
+  };
+};
 
 const generateConsolidatedCertificationsPDF = async (targetUserId, requesterUserId, requesterRole) => {
   console.log('🎯 [PDF] Generando PDF consolidado de certificaciones para usuario:', targetUserId, 'por:', requesterUserId, 'rol:', requesterRole);
@@ -632,11 +915,465 @@ const createBulkCertifications = async (userId, bulkData, files = []) => {
   };
 };
 
+const PROFESSIONAL_PAGE_SIZE_A4 = [595.28, 841.89];
+const PROFESSIONAL_DOSSIER_ALLOWED_ROLES = new Set(["acp_comercial", "talento_humano", "gerencia", "gerencia_general"]);
+
+const dossierToSafeMetadata = (value) => (value && typeof value === "object" && !Array.isArray(value) ? value : {});
+
+const dossierFirstNonEmptyValue = (values = []) => {
+  for (const value of values) {
+    const parsed = String(value || "").trim();
+    if (parsed) return parsed;
+  }
+  return "";
+};
+
+const dossierDateKey = (value) => {
+  if (!value) return "na";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "na";
+  return parsed.toISOString().slice(0, 10).replace(/-/g, "");
+};
+
+const dossierDrawField = ({
+  page,
+  x = 44,
+  y = 720,
+  label,
+  value,
+  fontBold,
+  fontRegular,
+  size = 11,
+  labelOffset = 152,
+}) => {
+  page.drawText(`${label}:`, {
+    x,
+    y,
+    size,
+    font: fontBold,
+    color: rgb(0.11, 0.16, 0.24),
+  });
+  page.drawText(String(value || "No registrado"), {
+    x: x + labelOffset,
+    y,
+    size,
+    font: fontRegular,
+    color: rgb(0.17, 0.23, 0.33),
+  });
+};
+
+const dossierDrawDivider = (page, { x = 44, y = 700, width = 508 } = {}) => {
+  page.drawLine({
+    start: { x, y },
+    end: { x: x + width, y },
+    thickness: 1,
+    color: rgb(0.87, 0.9, 0.94),
+  });
+};
+
+const dossierBuildVerificationCode = ({ cert = {}, user = {}, dossierSeed = "" }) => {
+  const metadata = dossierToSafeMetadata(cert.metadata);
+  const metadataCode = dossierFirstNonEmptyValue([
+    metadata.verification_code,
+    metadata.verificationCode,
+    metadata.codigo_verificacion,
+    metadata.credential_code,
+    metadata.credentialCode,
+    metadata.credential_id,
+    metadata.credentialId,
+    metadata.code,
+    metadata.folio,
+  ]);
+  if (metadataCode) return metadataCode;
+
+  const digest = crypto
+    .createHash("sha256")
+    .update(`${dossierSeed}|${user.id}|${cert.id}|${dossierDateKey(cert.issue_date)}|${cert.title || ""}`)
+    .digest("hex")
+    .toUpperCase();
+
+  return `SPI-CERT-${String(user.id || "U0").padStart(4, "0")}-${String(cert.id || "C0").padStart(5, "0")}-${digest.slice(0, 8)}`;
+};
+
+const dossierBuildVerificationTarget = ({ fileLink, verificationCode }) => {
+  if (fileLink) {
+    const separator = fileLink.includes("?") ? "&" : "?";
+    return `${fileLink}${separator}vc=${encodeURIComponent(verificationCode)}`;
+  }
+  return `SPI-CERT:${verificationCode}`;
+};
+
+/**
+ * Motor profesional de expediente consolidado de certificaciones.
+ * Incluye metadatos de vigencia y codigo de verificacion por certificacion.
+ *
+ * @param {number|string} userId
+ * @param {{ requesterUserId?: number, requesterRole?: string }} [options]
+ */
+const buildProfessionalCertificationsDossier = async (userId, options = {}) => {
+  const targetUserId = normalizeUserId(userId);
+  const requesterUserId = options?.requesterUserId ? normalizeUserId(options.requesterUserId) : null;
+  const requesterRole = String(options?.requesterRole || "").trim().toLowerCase() || null;
+
+  const { rows } = await db.query(
+    `
+      SELECT
+        u.id AS user_id,
+        u.fullname,
+        u.email,
+        uc.id,
+        uc.title,
+        uc.issuer,
+        uc.issue_date,
+        uc.expiry_date,
+        uc.credential_type,
+        uc.description,
+        uc.file_url,
+        uc.drive_file_id,
+        uc.metadata,
+        uc.created_at,
+        uc.updated_at
+      FROM users u
+      LEFT JOIN user_certifications uc
+        ON uc.user_id = u.id
+       AND uc.is_active = true
+      WHERE u.id = $1
+      ORDER BY uc.issue_date DESC NULLS LAST, uc.created_at DESC NULLS LAST
+    `,
+    [targetUserId]
+  );
+
+  if (!rows.length) {
+    const err = new Error("Usuario no encontrado");
+    err.status = 404;
+    throw err;
+  }
+
+  const user = {
+    id: rows[0].user_id,
+    fullname: rows[0].fullname || "Sin nombre",
+    email: rows[0].email || "",
+  };
+  const certifications = rows.filter((row) => row.id).map((row) => enrichCertification(row));
+  if (!certifications.length) {
+    const err = new Error("El usuario no tiene certificaciones activas");
+    err.status = 404;
+    throw err;
+  }
+
+  const generatedAt = new Date();
+  const summary = summarizeCertifications(certifications);
+  const dossierSeed = crypto
+    .createHash("sha1")
+    .update(`${targetUserId}|${generatedAt.toISOString()}|${certifications.length}`)
+    .digest("hex")
+    .toUpperCase();
+  const dossierCode = `SPI-DOS-${String(targetUserId).padStart(4, "0")}-${dossierSeed.slice(0, 10)}`;
+
+  const pdfDoc = await PdfLibDocument.create();
+  const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+  const totalPages = certifications.length + 1;
+
+  const cover = pdfDoc.addPage(PROFESSIONAL_PAGE_SIZE_A4);
+  const { width: coverWidth, height: coverHeight } = cover.getSize();
+  let coverY = coverHeight - 72;
+
+  cover.drawText("DOSSIER PROFESIONAL", {
+    x: 44,
+    y: coverY,
+    size: 14,
+    font: fontBold,
+    color: rgb(0.15, 0.22, 0.34),
+  });
+  coverY -= 24;
+  cover.drawText("CONSOLIDADO DE CERTIFICACIONES", {
+    x: 44,
+    y: coverY,
+    size: 20,
+    font: fontBold,
+    color: rgb(0.07, 0.14, 0.26),
+  });
+  coverY -= 14;
+  dossierDrawDivider(cover, { y: coverY });
+  coverY -= 34;
+
+  dossierDrawField({ page: cover, y: coverY, label: "Colaborador", value: user.fullname, fontBold, fontRegular });
+  coverY -= 20;
+  dossierDrawField({ page: cover, y: coverY, label: "Correo", value: user.email || "No registrado", fontBold, fontRegular });
+  coverY -= 20;
+  dossierDrawField({ page: cover, y: coverY, label: "Codigo de dossier", value: dossierCode, fontBold, fontRegular });
+  coverY -= 20;
+  dossierDrawField({ page: cover, y: coverY, label: "Generado el", value: generatedAt.toLocaleString("es-EC"), fontBold, fontRegular });
+  coverY -= 32;
+
+  cover.drawText("RESUMEN DE VIGENCIA", {
+    x: 44,
+    y: coverY,
+    size: 12,
+    font: fontBold,
+    color: rgb(0.09, 0.15, 0.25),
+  });
+  coverY -= 20;
+  dossierDrawField({ page: cover, y: coverY, label: "Total certificaciones", value: summary.total, fontBold, fontRegular });
+  coverY -= 18;
+  dossierDrawField({ page: cover, y: coverY, label: "Vigentes", value: summary.active, fontBold, fontRegular });
+  coverY -= 18;
+  dossierDrawField({ page: cover, y: coverY, label: "Permanentes", value: summary.permanent, fontBold, fontRegular });
+  coverY -= 18;
+  dossierDrawField({ page: cover, y: coverY, label: "Por vencer", value: summary.expiring_soon, fontBold, fontRegular });
+  coverY -= 18;
+  dossierDrawField({ page: cover, y: coverY, label: "Expiradas", value: summary.expired, fontBold, fontRegular });
+
+  cover.drawText("Documento emitido por SPI FAM - Talento Humano", {
+    x: 44,
+    y: 40,
+    size: 9,
+    font: fontRegular,
+    color: rgb(0.39, 0.44, 0.52),
+  });
+  cover.drawText(`Pagina 1 de ${totalPages}`, {
+    x: coverWidth - 138,
+    y: 40,
+    size: 9,
+    font: fontRegular,
+    color: rgb(0.39, 0.44, 0.52),
+  });
+
+  for (let index = 0; index < certifications.length; index += 1) {
+    const cert = certifications[index];
+    const metadata = dossierToSafeMetadata(cert.metadata);
+    const verificationCode = dossierBuildVerificationCode({ cert, user, dossierSeed });
+    const fileLink = buildCertificationFileLink(cert);
+    const verificationTarget = dossierBuildVerificationTarget({ fileLink, verificationCode });
+    const externalReference = dossierFirstNonEmptyValue([
+      metadata.credential_id,
+      metadata.credentialId,
+      metadata.credential_reference,
+      metadata.reference,
+      metadata.folio,
+    ]);
+
+    const page = pdfDoc.addPage(PROFESSIONAL_PAGE_SIZE_A4);
+    const { width, height } = page.getSize();
+    let y = height - 58;
+
+    page.drawText("CERTIFICACION", {
+      x: 44,
+      y,
+      size: 12,
+      font: fontBold,
+      color: rgb(0.23, 0.3, 0.4),
+    });
+    y -= 22;
+    page.drawText(`${index + 1}. ${cert.title || "Sin titulo"}`, {
+      x: 44,
+      y,
+      size: 18,
+      font: fontBold,
+      color: rgb(0.07, 0.14, 0.26),
+    });
+    y -= 14;
+    dossierDrawDivider(page, { y });
+
+    y -= 28;
+    dossierDrawField({ page, y, label: "Colaborador", value: user.fullname, fontBold, fontRegular });
+    y -= 18;
+    dossierDrawField({
+      page,
+      y,
+      label: "Tipo",
+      value: CREDENTIAL_TYPE_LABELS[cert.credential_type] || CREDENTIAL_TYPE_LABELS.other,
+      fontBold,
+      fontRegular,
+    });
+    y -= 18;
+    dossierDrawField({ page, y, label: "Emisor", value: cert.issuer || "No registrado", fontBold, fontRegular });
+    y -= 18;
+    dossierDrawField({ page, y, label: "Fecha de emision", value: formatDateLabel(cert.issue_date), fontBold, fontRegular });
+    y -= 18;
+    dossierDrawField({
+      page,
+      y,
+      label: "Fecha de vencimiento",
+      value: cert.expiry_date ? formatDateLabel(cert.expiry_date) : "Sin vencimiento",
+      fontBold,
+      fontRegular,
+    });
+    y -= 18;
+    dossierDrawField({ page, y, label: "Estado de vigencia", value: cert.status_label || "Sin estado", fontBold, fontRegular });
+    y -= 18;
+    dossierDrawField({
+      page,
+      y,
+      label: "Dias para vencimiento",
+      value: cert.days_until_expiry == null ? "No aplica" : cert.days_until_expiry,
+      fontBold,
+      fontRegular,
+    });
+    y -= 18;
+    dossierDrawField({
+      page,
+      y,
+      label: "Codigo de verificacion",
+      value: verificationCode,
+      fontBold,
+      fontRegular,
+      size: 10,
+    });
+    y -= 18;
+    dossierDrawField({ page, y, label: "ID interno", value: cert.id, fontBold, fontRegular });
+
+    if (externalReference) {
+      y -= 18;
+      dossierDrawField({
+        page,
+        y,
+        label: "Referencia externa",
+        value: externalReference,
+        fontBold,
+        fontRegular,
+      });
+    }
+
+    if (cert.description) {
+      y -= 24;
+      page.drawText("Descripcion:", {
+        x: 44,
+        y,
+        size: 11,
+        font: fontBold,
+        color: rgb(0.11, 0.16, 0.24),
+      });
+      y -= 14;
+      page.drawText(truncateText(cert.description, 310), {
+        x: 44,
+        y,
+        size: 10,
+        font: fontRegular,
+        color: rgb(0.17, 0.23, 0.33),
+        maxWidth: 380,
+        lineHeight: 12,
+      });
+    }
+
+    y -= 28;
+    page.drawText("Documento / evidencia:", {
+      x: 44,
+      y,
+      size: 11,
+      font: fontBold,
+      color: rgb(0.11, 0.16, 0.24),
+    });
+    y -= 16;
+    page.drawText(truncateText(fileLink || "Sin enlace disponible", 96), {
+      x: 44,
+      y,
+      size: 10,
+      font: fontRegular,
+      color: fileLink ? rgb(0.07, 0.31, 0.66) : rgb(0.32, 0.37, 0.45),
+    });
+
+    try {
+      const qrDataUrl = await QRCode.toDataURL(verificationTarget, { width: 180, margin: 1 });
+      const base64Png = String(qrDataUrl).split(",")[1];
+      if (base64Png) {
+        const qrImage = await pdfDoc.embedPng(Buffer.from(base64Png, "base64"));
+        page.drawImage(qrImage, {
+          x: width - 158,
+          y: 110,
+          width: 92,
+          height: 92,
+        });
+        page.drawText("Escanear para verificar", {
+          x: width - 170,
+          y: 96,
+          size: 8,
+          font: fontRegular,
+          color: rgb(0.29, 0.35, 0.44),
+        });
+      }
+    } catch (qrError) {
+      logger.warn({ certId: cert.id, qrError: qrError?.message }, "No se pudo generar QR de certificacion");
+    }
+
+    page.drawText(`Generado: ${generatedAt.toLocaleString("es-EC")}`, {
+      x: 44,
+      y: 32,
+      size: 9,
+      font: fontRegular,
+      color: rgb(0.39, 0.44, 0.52),
+    });
+    page.drawText(`Pagina ${index + 2} de ${totalPages}`, {
+      x: width - 138,
+      y: 32,
+      size: 9,
+      font: fontRegular,
+      color: rgb(0.39, 0.44, 0.52),
+    });
+  }
+
+  const pdfBuffer = Buffer.from(await pdfDoc.save());
+  const safeName = String(user.fullname || "usuario")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+
+  if (requesterUserId) {
+    try {
+      await logAction({
+        usuario_id: requesterUserId,
+        rol: requesterRole || null,
+        modulo: "user-certifications",
+        accion: "certifications_dossier_generated",
+        descripcion: `Dossier de certificaciones generado para usuario ${targetUserId}`,
+        datos_nuevos: {
+          target_user_id: targetUserId,
+          certifications_count: certifications.length,
+          dossier_code: dossierCode,
+        },
+      });
+    } catch (auditError) {
+      logger.warn({ auditError, targetUserId }, "No se pudo registrar auditoria del dossier de certificaciones");
+    }
+  }
+
+  return {
+    buffer: pdfBuffer,
+    filename: `dossier_certificaciones_${safeName || "usuario"}_${generatedAt.toISOString().split("T")[0]}.pdf`,
+    user,
+    certificationsCount: certifications.length,
+    dossierCode,
+  };
+};
+
+const generateConsolidatedCertificationsPDFV2 = async (targetUserId, requesterUserId, requesterRole) => {
+  const normalizedTargetUserId = normalizeUserId(targetUserId);
+  const normalizedRequesterUserId = normalizeUserId(requesterUserId);
+  const normalizedRole = String(requesterRole || "").trim().toLowerCase();
+  const isSelfRequest = normalizedRequesterUserId === normalizedTargetUserId;
+  const canGenerate = PROFESSIONAL_DOSSIER_ALLOWED_ROLES.has(normalizedRole);
+
+  if (!isSelfRequest && !canGenerate) {
+    const err = new Error("No tienes permisos para acceder a las certificaciones de este usuario");
+    err.status = 403;
+    throw err;
+  }
+
+  return buildProfessionalCertificationsDossier(normalizedTargetUserId, {
+    requesterUserId: normalizedRequesterUserId,
+    requesterRole: normalizedRole,
+  });
+};
+
 module.exports = {
   createCertification,
   getUserCertifications,
   getCertificationsByUserId,
   softDeleteCertification,
-  generateConsolidatedCertificationsPDF,
+  generateCertificationsDossier: buildProfessionalCertificationsDossier,
+  generateConsolidatedCertificationsPDF: generateConsolidatedCertificationsPDFV2,
   createBulkCertifications
 };

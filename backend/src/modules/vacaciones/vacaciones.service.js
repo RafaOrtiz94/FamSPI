@@ -95,6 +95,32 @@ function diffDaysInclusive(start, end) {
   return diff >= 0 ? diff + 1 : 0;
 }
 
+function normalizeDateOnly(value) {
+  if (!value) return null;
+  if (typeof value === "string") {
+    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (direct) return direct[1];
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function getCurrentDateInAppTimezone() {
+  const timeZone = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = parts.find((part) => part.type === "year")?.value;
+  const month = parts.find((part) => part.type === "month")?.value;
+  const day = parts.find((part) => part.type === "day")?.value;
+  if (!year || !month || !day) return normalizeDateOnly(new Date());
+  return `${year}-${month}-${day}`;
+}
+
 async function loadUser(userId) {
   const { rows } = await db.query(
     `SELECT u.id, u.email, u.fullname, u.name, u.role, u.department_id, d.name as department_name
@@ -235,14 +261,22 @@ async function findApprover(targetRole) {
   return rows[0]?.id || null;
 }
 
-async function computeTakenDays(userId, year) {
+async function computeTakenDays(userId, year, options = {}) {
+  const values = [userId, year];
+  let excludeClause = "";
+  if (options?.excludeRequestId) {
+    values.push(options.excludeRequestId);
+    excludeClause = ` AND id <> $${values.length}`;
+  }
+
   const { rows } = await db.query(
     `SELECT COALESCE(SUM(days),0) as total
        FROM vacaciones_solicitudes
       WHERE requester_id = $1
         AND status IN ('aprobado','approved')
-        AND EXTRACT(YEAR FROM start_date) = $2`,
-    [userId, year]
+        AND EXTRACT(YEAR FROM start_date) = $2
+        ${excludeClause}`,
+    values
   );
   const vacationDays = Number(rows[0]?.total || 0);
   const { rows: legacyRows } = await db.query(
@@ -257,6 +291,50 @@ async function computeTakenDays(userId, year) {
   const legacyVacationDays = Number(legacyRows[0]?.total || 0);
   const chargedDays = await computeChargedVacationDays({ userId, year, statuses: ["approved", "aprobado"] });
   return Math.round(((vacationDays + legacyVacationDays + chargedDays) + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * Recalcula saldo disponible de vacaciones contra histórico del colaborador.
+ * Se usa para validar creación y reprogramación bajo la misma regla.
+ */
+async function computeVacationBalanceValidation({
+  userId,
+  userEmail,
+  startDate,
+  requestedDays,
+  hireDateValue = null,
+  excludeRequestId = null,
+}) {
+  const normalizedStartDate = normalizeDateOnly(startDate);
+  const year = new Date(`${normalizedStartDate}T00:00:00.000Z`).getUTCFullYear();
+  const allowanceInfo = computeVacationAllowance(hireDateValue, normalizedStartDate);
+  const taken = await computeTakenDays(userId, year, { excludeRequestId });
+  const historicalBalance = await getHistoricVacationBalance({
+    userId,
+    userEmail: userEmail || null,
+    year,
+  });
+  const totalAllowance = allowanceInfo.allowance + historicalBalance;
+  const remaining = Math.max(totalAllowance - taken, 0);
+  const requested = Number(requestedDays || 0);
+  const exceedsBalance =
+    allowanceInfo.eligible &&
+    !allowanceInfo.missingHireDate &&
+    requested > remaining;
+
+  return {
+    year,
+    requested_days: requested,
+    allowance: totalAllowance,
+    allowance_base: allowanceInfo.allowance,
+    carry_over: historicalBalance,
+    taken,
+    remaining,
+    eligible: allowanceInfo.eligible,
+    eligible_from: allowanceInfo.eligibleFrom,
+    missing_hire_date: allowanceInfo.missingHireDate,
+    exceeds_balance: exceedsBalance,
+  };
 }
 
 async function computeChargedVacationDays({ userId, userEmail, year, statuses = [] }) {
@@ -369,17 +447,17 @@ async function createVacationRequest(payload, userId) {
     .toISOString()
     .split("T")[0];
 
-  const year = new Date(start_date).getFullYear();
-  const taken = await computeTakenDays(userId, year);
-  const historicalBalance = await getHistoricVacationBalance({
+  const balanceValidation = await computeVacationBalanceValidation({
     userId,
     userEmail: user.email,
-    year,
+    startDate: start_date,
+    requestedDays: days,
+    hireDateValue,
   });
-  const remaining = Math.max(allowanceInfo.allowance + historicalBalance - taken, 0);
-  if (allowanceInfo.eligible && !allowanceInfo.missingHireDate && days > remaining) {
+  if (balanceValidation.exceeds_balance) {
     throw new Error("No tienes dias disponibles para enviar esta solicitud de vacaciones.");
   }
+  const year = balanceValidation.year;
 
   const approverRole = resolveApproverRole(user.role || "");
   const approverId = await findApprover(approverRole) || null;
@@ -466,7 +544,7 @@ async function createVacationRequest(payload, userId) {
     logger.warn({ notifyError, solicitudId: rows[0]?.id }, "No se pudo enviar notificaci?n de vacaciones");
   }
 
-  return { ...rows[0], remaining_before: remaining };
+  return { ...rows[0], balance_validation: balanceValidation, remaining_before: balanceValidation.remaining };
 }
 
 async function listVacationRequests(params = {}, user) {
@@ -569,6 +647,335 @@ async function updateVacationStatus(id, status, user) {
     logger.warn({ notifyError, solicitudId: updated[0]?.id }, "No se pudo notificar estado de vacaciones");
   }
   return updated[0];
+}
+
+function isApprovedVacationStatus(status) {
+  const normalized = String(status || "").trim().toLowerCase();
+  return normalized === "aprobado" || normalized === "approved";
+}
+
+function ensureFutureStartDate(startDateValue) {
+  const normalizedStartDate = normalizeDateOnly(startDateValue);
+  if (!normalizedStartDate) {
+    const err = new Error("Fecha de inicio inválida");
+    err.status = 400;
+    throw err;
+  }
+  const today = getCurrentDateInAppTimezone();
+  if (normalizedStartDate <= today) {
+    const err = new Error("Solo se permiten cambios para solicitudes con fecha de inicio futura.");
+    err.status = 409;
+    throw err;
+  }
+  return normalizedStartDate;
+}
+
+function isManagerRole(role) {
+  const normalized = normalizeRole(role);
+  return HR_ROLES.includes(normalized) || MGMT_ROLES.includes(normalized);
+}
+
+function canManageVacationRequest(solicitud, actor = {}) {
+  const actorId = Number(actor?.id);
+  if (!Number.isFinite(actorId)) return false;
+  if (Number(solicitud?.requester_id) === actorId) return true;
+  if (Number(solicitud?.approver_id) === actorId) return true;
+  if (isManagerRole(actor?.role)) return true;
+
+  const roleCandidates = getApproverRoleCandidates(actor);
+  const solicitudApproverRole = String(solicitud?.approver_role || "").trim().toLowerCase();
+  if (!solicitudApproverRole) return false;
+
+  if (GERENCIA_GENERAL_ROLES.has(solicitudApproverRole)) {
+    return roleCandidates.some((candidate) => GERENCIA_GENERAL_ROLES.has(candidate));
+  }
+  return roleCandidates.includes(solicitudApproverRole);
+}
+
+async function resolveOriginalApproverId(solicitud = {}) {
+  if (solicitud?.approver_id) return Number(solicitud.approver_id);
+  if (solicitud?.approver_role) return findApprover(String(solicitud.approver_role).trim().toLowerCase());
+  return null;
+}
+
+async function notifyOriginalApprover({ solicitud, actor, actionType, payload = {} }) {
+  try {
+    const approverId = await resolveOriginalApproverId(solicitud);
+    if (!approverId || Number(approverId) === Number(actor?.id)) return;
+
+    const actorName = actor?.fullname || actor?.name || actor?.email || `usuario #${actor?.id || "N/A"}`;
+    const title = actionType === "rescheduled"
+      ? "Solicitud de vacaciones reprogramada"
+      : "Solicitud de vacaciones cancelada";
+    const message = actionType === "rescheduled"
+      ? `${actorName} cambió las fechas de la solicitud #${solicitud.id}.`
+      : `${actorName} canceló la solicitud #${solicitud.id}.`;
+
+    await notificationManager.sendNotification({
+      userId: approverId,
+      customTitle: title,
+      customMessage: message,
+      type: actionType === "rescheduled" ? "info" : "warning",
+      source: "vacaciones",
+      priority: 1,
+      email: true,
+      meta: {
+        solicitud_id: solicitud.id,
+        requester_id: solicitud.requester_id,
+        action: actionType,
+        ...payload,
+      },
+    });
+  } catch (notifyError) {
+    logger.warn(
+      { notifyError, solicitudId: solicitud?.id, actionType },
+      "No se pudo notificar al aprobador original de vacaciones"
+    );
+  }
+}
+
+/**
+ * Cancela una solicitud de vacaciones aprobada.
+ * Solo aplica para solicitudes con fecha de inicio futura.
+ *
+ * @param {number|string} solicitudId
+ * @param {number} userId
+ * @param {{ actor?: object, reason?: string }} [options]
+ */
+async function cancelVacationRequest(solicitudId, userId, options = {}) {
+  await ensureTable();
+  const actor = options?.actor && typeof options.actor === "object"
+    ? options.actor
+    : (await loadUser(userId));
+  if (!actor?.id) {
+    const err = new Error("Usuario inválido para cancelar la solicitud");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    "SELECT * FROM vacaciones_solicitudes WHERE id = $1 LIMIT 1",
+    [solicitudId]
+  );
+  const current = rows[0];
+  if (!current) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  if (!canManageVacationRequest(current, actor)) {
+    const err = new Error("No tienes permisos para cancelar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
+
+  if (!isApprovedVacationStatus(current.status)) {
+    const err = new Error("Solo se pueden cancelar solicitudes aprobadas");
+    err.status = 409;
+    throw err;
+  }
+
+  ensureFutureStartDate(current.start_date);
+
+  const { rows: updatedRows } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET status = 'cancelado',
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [solicitudId]
+  );
+  const updated = updatedRows[0];
+
+  await logAction({
+    user_id: actor.id,
+    module: "vacaciones",
+    action: "cancel",
+    entity: "vacaciones_solicitudes",
+    entity_id: updated.id,
+    details: {
+      reason: options?.reason || null,
+      previous_status: current.status,
+      next_status: updated.status,
+      start_date: updated.start_date,
+      end_date: updated.end_date,
+    },
+  });
+
+  await notifyOriginalApprover({
+    solicitud: updated,
+    actor,
+    actionType: "cancelled",
+    payload: {
+      previous_status: current.status,
+      next_status: updated.status,
+      reason: options?.reason || null,
+    },
+  });
+
+  return updated;
+}
+
+/**
+ * Reprograma fechas de una solicitud de vacaciones aprobada
+ * validando nuevamente saldo disponible.
+ *
+ * @param {number|string} solicitudId
+ * @param {number} userId
+ * @param {{ start_date: string, end_date: string, return_date?: string, period?: string, days?: number }} payload
+ * @param {{ actor?: object }} [options]
+ */
+async function updateVacationDates(solicitudId, userId, payload = {}, options = {}) {
+  await ensureTable();
+  const actor = options?.actor && typeof options.actor === "object"
+    ? options.actor
+    : (await loadUser(userId));
+  if (!actor?.id) {
+    const err = new Error("Usuario inválido para reprogramar la solicitud");
+    err.status = 400;
+    throw err;
+  }
+
+  const startDate = normalizeDateOnly(payload?.start_date);
+  const endDate = normalizeDateOnly(payload?.end_date);
+  if (!startDate || !endDate) {
+    const err = new Error("Las fechas de inicio y fin son obligatorias");
+    err.status = 400;
+    throw err;
+  }
+  if (startDate > endDate) {
+    const err = new Error("La fecha de inicio no puede ser mayor a la fecha fin");
+    err.status = 400;
+    throw err;
+  }
+  ensureFutureStartDate(startDate);
+
+  const { rows } = await db.query(
+    "SELECT * FROM vacaciones_solicitudes WHERE id = $1 LIMIT 1",
+    [solicitudId]
+  );
+  const current = rows[0];
+  if (!current) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  if (!canManageVacationRequest(current, actor)) {
+    const err = new Error("No tienes permisos para reprogramar esta solicitud");
+    err.status = 403;
+    throw err;
+  }
+
+  if (!isApprovedVacationStatus(current.status)) {
+    const err = new Error("Solo se pueden reprogramar solicitudes aprobadas");
+    err.status = 409;
+    throw err;
+  }
+  ensureFutureStartDate(current.start_date);
+
+  const days = Number(payload?.days || diffDaysInclusive(startDate, endDate));
+  if (!Number.isFinite(days) || days <= 0) {
+    const err = new Error("La duración de vacaciones es inválida");
+    err.status = 400;
+    throw err;
+  }
+  const returnDate = normalizeDateOnly(payload?.return_date)
+    || new Date(new Date(`${endDate}T00:00:00.000Z`).getTime() + 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+  const requester = await loadUser(current.requester_id);
+  const hireDateValue = await getHireDate(current.requester_id);
+  const balanceValidation = await computeVacationBalanceValidation({
+    userId: current.requester_id,
+    userEmail: requester?.email || null,
+    startDate,
+    requestedDays: days,
+    hireDateValue,
+    excludeRequestId: current.id,
+  });
+  if (balanceValidation.exceeds_balance) {
+    const err = new Error("No tienes dias disponibles para reprogramar con ese rango de fechas.");
+    err.status = 400;
+    throw err;
+  }
+
+  const period = String(payload?.period || current.period || `${balanceValidation.year}`).trim();
+  const { rows: updatedRows } = await db.query(
+    `UPDATE vacaciones_solicitudes
+        SET start_date = $2,
+            end_date = $3,
+            return_date = $4,
+            period = $5,
+            days = $6,
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [solicitudId, startDate, endDate, returnDate, period, days]
+  );
+  const updated = updatedRows[0];
+
+  await logAction({
+    user_id: actor.id,
+    module: "vacaciones",
+    action: "reschedule",
+    entity: "vacaciones_solicitudes",
+    entity_id: updated.id,
+    details: {
+      previous_dates: {
+        start_date: current.start_date,
+        end_date: current.end_date,
+        return_date: current.return_date,
+        days: current.days,
+      },
+      next_dates: {
+        start_date: updated.start_date,
+        end_date: updated.end_date,
+        return_date: updated.return_date,
+        days: updated.days,
+      },
+      balance_validation: balanceValidation,
+    },
+  });
+
+  await notifyOriginalApprover({
+    solicitud: updated,
+    actor,
+    actionType: "rescheduled",
+    payload: {
+      previous_dates: {
+        start_date: current.start_date,
+        end_date: current.end_date,
+      },
+      next_dates: {
+        start_date: updated.start_date,
+        end_date: updated.end_date,
+      },
+    },
+  });
+
+  return { ...updated, balance_validation: balanceValidation, remaining_before: balanceValidation.remaining };
+}
+
+async function reviewVacationCancellation(id, decision, reason, user) {
+  const normalizedDecision = String(decision || "").trim().toLowerCase();
+  if (!["approve", "reject"].includes(normalizedDecision)) {
+    const err = new Error("Decisión inválida, usa approve o reject");
+    err.status = 400;
+    throw err;
+  }
+  if (normalizedDecision === "reject") {
+    const err = new Error("Este flujo opera con cancelación directa; no hay revisión pendiente.");
+    err.status = 409;
+    throw err;
+  }
+
+  return cancelVacationRequest(id, user?.id, {
+    actor: user,
+    reason: reason || null,
+  });
 }
 
 async function summary(user, includeAll = false) {
@@ -725,5 +1132,8 @@ module.exports = {
   createVacationRequest,
   listVacationRequests,
   updateVacationStatus,
+  cancelVacationRequest,
+  reviewVacationCancellation,
+  updateVacationDates,
   summary,
 };

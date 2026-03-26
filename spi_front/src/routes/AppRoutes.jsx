@@ -17,6 +17,7 @@ import FirstLoginSignature from "../modules/shared/pages/FirstLoginSignature";
 import NotFound from "../modules/shared/pages/NotFound";
 import Unauthorized from "../modules/shared/pages/Unauthorized";
 import RolePending from "../modules/shared/pages/RolePending";
+import AttendanceAction from "../modules/shared/pages/AttendanceAction";
 
 // 🧭 Dashboards por rol
 import LinksInteres from "../modules/shared/pages/LinksInteres";
@@ -194,6 +195,9 @@ const AppRoutes = () => {
       >
         {/* Redirección automática según rol */}
         <Route path="/dashboard" element={<RoleRedirect />} />
+
+        {/* 📱 Atajos de asistencia (requiere login previo) */}
+        <Route path="/asistencia/marcar/:action" element={<AttendanceAction />} />
 
         {/* Layout principal */}
         <Route element={<DashboardLayout />}>

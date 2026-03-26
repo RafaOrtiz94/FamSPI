@@ -733,7 +733,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const invalidDateRange =
  !usesSimplifiedHours &&
  Boolean(startValue && endValue) &&
- new Date(endValue).getTime() <= new Date(startValue).getTime();
+ new Date(endValue).getTime() < new Date(startValue).getTime();
  const hasDates = usesSimplifiedHours
  ? Boolean(startValue && computedEndValue)
  : Boolean(startValue && endValue);
@@ -1342,9 +1342,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  })
  }
  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
- required
- readOnly={isAutoHours || requiresActiveEnrollmentSelection || (tipoPermiso === "salud" && saludDuracionTipo === "dias")}
- disabled={requiresActiveEnrollmentSelection}
+  required
+  readOnly={
+    isAutoHours || 
+    requiresActiveEnrollmentSelection || 
+    (tipoPermiso === "salud" && saludDuracionTipo === "dias") || 
+    (tipoPermiso === "calamidad" && calamidadDuracionTipo === "dias")
+  }
+  disabled={requiresActiveEnrollmentSelection}
  min="0.5"
  max={tipoPermiso === "estudios" ? "3" : tipoPermiso === "personal" ? "2" : "30"}
  />

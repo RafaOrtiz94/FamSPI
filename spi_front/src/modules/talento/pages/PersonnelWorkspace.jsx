@@ -575,7 +575,28 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
  }
  };
 
- const handleHireApplicant = async () => {
+  const [uploadingDocKey, setUploadingDocKey] = useState(null);
+
+  const handleUploadDocument = async (docType, file) => {
+    if (!file) return;
+    setUploadingDocKey(docType);
+    try {
+      if (isRequestContext) {
+        await uploadPersonnelRequestDocument(selectedRequest.id, docType, file);
+      } else {
+        await uploadCollaboratorDocument(selectedCollaboratorId, docType, file);
+      }
+
+      showToast("Documento subido correctamente", "success");
+      await loadInitialData();
+    } catch (err) {
+      showToast(err.response?.data?.message || "Error al subir documento", "error");
+    } finally {
+      setUploadingDocKey(null);
+    }
+  };
+
+  const handleHireApplicant = async () => {
  if (!selectedRequest) return;
  const profileCompletion = computeProfileCompletion();
  const checklistCompletion = computeChecklistCompletion();
@@ -753,14 +774,27 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
  };
 
  // --- Render ---
- const isRequestContext = Boolean(selectedRequest);
- const isCollaboratorContext = Boolean(selectedCollaboratorId);
- const activeProfileSections = isCollaboratorContext ? profileSectionsTemplate : applicantProfileSections;
- const profileCompletion = computeProfileCompletion(activeProfileSections);
- const checklistCompletion = computeChecklistCompletion();
- const requestWorkflow = selectedRequest?.workflow || null;
- const canHire = isRequestContext && canHireApplicant && profileCompletion.complete && checklistCompletion.complete;
- const activeViewLabel =
+  const isRequestContext = Boolean(selectedRequest);
+  const isCollaboratorContext = Boolean(selectedCollaboratorId);
+  const activeProfileSections = isCollaboratorContext ? profileSectionsTemplate : applicantProfileSections;
+  
+  // Validation for Hiring
+  const profileCompletion = computeProfileCompletion(activeProfileSections);
+  const checklistCompletion = computeChecklistCompletion();
+  const requestWorkflow = selectedRequest?.workflow || null;
+
+  // New Hiring Requirements Check
+  const hasContract = (documents || []).some(doc => doc.doc_type === 'CONTRATO_TRABAJO');
+  const hasApplicant = Boolean(selectedRequest?.applicant_id);
+  
+  const canHire = isRequestContext && 
+                  canHireApplicant && 
+                  profileCompletion.complete && 
+                  checklistCompletion.complete &&
+                  hasContract &&
+                  hasApplicant;
+
+  const activeViewLabel =
  activeView === "colaboradores"
  ? "Colaboradores"
  : activeView === "aspirantes"
@@ -978,27 +1012,46 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
  </div>
  </form>
  )}
- {/* Tabs */}
- <div className="border-b border-gray-200">
- <nav className="-mb-px flex flex-wrap gap-4">
- {["perfil", "checklist", "documentos", "comentarios"].map((tab) => (
- <button
- key={tab}
- onClick={() => setActiveTab(tab)}
- className={`whitespace-nowrap border-b-2 px-1 py-4 text-sm font-medium transition-colors ${
- activeTab === tab
- ? "border-blue-500 text-blue-600"
- : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
- }`}
- >
- {tab.charAt(0).toUpperCase() + tab.slice(1)}
- </button>
- ))}
- </nav>
- </div>
+        {/* Tabs */}
+        <div className="border-b border-gray-200">
+          <nav className="-mb-px flex flex-wrap gap-4">
+            {(isRequestContext
+              ? ["perfil", "postulantes", "checklist", "documentos", "comentarios"]
+              : ["perfil", "checklist", "documentos", "comentarios"]
+            ).map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`whitespace-nowrap border-b-2 px-1 py-4 text-sm font-medium transition-colors ${
+                  activeTab === tab
+                    ? "border-blue-500 text-blue-600"
+                    : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+                }`}
+              >
+                {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
+          </nav>
+        </div>
 
- {/* Tab Content */}
- <div className="min-h-[400px]">
+        {/* Tab Content */}
+        <div className="min-h-[400px]">
+          {activeTab === "postulantes" && isRequestContext && (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4">
+                <h3 className="text-sm font-semibold text-blue-900">Selección de Candidato</h3>
+                <p className="text-xs text-blue-700">
+                  Selecciona el postulante que deseas vincular a esta solicitud para iniciar el proceso de contratación.
+                </p>
+              </div>
+              <ApplicantList
+                applicants={applicants}
+                loading={applicantsLoading}
+                selectedApplicantId={selectedApplicantId}
+                onSelect={handleSelectApplicant}
+              />
+            </div>
+          )}
  {activeTab === "perfil" && (
  <div className="space-y-4">
  {isRequestContext && selectedApplicant && (
@@ -1034,20 +1087,44 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
  Contratar postulante
  </Button>
  </div>
- {!canHire && (
- <p className="mt-2 text-xs text-amber-600">
- Debes completar todos los campos y documentos para habilitar la contratación.
- </p>
- )}
+  {!canHire && (
+    <div className="mt-3 space-y-1.5 border-t border-amber-100 pt-3">
+      <p className="text-xs font-semibold text-amber-700">Requisitos pendientes para contratar:</p>
+      <ul className="grid grid-cols-1 gap-x-4 gap-y-1 sm:grid-cols-2">
+        {!hasApplicant && (
+          <li className="flex items-center gap-1.5 text-[11px] text-amber-600">
+            <FiAlertCircle size={12} /> Seleccionar un postulante
+          </li>
+        )}
+        {!profileCompletion.complete && (
+          <li className="flex items-center gap-1.5 text-[11px] text-amber-600">
+            <FiAlertCircle size={12} /> Completar perfil profesional (100%)
+          </li>
+        )}
+        {!checklistCompletion.complete && (
+          <li className="flex items-center gap-1.5 text-[11px] text-amber-600">
+            <FiAlertCircle size={12} /> Marcar todos los puntos del checklist
+          </li>
+        )}
+        {!hasContract && (
+          <li className="flex items-center gap-1.5 text-[11px] text-amber-600">
+            <FiAlertCircle size={12} /> Subir contrato de trabajo firmado
+          </li>
+        )}
+      </ul>
+    </div>
+  )}
  </div>
  )}
- <PersonnelChecklist
- profileData={profileData}
- documents={documents}
- onToggleFlag={handleChecklistToggle}
- lockedSections={getLockedSections()}
- readOnly={selectedRequest?.status === "completada"}
- />
+          <PersonnelChecklist
+            profileData={profileData}
+            documents={documents}
+            onToggleFlag={handleChecklistToggle}
+            onUpload={handleUploadDocument}
+            uploadingDocKey={uploadingDocKey}
+            lockedSections={getLockedSections()}
+            readOnly={selectedRequest?.status === "completada"}
+          />
  </div>
  )}
 

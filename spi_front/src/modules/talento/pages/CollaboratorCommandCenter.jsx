@@ -1,4 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import toast from "react-hot-toast";
 import {
   FiAlertCircle,
   FiArrowRight,
@@ -8,29 +11,34 @@ import {
   FiLayers,
   FiMenu,
   FiUsers,
-  FiX,
 } from "react-icons/fi";
 
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
 import Button from "../../../core/ui/components/Button";
-import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
 import {
   applicantProfileSections,
   profileSections,
 } from "../components/collaboratorProfileDefinitions";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
+import ApplicantList from "../components/workspace/ApplicantList";
 import PersonnelChecklist from "../components/workspace/PersonnelChecklist";
 import PersonnelDocuments from "../components/workspace/PersonnelDocuments";
 import PersonnelProfile from "../components/workspace/PersonnelProfile";
 import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
 import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
-import PersonnelRequestReview from "../components/workspace/PersonnelRequestReview";
-import CommandCenterContextPanel from "../components/command-center/CommandCenterContextPanel";
-import CommandCenterEntityBrowser from "../components/command-center/CommandCenterEntityBrowser";
 import CommandCenterJourneyPanel from "../components/command-center/CommandCenterJourneyPanel";
+import CommandCenterSkeleton, {
+  JourneyPanelSkeleton,
+  SummaryStripSkeleton,
+  WorkspaceHeaderSectionSkeleton,
+} from "../components/command-center/CommandCenterSkeleton";
 import CommandCenterSummaryStrip from "../components/command-center/CommandCenterSummaryStrip";
-import CommandCenterWorkspaceHeader from "../components/command-center/CommandCenterWorkspaceHeader";
+import ActionDrawersSection from "../components/command-center/sections/ActionDrawersSection";
+import EntityBrowserSection from "../components/command-center/sections/EntityBrowserSection";
+import WorkspaceHeaderSection from "../components/command-center/sections/WorkspaceHeaderSection";
+import WorkspaceTabsSection from "../components/command-center/sections/WorkspaceTabsSection";
 import useCommandCenterState from "../hooks/useCommandCenterState";
+import commandCenterProfileSchema from "../schemas/commandCenterProfileSchema";
 
 const READY_REQUEST_STATUSES = new Set(["aprobada", "en_proceso", "completada"]);
 const REVIEWABLE_REQUEST_STATUSES = new Set(["pendiente", "en_revision"]);
@@ -50,6 +58,10 @@ const WORKSPACE_VIEW_MAP = {
   collaborators: "colaboradores",
 };
 
+const toBrowserView = (value) => BROWSER_VIEW_MAP[value] || "requests";
+const toWorkspaceView = (value) => WORKSPACE_VIEW_MAP[value] || value || "solicitudes";
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
 const STATUS_LABELS = {
   pendiente: "Pendiente",
   en_revision: "En revision",
@@ -60,10 +72,6 @@ const STATUS_LABELS = {
   cancelada: "Cancelada",
 };
 
-const toBrowserView = (value) => BROWSER_VIEW_MAP[value] || "requests";
-const toWorkspaceView = (value) => WORKSPACE_VIEW_MAP[value] || value || "solicitudes";
-const asArray = (value) => (Array.isArray(value) ? value : []);
-
 const percentFromProgress = (progress) => {
   if (!progress) return 0;
   if (typeof progress.percent === "number") return progress.percent;
@@ -71,6 +79,19 @@ const percentFromProgress = (progress) => {
   const done = Number(progress.done || 0);
   return total > 0 ? Math.round((done / total) * 100) : 0;
 };
+
+const flattenRHFErrors = (errors = {}, prefix = "") =>
+  Object.entries(errors).reduce((acc, [key, value]) => {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (value?.message) {
+      acc[path] = value.message;
+      return acc;
+    }
+    if (value && typeof value === "object") {
+      return { ...acc, ...flattenRHFErrors(value, path) };
+    }
+    return acc;
+  }, {});
 
 const overviewCards = [
   {
@@ -96,18 +117,22 @@ const overviewCards = [
   },
 ];
 
-const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
+const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const [focusMode, setFocusMode] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
+  const [browserPanelOpen, setBrowserPanelOpen] = useState(true);
   const state = useCommandCenterState({ initialView });
 
   const {
     requests,
     loadingRequests,
+    requestsInitialLoading,
     applicants,
     applicantsLoading,
+    applicantsInitialLoading,
     collaborators,
     loadingCollaborators,
+    collaboratorsInitialLoading,
     selectedRequest,
     selectedApplicant,
     selectedApplicantId,
@@ -148,8 +173,15 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
     filteredCollaborators,
     profileCompletion,
     checklistCompletion,
+    hasContract,
+    canHireFinal,
     currentWorkflow,
     currentContextKind,
+    requestWorkspaceLoading,
+    requestWorkspaceSyncing,
+    collaboratorProfileLoading,
+    collaboratorProfileSyncing,
+    entityRouteLoading,
     handleSelectRequest,
     handleSelectApplicant,
     handleSelectCollaborator,
@@ -174,25 +206,80 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
   const browserView = toBrowserView(activeView);
 
   const detailTabs = useMemo(() => {
-    const tabs = [
-      { key: "profile", label: "Perfil" },
-      { key: "documents", label: "Documentos" },
-      { key: "checklist", label: "Checklist" },
-    ];
-    if (isRequestContext && selectedApplicant) {
+    const tabs = [];
+
+    // Si es una solicitud, siempre habilitar pestaña de postulante
+    if (isRequestContext) {
       tabs.push({ key: "applicant", label: "Postulante" });
     }
+
+    // Perfil es común para ambos
+    tabs.push({ key: "profile", label: "Perfil" });
+
+    // Checklist y Documentos comunes
+    tabs.push({ key: "checklist", label: "Checklist" });
+    tabs.push({ key: "documents", label: "Documentos" });
+
+    // Comentarios solo para solicitudes
     if (isRequestContext) {
       tabs.push({ key: "comments", label: "Comentarios" });
     }
+
     return tabs;
-  }, [isRequestContext, selectedApplicant]);
+  }, [isRequestContext]);
 
   useEffect(() => {
     if (!detailTabs.some((tab) => tab.key === activeTab)) {
       setActiveTab(detailTabs[0]?.key || "profile");
     }
   }, [activeTab, detailTabs, setActiveTab]);
+
+  const profileForm = useForm({
+    resolver: zodResolver(commandCenterProfileSchema),
+    defaultValues: profileData || {},
+    mode: "onSubmit",
+  });
+
+  const {
+    reset: resetProfileForm,
+    setValue: setProfileFormValue,
+    handleSubmit: handleProfileSubmit,
+    formState: { errors: profileFormErrors },
+  } = profileForm;
+
+  useEffect(() => {
+    if (profileData) {
+      resetProfileForm(profileData);
+    }
+  }, [profileData, resetProfileForm]);
+
+  const profileErrorMap = useMemo(
+    () => ({
+      ...profileErrors,
+      ...flattenRHFErrors(profileFormErrors),
+    }),
+    [profileErrors, profileFormErrors],
+  );
+
+  const handleProfileChangeValidated = (section, key, value) => {
+    handleProfileChange(section, key, value);
+    setProfileFormValue(`${section}.${key}`, value, { shouldDirty: true });
+  };
+
+  const handleChecklistToggleValidated = (flagKey) => {
+    handleChecklistToggle(flagKey);
+    const current = Boolean(profileData?.onboarding?.[flagKey]);
+    setProfileFormValue(`onboarding.${flagKey}`, !current, { shouldDirty: true });
+  };
+
+  const handleValidatedSaveProfile = handleProfileSubmit(
+    async (values) => {
+      await handleSaveProfile(values);
+    },
+    () => {
+      toast.error("Completa los campos obligatorios del perfil antes de guardar.");
+    },
+  );
 
   const headerBadges = useMemo(() => {
     const badges = [];
@@ -230,6 +317,39 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
     }
     return badges;
   }, [checklistCompletion, profileCompletion, selectedCollaborator, selectedRequest]);
+
+  const workflowInfo = useMemo(() => {
+    if (selectedRequest) {
+      const isStalled = Boolean(currentWorkflow?.stalled);
+      const isNearSla = Boolean(currentWorkflow?.near_sla);
+      const statusLabel = isStalled
+        ? "Estancada"
+        : STATUS_LABELS[selectedRequest.status] || "Seguimiento";
+
+      return {
+        status: statusLabel,
+        owner:
+          currentWorkflow?.current_responsible_name ||
+          selectedRequest.collaborator_name ||
+          "Sin asignar",
+        nextAction: currentWorkflow?.next_action || "Revisar estado de solicitud",
+        alert: isStalled
+          ? `Estancada por ${currentWorkflow?.stalled_for_label || "N/A"}`
+          : isNearSla
+            ? currentWorkflow?.sla_alert_message || "Etapa cerca del límite de SLA"
+            : null,
+        alertTone: isStalled ? "danger" : isNearSla ? "warning" : "normal",
+      };
+    }
+    if (selectedCollaborator) {
+      return {
+        status: "Activo",
+        owner: selectedCollaborator.fullname || selectedCollaborator.email || "Sin asignar",
+        nextAction: "Mantener expediente y documentos al dia",
+      };
+    }
+    return null;
+  }, [currentWorkflow, selectedCollaborator, selectedRequest]);
 
   const summaryItems = useMemo(() => {
     if (selectedCollaborator) {
@@ -368,40 +488,95 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
       const requestReady = READY_REQUEST_STATUSES.has(
         String(selectedRequest.status || "").toLowerCase(),
       );
+      const workflowStalled = Boolean(currentWorkflow?.stalled);
+      const workflowNearSla = Boolean(currentWorkflow?.near_sla);
       const profileReady = percentFromProgress(profileCompletion) === 100;
       const checklistReady =
         checklistCompletion?.total > 0 &&
         checklistCompletion.done === checklistCompletion.total;
       const applicantReady = Boolean(selectedApplicant);
+      const contractReady = hasContract;
+
       const done =
         (requestReady ? 1 : 0) +
         (profileReady ? 1 : 0) +
         (checklistReady ? 1 : 0) +
-        (applicantReady ? 1 : 0);
+        (applicantReady ? 1 : 0) +
+        (contractReady ? 1 : 0);
+
       return {
         title: "Journey de ingreso",
         description:
-          "La solicitud, el expediente y el postulante se resuelven en el mismo flujo.",
-        progress: { done, total: 4, percent: done * 25 },
+          "La solicitud, el postulante y el expediente se resuelven en un flujo secuencial.",
+        aside: currentWorkflow ? (
+          <div
+            className={`rounded-2xl border p-3 ${
+              workflowStalled
+                ? "border-rose-200 bg-rose-50 text-rose-800"
+                : workflowNearSla
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-emerald-200 bg-emerald-50 text-emerald-800"
+            }`}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.22em]">
+              Control SLA
+            </p>
+            <p className="mt-1 text-sm font-semibold">
+              {workflowStalled
+                ? "Estancamiento detectado"
+                : workflowNearSla
+                  ? "Etapa cerca del límite"
+                  : "Etapa dentro de SLA"}
+            </p>
+            <p className="mt-1 text-xs">
+              {currentWorkflow?.sla_alert_message || "Sin métrica de SLA disponible."}
+            </p>
+          </div>
+        ) : null,
+        progress: { done, total: 5, percent: Math.round((done / 5) * 100) },
         steps: [
           {
             key: "request",
             label: "Solicitud habilitada",
-            detail:
-              currentWorkflow?.current_stage_label ||
-              STATUS_LABELS[selectedRequest.status] ||
-              "Flujo en seguimiento",
-            status: requestReady
-              ? "complete"
-              : REVIEWABLE_REQUEST_STATUSES.has(selectedRequest.status)
+            detail: workflowStalled
+              ? `Estancada por ${currentWorkflow?.stalled_for_label || "N/A"} en ${currentWorkflow?.current_stage_label || "etapa activa"}.`
+              : workflowNearSla
+                ? currentWorkflow?.sla_alert_message ||
+                  "El tiempo consumido está cerca del límite operativo."
+                : currentWorkflow?.current_stage_label ||
+                  STATUS_LABELS[selectedRequest.status] ||
+                  "Flujo en seguimiento",
+            status: workflowStalled
+              ? "stalled"
+              : workflowNearSla
                 ? "warning"
-                : "pending",
+                : requestReady
+                  ? "complete"
+                  : REVIEWABLE_REQUEST_STATUSES.has(selectedRequest.status)
+                    ? "warning"
+                    : "pending",
+          },
+          {
+            key: "applicant",
+            label: "Elegir postulante",
+            detail: selectedApplicant
+              ? `${selectedApplicant.fullname || selectedApplicant.email || "Postulante"} seleccionado.`
+              : "Selecciona el candidato para iniciar el expediente.",
+            status: applicantReady ? "complete" : "current",
+            actionLabel: applicantReady ? "Cambiar" : "Seleccionar",
+            onAction: () => setActiveTab("applicant"),
           },
           {
             key: "profile",
             label: "Preparar expediente",
-            detail: `${profileCompletion?.done || 0}/${profileCompletion?.total || 0} campos preparados.`,
-            status: profileReady ? "complete" : "current",
+            detail: applicantReady
+              ? `${profileCompletion?.done || 0}/${profileCompletion?.total || 0} campos preparados.`
+              : "Primero debes elegir un postulante.",
+            status: !applicantReady
+              ? "pending"
+              : profileReady
+                ? "complete"
+                : "current",
             actionLabel: "Abrir perfil",
             onAction: () => setActiveTab("profile"),
           },
@@ -414,16 +589,24 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
             onAction: () => setActiveTab("checklist"),
           },
           {
+            key: "contract",
+            label: "Contrato firmado",
+            detail: contractReady
+              ? "Contrato cargado correctamente."
+              : "Pendiente subir contrato de trabajo.",
+            status: contractReady ? "complete" : "pending",
+            actionLabel: "Subir contrato",
+            onAction: () => setActiveTab("documents"),
+          },
+          {
             key: "hire",
-            label: selectedApplicant ? "Contratacion lista" : "Seleccionar postulante",
-            detail: selectedApplicant
-              ? `${selectedApplicant.fullname || selectedApplicant.email || "Postulante"} listo para cierre.`
-              : "Aun no se ha fijado un postulante activo para esta solicitud.",
-            status: selectedApplicant ? "current" : "pending",
-            actionLabel: selectedApplicant && canHireApplicant ? "Contratar" : "Abrir detalle",
-            onAction: selectedApplicant && canHireApplicant
-              ? handleHireApplicant
-              : () => setActiveTab("applicant"),
+            label: "Finalizar contratación",
+            detail: canHireFinal
+              ? "Todos los requisitos cumplidos."
+              : "Pendiente completar los pasos anteriores.",
+            status: canHireFinal ? "complete" : "pending",
+            actionLabel: "Contratar",
+            onAction: handleHireApplicant,
           },
         ],
       };
@@ -437,7 +620,6 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
       steps: [],
     };
   }, [
-    canHireApplicant,
     checklistCompletion,
     currentWorkflow,
     handleHireApplicant,
@@ -446,6 +628,8 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
     selectedCollaborator,
     selectedRequest,
     setActiveTab,
+    hasContract,
+    canHireFinal,
   ]);
 
   const primaryAction = profileData
@@ -477,7 +661,7 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
     secondaryActions.push({
       label: "Contratar",
       onClick: handleHireApplicant,
-      disabled: !requestWorkspaceReady,
+      disabled: !canHireFinal,
       variant: "outline",
     });
   }
@@ -515,15 +699,28 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
           <PersonnelChecklist
             profileData={profileData}
             documents={documents}
-            onToggleFlag={handleChecklistToggle}
+            onToggleFlag={handleChecklistToggleValidated}
+            onUpload={handleUploadDocument}
+            uploadingDocKey={docUploading}
           />
         );
       case "applicant":
-        return selectedApplicant ? (
-          <ApplicantIntakeSummary applicant={selectedApplicant} />
-        ) : (
-          <div className="rounded-[28px] border border-dashed border-stone-300 bg-stone-50 p-6 text-sm text-stone-500">
-            No hay postulante seleccionado para esta solicitud.
+        return (
+          <div className="space-y-6">
+            {selectedApplicant && (
+              <ApplicantIntakeSummary applicant={selectedApplicant} />
+            )}
+            <div className="rounded-[28px] border border-stone-200 bg-white p-6 shadow-sm">
+              <h3 className="mb-4 text-lg font-bold text-stone-800">
+                {selectedApplicant ? "Cambiar postulante" : "Seleccionar postulante"}
+              </h3>
+              <ApplicantList
+                applicants={applicants}
+                loading={applicantsLoading}
+                selectedApplicantId={selectedApplicantId}
+                onSelect={handleSelectApplicant}
+              />
+            </div>
           </div>
         );
       case "comments":
@@ -544,11 +741,11 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
         return (
           <PersonnelProfile
             profileData={profileData}
-            onChange={handleProfileChange}
-            onSave={handleSaveProfile}
+            onChange={handleProfileChangeValidated}
+            onSave={handleValidatedSaveProfile}
             loading={profileLoading}
             saving={profileSaving}
-            errors={profileErrors}
+            errors={profileErrorMap}
             canUnlockSections={canUnlockSections}
             sections={isCollaboratorContext ? profileSections : applicantProfileSections}
           />
@@ -556,350 +753,221 @@ const CollaboratorCommandCenter = ({ initialView = "solicitudes" }) => {
     }
   };
 
+  const browserProps = {
+    activeView: browserView,
+    onChangeView: (view) => setActiveView(toWorkspaceView(view)),
+    searchQuery,
+    onSearchChange: setSearchQuery,
+    requests: filteredRequests || requests,
+    loadingRequests,
+    selectedRequestId: selectedRequest?.id,
+    onSelectRequest: (request) => {
+      handleSelectRequest(request);
+      setBrowserOpen(false);
+    },
+    applicants: filteredApplicants || applicants,
+    applicantsLoading,
+    selectedApplicantId,
+    onSelectApplicant: (applicant) => {
+      handleSelectApplicant(applicant);
+      setBrowserOpen(false);
+    },
+    collaborators: filteredCollaborators || collaborators,
+    loadingCollaborators,
+    selectedCollaboratorId,
+    onSelectCollaborator: (collaborator) => {
+      handleSelectCollaborator(collaborator);
+      setBrowserOpen(false);
+    },
+    canRequestPersonnel,
+    canApprovePersonnel,
+    onCreateRequest: handleCreateRequest,
+    onOpenReview: (request) => {
+      handleReviewRequest(request);
+      setBrowserOpen(false);
+    },
+    hideControls: true,
+  };
+  const hasInitialData =
+    asArray(requests).length > 0 ||
+    asArray(applicants).length > 0 ||
+    asArray(collaborators).length > 0;
+  const showLoadingSkeleton =
+    !currentEntity &&
+    !focusMode &&
+    !hasInitialData &&
+    (requestsInitialLoading || applicantsInitialLoading || collaboratorsInitialLoading);
+
+  const showEntityBootstrapSkeleton =
+    !focusMode &&
+    !currentEntity &&
+    entityRouteLoading;
+
+  const shouldShowHeaderSkeleton =
+    Boolean(currentEntity) &&
+    ((isRequestContext && (requestWorkspaceLoading || requestWorkspaceSyncing)) ||
+      (isCollaboratorContext &&
+        (collaboratorProfileLoading || collaboratorProfileSyncing)));
+
   return (
-    <DashboardLayout includeWidgets={false} className="bg-[#f6f1e8]">
-      <div className="mx-auto flex max-w-[1680px] flex-col gap-6">
-        <div
-          className={`grid gap-6 ${
-            focusMode ? "grid-cols-1" : "xl:grid-cols-[360px_minmax(0,1fr)]"
-          }`}
-        >
-          {!focusMode && (
-            <aside className="hidden xl:block">
-              <CommandCenterEntityBrowser
+    <DashboardLayout includeWidgets={false} className="bg-slate-100">
+      <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-6">
+        {showLoadingSkeleton || showEntityBootstrapSkeleton ? (
+          <CommandCenterSkeleton />
+        ) : (
+          <>
+            {shouldShowHeaderSkeleton ? (
+              <WorkspaceHeaderSectionSkeleton />
+            ) : (
+              <WorkspaceHeaderSection
+                currentEntity={currentEntity}
+                currentContextKind={currentContextKind}
+                summaryBadges={headerBadges}
+                onOpenBrowser={() => setBrowserOpen(true)}
+                onToggleFocus={() => setFocusMode((current) => !current)}
+                focusMode={focusMode}
+                primaryAction={primaryAction}
+                secondaryActions={secondaryActions}
+                workflowInfo={workflowInfo}
+              />
+            )}
+
+            {!focusMode && (
+              <EntityBrowserSection
+                open={browserPanelOpen}
+                onToggle={() => setBrowserPanelOpen((current) => !current)}
                 activeView={browserView}
                 onChangeView={(view) => setActiveView(toWorkspaceView(view))}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
-                requests={filteredRequests || requests}
-                loadingRequests={loadingRequests}
-                selectedRequestId={selectedRequest?.id}
-                onSelectRequest={(request) => {
-                  handleSelectRequest(request);
-                  setBrowserOpen(false);
-                }}
-                applicants={filteredApplicants || applicants}
-                applicantsLoading={applicantsLoading}
-                selectedApplicantId={selectedApplicantId}
-                onSelectApplicant={(applicant) => {
-                  handleSelectApplicant(applicant);
-                  setBrowserOpen(false);
-                }}
-                collaborators={filteredCollaborators || collaborators}
-                loadingCollaborators={loadingCollaborators}
-                selectedCollaboratorId={selectedCollaboratorId}
-                onSelectCollaborator={(collaborator) => {
-                  handleSelectCollaborator(collaborator);
-                  setBrowserOpen(false);
-                }}
-                canRequestPersonnel={canRequestPersonnel}
-                canApprovePersonnel={canApprovePersonnel}
-                onCreateRequest={handleCreateRequest}
-                onOpenReview={handleReviewRequest}
+                browserProps={browserProps}
               />
-            </aside>
-          )}
-          <section className="overflow-hidden rounded-[36px] border border-stone-200 bg-[#fcfaf7] shadow-[0_24px_80px_rgba(28,25,23,0.08)]">
-            <CommandCenterWorkspaceHeader
-              currentEntity={currentEntity}
-              currentContextKind={currentContextKind}
-              summaryBadges={headerBadges}
-              onOpenBrowser={() => setBrowserOpen(true)}
-              onToggleFocus={() => setFocusMode((current) => !current)}
-              focusMode={focusMode}
-              primaryAction={primaryAction}
-              secondaryActions={secondaryActions}
-            />
-            <div className="space-y-6 p-4 sm:p-6 lg:p-8">
-              {!currentEntity && (
-                <div className="grid gap-4 xl:grid-cols-3">
-                  {overviewCards.map((card) => {
-                    const Icon = card.icon;
-                    return (
-                      <div
-                        key={card.key}
-                        className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm"
-                      >
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-stone-100 text-stone-700">
-                          <Icon size={20} />
-                        </div>
-                        <h3 className="mt-4 text-base font-semibold text-stone-950">
-                          {card.title}
-                        </h3>
-                        <p className="mt-2 text-sm leading-6 text-stone-600">
-                          {card.detail}
-                        </p>
+            )}
+
+            {!currentEntity && (
+              <div className="grid gap-4 xl:grid-cols-3">
+                {overviewCards.map((card) => {
+                  const Icon = card.icon;
+                  return (
+                    <div key={card.key} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
+                        <Icon size={20} />
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-              {currentEntity && (
-                <div className="space-y-6">
+                      <h3 className="mt-4 text-base font-semibold text-slate-900">{card.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-slate-600">{card.detail}</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {currentEntity && (
+              <div className="space-y-6">
+                {shouldShowHeaderSkeleton ? (
+                  <SummaryStripSkeleton />
+                ) : (
                   <CommandCenterSummaryStrip items={summaryItems} />
-                  <div
-                    className={`grid gap-6 ${
-                      focusMode ? "grid-cols-1" : "lg:grid-cols-[minmax(0,1fr)_320px]"
-                    }`}
-                  >
-                    <div className="space-y-6">
+                )}
+                <div className={`grid gap-6 ${focusMode ? "grid-cols-1" : "xl:grid-cols-[minmax(0,1fr)_320px]"}`}>
+                  <div className="space-y-6">
+                    {shouldShowHeaderSkeleton ? (
+                      <JourneyPanelSkeleton />
+                    ) : (
                       <CommandCenterJourneyPanel
                         title={journey.title}
                         description={journey.description}
                         progress={journey.progress}
                         steps={journey.steps}
+                        aside={journey.aside}
                       />
-                      <CommandCenterContextPanel
-                        tabs={detailTabs}
-                        activeTab={activeTab}
-                        onChangeTab={setActiveTab}
-                        footer={
-                          profileData ? (
-                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                              <p className="text-xs text-stone-500">
-                                El guardado sigue siendo manual para evitar cierres
-                                accidentales mientras se reorganiza el modulo.
-                              </p>
-                              <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={handleSaveProfile}
-                                disabled={profileSaving || profileLoading}
-                                rightIcon={FiArrowRight}
-                              >
-                                Guardar cambios
-                              </Button>
-                            </div>
-                          ) : null
-                        }
-                      >
-                        {renderContextContent()}
-                      </CommandCenterContextPanel>
-                    </div>
-                    {!focusMode && (
-                      <div className="space-y-6">
-                        {isRequestContext && currentWorkflow && (
-                          <PersonnelRequestProgress
-                            workflow={currentWorkflow}
-                            request={selectedRequest}
-                          />
-                        )}
-                        {selectedRequest && canReassignPersonnel && (
-                          <form
-                            onSubmit={handleAssignCollaborator}
-                            className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm"
-                          >
-                            <p className="text-sm font-semibold text-stone-900">
-                              Responsable operativo
-                            </p>
-                            <p className="mt-1 text-xs text-stone-500">
-                              Vincula el colaborador que operara esta solicitud.
-                            </p>
-                            <select
-                              value={requestCollaboratorId || ""}
-                              onChange={(event) =>
-                                setRequestCollaboratorId(event.target.value)
-                              }
-                              className="mt-4 w-full rounded-2xl border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-800 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-                            >
-                              <option value="">Sin responsable asignado</option>
-                              {asArray(collaborators).map((collaborator) => (
-                                <option key={collaborator.id} value={collaborator.id}>
-                                  {collaborator.fullname || collaborator.email}
-                                </option>
-                              ))}
-                            </select>
-                            <Button
-                              type="submit"
-                              variant="secondary"
-                              size="sm"
-                              className="mt-4 w-full"
-                            >
-                              Guardar responsable
-                            </Button>
-                          </form>
-                        )}
-                        {selectedApplicant && (
-                          <div className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm">
-                            <p className="text-sm font-semibold text-stone-900">
-                              Postulante activo
-                            </p>
-                            <p className="mt-1 text-sm text-stone-600">
-                              {selectedApplicant.fullname ||
-                                selectedApplicant.email ||
-                                "Sin nombre"}
-                            </p>
-                            <Button
-                              variant="secondary"
-                              size="sm"
-                              className="mt-4 w-full"
-                              onClick={() => setActiveTab("applicant")}
-                            >
-                              Abrir resumen del postulante
-                            </Button>
-                          </div>
-                        )}
-                        {selectedCollaborator && (
-                          <div className="rounded-[28px] border border-stone-200 bg-white p-5 shadow-sm">
-                            <p className="text-sm font-semibold text-stone-900">
-                              Colaborador activo
-                            </p>
-                            <div className="mt-3 space-y-2 text-sm text-stone-600">
-                              <p>
-                                <span className="font-semibold text-stone-900">
-                                  Correo:
-                                </span>{" "}
-                                {selectedCollaborator.email || "No registrado"}
-                              </p>
-                              <p>
-                                <span className="font-semibold text-stone-900">
-                                  Area:
-                                </span>{" "}
-                                {selectedCollaborator.department_name ||
-                                  profileData?.laboral?.area ||
-                                  "Sin definir"}
-                              </p>
-                              <p>
-                                <span className="font-semibold text-stone-900">
-                                  Cargo:
-                                </span>{" "}
-                                {profileData?.laboral?.cargo || "Sin definir"}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
                     )}
+                    <WorkspaceTabsSection
+                      tabs={detailTabs.map((tab) => ({
+                        ...tab,
+                        badge:
+                          tab.key === "documents"
+                            ? `${documents.length}`
+                            : tab.key === "checklist"
+                              ? `${checklistCompletion.done || 0}/${checklistCompletion.total || 0}`
+                              : undefined,
+                      }))}
+                      activeTab={activeTab}
+                      onChangeTab={setActiveTab}
+                      footer={
+                        profileData ? (
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-xs text-slate-500">
+                              Validacion activa con React Hook Form + Zod antes de persistir en JSONB.
+                            </p>
+                            <Button
+                              variant="primary"
+                              size="sm"
+                              onClick={handleValidatedSaveProfile}
+                              disabled={profileSaving || profileLoading}
+                              rightIcon={FiArrowRight}
+                            >
+                              Guardar cambios
+                            </Button>
+                          </div>
+                        ) : null
+                      }
+                    >
+                      {renderContextContent()}
+                    </WorkspaceTabsSection>
                   </div>
+                  {!focusMode && (
+                    <div className="space-y-6">
+                      {isRequestContext && currentWorkflow && (
+                        <PersonnelRequestProgress workflow={currentWorkflow} request={selectedRequest} />
+                      )}
+                      {selectedRequest && canReassignPersonnel && (
+                        <form onSubmit={handleAssignCollaborator} className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+                          <p className="text-sm font-semibold text-slate-900">Responsable operativo</p>
+                          <p className="mt-1 text-xs text-slate-500">Vincula el colaborador que operara esta solicitud.</p>
+                          <select
+                            value={requestCollaboratorId || ""}
+                            onChange={(event) => setRequestCollaboratorId(event.target.value)}
+                            className="mt-4 w-full rounded-2xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-800 outline-none focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                          >
+                            <option value="">Sin responsable asignado</option>
+                            {asArray(collaborators).map((collaborator) => (
+                              <option key={collaborator.id} value={collaborator.id}>
+                                {collaborator.fullname || collaborator.email}
+                              </option>
+                            ))}
+                          </select>
+                          <Button type="submit" variant="secondary" size="sm" className="mt-4 w-full">
+                            Guardar responsable
+                          </Button>
+                        </form>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </section>
-        </div>
-      </div>
-      {browserOpen && (
-        <div className="fixed inset-0 z-40 flex bg-stone-950/40 xl:hidden">
-          <div
-            className="flex-1"
-            aria-hidden="true"
-            onClick={() => setBrowserOpen(false)}
-          />
-          <div className="w-full max-w-md border-l border-stone-200 bg-[#f8f4ec] p-4 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between">
-              <p className="text-sm font-semibold text-stone-900">Navegador</p>
-              <button
-                type="button"
-                onClick={() => setBrowserOpen(false)}
-                className="rounded-full border border-stone-200 bg-white p-2 text-stone-600"
-              >
-                <FiX />
-              </button>
-            </div>
-            <CommandCenterEntityBrowser
-              activeView={browserView}
-              onChangeView={(view) => setActiveView(toWorkspaceView(view))}
-              searchQuery={searchQuery}
-              onSearchChange={setSearchQuery}
-              requests={filteredRequests || requests}
-              loadingRequests={loadingRequests}
-              selectedRequestId={selectedRequest?.id}
-              onSelectRequest={(request) => {
-                handleSelectRequest(request);
-                setBrowserOpen(false);
-              }}
-              applicants={filteredApplicants || applicants}
-              applicantsLoading={applicantsLoading}
-              selectedApplicantId={selectedApplicantId}
-              onSelectApplicant={(applicant) => {
-                handleSelectApplicant(applicant);
-                setBrowserOpen(false);
-              }}
-              collaborators={filteredCollaborators || collaborators}
-              loadingCollaborators={loadingCollaborators}
-              selectedCollaboratorId={selectedCollaboratorId}
-              onSelectCollaborator={(collaborator) => {
-                handleSelectCollaborator(collaborator);
-                setBrowserOpen(false);
-              }}
-              canRequestPersonnel={canRequestPersonnel}
-              canApprovePersonnel={canApprovePersonnel}
-              onCreateRequest={handleCreateRequest}
-              onOpenReview={(request) => {
-                handleReviewRequest(request);
-                setBrowserOpen(false);
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      {createDrawerOpen && (
-        <div className="fixed inset-0 z-50 flex bg-stone-950/40">
-          <div
-            className="flex-1"
-            aria-hidden="true"
-            onClick={handleCloseCreateRequest}
-          />
-          <div className="flex h-full w-full max-w-3xl flex-col overflow-y-auto border-l border-stone-200 bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-stone-200 px-5 py-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.24em] text-stone-500">
-                  Nuevo flujo
-                </p>
-                <h2 className="text-lg font-semibold text-stone-950">
-                  Crear solicitud de personal
-                </h2>
               </div>
-              <button
-                type="button"
-                onClick={handleCloseCreateRequest}
-                className="rounded-full border border-stone-200 bg-white p-2 text-stone-600"
-              >
-                <FiX />
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-5">
-              <PersonnelRequestForm
-                isModal={false}
-                onClose={handleCloseCreateRequest}
-                onSuccess={handleRequestCreated}
-              />
-            </div>
-          </div>
-        </div>
-      )}
+            )}
+          </>
+        )}
 
-      {reviewModeOpen && reviewRequestData && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-stone-950/40 p-4 sm:p-8">
-          <div className="mx-auto max-w-5xl">
-            <div className="mb-4 flex justify-end">
-              <button
-                type="button"
-                onClick={handleCloseReview}
-                className="rounded-full border border-stone-200 bg-white p-2 text-stone-600 shadow-sm"
-              >
-                <FiX />
-              </button>
-            </div>
-            <PersonnelRequestReview
-              request={reviewRequestData}
-              onCancel={handleCloseReview}
-              onUpdate={handleRequestReviewed}
-              canApprove={canApprovePersonnel}
-            />
-          </div>
-        </div>
-      )}
+        <ActionDrawersSection
+          browserOpen={browserOpen}
+          onCloseBrowser={() => setBrowserOpen(false)}
+          browserProps={browserProps}
+          createDrawerOpen={createDrawerOpen}
+          onCloseCreateDrawer={handleCloseCreateRequest}
+          onRequestCreated={handleRequestCreated}
+          reviewModeOpen={reviewModeOpen}
+          reviewRequestData={reviewRequestData}
+          canApprovePersonnel={canApprovePersonnel}
+          onCloseReview={handleCloseReview}
+          onRequestReviewed={handleRequestReviewed}
+        />
 
-      <div className="fixed bottom-5 right-5 z-30 xl:hidden">
-        <Button
-          variant="primary"
-          size="sm"
-          onClick={() => setBrowserOpen(true)}
-          leftIcon={FiMenu}
-        >
-          Navegar
-        </Button>
+        <div className="fixed bottom-5 right-5 z-30 xl:hidden">
+          <Button variant="primary" size="sm" onClick={() => setBrowserOpen(true)} leftIcon={FiMenu}>
+            Navegar
+          </Button>
+        </div>
       </div>
     </DashboardLayout>
   );

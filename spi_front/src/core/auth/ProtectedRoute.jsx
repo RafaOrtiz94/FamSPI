@@ -85,6 +85,7 @@ export const ProtectedRoute = ({ allowedRoles = [], strictRoles = false }) => {
  !["/login", "/login/callback"].includes(location.pathname)
  ) {
  console.warn("🚫 Usuario no autenticado, redirigiendo a /login");
+ sessionStorage.setItem("redirectTo", location.pathname + location.search);
  return <Navigate to="/login" replace />;
  }
 

@@ -1,11 +1,13 @@
 import React from "react";
-import { FiCheck, FiX, FiFile, FiCheckSquare, FiSquare } from "react-icons/fi";
+import { FiCheck, FiFile, FiCheckSquare, FiSquare, FiUploadCloud, FiLoader } from "react-icons/fi";
 import { checklistSections } from "../collaboratorProfileDefinitions";
 
 const PersonnelChecklist = ({
  profileData,
  documents,
  onToggleFlag,
+ onUpload,
+ uploadingDocKey,
  lockedSections = [],
  readOnly = false,
 }) => {
@@ -116,13 +118,44 @@ const PersonnelChecklist = ({
  isChecked ? "text-gray-700" : "text-gray-500"
  }`}
  >
- {isDoc ? (
- <FiFile
- className={`mt-0.5 shrink-0 ${
- isChecked ? "text-blue-500" : "text-gray-300"
- }`}
- />
- ) : (
+              {isDoc ? (
+                <div className="flex w-full items-center justify-between gap-4">
+                  <div className="flex items-center gap-2">
+                    <FiFile
+                      className={`mt-0.5 shrink-0 ${
+                        isChecked ? "text-blue-500" : "text-gray-300"
+                      }`}
+                    />
+                    <span className="text-gray-700">{item.label}</span>
+                  </div>
+                  {!isChecked && !readOnly && !isLocked && (
+                    <div className="relative">
+                      <input
+                        type="file"
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                        onChange={(e) => onUpload(item.docType, e.target.files[0])}
+                        disabled={uploadingDocKey === item.docType}
+                      />
+                      <button
+                        type="button"
+                        className="flex items-center gap-1 rounded-md bg-blue-50 px-2 py-1 text-[10px] font-medium text-blue-600 hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        {uploadingDocKey === item.docType ? (
+                          <FiLoader className="animate-spin" />
+                        ) : (
+                          <FiUploadCloud />
+                        )}
+                        Subir
+                      </button>
+                    </div>
+                  )}
+                  {isChecked && (
+                    <span className="flex items-center gap-1 text-[10px] font-medium text-green-600">
+                      <FiCheck /> Cargado
+                    </span>
+                  )}
+                </div>
+              ) : (
  <button
  onClick={() => !isLocked && !readOnly && onToggleFlag(item.flagKey)}
  disabled={isLocked || readOnly}
@@ -133,14 +166,16 @@ const PersonnelChecklist = ({
  {isChecked ? (
  <FiCheckSquare className="text-blue-600" />
  ) : (
- <FiSquare className="text-gray-300 hover:text-gray-400" />
- )}
- </button>
- )}
- <span className={isChecked ? "font-medium" : ""}>
- {item.label}
- </span>
- </div>
+                    <FiSquare className="text-gray-300 hover:text-gray-400" />
+                  )}
+                </button>
+              )}
+              {!isDoc && (
+                <span className={isChecked ? "font-medium" : ""}>
+                  {item.label}
+                </span>
+              )}
+            </div>
  );
  })}
  </div>

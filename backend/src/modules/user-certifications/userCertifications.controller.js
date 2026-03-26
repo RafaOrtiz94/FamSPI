@@ -12,6 +12,43 @@ const certificationSchema = Joi.object({
   metadata: Joi.object().optional()
 });
 
+const DOSSIER_ROLES_FOR_OTHERS = new Set([
+  'talento_humano',
+  'jefe_talento_humano',
+  'jefe_de_talento_humano',
+  'analista_talento_humano',
+  'asistente_talento_humano',
+  'auxiliar_talento_humano',
+  'rh',
+  'rrhh',
+  'gerencia',
+  'gerencia_general',
+  'gerente_general',
+  'director',
+  'gerente',
+]);
+
+const normalizeRole = (value) => String(value || '').trim().toLowerCase();
+const collectRequesterRoles = (user = {}) => {
+  const roles = new Set();
+  const registerRole = (value) => {
+    const normalized = normalizeRole(value);
+    if (normalized) roles.add(normalized);
+  };
+
+  registerRole(user.role);
+  registerRole(user.role_name);
+
+  if (Array.isArray(user.roles)) {
+    user.roles.forEach(registerRole);
+  }
+  if (Array.isArray(user.scopes)) {
+    user.scopes.forEach(registerRole);
+  }
+
+  return roles;
+};
+
 // POST /api/v1/users/me/certifications
 const createMyCertification = async (req, res) => {
   try {
@@ -172,6 +209,50 @@ const generateUserCertificationsPDF = async (req, res) => {
   }
 };
 
+// GET /api/v1/users/:id/certifications/dossier - Dossier consolidado de certificaciones
+const generateUserCertificationsDossier = async (req, res) => {
+  try {
+    const targetUserId = parseInt(req.params.id, 10);
+    if (Number.isNaN(targetUserId)) {
+      return res.status(400).json({
+        ok: false,
+        message: 'ID de usuario inválido'
+      });
+    }
+
+    const requesterUserId = Number.parseInt(req.user?.id, 10);
+    const requesterRoles = collectRequesterRoles(req.user);
+    const isOwnDossier = requesterUserId === targetUserId;
+    const canGenerateForOthers = Array.from(requesterRoles).some((role) => DOSSIER_ROLES_FOR_OTHERS.has(role));
+
+    if (!isOwnDossier && !canGenerateForOthers) {
+      return res.status(403).json({
+        ok: false,
+        message: 'No tienes permisos para generar dossiers de otros usuarios'
+      });
+    }
+
+    const dossier = await service.generateCertificationsDossier(targetUserId, {
+      requesterUserId,
+      requesterRole: req.user?.role || req.user?.role_name || null,
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${dossier.filename}"`);
+    res.setHeader('Content-Length', dossier.buffer.length);
+    res.send(dossier.buffer);
+  } catch (err) {
+    logger.error({ err }, 'Error generando dossier de certificaciones');
+
+    const status = err.status || 500;
+    const message = err.message || 'Error interno del servidor';
+
+    res.status(status).json({
+      ok: false,
+      message
+    });
+  }
+};
+
 // POST /api/v1/users/me/certifications/bulk - Crear múltiples certificaciones
 const createMyBulkCertifications = async (req, res) => {
   try {
@@ -206,6 +287,7 @@ module.exports = {
   getUserCertifications,
   deleteMyCertification,
   generateUserCertificationsPDF,
+  generateUserCertificationsDossier,
   createMyBulkCertifications
 };
 

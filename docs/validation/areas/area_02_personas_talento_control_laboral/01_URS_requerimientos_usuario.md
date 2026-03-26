@@ -48,60 +48,68 @@ El area existe para ordenar la relacion entre la organizacion y sus colaboradore
 | `permisos` | Para gestionar ausencias justificadas y recuperables. | Crea solicitudes, matriculas, justificantes, aprobaciones y coordinacion. | Cuando un colaborador necesita ausentarse con soporte formal. |
 | `vacaciones` | Para administrar el descanso anual y su saldo. | Crea solicitudes, resume saldo, aprueba, cancela y recalcula. | Cuando el colaborador solicita vacaciones o talento revisa disponibilidad. |
 
-## 7. Requerimientos de usuario
-- REQ-PT-001: El sistema debe permitir a talento humano y roles autorizados administrar usuarios internos y departamentos.
-- REQ-PT-001A: El sistema debe unificar la gestion de usuarios y departamentos en una sola entrada de navegacion para simplificar el acceso administrativo.
-- REQ-PT-001B: El sistema debe restringir esa entrada unificada a Talento Humano y TI, tanto en navegacion como en acceso directo a la ruta.
-- REQ-PT-002: El sistema debe permitir consolidar la informacion del colaborador en un workspace verificable.
-- REQ-PT-002A: El sistema debe presentar solicitudes, postulantes y colaboradores dentro de una experiencia de trabajo unificada, evitando que el usuario deba saltar entre pantallas inconexas para completar un mismo proceso.
-- REQ-PT-002B: El sistema debe evitar que la operacion principal dependa de menus tipo sidebar o paneles laterales persistentes que oculten contenido critico o reduzcan de forma excesiva el espacio util de trabajo.
-- REQ-PT-002C: El sistema debe priorizar una navegacion contextual visible y directa, basada en tabs, segmentos o controles equivalentes, para cambiar entre solicitudes, postulantes, colaboradores y detalle operativo sin perder el contexto actual.
-- REQ-PT-002D: El sistema debe mostrar en todo momento un encabezado operativo con el contexto activo, el estado del proceso, el responsable actual y la siguiente accion esperada cuando aplique.
-- REQ-PT-002E: El sistema debe organizar el contenido operativo siguiendo una jerarquia visual consistente, de modo que resumen, progreso, checklist, documentos y acciones principales tengan ubicacion predecible y comprensible.
-- REQ-PT-002F: El sistema debe minimizar scrolls anidados y evitar disposiciones que obliguen al usuario a desplazar multiples paneles internos para completar una tarea principal.
-- REQ-PT-002G: El sistema debe adaptar esa experiencia unificada a desktop y movil sin ocultar funciones clave detras de patrones ambiguos o de dificil descubrimiento.
-- REQ-PT-002H: El sistema debe permitir trabajar el ciclo de ingreso, seguimiento del colaborador activo y salida del colaborador bajo una logica visual coherente y reconocible dentro del mismo dominio.
-- REQ-PT-003: El sistema debe permitir al propio usuario mantener actualizado su perfil y preferencias.
-- REQ-PT-004: El sistema debe permitir registrar certificaciones con soporte documental y consultar su vigencia.
-- REQ-PT-004A: El sistema debe sincronizar de forma controlada las claves compartidas entre el perfil propio del usuario y el expediente laboral del colaborador.
-- REQ-PT-005: El sistema debe permitir abrir, revisar y cerrar solicitudes de personal con historial y comentarios.
-- REQ-PT-006: El sistema debe permitir asociar postulantes o colaboradores a una solicitud de personal y completar su perfil.
-- REQ-PT-007: El sistema debe permitir contratar un postulante y trasladar informacion relevante al colaborador resultante.
-- REQ-PT-008: El sistema debe permitir registrar entrada, salida a almuerzo, retorno y salida final de la jornada.
-- REQ-PT-009: El sistema debe permitir gestionar salidas inesperadas y retorno al sitio.
-- REQ-PT-010: El sistema debe permitir registrar o calcular horas extra y consultarlas por rango.
-- REQ-PT-011: El sistema debe permitir generar reportes PDF oficiales de asistencia por usuario y rango.
-- REQ-PT-021: El sistema debe permitir consultar asistencia administrativa por usuario, rango y estado de jornada sin mezclarla con el PDF oficial.
-- REQ-PT-022: El sistema debe mostrar el estado de jornada derivado para distinguir entre sin entrada, jornada abierta, almuerzo abierto y jornada cerrada.
-- REQ-PT-023: El sistema debe separar de forma clara la consulta administrativa de asistencia del reporte oficial RH-09 para evitar interpretaciones incorrectas.
-- REQ-PT-023A: El sistema debe alinear la visibilidad de reportes de asistencia con los roles realmente autorizados en backend y frontend.
-- REQ-PT-024: El sistema debe impedir que una solicitud de personal avance de paso si el bloque actual no tiene la informacion obligatoria completa.
-- REQ-PT-025: El sistema debe mostrar de forma visible el estado actual, el responsable de la etapa y el proximo paso de una solicitud de personal.
-- REQ-PT-026: El sistema debe indicar cuando una solicitud de personal esta estancada o excedio el tiempo operativo esperado para su etapa.
-- REQ-PT-027: El sistema debe permitir reasignar el responsable operativo de una solicitud de personal cuando el rol autorizado lo requiera.
-- REQ-PT-028: El sistema debe permitir registrar comentarios trazables asociados al usuario, fecha y visibilidad interna o externa.
-- REQ-PT-029: El sistema debe mostrar el progreso de contratacion y el checklist de documentos y validaciones requeridas antes de cerrar la contratacion.
-- REQ-PT-012: El sistema debe permitir solicitar permisos por estudios, salud, calamidad y motivos personales con los campos que correspondan.
-- REQ-PT-013: El sistema debe permitir registrar matriculas de estudio y exigirlas antes de habilitar permisos por estudios.
-- REQ-PT-014: El sistema debe permitir subir justificantes cuando un permiso lo requiera.
-- REQ-PT-015: El sistema debe permitir aprobacion parcial, aprobacion final, rechazo y cancelacion de permisos.
-- REQ-PT-016: El sistema debe permitir coordinar planes de recuperacion para permisos recuperables y cerrarlos por acuerdo o vencimiento.
-- REQ-PT-017: El sistema debe permitir solicitar vacaciones, consultar saldo disponible y conocer dias u horas restantes.
-- REQ-PT-018: El sistema debe permitir aprobar, rechazar, cancelar y revisar cancelaciones de vacaciones.
-- REQ-PT-019: El sistema debe permitir a talento humano y gerencia ver resumen consolidado por colaborador en permisos y vacaciones.
-- REQ-PT-020: El sistema debe conservar trazabilidad suficiente sobre acciones criticas del area y sus soportes documentales.
-- REQ-PT-020A: El sistema debe registrar auditoria con actor, modulo y accion identificables para evitar registros degradados a valores internos no interpretables por el usuario.
+## 7. Requerimientos de usuario (URS) - 40 Requisitos para Producción
+
+### 7.1 Gestión Organizacional y Usuarios
+- **REQ-PT-001**: El sistema debe permitir a talento humano y roles autorizados administrar usuarios internos y departamentos.
+- **REQ-PT-001A**: El sistema debe unificar la gestion de usuarios y departamentos en una sola entrada de navegacion para simplificar el acceso administrativo.
+- **REQ-PT-001B**: El sistema debe restringir esa entrada unificada a Talento Humano y TI, tanto en navegacion como en acceso directo a la ruta.
+- **REQ-PT-030**: El sistema debe impedir la eliminacion fisica de usuarios, permitiendo solo la desactivacion logica para preservar la integridad referencial historica.
+- **REQ-PT-031**: El sistema debe validar la existencia y estado activo de un departamento antes de permitir la asignacion de un colaborador al mismo.
+
+### 7.2 Workspace del Colaborador (REQ-PT-002)
+- **REQ-PT-002**: El sistema debe permitir consolidar la informacion del colaborador en un workspace verificable.
+- **REQ-PT-002A**: El sistema debe presentar solicitudes, postulantes y colaboradores dentro de una experiencia de trabajo unificada, evitando saltos entre pantallas.
+- **REQ-PT-002B**: El sistema debe evitar layouts basados en sidebars persistentes que reduzcan el area util de trabajo efectiva.
+- **REQ-PT-002C**: El sistema debe implementar una navegacion contextual basada en pestañas (Tabs) para cambiar entre Perfil, Documentos, Checklist e Historial.
+- **REQ-PT-002D**: El sistema debe mostrar un encabezado operativo persistente con el contexto activo (Nombre, Foto, Estado, Responsable y Siguiente Accion).
+- **REQ-PT-002E**: El sistema debe organizar el contenido siguiendo una jerarquia visual consistente (Resumen -> Detalle -> Acciones).
+- **REQ-PT-032**: El sistema debe implementar Skeleton Loaders durante la carga de datos del workspace para evitar saltos visuales (Layout Shift).
+
+### 7.3 Perfil y Certificaciones
+- **REQ-PT-003**: El sistema debe permitir al propio usuario mantener actualizado su perfil personal y preferencias de sistema.
+- **REQ-PT-004**: El sistema debe permitir registrar certificaciones con soporte documental y alertas de vencimiento.
+- **REQ-PT-004A**: El sistema debe sincronizar automaticamente las claves compartidas entre el perfil del usuario y el expediente laboral del colaborador.
+- **REQ-PT-033**: El sistema debe permitir la descarga de un "Dossier de Certificaciones" consolidado en formato PDF.
+
+### 7.4 Solicitudes de Personal (Personnel Requests)
+- **REQ-PT-005**: El sistema debe permitir abrir, revisar y cerrar solicitudes de personal con historial de cambios y comentarios.
+- **REQ-PT-006**: El sistema debe permitir asociar postulantes externos o colaboradores internos a una solicitud de personal.
+- **REQ-PT-007**: El sistema debe permitir la contratacion de un postulante, trasladando automaticamente su perfil al registro de colaborador.
+- **REQ-PT-024**: El sistema debe impedir que una solicitud avance de etapa si el bloque de informacion actual no esta completo al 100%.
+- **REQ-PT-026**: El sistema debe marcar visualmente como "Estancada" cualquier solicitud que supere el tiempo limite definido para su etapa actual (SLA).
+- **REQ-PT-028**: El sistema debe permitir comentarios con visibilidad selectiva (Interno TH / Publico involucrados).
+- **REQ-PT-029**: El sistema debe mostrar un Checklist de verificacion obligatoria antes de permitir el cierre de una contratacion.
+- **REQ-PT-034**: El sistema debe asegurar que toda contratacion se realice bajo una transaccion atomica en base de datos para evitar registros inconsistentes.
+
+### 7.5 Control de Asistencia y Jornada
+- **REQ-PT-008**: El sistema debe permitir el registro de entrada, salida a almuerzo, retorno y salida final.
+- **REQ-PT-035**: El sistema debe capturar la geolocalización del dispositivo al momento de realizar cualquier marcacion de asistencia.
+- **REQ-PT-036**: El sistema debe permitir el acceso rapido a las marcaciones de asistencia mediante Atajos (Shortcuts) optimizados para dispositivos moviles.
+- **REQ-PT-010**: El sistema debe calcular automaticamente las horas extra diarias y permitir su consulta por rangos de fecha.
+- **REQ-PT-011**: El sistema debe generar el reporte oficial RH-09 de asistencia en formato PDF con firma de responsabilidad.
+- **REQ-PT-021**: El sistema debe proveer una vista administrativa de asistencia para TH que permita filtrar por estado de jornada (Abierta, Almuerzo, Cerrada).
+- **REQ-PT-037**: El sistema debe notificar automaticamente a TH cuando un colaborador registre una excepcion de jornada o salida inesperada.
+
+### 7.6 Permisos y Vacaciones
+- **REQ-PT-012**: El sistema debe permitir solicitar permisos (estudios, salud, calamidad) con validacion de campos obligatorios segun el tipo.
+- **REQ-PT-013**: El sistema debe exigir el registro de matricula vigente antes de habilitar solicitudes de permiso por estudios.
+- **REQ-PT-014**: El sistema debe permitir adjuntar evidencias digitales (justificantes) a las solicitudes de permiso.
+- **REQ-PT-015**: El sistema debe implementar un flujo de aprobacion multinivel (Jefe Inmediato -> Talento Humano).
+- **REQ-PT-016**: El sistema debe permitir la coordinacion de planes de recuperacion para permisos recuperables con seguimiento de cumplimiento.
+- **REQ-PT-017**: El sistema debe mostrar al colaborador su saldo actualizado de vacaciones en tiempo real.
+- **REQ-PT-038**: El sistema debe impedir solicitudes de vacaciones que excedan el saldo disponible del colaborador.
+- **REQ-PT-039**: El sistema debe permitir la reprogramacion o cancelacion de vacaciones aprobadas antes de su fecha de inicio.
+
+### 7.7 Seguridad y Auditoría
+- **REQ-PT-020A**: El sistema debe registrar un log de auditoria detallado para cada accion critica, incluyendo: Actor, Modulo, Accion, Valor Anterior y Valor Nuevo.
+- **REQ-PT-040**: El sistema debe renovar automaticamente el token de acceso (Refresh Token) con una vigencia de 30 dias para asegurar la continuidad operativa en dispositivos moviles.
 
 ## 8. Requerimientos no funcionales
-- Toda operacion del area debe estar protegida por autenticacion y, cuando corresponda, por control de rol.
-- La informacion personal y laboral debe tratarse con criterio de minima exposicion y trazabilidad.
-- Los formularios del area deben permitir calculo automatico de fechas, horas o duraciones cuando la logica del proceso asi lo exija.
-- Los procesos diarios como asistencia deben ser simples de usar y no depender de pasos manuales innecesarios.
-- La navegacion principal del area debe privilegiar claridad operativa, consistencia visual y acceso directo al contenido, evitando layouts que dependan de sidebars intrusivos o de paneles que comprometan la legibilidad.
-- Las vistas de trabajo del area deben mantener una jerarquia visual estable entre contexto, progreso, contenido y acciones, para reducir errores de operacion y mejorar aprendizaje del usuario.
-- La experiencia responsive del area debe preservar tareas criticas, visibilidad de acciones y lectura del contenido sin degradarse por compresion excesiva del layout.
-- Los documentos y archivos asociados a colaboradores, solicitudes, permisos o certificaciones deben quedar vinculados de forma recuperable.
-- El area debe sostener reportes y evidencia objetiva suficiente para fines administrativos y de control interno.
+- Toda operacion del area debe estar protegida por autenticacion y control de acceso basado en roles (RBAC).
+- La navegacion debe ser responsiva y garantizar la funcionalidad completa en dispositivos moviles.
+- Los formularios deben incluir validacion en cliente (frontend) y servidor (backend).
+- Los documentos deben almacenarse de forma segura y vinculada al expediente del colaborador.
 
 ## 9. Conclusion
-Los requerimientos de usuario del Area 02 responden a la necesidad de administrar el ciclo laboral interno del colaborador dentro de SPI. El dominio no solo existe para almacenar datos de personas, sino para hacer operables los procesos de talento, asistencia, permisos y vacaciones con trazabilidad, criterios de aprobacion y soporte documental verificable.
+Este conjunto de 40 requerimientos asegura que el Area 02 de SPI cuente con la robustez necesaria para operar en produccion, garantizando trazabilidad, cumplimiento de procesos y una experiencia de usuario eficiente.

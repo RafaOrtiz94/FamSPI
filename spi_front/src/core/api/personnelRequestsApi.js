@@ -86,6 +86,14 @@ export const updatePersonnelRequestProfile = async (id, payload) => {
 };
 
 /**
+ * Vincular un postulante a una solicitud de personal
+ */
+export const linkApplicantToRequest = async (requestId, applicantId) => {
+ const response = await api.patch(`/personnel-requests/${requestId}/applicant`, { applicant_id: applicantId });
+ return response.data;
+};
+
+/**
  * Subir documento del personal seleccionado
  */
 export const uploadPersonnelRequestDocument = async (id, docType, file) => {
