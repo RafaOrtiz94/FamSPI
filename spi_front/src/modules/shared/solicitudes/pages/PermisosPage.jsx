@@ -1,4 +1,4 @@
-﻿import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { FiCalendar, FiCheckSquare, FiGlobe, FiUsers } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -8,6 +8,7 @@ import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { getMisSolicitudes, getVacationSummary } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
+import { calculateInclusiveCalendarDays } from "../utils/solicitudesHelpers";
 
 const PermisosStatusWidget = lazy(() => import("../components/PermisosStatusWidget"));
 const PermisosColaboradoresWidget = lazy(() => import("../components/PermisosColaboradoresWidget"));
@@ -16,34 +17,41 @@ const PermisosColaboradoresAlbum = lazy(() => import("../components/PermisosCola
 const AprobacionPermisosView = lazy(() => import("../components/AprobacionPermisosView"));
 
 const SECTION_META = {
- collaborators: {
- title: "Colaboradores",
- subtitle: "Talento Humano",
- description: "Resumen por colaborador con carga independiente para no saturar la página principal.",
- icon: FiUsers,
- tone: "emerald",
- },
- global: {
- title: "Solicitudes globales",
- subtitle: "Seguimiento",
- description: "Consulta consolidada de solicitudes sin mezclarla con la gestión personal diaria.",
- icon: FiGlobe,
- tone: "amber",
- },
- gerencia_album: {
- title: "Álbum de colaboradores",
- subtitle: "Gerencia",
- description: "Navegación por tarjetas para revisar disponibilidad y detalle por colaborador.",
- icon: FiUsers,
- tone: "indigo",
- },
- gerencia_approvals: {
- title: "Aprobaciones",
- subtitle: "Gerencia",
- description: "Pendientes finales en una vista separada para evitar sobrecarga visual.",
- icon: FiCheckSquare,
- tone: "rose",
- },
+  mine: {
+    title: "Mis solicitudes",
+    subtitle: "Personal",
+    description: "Gestiona tus propios permisos, vacaciones y subida de justificantes.",
+    icon: FiCalendar,
+    tone: "blue",
+  },
+  collaborators: {
+    title: "Colaboradores",
+    subtitle: "Talento Humano",
+    description: "Resumen por colaborador con carga independiente para no saturar la página principal.",
+    icon: FiUsers,
+    tone: "emerald",
+  },
+  global: {
+    title: "Solicitudes globales",
+    subtitle: "Seguimiento",
+    description: "Consulta consolidada de solicitudes sin mezclarla con la gestión personal diaria.",
+    icon: FiGlobe,
+    tone: "amber",
+  },
+  gerencia_album: {
+    title: "Álbum de colaboradores",
+    subtitle: "Gerencia",
+    description: "Navegación por tarjetas para revisar disponibilidad y detalle por colaborador.",
+    icon: FiUsers,
+    tone: "indigo",
+  },
+  gerencia_approvals: {
+    title: "Aprobaciones",
+    subtitle: "Gestión",
+    description: "Revisa y gestiona las solicitudes de tu equipo y el historial de aprobados.",
+    icon: FiCheckSquare,
+    tone: "blue",
+  },
 };
 
 const SECTION_TONES = {
@@ -118,10 +126,7 @@ const PermisosPage = () => {
  const calculateDays = (req) => {
  if (req?.duracion_dias) return Number(req.duracion_dias) || 0;
  if (!req?.fecha_inicio || !req?.fecha_fin) return 0;
- const start = new Date(req.fecha_inicio);
- const end = new Date(req.fecha_fin);
- const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
- return diff >= 0 ? diff + 1 : 0;
+ return calculateInclusiveCalendarDays(req.fecha_inicio, req.fecha_fin);
  };
 
  const loadSummary = async ({ silent = false } = {}) => {
@@ -219,14 +224,29 @@ const PermisosPage = () => {
  return candidates.some((role) => ["jefe_ti", "jefe_financiero"].includes(role));
  }, [user]);
 
- const availableSections = useMemo(() => {
- if (isGerenciaGeneral) return ["gerencia_album", "gerencia_approvals"];
+ const isJefeRole = useMemo(() => {
+    if (!user || !user.role) return false;
+    const role = user.role.toLowerCase();
+    return role.includes("jefe") || role.includes("gerencia") || role === "admin";
+  }, [user]);
 
- const sections = [];
- if (isTalentRole) sections.push("collaborators");
- if (canViewGlobalRequestsWidget) sections.push("global");
- return sections;
- }, [isGerenciaGeneral, isTalentRole, canViewGlobalRequestsWidget]);
+  const availableSections = useMemo(() => {
+    const sections = ["mine"]; // Siempre incluir 'mis solicitudes'
+
+    if (isGerenciaGeneral) return ["gerencia_album", "gerencia_approvals"];
+
+    if (isTalentRole) sections.push("collaborators");
+    if (canViewGlobalRequestsWidget) sections.push("global");
+    
+    // Si es jefe o gerencia, permitir ver el widget de aprobaciones
+    if (isJefeRole) {
+      if (!sections.includes("gerencia_approvals")) {
+        sections.push("gerencia_approvals");
+      }
+    }
+
+    return sections;
+  }, [isGerenciaGeneral, isTalentRole, canViewGlobalRequestsWidget, isJefeRole]);
 
  useEffect(() => {
  if (activeSection !== "mine" && !availableSections.includes(activeSection)) {
@@ -235,42 +255,46 @@ const PermisosPage = () => {
  }, [activeSection, availableSections]);
  const containerClass = isGerenciaGeneral ? "p-4 max-w-7xl mx-auto space-y-4" : "p-6 max-w-7xl mx-auto space-y-6";
 
- const renderActiveSection = () => {
- switch (activeSection) {
- case "mine":
- return (
- <Suspense fallback={<SectionLoader label="mis solicitudes" />}>
- <PermisosStatusWidget />
- </Suspense>
- );
- case "collaborators":
- return (
- <Suspense fallback={<SectionLoader label="colaboradores" />}>
- <PermisosColaboradoresWidget />
- </Suspense>
- );
- case "global":
- return (
- <Suspense fallback={<SectionLoader label="solicitudes globales" />}>
- <PermisosGlobalRequestsWidget />
- </Suspense>
- );
- case "gerencia_album":
- return (
- <Suspense fallback={<SectionLoader label="álbum de colaboradores" />}>
- <PermisosColaboradoresAlbum compact />
- </Suspense>
- );
- case "gerencia_approvals":
- return (
- <Suspense fallback={<SectionLoader label="aprobaciones" />}>
- <AprobacionPermisosView compact />
- </Suspense>
- );
- default:
- return null;
- }
- };
+  const renderActiveSection = () => {
+    switch (activeSection) {
+      case "mine":
+        return (
+          <Suspense fallback={<SectionLoader label="mis solicitudes" />}>
+            <PermisosStatusWidget />
+          </Suspense>
+        );
+      case "collaborators":
+        return (
+          <Suspense fallback={<SectionLoader label="colaboradores" />}>
+            <PermisosColaboradoresWidget />
+          </Suspense>
+        );
+      case "global":
+        return (
+          <Suspense fallback={<SectionLoader label="solicitudes globales" />}>
+            <PermisosGlobalRequestsWidget />
+          </Suspense>
+        );
+      case "gerencia_album":
+        return (
+          <Suspense fallback={<SectionLoader label="álbum de colaboradores" />}>
+            <PermisosColaboradoresAlbum compact />
+          </Suspense>
+        );
+      case "gerencia_approvals":
+        return (
+          <Suspense fallback={<SectionLoader label="aprobaciones" />}>
+            <AprobacionPermisosView compact={isGerenciaGeneral} />
+          </Suspense>
+        );
+      default:
+        return (
+          <Suspense fallback={<SectionLoader label="mis solicitudes" />}>
+            <PermisosStatusWidget />
+          </Suspense>
+        );
+    }
+  };
 
  return (
  <div className={containerClass}>

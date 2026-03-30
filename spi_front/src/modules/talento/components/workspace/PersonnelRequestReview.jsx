@@ -6,10 +6,19 @@ import { useUI } from "../../../../core/ui/UIContext";
 import { formatDateSafe } from "../../../../shared/utils/dateUtils";
 import { updatePersonnelRequestStatus } from "../../../../core/api/personnelRequestsApi";
 
-const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => {
+const PersonnelRequestReview = ({
+  request,
+  onRequestUpdate,
+  onUpdate,
+  onRequestCancel,
+  onCancel,
+  canApprove,
+}) => {
  const { showLoader, hideLoader } = useUI();
  const [actionNotes, setActionNotes] = useState("");
  const [actionLoading, setActionLoading] = useState(false);
+ const handleRequestUpdate = onRequestUpdate || onUpdate;
+ const handleRequestCancel = onRequestCancel || onCancel;
 
  const getStatusBadge = (status) => {
  const badges = {
@@ -27,7 +36,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
 
  return (
  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${badge.color}`}>
- <Icon size={12} />
+ <Icon size={12} title={`Estado ${badge.label}`} />
  {badge.label}
  </span>
  );
@@ -44,7 +53,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
  try {
  await updatePersonnelRequestStatus(request.id, status, actionNotes.trim() || null);
  toast.success(status === "aprobada" ? "Solicitud aprobada" : "Solicitud rechazada");
- onUpdate?.();
+ handleRequestUpdate?.();
  } catch (error) {
  console.error("Error actualizando solicitud:", error);
  toast.error(error.response?.data?.message || "No se pudo actualizar la solicitud");
@@ -68,7 +77,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
  </span>
  </div>
  </div>
- <Button variant="secondary" onClick={onCancel}>
+ <Button variant="secondary" onClick={handleRequestCancel} aria-label="Volver a la lista de solicitudes">
  Volver
  </Button>
  </div>
@@ -186,6 +195,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
  variant="danger"
  onClick={() => handleDecision("rechazada")}
  disabled={actionLoading}
+ aria-label="Rechazar solicitud de personal"
  >
  Rechazar
  </Button>
@@ -193,6 +203,7 @@ const PersonnelRequestReview = ({ request, onUpdate, onCancel, canApprove }) => 
  variant="primary"
  onClick={() => handleDecision("aprobada")}
  disabled={actionLoading}
+ aria-label="Aprobar solicitud de personal"
  >
  Aprobar Solicitud
  </Button>

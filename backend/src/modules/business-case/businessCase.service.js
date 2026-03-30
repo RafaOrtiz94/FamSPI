@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const crypto = require("crypto");
 const businessCaseCalculator = require("./businessCaseCalculator.service");
+const integrationService = require("./businessCaseIntegration.service");
 const { PrivatePurchaseStateMachine } = require("../private-purchases/privatePurchaseStateMachine");
 const { PRIVATE_PURCHASE_STATES } = require("../private-purchases/privatePurchaseStates.constants");
 const { ensureBusinessCaseDriveFolder } = require("./businessCaseDriveFolder.service");
@@ -114,6 +115,40 @@ function normalizeFallbackOfferKind(value) {
   return null;
 }
 
+const FEASIBILITY_ALLOWED_ROLES = new Set(["jefe_operaciones", "jefe_tecnico"]);
+
+function normalizeRoleToken(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function collectUserRoles(user = {}) {
+  const values = [
+    user?.role,
+    user?.scope,
+    user?.role_name,
+    user?.rol,
+    ...(Array.isArray(user?.roles) ? user.roles : []),
+    ...(Array.isArray(user?.scopes) ? user.scopes : []),
+  ];
+
+  return new Set(values.map(normalizeRoleToken).filter(Boolean));
+}
+
+function assertCanSaveFeasibilityDecision(user = {}) {
+  const roles = collectUserRoles(user);
+  const isAllowed = Array.from(roles).some((role) => FEASIBILITY_ALLOWED_ROLES.has(role));
+
+  if (isAllowed) return;
+
+  const error = new Error("No tienes permisos para aprobar factibilidad y bloquear inventario.");
+  error.status = 403;
+  error.code = "INSUFFICIENT_ROLE";
+  throw error;
+}
+
 async function recordExcelExportAndMarkWaitingCalculations(businessCaseId, user = {}) {
   await assertModernBusinessCase(businessCaseId);
   const { rows } = await db.query(
@@ -166,69 +201,97 @@ async function saveFeasibilityDecision(
   } = {},
   user = {},
 ) {
+  assertCanSaveFeasibilityDecision(user);
   await assertModernBusinessCase(businessCaseId);
-  const { rows } = await db.query(
-    `SELECT id, canonical_state, modern_bc_metadata
-       FROM equipment_purchase_requests
-      WHERE id = $1`,
-    [businessCaseId],
-  );
-  if (!rows.length) {
-    const error = new Error("Business Case no encontrado");
-    error.status = 404;
-    throw error;
-  }
-
-  const row = rows[0];
-  const metadata = toObject(row.modern_bc_metadata);
-  const feasibility = toObject(metadata.feasibility);
-  const exportInfo = toObject(feasibility.export_excel);
-
-  if (!exportInfo.at) {
-    const error = new Error("Primero debe exportar los reactivos para iniciar calculos");
-    error.status = 409;
-    error.code = "EXPORT_REQUIRED";
-    throw error;
-  }
-
+  const client = await db.getClient();
   const nowIso = new Date().toISOString();
   const normalizedFallback = normalizeFallbackOfferKind(fallback_offer_kind);
-  if (is_feasible === false && !normalizedFallback) {
-    const error = new Error(
-      "Debe seleccionar venta directa, alquiler o alquiler con transferencia de dominio cuando no es factible",
+  let metadata = {};
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `SELECT id, modern_bc_metadata
+         FROM equipment_purchase_requests
+        WHERE id = $1
+        FOR UPDATE`,
+      [businessCaseId],
     );
-    error.status = 400;
-    error.code = "FALLBACK_OFFER_KIND_REQUIRED";
+    if (!rows.length) {
+      const error = new Error("Business Case no encontrado");
+      error.status = 404;
+      throw error;
+    }
+
+    const row = rows[0];
+    metadata = toObject(row.modern_bc_metadata);
+    const feasibility = toObject(metadata.feasibility);
+    const exportInfo = toObject(feasibility.export_excel);
+
+    if (!exportInfo.at) {
+      const error = new Error("Primero debe exportar los reactivos para iniciar calculos");
+      error.status = 409;
+      error.code = "EXPORT_REQUIRED";
+      throw error;
+    }
+
+    if (is_feasible === false && !normalizedFallback) {
+      const error = new Error(
+        "Debe seleccionar venta directa, alquiler o alquiler con transferencia de dominio cuando no es factible",
+      );
+      error.status = 400;
+      error.code = "FALLBACK_OFFER_KIND_REQUIRED";
+      throw error;
+    }
+
+    if (Boolean(is_feasible)) {
+      await integrationService.reserveInventory({
+        businessCaseId,
+        actorId: user?.id || null,
+        client,
+      });
+    }
+
+    feasibility.status = is_feasible ? "factible" : "no_factible";
+    feasibility.decision = {
+      is_feasible: Boolean(is_feasible),
+      notes: notes || "",
+      decided_at: nowIso,
+      decided_by_email: user?.email || null,
+      decided_by_id: user?.id || null,
+      fallback_offer_kind: is_feasible ? null : normalizedFallback,
+      quantities: quantities || null,
+      prices: prices || null,
+      calculations: calculations || null,
+    };
+    feasibility.requires_change_approval = false;
+    feasibility.closed = true;
+    feasibility.closed_at = nowIso;
+    feasibility.closed_by_email = user?.email || null;
+    feasibility.closed_by_id = user?.id || null;
+
+    metadata.feasibility = feasibility;
+    await client.query(
+      `UPDATE equipment_purchase_requests
+          SET bc_stage = $2,
+              modern_bc_metadata = $1::jsonb,
+              updated_at = NOW()
+        WHERE id = $3`,
+      [JSON.stringify(metadata), is_feasible ? "factible" : "cerrado_no_factible", businessCaseId],
+    );
+
+    await client.query("COMMIT");
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, businessCaseId }, "Error haciendo rollback de factibilidad BC");
+    }
     throw error;
+  } finally {
+    client.release();
   }
-
-  feasibility.status = is_feasible ? "factible" : "no_factible";
-  feasibility.decision = {
-    is_feasible: Boolean(is_feasible),
-    notes: notes || "",
-    decided_at: nowIso,
-    decided_by_email: user?.email || null,
-    decided_by_id: user?.id || null,
-    fallback_offer_kind: is_feasible ? null : normalizedFallback,
-    quantities: quantities || null,
-    prices: prices || null,
-    calculations: calculations || null,
-  };
-  feasibility.requires_change_approval = false;
-  feasibility.closed = true;
-  feasibility.closed_at = nowIso;
-  feasibility.closed_by_email = user?.email || null;
-  feasibility.closed_by_id = user?.id || null;
-
-  metadata.feasibility = feasibility;
-  await db.query(
-    `UPDATE equipment_purchase_requests
-        SET bc_stage = $2,
-            modern_bc_metadata = $1::jsonb,
-            updated_at = NOW()
-      WHERE id = $3`,
-    [JSON.stringify(metadata), is_feasible ? "factible" : "cerrado_no_factible", businessCaseId],
-  );
 
   const privatePurchaseId = metadata?.private_purchase_id || null;
   if (privatePurchaseId) {

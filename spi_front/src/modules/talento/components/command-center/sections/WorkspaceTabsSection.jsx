@@ -1,20 +1,30 @@
 import React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 
-/**
- * Tabs horizontales del workspace con transición animada.
- */
-const WorkspaceTabsSection = ({
-  tabs = [],
-  activeTab,
-  onChangeTab,
-  children,
-  footer,
-}) => {
+const WorkspaceTabsSection = ({ tabs = [], activeTab, onChangeTab, children, footer }) => {
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
-      <div className="border-b border-slate-200 px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap gap-2">
+    <section className="rounded-3xl border border-brand-hr-primary/15 bg-brand-hr-primary-contrast shadow-sm">
+      <div className="border-b border-brand-hr-primary/15 px-4 py-3 sm:px-6">
+        <div className="sm:hidden">
+          <label htmlFor="workspace-tab-selector" className="sr-only">
+            Seleccionar pestaña de workspace
+          </label>
+          <select
+            id="workspace-tab-selector"
+            value={activeTab}
+            onChange={(event) => onChangeTab?.(event.target.value)}
+            className="w-full rounded-xl border border-brand-hr-primary/20 bg-brand-hr-primary-soft px-3 py-2 text-sm font-medium text-brand-hr-primary outline-none transition focus:border-brand-hr-primary focus:ring-2 focus:ring-brand-hr-primary/20"
+          >
+            {tabs.map((tab) => (
+              <option key={tab.key} value={tab.key} disabled={tab.disabled}>
+                {tab.label}
+                {tab.badge !== undefined && tab.badge !== null ? ` (${tab.badge})` : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="hidden flex-wrap gap-2 sm:flex">
           {tabs.map((tab) => {
             const isActive = tab.key === activeTab;
             return (
@@ -25,32 +35,35 @@ const WorkspaceTabsSection = ({
                 disabled={tab.disabled}
                 className={`relative rounded-full px-4 py-1.5 text-sm font-semibold transition ${
                   isActive
-                    ? "text-white"
-                    : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100"
+                    ? "text-brand-hr-primary-contrast"
+                    : "border border-brand-hr-primary/20 bg-brand-hr-primary-contrast text-brand-hr-primary hover:bg-brand-hr-primary-soft"
                 } ${tab.disabled ? "cursor-not-allowed opacity-40" : ""}`}
               >
-                {isActive && (
+                {isActive ? (
                   <motion.span
                     layoutId="workspace-active-tab-pill"
-                    className="absolute inset-0 rounded-full bg-slate-900"
+                    className="absolute inset-0 rounded-full bg-brand-hr-primary"
                     transition={{ type: "spring", stiffness: 340, damping: 30 }}
                   />
-                )}
+                ) : null}
                 <span className="relative z-10">{tab.label}</span>
-                {tab.badge !== undefined && tab.badge !== null && (
+                {tab.badge !== undefined && tab.badge !== null ? (
                   <span
                     className={`relative z-10 ml-2 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                      isActive ? "bg-white/20 text-white" : "bg-slate-100 text-slate-600"
+                      isActive
+                        ? "bg-brand-hr-primary-contrast/25 text-brand-hr-primary-contrast"
+                        : "bg-brand-hr-primary-soft text-brand-hr-primary-muted"
                     }`}
                   >
                     {tab.badge}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}
         </div>
       </div>
+
       <div className="p-4 sm:p-6">
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
@@ -64,7 +77,10 @@ const WorkspaceTabsSection = ({
           </motion.div>
         </AnimatePresence>
       </div>
-      {footer ? <div className="border-t border-slate-200 px-4 py-4 sm:px-6">{footer}</div> : null}
+
+      {footer ? (
+        <div className="border-t border-brand-hr-primary/15 px-4 py-4 sm:px-6">{footer}</div>
+      ) : null}
     </section>
   );
 };

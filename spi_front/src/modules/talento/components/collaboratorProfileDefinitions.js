@@ -3,6 +3,7 @@ export const defaultProfile = {
     nombres: "",
     apellidos: "",
     cedula: "",
+    ruc: "",
     tipo_sangre: "",
     genero: "",
     cuenta_bancaria: "",
@@ -72,6 +73,7 @@ export const defaultProfile = {
     celular_entregado: false,
     computadora_entregada: false,
     uniformes_entregados: false,
+    seguro_medico_vida: false,
     tarjetas_presentacion: false,
     credencial_entregada: false,
     salida_equipos: false,
@@ -100,10 +102,19 @@ export const profileSections = [
       {
         key: "cedula",
         label: "NUMERO DE CEDULA",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
         required: true,
+      },
+      {
+        key: "ruc",
+        label: "RUC",
+        mask: "ruc",
+        inputMode: "numeric",
+        pattern: "[0-9]*",
+        maxLength: 13,
       },
       { key: "tipo_sangre", label: "TIPO DE SANGRE" },
       { key: "genero", label: "GENERO" },
@@ -120,6 +131,7 @@ export const profileSections = [
       {
         key: "telefono_personal",
         label: "TELEFONO PERSONAL",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -153,6 +165,7 @@ export const profileSections = [
       {
         key: "telefono_celular_famproject",
         label: "TELEFONO CELULAR (PLAN FAMPROJECT)",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -215,6 +228,7 @@ export const profileSections = [
       {
         key: "cedula_conyuge",
         label: "C.C. CONYUGE",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -225,6 +239,7 @@ export const profileSections = [
       {
         key: "cedula_primer_hijo",
         label: "C.C. PRIMER HIJO/A",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -245,6 +260,7 @@ export const profileSections = [
       {
         key: "cedula_segundo_hijo",
         label: "C.C. SEGUNDO HIJO/A",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -282,6 +298,7 @@ export const profileSections = [
       {
         key: "telefono_fijo",
         label: "TELEFONO FIJO",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -298,6 +315,7 @@ export const profileSections = [
       {
         key: "telefono_contacto",
         label: "NUMERO DE TELEFONO",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -327,10 +345,19 @@ export const applicantProfileSections = [
       {
         key: "cedula",
         label: "NUMERO DE CEDULA",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
         required: true,
+      },
+      {
+        key: "ruc",
+        label: "RUC",
+        mask: "ruc",
+        inputMode: "numeric",
+        pattern: "[0-9]*",
+        maxLength: 13,
       },
       { key: "tipo_sangre", label: "TIPO DE SANGRE" },
       { key: "genero", label: "GENERO" },
@@ -346,6 +373,7 @@ export const applicantProfileSections = [
       {
         key: "telefono_personal",
         label: "TELEFONO PERSONAL",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -379,6 +407,7 @@ export const applicantProfileSections = [
       {
         key: "cedula_conyuge",
         label: "C.C. CONYUGE",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -389,6 +418,7 @@ export const applicantProfileSections = [
       {
         key: "cedula_primer_hijo",
         label: "C.C. PRIMER HIJO/A",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -409,6 +439,7 @@ export const applicantProfileSections = [
       {
         key: "cedula_segundo_hijo",
         label: "C.C. SEGUNDO HIJO/A",
+        mask: "cedula",
         inputMode: "numeric",
         pattern: "[0-9]*",
         maxLength: 10,
@@ -439,6 +470,7 @@ export const applicantProfileSections = [
       {
         key: "telefono_fijo",
         label: "TELEFONO FIJO",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -455,6 +487,7 @@ export const applicantProfileSections = [
       {
         key: "telefono_contacto",
         label: "NUMERO DE TELEFONO",
+        mask: "phone",
         inputMode: "tel",
         pattern: "[0-9+\\-() ]*",
         maxLength: 15,
@@ -486,10 +519,6 @@ export const documentTypes = [
     label: "Copia a color de certificado de votacion",
   },
   { key: "SERVICIO_BASICO", label: "Copia de servicio basico" },
-  {
-    key: "CERTIFICADO_SALUD",
-    label: "Certificado de salud y examenes preocupacionales",
-  },
   { key: "CARNET_TIPO_SANGRE", label: "Copia del carnet de tipo de sangre" },
   { key: "ACTA_MATRIMONIO", label: "Copia de acta de matrimonio" },
   { key: "CERTIFICADO_NACIMIENTO", label: "Certificado de nacimiento" },
@@ -517,9 +546,7 @@ export const documentTypes = [
     label: "Compromiso de erradicacion de discriminacion",
   },
   { key: "INGRESO_IESS", label: "Firmar ingreso en el IESS" },
-  { key: "REGISTRO_BALANCE_SOCIAL", label: "Registro en el balance social" },
   { key: "FORMATO_DECIMOS", label: "Formato de acumulacion de decimos" },
-  { key: "REGISTRO_FIRMAS", label: "Registro de firmas y sumillas" },
   { key: "OFERTA_SALARIO", label: "Oferta de salario" },
   { key: "HOJA_VIDA", label: "Hoja de vida" },
   { key: "CARTA_MOTIVACION", label: "Carta de motivacion" },
@@ -548,11 +575,6 @@ export const checklistSections = [
         label: "Copia de servicio basico",
         type: "doc",
         docType: "SERVICIO_BASICO",
-      },
-      {
-        label: "Certificado de salud y examenes preocupacionales",
-        type: "doc",
-        docType: "CERTIFICADO_SALUD",
       },
       {
         label: "Copia del carnet de tipo de sangre",
@@ -636,11 +658,6 @@ export const checklistSections = [
         docType: "INGRESO_IESS",
       },
       {
-        label: "Registro en el balance social",
-        type: "doc",
-        docType: "REGISTRO_BALANCE_SOCIAL",
-      },
-      {
         label: "Formato de acumulacion de decimos",
         type: "doc",
         docType: "FORMATO_DECIMOS",
@@ -654,11 +671,6 @@ export const checklistSections = [
         label: "Entrega de credencial",
         type: "flag",
         flagKey: "credencial_entregada",
-      },
-      {
-        label: "Registro de firmas y sumillas",
-        type: "doc",
-        docType: "REGISTRO_FIRMAS",
       },
       { label: "Oferta de salario", type: "doc", docType: "OFERTA_SALARIO" },
     ],
@@ -715,6 +727,11 @@ export const checklistSections = [
         label: "Entrega de uniformes (cuando aplique)",
         type: "flag",
         flagKey: "uniformes_entregados",
+      },
+      {
+        label: "Seguro de atención médica y de vida",
+        type: "flag",
+        flagKey: "seguro_medico_vida",
       },
     ],
   },

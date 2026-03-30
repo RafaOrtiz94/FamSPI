@@ -4,6 +4,7 @@ import Button from "../../../../core/ui/components/Button";
 import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
+import { formatCalendarDate } from "../utils/solicitudesHelpers";
 
 const normalizeStatus = (status = "") => {
  const value = String(status || "").toLowerCase();
@@ -26,9 +27,8 @@ const INITIAL_VISIBLE_ROWS = 25;
 
 const formatDate = (value) => {
  if (!value) return "-";
- const date = new Date(value);
- if (Number.isNaN(date.getTime())) return "-";
- return date.toLocaleDateString("es-EC");
+ const formatted = formatCalendarDate(value);
+ return formatted === "N/A" ? "-" : formatted;
 };
 
 const formatDateTime = (value) => {

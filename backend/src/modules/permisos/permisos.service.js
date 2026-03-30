@@ -704,7 +704,30 @@ async function settleExpiredRecoveryCoordination(row = {}) {
       RETURNING *`,
     [row.id, vacationCharge.hours, vacationCharge.days]
   );
-  return rows[0] || row;
+  const settled = rows[0] || row;
+  if (rows[0]) {
+    try {
+      await logAction({
+        usuario_id: row?.approver_user_id || null,
+        usuario_email: row?.approver_email || "system",
+        modulo: "permisos",
+        accion: "descuento_vacaciones_sin_coordinacion",
+        descripcion: "Se cerró coordinación de recuperación por vencimiento y se aplicó descuento a vacaciones.",
+        datos_nuevos: {
+          solicitud_id: settled.id,
+          recovery_coordination_status: settled.recovery_coordination_status,
+          charged_to_vacation: Boolean(settled.charged_to_vacation),
+          charged_vacation_hours: settled.charged_vacation_hours,
+          charged_vacation_days: settled.charged_vacation_days,
+          charged_to_vacation_reason: settled.charged_to_vacation_reason || "no_recovery_agreement",
+        },
+        contexto: { auto: true },
+      });
+    } catch (auditError) {
+      logger.warn({ auditError, solicitudId: settled.id }, "No se pudo registrar auditoría de cierre automático de coordinación");
+    }
+  }
+  return settled;
 }
 
 async function settleExpiredRecoveryCoordinationRows(rows = []) {
@@ -1463,8 +1486,8 @@ async function createSolicitud({ body, user, meta }) {
   let esRecuperable = false;
   let recoveryPlan = [];
   let recoveryPlanTotalHours = 0;
-  const startDateTimeRaw = payload.fecha_inicio_hora || payload.fecha_inicio_datetime;
-  const endDateTimeRaw = payload.fecha_fin_hora || payload.fecha_fin_datetime;
+  const startDateTimeRaw = payload.fecha_inicio_hora || payload.fecha_inicio_datetime || payload.start_time;
+  const endDateTimeRaw = payload.fecha_fin_hora || payload.fecha_fin_datetime || payload.end_time;
   payload.fecha_inicio_hora = normalizeDateTime(startDateTimeRaw);
   payload.fecha_fin_hora = normalizeDateTime(endDateTimeRaw);
   payload.fecha_inicio = normalizeDateOnly(payload.fecha_inicio || payload.fecha_inicio_hora);
@@ -1601,28 +1624,21 @@ async function createSolicitud({ body, user, meta }) {
     esRecuperable = Boolean(validation.es_recuperable);
 
     if (payload.recovery_plan !== undefined && payload.recovery_plan !== null && payload.recovery_plan !== "") {
-      if (!esRecuperable) {
-        const err = new Error("Este tipo de permiso no permite plan de recuperación según la política vigente.");
-        err.status = 400;
-        throw err;
-      }
-      const normalized = normalizeRecoveryPlan(payload.recovery_plan);
-      recoveryPlan = normalized.plan;
-      recoveryPlanTotalHours = normalized.totalHours;
-      const requestedHours = estimateRequestedHours({
-        duracion_horas: payload.duracion_horas,
-        duracion_dias: payload.duracion_dias,
-      });
-      if (requestedHours > 0 && recoveryPlanTotalHours > requestedHours + 0.01) {
-        const err = new Error("El plan de recuperación excede las horas solicitadas del permiso.");
-        err.status = 400;
-        throw err;
-      }
+      const err = new Error("La coordinación de tramos solo se habilita después de la aprobación definitiva.");
+      err.status = 400;
+      throw err;
     }
   } else if (payload.tipo_solicitud === "vacaciones") {
-    if (Number(payload.duracion_horas || 0) > 0) {
-      payload.fecha_inicio_hora = normalizeDateTime(payload.fecha_inicio_hora || payload.fecha_inicio_datetime);
-      payload.fecha_fin_hora = normalizeDateTime(payload.fecha_fin_hora || payload.fecha_fin_datetime);
+    const hasHourRangePayload =
+      Boolean(payload.fecha_inicio_hora || payload.fecha_inicio_datetime || payload.start_time) &&
+      Boolean(payload.fecha_fin_hora || payload.fecha_fin_datetime || payload.end_time);
+    if (Number(payload.duracion_horas || 0) > 0 || hasHourRangePayload) {
+      payload.fecha_inicio_hora = normalizeDateTime(
+        payload.fecha_inicio_hora || payload.fecha_inicio_datetime || payload.start_time
+      );
+      payload.fecha_fin_hora = normalizeDateTime(
+        payload.fecha_fin_hora || payload.fecha_fin_datetime || payload.end_time
+      );
       if (!payload.fecha_inicio_hora || !payload.fecha_fin_hora) {
         const err = new Error("Para vacaciones por horas debes indicar fecha/hora inicio y fin.");
         err.status = 400;
@@ -1733,7 +1749,7 @@ async function createSolicitud({ body, user, meta }) {
       recoveryPlanTotalHours > 0 ? recoveryPlanTotalHours : null,
       recoveryPlan.length > 0 ? new Date().toISOString() : null,
       recoveryPlan.length > 0 ? payload.user_id : null,
-      esRecuperable ? "pending_approver_proposal" : "not_required",
+      "not_required",
       driveMeta.drive_doc_id || null,
       driveMeta.drive_pdf_id || null,
       driveMeta.drive_doc_link || null,
@@ -2655,8 +2671,9 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
     err.status = 409;
     throw err;
   }
-  if (!["approved", "aprobado"].includes(status)) {
-    const err = new Error("La coordinación de tramos se habilita después de la aprobación definitiva.");
+  const coordinationEnabledStatuses = ["partially_approved", "pending_final", "approved", "aprobado"];
+  if (!coordinationEnabledStatuses.includes(status)) {
+    const err = new Error("La coordinación de tramos se habilita desde la aprobación parcial y en la aprobación final.");
     err.status = 409;
     throw err;
   }
@@ -2820,11 +2837,22 @@ async function listarPendientes({ stage, approver }) {
   if (["approved", "rejected", "cancelled"].includes(String(stage || "").toLowerCase())) {
     statusFilter = String(stage || "").toLowerCase();
   }
+  const normalizedStatusFilter = String(statusFilter || "").toLowerCase();
+  const statusCandidates =
+    normalizedStatusFilter === "approved"
+      ? ["approved", "aprobado"]
+      : normalizedStatusFilter === "rejected"
+      ? ["rejected", "rechazado"]
+      : normalizedStatusFilter === "cancelled"
+      ? ["cancelled", "cancelado"]
+      : normalizedStatusFilter === "pending"
+      ? ["pending", "pendiente"]
+      : [normalizedStatusFilter];
   const roleCandidates = getApproverRoleCandidates(approver);
   if (!approver?.id && roleCandidates.length === 0) return [];
   const { rows } = await db.query(
     `SELECT * FROM permisos_vacaciones
-      WHERE status = $1
+      WHERE LOWER(COALESCE(status, '')) = ANY($1::text[])
         AND ($4::text IS NULL OR LOWER(COALESCE(cancellation_status, 'none')) = $4)
         AND ($5::boolean = false OR LOWER(COALESCE(cancellation_status, 'none')) <> 'pending')
         AND (
@@ -2833,7 +2861,7 @@ async function listarPendientes({ stage, approver }) {
         )
       ORDER BY created_at DESC`,
     [
-      statusFilter,
+      statusCandidates,
       approver?.id || null,
       roleCandidates,
       stage === "cancellation_pending" ? "pending" : null,
@@ -2957,8 +2985,17 @@ function calculateVacationDays(row) {
   const explicitDays = Number(row?.duracion_dias);
   if (Number.isFinite(explicitDays) && explicitDays > 0) return explicitDays;
   if (!row?.fecha_inicio || !row?.fecha_fin) return 0;
-  const start = new Date(row.fecha_inicio);
-  const end = new Date(row.fecha_fin);
+  const startText = String(row.fecha_inicio).trim();
+  const endText = String(row.fecha_fin).trim();
+  const startMatch = startText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const endMatch = endText.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const start = startMatch
+    ? Date.UTC(Number(startMatch[1]), Number(startMatch[2]) - 1, Number(startMatch[3]))
+    : new Date(row.fecha_inicio).getTime();
+  const end = endMatch
+    ? Date.UTC(Number(endMatch[1]), Number(endMatch[2]) - 1, Number(endMatch[3]))
+    : new Date(row.fecha_fin).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
   const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
   return diff >= 0 ? diff + 1 : 0;
 }

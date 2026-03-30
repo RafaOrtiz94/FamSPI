@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { logAction } = require("../../utils/audit");
+const { HASH_ALGORITHM, computeSha256HexFromBase64 } = require("../../utils/documentHash");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 
 const metrics = {
@@ -154,8 +155,16 @@ const ensureApplicantsTables = async () => {
       drive_url TEXT,
       file_name TEXT,
       mime_type TEXT,
+      content_hash_sha256 VARCHAR(64),
+      hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',
       created_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+  await db.query(`
+    ALTER TABLE applicant_documents
+    ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
   `);
 
   await db.query(`
@@ -725,12 +734,20 @@ const upsertApplicantDocument = async (
   driveFileId,
   driveUrl,
   fileName,
-  mime
+  mime,
+  contentHashSha256 = null,
+  hashAlgorithm = null
 ) => {
   const upsertDoc = `
     WITH updated AS (
       UPDATE applicant_documents
-      SET drive_file_id = $3, drive_url = $4, file_name = $5, mime_type = $6, created_at = NOW()
+      SET drive_file_id = $3,
+          drive_url = $4,
+          file_name = $5,
+          mime_type = $6,
+          content_hash_sha256 = COALESCE($7, applicant_documents.content_hash_sha256),
+          hash_algorithm = COALESCE($8, applicant_documents.hash_algorithm, 'SHA-256'),
+          created_at = NOW()
       WHERE applicant_id = $1 AND doc_type = $2
       RETURNING id
     )
@@ -741,13 +758,15 @@ const upsertApplicantDocument = async (
       drive_url,
       file_name,
       mime_type,
+      content_hash_sha256,
+      hash_algorithm,
       created_at
     )
-    SELECT $1, $2, $3, $4, $5, $6, NOW()
+    SELECT $1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'SHA-256'), NOW()
     WHERE NOT EXISTS (SELECT 1 FROM updated)
     RETURNING id
   `;
-  const values = [applicantId, docType, driveFileId, driveUrl, fileName, mime];
+  const values = [applicantId, docType, driveFileId, driveUrl, fileName, mime, contentHashSha256, hashAlgorithm];
   const result = await client.query(upsertDoc, values);
   return result.rows[0] || null;
 };
@@ -766,6 +785,8 @@ const saveDocuments = async (client, applicantId, applicantEmail, payload = {}) 
 
     let driveFileId = null;
     let driveUrl = docPayload.url || null;
+    const contentHashSha256 = computeSha256HexFromBase64(docPayload.base64);
+    const hashAlgorithm = contentHashSha256 ? HASH_ALGORITHM : null;
 
     if (!driveUrl && docPayload.base64) {
       try {
@@ -799,7 +820,9 @@ const saveDocuments = async (client, applicantId, applicantEmail, payload = {}) 
       driveFileId,
       driveUrl,
       docPayload.fileName,
-      docPayload.mime
+      docPayload.mime,
+      contentHashSha256,
+      hashAlgorithm
     );
     if (saved) savedDocs.push({ ...saved, doc_type: docType, drive_url: driveUrl });
   }
@@ -1174,7 +1197,7 @@ const getApplicantById = async (id) => {
     db.query(`SELECT * FROM applicant_work_experience WHERE applicant_id = $1`, [id]),
     db.query(`SELECT * FROM applicant_work_references WHERE applicant_id = $1`, [id]),
     db.query(
-      `SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, created_at
+      `SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, content_hash_sha256, hash_algorithm, created_at
        FROM applicant_documents
        WHERE applicant_id = $1
        ORDER BY created_at DESC`,

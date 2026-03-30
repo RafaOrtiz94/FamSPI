@@ -10,6 +10,8 @@ const { drive, docs } = require("../config/google");
 const { Readable } = require("stream");
 const logger = require("../config/logger");
 
+const { HASH_ALGORITHM, computeSha256HexFromBuffer, registerIntegrity } = require("./documentHash");
+
 // Convierte buffer/base64 en stream
 function bufferToStream(buffer) {
   const readable = new Readable();
@@ -136,13 +138,30 @@ async function replaceTags(documentId, replacements = {}) {
 async function uploadBase64File(name, base64, mimeType = "image/png", parentId) {
   try {
     const buffer = Buffer.from(base64, "base64");
+    const contentHash = computeSha256HexFromBuffer(buffer);
+
     const { data } = await drive.files.create({
       supportsAllDrives: true,
       requestBody: { name, parents: parentId ? [parentId] : undefined },
       media: { mimeType, body: bufferToStream(buffer) },
-      fields: "id, name, mimeType, webViewLink, webContentLink",
+      fields: "id, name, mimeType, webViewLink, webContentLink, md5Checksum",
     });
-    return data;
+
+    const result = {
+      ...data,
+      content_hash_sha256: contentHash,
+      hash_algorithm: HASH_ALGORITHM,
+      md5_drive: data.md5Checksum,
+    };
+
+    // Registrar en la tabla central de integridad
+    await registerIntegrity(data.id, {
+      hash: contentHash,
+      algorithm: HASH_ALGORITHM,
+      md5: data.md5Checksum,
+    });
+
+    return result;
   } catch (err) {
     logger.error({ err }, "❌ uploadBase64File");
     throw err;
@@ -152,10 +171,9 @@ async function uploadBase64File(name, base64, mimeType = "image/png", parentId) 
 /** 📤 Subir archivo desde multer (file.buffer) */
 async function uploadFileToDrive(file, path, parentId) {
   try {
-    const filename = path.split('/').pop();
-    const base64 = file.buffer.toString('base64');
-    const data = await uploadBase64File(filename, base64, file.mimetype, parentId);
-    return data;
+    const filename = path.split("/").pop();
+    const base64 = file.buffer.toString("base64");
+    return await uploadBase64File(filename, base64, file.mimetype, parentId);
   } catch (err) {
     logger.error({ err }, "❌ uploadFileToDrive");
     throw err;
@@ -170,10 +188,13 @@ async function exportPdf(docId, targetFolderId, filename) {
       { responseType: "arraybuffer" }
     );
     const pdfBuffer = Buffer.from(res.data);
+    const contentHash = computeSha256HexFromBuffer(pdfBuffer);
+
     const safeName = (() => {
       if (!filename) return `export-${docId}.pdf`;
       return filename.toLowerCase().endsWith(".pdf") ? filename : `${filename}.pdf`;
     })();
+
     const { data } = await drive.files.create({
       supportsAllDrives: true,
       requestBody: {
@@ -181,9 +202,24 @@ async function exportPdf(docId, targetFolderId, filename) {
         parents: targetFolderId ? [targetFolderId] : undefined,
       },
       media: { mimeType: "application/pdf", body: bufferToStream(pdfBuffer) },
-      fields: "id, name, webViewLink",
+      fields: "id, name, webViewLink, md5Checksum",
     });
-    return data;
+
+    const result = {
+      ...data,
+      content_hash_sha256: contentHash,
+      hash_algorithm: HASH_ALGORITHM,
+      md5_drive: data.md5Checksum,
+    };
+
+    // Registrar en la tabla central de integridad
+    await registerIntegrity(data.id, {
+      hash: contentHash,
+      algorithm: HASH_ALGORITHM,
+      md5: data.md5Checksum,
+    });
+
+    return result;
   } catch (err) {
     logger.error({ err }, "❌ exportPdf");
     throw err;
@@ -199,4 +235,5 @@ module.exports = {
   uploadBase64File,
   uploadFileToDrive,
   exportPdf,
+  drive, // Exportar instancia para cálculos de integridad
 };

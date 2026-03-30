@@ -22,7 +22,9 @@ const {
   uploadBase64File,
   ensureFolder,
   exportPdf,
+  drive: driveInstance,
 } = require("../../utils/drive");
+const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { resolveRequestDriveFolders, padId } = require("../../utils/drivePaths");
 const { logAction } = require("../../utils/audit");
 const { sendMail } = require("../../utils/mailer");
@@ -1308,12 +1310,14 @@ async function saveAttachment({ request_id, files, uploaded_by, driveFolderId })
 
     const name = f.originalname || f.name || `archivo - ${Date.now()} `;
     const mime = f.mimetype || "application/octet-stream";
-    const { id, webViewLink } = await uploadBase64File(name, base64Content, mime, parentFolder);
+    const uploaded = await uploadBase64File(name, base64Content, mime, parentFolder);
+    const { id, webViewLink, content_hash_sha256, hash_algorithm } = uploaded;
+    
     uploadedFiles.push({ id, link: webViewLink });
     await db.query(
-      `INSERT INTO request_attachments(request_id, drive_file_id, drive_link, mime_type, uploaded_by, title)`
-      + `VALUES($1, $2, $3, $4, $5, $6)`,
-      [request_id, id, webViewLink, mime, uploaded_by, name]
+      `INSERT INTO request_attachments(request_id, drive_file_id, drive_link, mime_type, uploaded_by, title, content_hash_sha256, hash_algorithm)`
+      + `VALUES($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [request_id, id, webViewLink, mime, uploaded_by, name, content_hash_sha256, hash_algorithm]
     );
   }
 
@@ -1741,6 +1745,23 @@ async function addDriveAttachment({ request_id, drive_file_id, title, mime_type 
      RETURNING *`,
     [request_id, drive_file_id, drive_link, mime_type, title || "Documento adjunto"],
   );
+
+  const newDoc = rows[0];
+
+  // Resolver integridad en segundo plano para adjuntos existentes
+  if (newDoc && drive_file_id) {
+    resolveExternalDriveIntegrity(drive_file_id, driveInstance)
+      .then(async (result) => {
+        if (result) {
+          await db.query(
+            `UPDATE request_attachments SET content_hash_sha256 = $1, hash_algorithm = $2 WHERE id = $3`,
+            [result.hash, result.algorithm, newDoc.id],
+          );
+          logger.info({ fileId: drive_file_id }, "Integridad resuelta para adjunto de solicitud");
+        }
+      })
+      .catch((err) => logger.warn({ err }, "Error asíncrono resolviendo integridad de adjunto"));
+  }
 
   await logAction({
     module: "requests",

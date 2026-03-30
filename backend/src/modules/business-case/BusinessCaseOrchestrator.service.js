@@ -1,6 +1,8 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 const businessCaseCalculator = require('./businessCaseCalculator.service');
+const integrationService = require('./businessCaseIntegration.service');
+const { normalizeRole, hasRoleToken } = require('../../utils/normalizers');
 
 /**
  * Business Case Orchestrator
@@ -502,6 +504,12 @@ class BusinessCaseOrchestrator {
             const determinations = await this.getDeterminations(bcId);
 
             const validations = [];
+            const technicalValidationDate = this._getValidationDateOnly();
+            const availableTechnicalCapacity = await integrationService.getTechnicalCapacity(technicalValidationDate);
+            const requiredTechnicalCapacity = this._estimateRequiredTechnicalCapacity({
+                operational,
+                determinations
+            });
 
             // Validación 1: Controles de calidad excesivos
             if (operational && determinations.length > 0) {
@@ -542,6 +550,21 @@ class BusinessCaseOrchestrator {
                     type: 'roi',
                     severity: 'error',
                     message: `ROI ${bc.calculated_roi_percentage}% no cumple objetivo ${bc.target_margin_percentage}%`
+                });
+            }
+
+            // Validacion 4: Factibilidad tecnica por capacidad real de tecnicos
+            if (availableTechnicalCapacity <= 0) {
+                validations.push({
+                    type: 'technical_feasibility',
+                    severity: 'error',
+                    message: `No existe capacidad tecnica disponible para ${technicalValidationDate}.`
+                });
+            } else if (availableTechnicalCapacity < requiredTechnicalCapacity) {
+                validations.push({
+                    type: 'technical_feasibility',
+                    severity: 'error',
+                    message: `Capacidad tecnica insuficiente para ${technicalValidationDate}: disponible ${availableTechnicalCapacity}, requerida ${requiredTechnicalCapacity}.`
                 });
             }
 
@@ -644,6 +667,38 @@ class BusinessCaseOrchestrator {
         if (warningCount >= 2) return 'medium';
         if (warningCount === 1) return 'low';
         return 'low';
+    }
+
+    _getValidationDateOnly() {
+        return new Date().toISOString().slice(0, 10);
+    }
+
+    _estimateRequiredTechnicalCapacity({ operational, determinations }) {
+        const shiftsPerDay = Number(operational?.shifts_per_day || 0);
+        const workDaysPerWeek = Number(operational?.work_days_per_week || 0);
+        const hoursPerShift = Number(operational?.hours_per_shift || 0);
+        const testsPerHour = Number(process.env.BC_TECH_TESTS_PER_HOUR || 60);
+        const totalAnnualTests = Array.isArray(determinations)
+            ? determinations.reduce((sum, item) => sum + Number(item?.annual_quantity || 0), 0)
+            : 0;
+
+        let requiredByVolume = 1;
+        if (
+            totalAnnualTests > 0 &&
+            workDaysPerWeek > 0 &&
+            shiftsPerDay > 0 &&
+            hoursPerShift > 0 &&
+            testsPerHour > 0
+        ) {
+            const annualOperationalHours = workDaysPerWeek * shiftsPerDay * hoursPerShift * 52;
+            requiredByVolume = Math.max(
+                1,
+                Math.ceil(totalAnnualTests / (annualOperationalHours * testsPerHour))
+            );
+        }
+
+        const requiredByShifts = shiftsPerDay > 1 ? Math.ceil(shiftsPerDay / 2) : 1;
+        return Math.max(1, requiredByVolume, requiredByShifts);
     }
 
     async getBCMaster(bcId) {

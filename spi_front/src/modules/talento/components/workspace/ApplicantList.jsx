@@ -1,7 +1,15 @@
 import React from "react";
 import { FiUser } from "react-icons/fi";
 
-const ApplicantList = ({ applicants, loading, selectedApplicantId, onSelect }) => {
+const ApplicantList = ({
+  applicants,
+  loading,
+  selectedApplicantId,
+  onSelectApplicant,
+  onSelect,
+}) => {
+ const handleSelectApplicant = onSelectApplicant || onSelect;
+
  if (loading) {
  return (
  <div className="flex justify-center p-8">
@@ -23,7 +31,9 @@ const ApplicantList = ({ applicants, loading, selectedApplicantId, onSelect }) =
  {applicants.map((applicant) => (
  <button
  key={applicant.id}
- onClick={() => onSelect(applicant)}
+ type="button"
+ onClick={() => handleSelectApplicant?.(applicant)}
+ aria-label={`Seleccionar postulante ${applicant.fullname || applicant.email || applicant.id}`}
  className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition ${
  String(applicant.id) === String(selectedApplicantId)
  ? "border-blue-400 bg-blue-50 ring-1 ring-blue-400"
@@ -32,7 +42,7 @@ const ApplicantList = ({ applicants, loading, selectedApplicantId, onSelect }) =
  >
  <div className="flex items-start gap-3">
  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500">
- <FiUser />
+ <FiUser title="Icono de postulante" />
  </div>
  <div className="min-w-0 flex-1">
  <p className="font-medium text-gray-900 truncate">{applicant.fullname}</p>

@@ -20,7 +20,9 @@ const STATUS_LABELS = {
  cancelada: "Cancelada",
 };
 
-const RequestList = ({ requests, selectedRequestId, onSelect }) => {
+const RequestList = ({ requests, selectedRequestId, onSelectRequest, onSelect }) => {
+ const handleSelectRequest = onSelectRequest || onSelect;
+
  if (requests.length === 0) {
  return (
  <div className="p-4 text-center text-sm text-gray-500">
@@ -34,7 +36,9 @@ const RequestList = ({ requests, selectedRequestId, onSelect }) => {
  {requests.map((request) => (
  <button
  key={request.id}
- onClick={() => onSelect(request)}
+ type="button"
+ onClick={() => handleSelectRequest?.(request)}
+ aria-label={`Abrir solicitud ${request.request_number || request.id}`}
  className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition ${
  String(request.id) === String(selectedRequestId)
  ? "border-blue-400 bg-blue-50 ring-1 ring-blue-400"

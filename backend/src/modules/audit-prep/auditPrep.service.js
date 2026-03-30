@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { logAction } = require("../../utils/audit");
+const { HASH_ALGORITHM, computeSha256HexFromBase64 } = require("../../utils/documentHash");
 
 const MODULE = "audit_prep";
 const ALLOWED_MIME_TYPES = new Set([
@@ -291,6 +292,7 @@ async function uploadDocument({ user, section_code, file }) {
   const section = await getSection(section_code);
   assertAllowedSection(section, user?.role);
   const safeFile = validateFilePayload(file);
+  const contentHashSha256 = computeSha256HexFromBase64(safeFile.content);
 
   const rootId = await ensureAuditRoot(settings);
   const folderId = await ensureStoragePath(rootId, section.storage_path);
@@ -311,7 +313,11 @@ async function uploadDocument({ user, section_code, file }) {
       uploaded.id,
       folderId,
       user?.id || null,
-      { webViewLink: uploaded.webViewLink },
+      {
+        webViewLink: uploaded.webViewLink,
+        content_hash_sha256: contentHashSha256,
+        hash_algorithm: contentHashSha256 ? HASH_ALGORITHM : null,
+      },
     ]
   );
 

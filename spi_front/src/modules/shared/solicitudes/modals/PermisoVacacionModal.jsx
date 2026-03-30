@@ -49,7 +49,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  valid_until: "",
  matricula_file: null,
  });
- const [recoveryPlanRows, setRecoveryPlanRows] = useState([]);
  const usesPermisoHoras = (permiso, saludTipo, calamidadTipo) =>
  permiso === "estudios" ||
  permiso === "personal" ||
@@ -144,24 +143,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  return "Horario mixto";
  };
 
- const computeRecoveryHours = (startTime, endTime) => {
- const start = normalizeTimeText(startTime);
- const end = normalizeTimeText(endTime);
- if (!start || !end) return "";
- const [sh, sm] = start.split(":").map(Number);
- const [eh, em] = end.split(":").map(Number);
- const diff = eh * 60 + em - (sh * 60 + sm);
- if (diff <= 0) return "";
- return String(Math.round(((diff / 60) + Number.EPSILON) * 100) / 100);
- };
-
- const estimateRequestedHours = () => {
- const hours = Number(formData.duracion_horas || 0);
- if (Number.isFinite(hours) && hours > 0) return hours;
- const days = Number(formData.duracion_dias || 0);
- if (Number.isFinite(days) && days > 0) return Math.round(((days * 8) + Number.EPSILON) * 100) / 100;
- return 0;
- };
  const getPermisoHourLimit = (permiso) => {
  if (permiso === "estudios") return 3;
  if (permiso === "personal") return 2;
@@ -183,17 +164,18 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  };
 
  const [formData, setFormData] = useState({
- // Común
- fecha_inicio: "",
- fecha_fin: "",
- fecha_inicio_hora: "",
- fecha_fin_hora: "",
+    // Común
+    fecha_inicio: "",
+    fecha_fin: "",
+    fecha_inicio_hora: "",
+    fecha_fin_hora: "",
+    observaciones: "",
 
- // Permisos
- duracion_horas: "",
- tipo_permiso: "",
- subtipo_calamidad: "",
- subtipo_salud: "",
+    // Permisos
+    duracion_horas: "",
+    tipo_permiso: "",
+    subtipo_calamidad: "",
+    subtipo_salud: "",
 
  // Vacaciones
  duracion_dias: "",
@@ -229,13 +211,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setSubtipoCalamidad("");
  }
  }, [tipoPermiso]);
-
- useEffect(() => {
- if (!canBeRecoverableByRule()) {
- setRecoveryPlanRows([]);
- }
- // eslint-disable-next-line react-hooks/exhaustive-deps
- }, [tipoSolicitud, tipoPermiso, subtipoCalamidad, subtipoSalud]);
 
  useEffect(() => {
  const loadEnrollment = async () => {
@@ -435,6 +410,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  fecha_fin: "",
  fecha_inicio_hora: "",
  fecha_fin_hora: "",
+ observaciones: "",
  duracion_horas: "",
  tipo_permiso: "",
  subtipo_calamidad: "",
@@ -455,7 +431,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  valid_until: "",
  matricula_file: null,
  });
- setRecoveryPlanRows([]);
  };
 
  const handleClose = () => {
@@ -563,8 +538,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  payload.fecha_fin_hora = "";
  }
  if (tipoPermiso === "calamidad") {
- payload.subtipo_calamidad = subtipoCalamidad.trim();
- }
+ payload.subtipo_calamidad = String(subtipoCalamidad || "").trim();
+}
  if (tipoPermiso === "salud" && saludDuracionTipo === "horas") {
  payload.duracion_dias = "";
  }
@@ -578,34 +553,10 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  payload.duracion_horas = "";
  }
 
- if (canBeRecoverableByRule() && recoveryPlanRows.length > 0) {
- const normalizedRecoveryPlan = recoveryPlanRows
- .map((row) => {
- const date = row?.date || "";
- const start_time = normalizeTimeText(row?.start_time);
- const end_time = normalizeTimeText(row?.end_time);
- const notes = String(row?.notes || "").trim();
- const hours = Number(computeRecoveryHours(start_time, end_time) || 0);
- return { date, start_time, end_time, notes, hours };
- })
- .filter((row) => row.date && row.start_time && row.end_time && row.hours > 0)
- .map((row) => ({
- date: row.date,
- start_time: row.start_time,
- end_time: row.end_time,
- notes: row.notes || null,
- }));
-
- if (normalizedRecoveryPlan.length === 0) {
- throw new Error("El plan de recuperación contiene tramos incompletos o inválidos.");
- }
- payload.recovery_plan = normalizedRecoveryPlan;
- }
  }
 
  if (tipoSolicitud === "vacaciones" && vacacionMedioDia) {
  payload.duracion_dias = 0.5;
- payload.duracion_horas = 4;
  payload.fecha_fin = payload.fecha_inicio;
  if (!formData.vacation_start_time || !formData.vacation_end_time) {
  throw new Error("Para vacaciones de medio día debes registrar el rango horario.");
@@ -615,9 +566,13 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  if (!startIso || !endIso || new Date(endIso) <= new Date(startIso)) {
  throw new Error("El rango horario de vacaciones no es válido.");
  }
- payload.start_time = startIso;
- payload.end_time = endIso;
- payload.duration_hours = Number(calculateHoursBetween(startIso, endIso) || 0);
+ payload.fecha_inicio_hora = startIso;
+ payload.fecha_fin_hora = endIso;
+ const computedVacationHours = Number(calculateHoursBetween(startIso, endIso) || 0);
+ if (!Number.isFinite(computedVacationHours) || computedVacationHours <= 0) {
+ throw new Error("No se pudo calcular la duración por horas para vacaciones.");
+ }
+ payload.duracion_horas = computedVacationHours;
  }
 
  const response = await createSolicitud(payload);
@@ -636,7 +591,15 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  }
  } catch (error) {
  console.error("Error creating solicitud:", error);
+ const isNetworkError = !error?.response && /failed to fetch|network error|err_failed/i.test(String(error?.message || ""));
+ if (isNetworkError) {
+ showToast(
+ "No se pudo conectar con el servidor. Recarga la página e intenta nuevamente.",
+ "error"
+ );
+ } else {
  showToast(error.response?.data?.message || error.message || "Error al crear la solicitud", "error");
+ }
  } finally {
  setLoading(false);
  hideLoader();
@@ -782,16 +745,6 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  studyForm.valid_from &&
  studyForm.valid_until &&
  studyForm.matricula_file;
- const plannedRecoveryHours =
- Math.round(
- (recoveryPlanRows.reduce(
- (acc, row) => acc + Number(computeRecoveryHours(row.start_time, row.end_time) || 0),
- 0
- ) + Number.EPSILON) * 100
- ) / 100;
- const requestedHours = estimateRequestedHours();
- const isRecoveryPlanComplete = requestedHours > 0 && plannedRecoveryHours >= requestedHours;
-
  return (
  <div className="space-y-4">
  <h3 className="text-lg font-semibold text-gray-900">Tipo de Permiso</h3>
@@ -867,6 +820,17 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  <option value="dias">Días</option>
  <option value="horas">Horas</option>
  </select>
+ </div>
+ <div className="mt-3">
+ <label className="block text-sm font-medium text-gray-700 mb-2">Observaciones / Motivo Detallado</label>
+ <textarea
+ value={formData.observaciones}
+ onChange={(e) => setFormData({ ...formData, observaciones: e.target.value })}
+ placeholder="Proporcione detalles adicionales sobre la calamidad doméstica..."
+ rows={3}
+ className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500"
+ required
+ />
  </div>
  </div>
  )}
@@ -1071,126 +1035,11 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  )}
 
  {canBeRecoverableByRule() && (
- <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 space-y-3">
- <div className="flex items-center justify-between">
- <p className="text-xs font-semibold text-emerald-900">Plan de recuperación (opcional y editable con tu jefe)</p>
- <Button
- type="button"
- variant="secondary"
- className="text-xs px-2 py-1"
- disabled={isRecoveryPlanComplete}
- onClick={() =>
- setRecoveryPlanRows((prev) => [
- ...prev,
- { date: "", start_time: "", end_time: "", notes: "" },
- ])
- }
- >
- {isRecoveryPlanComplete ? "Límite alcanzado" : "+ Tramo"}
- </Button>
- </div>
-
- {recoveryPlanRows.length === 0 ? (
- <p className="text-xs text-emerald-800">
- Puedes dejarlo vacío ahora y coordinarlo luego. Ejemplo: 30 minutos diarios por varios días.
+ <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+ <p className="text-xs font-semibold text-emerald-900">Coordinación de tramos</p>
+ <p className="mt-1 text-xs text-emerald-800">
+ La coordinación de recuperación se habilita después de la aprobación definitiva.
  </p>
- ) : (
- <div className="space-y-2">
- {recoveryPlanRows.map((row, idx) => {
- const computedHours = computeRecoveryHours(row.start_time, row.end_time);
- return (
- <div key={`recovery-row-${idx}`} className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end rounded-md border border-emerald-200 bg-white p-2">
- <div className="sm:col-span-3">
- <label className="block text-[11px] text-gray-600">Fecha</label>
- <input
- type="date"
- value={row.date || ""}
- onChange={(e) =>
- setRecoveryPlanRows((prev) =>
- prev.map((it, itIdx) =>
- itIdx === idx ? { ...it, date: e.target.value } : it
- )
- )
- }
- className="w-full px-2 py-1.5 border border-gray-300 rounded"
- />
- </div>
- <div className="sm:col-span-2">
- <label className="block text-[11px] text-gray-600">Inicio</label>
- <input
- type="time"
- value={row.start_time || ""}
- onChange={(e) =>
- setRecoveryPlanRows((prev) =>
- prev.map((it, itIdx) =>
- itIdx === idx ? { ...it, start_time: e.target.value } : it
- )
- )
- }
- className="w-full px-2 py-1.5 border border-gray-300 rounded"
- />
- </div>
- <div className="sm:col-span-2">
- <label className="block text-[11px] text-gray-600">Fin</label>
- <input
- type="time"
- value={row.end_time || ""}
- onChange={(e) =>
- setRecoveryPlanRows((prev) =>
- prev.map((it, itIdx) =>
- itIdx === idx ? { ...it, end_time: e.target.value } : it
- )
- )
- }
- className="w-full px-2 py-1.5 border border-gray-300 rounded"
- />
- </div>
- <div className="sm:col-span-3">
- <label className="block text-[11px] text-gray-600">Notas</label>
- <input
- type="text"
- value={row.notes || ""}
- onChange={(e) =>
- setRecoveryPlanRows((prev) =>
- prev.map((it, itIdx) =>
- itIdx === idx ? { ...it, notes: e.target.value } : it
- )
- )
- }
- className="w-full px-2 py-1.5 border border-gray-300 rounded"
- placeholder="Ej: recuperación diaria"
- />
- </div>
- <div className="sm:col-span-1 text-center">
- <p className="text-[11px] text-gray-600">h</p>
- <p className="text-xs font-semibold text-emerald-700">{computedHours || "-"}</p>
- </div>
- <div className="sm:col-span-1">
- <Button
- type="button"
- variant="secondary"
- className="w-full text-xs px-2 py-1"
- onClick={() =>
- setRecoveryPlanRows((prev) => prev.filter((_, itIdx) => itIdx !== idx))
- }
- >
- X
- </Button>
- </div>
- </div>
- );
- })}
- <p className="text-xs text-emerald-800">
- Total planificado: <strong>{plannedRecoveryHours}h</strong>
- {requestedHours > 0 ? ` / ${requestedHours}h solicitadas` : ""}
- </p>
- {isRecoveryPlanComplete && (
- <p className="text-xs text-emerald-700">
- Ya alcanzaste las horas solicitadas. No puedes agregar más tramos.
- </p>
- )}
- </div>
- )}
  </div>
  )}
 
@@ -1413,7 +1262,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  disabled={
  !tipoPermiso ||
  (isSalud && !subtipoSalud) ||
- (tipoPermiso === "calamidad" && !subtipoCalamidad.trim()) ||
+ (tipoPermiso === "calamidad" && (!String(subtipoCalamidad || "").trim() || !String(formData.observaciones || "").trim())) ||
  !hasDates ||
  !hasDuration ||
  invalidDateRange ||
@@ -1703,6 +1552,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  : `${formData.duracion_dias} días`}
  </span>
  </div>
+ {tipoPermiso === "calamidad" && formData.observaciones && (
+ <div className="mt-2 pt-2 border-t border-gray-200">
+ <p className="text-[11px] text-gray-500 uppercase font-bold tracking-wider mb-1">Observaciones:</p>
+ <p className="text-sm text-gray-700 italic">"{formData.observaciones}"</p>
+ </div>
+ )}
  </div>
 
  <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-lg space-y-2">

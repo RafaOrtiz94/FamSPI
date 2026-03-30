@@ -1067,10 +1067,218 @@ const syncLocation = async (req, res) => {
     return res.status(400).json({ ok: false, message: "Target de ubicacion invalido" });
   } catch (err) {
     logger.error({ err }, "❌ Error en sync-location");
-    return res.status(500).json({
-      ok: false,
-      message: "Error sincronizando ubicacion",
+    return res.status(500).json({ ok: false, message: "Error sincronizando ubicacion" });
+  }
+};
+
+/**
+ * 📍 Field Clock In - Entry to client visit (iPhone Shortcut compatible)
+ * POST /api/attendance/marcar/visita-entrada
+ * Body: { location, client_id, prospect_name }
+ */
+const clockInField = async (req, res) => {
+  try {
+    const { id: userId, email, role } = req.user || {};
+    const { location, client_id, prospect_name } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const isCommercial = ["comercial", "acp_comercial", "jefe_comercial"].includes(role?.toLowerCase());
+    const isTech = ["tecnico", "jefe_tecnico"].includes(role?.toLowerCase());
+
+    if (!isCommercial && !isTech) {
+      return res.status(403).json({ ok: false, message: "Solo personal de campo puede marcar visitas" });
+    }
+
+    const now = new Date();
+    let result;
+
+    if (client_id) {
+      // 🕵️ Cotejar con cronograma (Schedules)
+      const scheduleCheck = await db.query(
+        `SELECT id FROM schedules 
+         WHERE user_email = $1 AND client_request_id = $2 
+         AND visit_date = CURRENT_DATE AND status IN ('pending', 'approved')`,
+        [email, client_id]
+      );
+
+      // Si no existe en cronograma, registrar como visita no planificada pero permitir el marcado
+      const isPlanned = scheduleCheck.rows.length > 0;
+
+      result = await db.query(
+        `INSERT INTO client_visit_logs (client_request_id, user_email, visit_date, status, hora_entrada, lat_entrada, lng_entrada, is_planned)
+         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5, $6)
+         ON CONFLICT (client_request_id, user_email, visit_date) 
+         DO UPDATE SET status = 'in_visit', hora_entrada = COALESCE(client_visit_logs.hora_entrada, EXCLUDED.hora_entrada), is_planned = EXCLUDED.is_planned
+         RETURNING *`,
+        [client_id, email, now, location?.split(',')[0], location?.split(',')[1], isPlanned]
+      );
+
+      // Actualizar estado del cronograma si existe
+      if (isPlanned) {
+        await db.query(
+          `UPDATE schedules SET status = 'in_progress', actual_start_time = $1 
+           WHERE id = $2`,
+          [now, scheduleCheck.rows[0].id]
+        );
+      }
+    } else if (prospect_name) {
+      // Logic for prospect visit
+      result = await db.query(
+        `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng)
+         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5)
+         RETURNING *`,
+        [email, prospect_name, now, location?.split(',')[0], location?.split(',')[1]]
+      );
+    } else {
+      return res.status(400).json({ ok: false, message: "ID de cliente o nombre de prospecto requerido" });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: `Entrada a visita registrada para ${prospect_name || 'cliente #' + client_id}`,
+      data: result.rows[0]
     });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-in-field");
+    return res.status(500).json({ ok: false, message: "Error registrando entrada a visita" });
+  }
+};
+
+/**
+ * 📍 Field Clock Out - Exit from client visit (iPhone Shortcut compatible)
+ * POST /api/attendance/marcar/visita-salida
+ * Body: { location, client_id, prospect_name, observations }
+ */
+const clockOutField = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location, client_id, prospect_name, observations } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const now = new Date();
+    let result;
+
+    if (client_id) {
+      result = await db.query(
+        `UPDATE client_visit_logs 
+         SET status = 'visited', hora_salida = $1, lat_salida = $2, lng_salida = $3, observaciones = $4,
+             duracion_minutos = EXTRACT(EPOCH FROM ($1 - hora_entrada))/60
+         WHERE user_email = $5 AND client_request_id = $6 AND visit_date = CURRENT_DATE AND status = 'in_visit'
+         RETURNING *`,
+        [now, location?.split(',')[0], location?.split(',')[1], observations, email, client_id]
+      );
+
+      // Actualizar cronograma a completado
+      if (result.rows.length > 0) {
+        await db.query(
+          `UPDATE schedules SET status = 'completed', actual_end_time = $1 
+           WHERE user_email = $2 AND client_request_id = $3 AND visit_date = CURRENT_DATE`,
+          [now, email, client_id]
+        );
+      }
+    } else if (prospect_name) {
+      result = await db.query(
+        `UPDATE prospect_visits 
+         SET status = 'visited', check_out_time = $1, check_out_lat = $2, check_out_lng = $3, observations = $4
+         WHERE user_email = $5 AND prospect_name = $6 AND visit_date = CURRENT_DATE AND status = 'in_visit'
+         RETURNING *`,
+        [now, location?.split(',')[0], location?.split(',')[1], observations, email, prospect_name]
+      );
+    }
+
+    if (!result?.rows?.length) {
+      return res.status(404).json({ ok: false, message: "No se encontró una visita activa para cerrar hoy" });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: "Salida de visita registrada correctamente",
+      data: result.rows[0]
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-out-field");
+    return res.status(500).json({ ok: false, message: "Error registrando salida de visita" });
+  }
+};
+
+/**
+ * 🚨 Unexpected Exit - Start (iPhone Shortcut compatible)
+ * POST /api/attendance/marcar/salida-imprevista
+ * Body: { location, description }
+ */
+const clockOutUnexpected = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location, description } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    // Check if there is already an active exception
+    const active = await db.query(
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
+      [userId]
+    );
+
+    if (active.rows.length > 0) {
+      return res.status(400).json({
+        ok: false,
+        message: "Ya tienes una salida en curso. Complétala antes de iniciar otra."
+      });
+    }
+
+    const result = await db.query(
+      `INSERT INTO attendance_exceptions (user_id, date, type, description, start_time, start_location, status)
+       VALUES ($1, CURRENT_DATE, 'IMPREVISTO', $2, NOW(), $3, 'ACTIVE')
+       RETURNING *`,
+      [userId, description || "Salida imprevista vía atajo", location]
+    );
+
+    return res.status(200).json({
+      ok: true,
+      message: "Salida imprevista registrada correctamente",
+      data: result.rows[0]
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-out-unexpected");
+    return res.status(500).json({ ok: false, message: "Error registrando salida imprevista" });
+  }
+};
+
+/**
+ * 🏠 Unexpected Return - End (iPhone Shortcut compatible)
+ * POST /api/attendance/marcar/regreso-imprevisto
+ * Body: { location }
+ */
+const clockInUnexpected = async (req, res) => {
+  try {
+    const { id: userId, email } = req.user || {};
+    const { location } = req.body;
+
+    if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
+
+    const now = new Date();
+    const result = await db.query(
+      `UPDATE attendance_exceptions 
+       SET status = 'COMPLETED', end_time = $1, end_location = $2
+       WHERE user_id = $3 AND status != 'COMPLETED'
+       RETURNING *`,
+      [now, location, userId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ ok: false, message: "No se encontró una salida imprevista activa" });
+    }
+
+    return res.status(200).json({
+      ok: true,
+      message: "Regreso de salida imprevista registrado correctamente",
+      data: result.rows[0]
+    });
+  } catch (err) {
+    logger.error({ err }, "❌ Error en clock-in-unexpected");
+    return res.status(500).json({ ok: false, message: "Error registrando regreso imprevisto" });
   }
 };
 
@@ -1228,6 +1436,10 @@ module.exports = {
   clockOutLunch,
   clockInLunch,
   clockOut,
+  clockInField,
+  clockOutField,
+  clockOutUnexpected,
+  clockInUnexpected,
   registerException,
   updateExceptionStatus,
   getActiveException,

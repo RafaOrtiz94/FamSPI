@@ -164,8 +164,8 @@ export const RoleRedirect = () => {
  };
 
  const target =
- roleRoutes[scope] ||
  roleRoutes[role] ||
+ roleRoutes[scope] ||
  (role.includes("pendiente") || role.includes("pending") || scope.includes("pendiente") || scope.includes("pending")
  ? "/registro-en-proceso"
  : "/unauthorized");

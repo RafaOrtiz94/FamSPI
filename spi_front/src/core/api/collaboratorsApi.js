@@ -15,12 +15,13 @@ export const updateCollaboratorProfile = async (id, payload) => {
   return data;
 };
 
-export const uploadCollaboratorDocument = async (id, docType, file) => {
+export const uploadCollaboratorDocument = async (id, docType, file, options = {}) => {
   const formData = new FormData();
   formData.append('docType', docType);
   formData.append('file', file);
   const { data } = await api.post(`/collaborators/${id}/documents`, formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    ...options,
   });
   return data;
 };

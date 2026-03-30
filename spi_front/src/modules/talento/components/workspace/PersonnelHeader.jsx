@@ -17,11 +17,14 @@ const PersonnelHeader = ({
  selectedCollaborator,
  selectedApplicant,
  workflow,
+ onProfileSave,
  onSave,
  saving,
  loading,
- onToggleSidebar, // For mobile if needed
+ onSidebarToggle, // For mobile if needed
+ onToggleSidebar, // Legacy alias
 }) => {
+ const handleProfileSave = onProfileSave || onSave;
  const normalizedStatus = String(selectedRequest?.status || "").trim().toLowerCase();
  const statusMeta = STATUS_META[normalizedStatus] || { label: "En seguimiento", className: "text-blue-600" };
 
@@ -58,10 +61,11 @@ const PersonnelHeader = ({
  <div className="flex items-center gap-2">
  <Button
  variant="primary"
- icon={FiSave}
- onClick={onSave}
+ icon={<FiSave title="Icono de guardado" />}
+ onClick={handleProfileSave}
  disabled={saving || loading}
  className="w-full sm:w-auto"
+ aria-label="Guardar cambios del perfil del colaborador"
  >
  {saving ? "Guardando..." : "Guardar Cambios"}
  </Button>
@@ -132,10 +136,11 @@ const PersonnelHeader = ({
  <div className="flex items-center gap-2">
  <Button
  variant="primary"
- icon={FiSave}
- onClick={onSave}
+ icon={<FiSave title="Icono de guardado" />}
+ onClick={handleProfileSave}
  disabled={saving || loading}
  className="w-full sm:w-auto"
+ aria-label="Guardar cambios de la solicitud"
  >
  {saving ? "Guardando..." : "Guardar Cambios"}
  </Button>

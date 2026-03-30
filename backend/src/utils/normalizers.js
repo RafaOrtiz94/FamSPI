@@ -112,6 +112,85 @@ const normalizeRequest = (row) => {
   return normalizeRow(row, dateFields, numericFields);
 };
 
+/**
+ * Normalize role tokens to standard underscore-separated lowercase
+ */
+const normalizeRole = (role) => {
+  return String(role || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+};
+
+/**
+ * Extract and normalize all roles from a user object
+ */
+const getUserRoles = (user) => {
+  const candidates = [];
+  if (Array.isArray(user?.role)) {
+    candidates.push(...user.role);
+  } else if (user?.role) {
+    candidates.push(user.role);
+  }
+  if (Array.isArray(user?.roles)) {
+    candidates.push(...user.roles);
+  }
+  if (user?.scope) {
+    candidates.push(user.scope);
+  }
+  return Array.from(
+    new Set(
+      candidates
+        .flatMap((value) => String(value || "").split(/[,\s]+/))
+        .map((role) => normalizeRole(role))
+        .filter(Boolean)
+    )
+  );
+};
+
+/**
+ * Check if a user has a specific role token
+ */
+const hasRoleToken = (user, token) => {
+  if (!token) return false;
+  const normalizedToken = normalizeRole(token);
+  const compactToken = normalizedToken.replace(/_/g, "");
+  return getUserRoles(user).some((role) => {
+    const compactRole = String(role || "").replace(/_/g, "");
+    return (
+      role === normalizedToken ||
+      role.includes(normalizedToken) ||
+      compactRole === compactToken ||
+      compactRole.includes(compactToken)
+    );
+  });
+};
+
+/**
+ * Normalize offer kind to canonical values
+ */
+const normalizeOfferKind = (rawOfferKind) => {
+  const CANONICAL_MAP = {
+    venta: "venta",
+    comodato: "comodato",
+    alquiler: "alquiler",
+    prestamo: "alquiler",
+    alquiler_transferencia_dominio: "alquiler_transferencia_dominio",
+    alquiler_con_transferencia_de_dominio: "alquiler_transferencia_dominio"
+  };
+  const ALLOWED = ["venta", "comodato", "alquiler", "alquiler_transferencia_dominio"];
+
+  const normalized = String(rawOfferKind || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+  if (!normalized) return "venta";
+  if (CANONICAL_MAP[normalized]) return CANONICAL_MAP[normalized];
+  return ALLOWED.includes(normalized) ? normalized : "venta";
+};
+
 module.exports = {
   normalizeDateTime,
   toNumberOrZero,
@@ -119,4 +198,8 @@ module.exports = {
   normalizeRow,
   normalizeBusinessCase,
   normalizeRequest,
+  normalizeRole,
+  getUserRoles,
+  hasRoleToken,
+  normalizeOfferKind,
 };

@@ -74,8 +74,8 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
  {selectedRequest ? (
  <PersonnelRequestReview
  request={selectedRequest}
- onCancel={handleBack}
- onUpdate={handleUpdated}
+ onRequestCancel={handleBack}
+ onRequestUpdate={handleUpdated}
  canApprove={canApprove}
  />
  ) : (
@@ -85,11 +85,13 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
  value={search}
  onChange={(e) => setSearch(e.target.value)}
  placeholder="Buscar por puesto, solicitante o numero"
+ aria-label="Buscar solicitudes de personal"
  className="flex-1 min-w-[180px] rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
  />
  <select
  value={filterStatus}
  onChange={(e) => setFilterStatus(e.target.value)}
+ aria-label="Filtrar solicitudes por estado"
  className="rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
  >
  <option value="all">Todas</option>
@@ -100,7 +102,7 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
  <option value="en_proceso">En proceso</option>
  <option value="completada">Completadas</option>
  </select>
- <Button variant="secondary" onClick={loadRequests} disabled={loading}>
+ <Button variant="secondary" onClick={loadRequests} disabled={loading} aria-label="Actualizar listado de solicitudes">
  Actualizar
  </Button>
  </div>
@@ -132,6 +134,7 @@ const PersonnelApprovalsModal = ({ open, onClose, canApprove }) => {
  variant="secondary"
  onClick={() => handleOpenReview(req.id)}
  disabled={loadingDetail}
+ aria-label={`Ver detalle de solicitud ${req.request_number || req.id}`}
  >
  Ver detalle
  </Button>

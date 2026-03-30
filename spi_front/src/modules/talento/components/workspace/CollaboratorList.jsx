@@ -1,7 +1,15 @@
 import React from "react";
 import { FiUsers } from "react-icons/fi";
 
-const CollaboratorList = ({ collaborators, loading, selectedCollaboratorId, onSelect }) => {
+const CollaboratorList = ({
+  collaborators,
+  loading,
+  selectedCollaboratorId,
+  onSelectCollaborator,
+  onSelect,
+}) => {
+ const handleSelectCollaborator = onSelectCollaborator || onSelect;
+
  if (loading) {
  return (
  <div className="flex justify-center p-8">
@@ -23,7 +31,9 @@ const CollaboratorList = ({ collaborators, loading, selectedCollaboratorId, onSe
  {collaborators.map((collaborator) => (
  <button
  key={collaborator.id}
- onClick={() => onSelect(collaborator)}
+ type="button"
+ onClick={() => handleSelectCollaborator?.(collaborator)}
+ aria-label={`Seleccionar colaborador ${collaborator.fullname || collaborator.email || collaborator.id}`}
  className={`w-full text-left rounded-lg border px-3 py-2 text-sm transition ${
  String(collaborator.id) === String(selectedCollaboratorId)
  ? "border-blue-400 bg-blue-50 ring-1 ring-blue-400"
@@ -32,7 +42,7 @@ const CollaboratorList = ({ collaborators, loading, selectedCollaboratorId, onSe
  >
  <div className="flex items-start gap-3">
  <div className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500">
- <FiUsers />
+ <FiUsers title="Icono de colaborador" />
  </div>
  <div className="min-w-0 flex-1">
  <p className="font-medium text-gray-900 truncate">

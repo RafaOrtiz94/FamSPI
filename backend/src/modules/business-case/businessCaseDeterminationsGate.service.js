@@ -1,4 +1,7 @@
 const db = require("../../config/db");
+const logger = require("../../config/logger");
+const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
+const { drive } = require("../../utils/drive");
 
 const DETERMINATIONS_DEADLINE_HOURS = 48;
 const DETERMINATIONS_DOCUMENT_VIEW_ROLES = new Set([
@@ -170,7 +173,25 @@ async function saveCurrentDocument({
       ],
     );
     await client.query("COMMIT");
-    return rows[0] || null;
+
+    const newDoc = rows[0];
+
+    // Si no hay hash pero hay file_id, intentar resolver integridad en segundo plano
+    if (!documentHashSha256 && newDoc?.drive_file_id) {
+      resolveExternalDriveIntegrity(newDoc.drive_file_id, drive)
+        .then(async (result) => {
+          if (result) {
+            await db.query(
+              `UPDATE bc_determinations_documents SET document_hash_sha256 = $1, metadata = jsonb_set(metadata, '{hash_algorithm}', $2) WHERE id = $3`,
+              [result.hash, JSON.stringify(result.algorithm), newDoc.id],
+            );
+            logger.info({ fileId: newDoc.drive_file_id }, "Integridad resuelta para documento estadístico de BC");
+          }
+        })
+        .catch((err) => logger.warn({ err }, "Error asíncrono resolviendo integridad de documento estadístico de BC"));
+    }
+
+    return newDoc || null;
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;

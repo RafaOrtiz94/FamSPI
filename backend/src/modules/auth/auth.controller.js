@@ -41,10 +41,11 @@ const ROLE_META = {
   director: { scope: "gerencia", dashboard: "/dashboard/gerencia" },
   finanzas: { scope: "finanzas", dashboard: "/dashboard/finanzas" },
   jefe_finanzas: { scope: "finanzas", dashboard: "/dashboard/finanzas" },
-  comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   jefe_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   backoffice_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   acp_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  analista_comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
+  comercial: { scope: "comercial", dashboard: "/dashboard/comercial" },
   servicio_tecnico: {
     scope: "servicio_tecnico",
     dashboard: "/dashboard/servicio-tecnico",

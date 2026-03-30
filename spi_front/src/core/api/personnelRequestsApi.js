@@ -96,12 +96,13 @@ export const linkApplicantToRequest = async (requestId, applicantId) => {
 /**
  * Subir documento del personal seleccionado
  */
-export const uploadPersonnelRequestDocument = async (id, docType, file) => {
+export const uploadPersonnelRequestDocument = async (id, docType, file, options = {}) => {
  const formData = new FormData();
  formData.append('doc_type', docType);
  formData.append('file', file);
  const response = await api.post(`/personnel-requests/${id}/documents`, formData, {
- headers: { 'Content-Type': 'multipart/form-data' }
+ headers: { 'Content-Type': 'multipart/form-data' },
+ ...options,
  });
  return response.data;
 };

@@ -97,6 +97,7 @@ try {
     "--set-secrets", "SECRET_KEY=SECRET_KEY:latest",
     "--set-secrets", "REFRESH_SECRET_KEY=REFRESH_SECRET_KEY:latest",
     "--set-secrets", "GOOGLE_CLIENT_SECRET=GOOGLE_CLIENT_SECRET:latest",
+    "--set-secrets", "GOOGLE_MAPS_SERVER_API_KEY=GOOGLE_MAPS_SERVER_API_KEY:latest",
     "--set-secrets", "SMTP_PASS=SMTP_PASS:latest",
     "--set-secrets", "JOBS_KEY=JOBS_KEY:latest",
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"

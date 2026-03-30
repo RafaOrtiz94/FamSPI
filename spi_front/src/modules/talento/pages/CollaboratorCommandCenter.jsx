@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import toast from "react-hot-toast";
 import {
   FiAlertCircle,
-  FiArrowRight,
   FiCheckCircle,
   FiClipboard,
   FiFilePlus,
@@ -21,11 +20,9 @@ import {
 } from "../components/collaboratorProfileDefinitions";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
 import ApplicantList from "../components/workspace/ApplicantList";
-import PersonnelChecklist from "../components/workspace/PersonnelChecklist";
-import PersonnelDocuments from "../components/workspace/PersonnelDocuments";
-import PersonnelProfile from "../components/workspace/PersonnelProfile";
 import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
 import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
+import WorkspaceErrorBoundary from "../components/workspace/WorkspaceErrorBoundary";
 import CommandCenterJourneyPanel from "../components/command-center/CommandCenterJourneyPanel";
 import CommandCenterSkeleton, {
   JourneyPanelSkeleton,
@@ -117,6 +114,10 @@ const overviewCards = [
   },
 ];
 
+const PersonnelProfile = lazy(() => import("../components/workspace/PersonnelProfile"));
+const PersonnelChecklist = lazy(() => import("../components/workspace/PersonnelChecklist"));
+const PersonnelDocuments = lazy(() => import("../components/workspace/PersonnelDocuments"));
+
 const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const [focusMode, setFocusMode] = useState(false);
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -144,6 +145,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     profileErrors,
     documents,
     docUploading,
+    docUploadProgress,
     activeView,
     setActiveView,
     activeTab,
@@ -669,9 +671,9 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const renderContextContent = () => {
     if (isRequestContext && !requestWorkspaceReady) {
       return (
-        <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
+          <div className="rounded-[28px] border border-amber-200 bg-amber-50 p-5 text-sm text-amber-900">
           <div className="flex items-start gap-3">
-            <FiAlertCircle className="mt-0.5 shrink-0" />
+            <FiAlertCircle className="mt-0.5 shrink-0" title="Icono de advertencia de flujo" />
             <div>
               <p className="font-semibold">
                 Esta solicitud aun no habilita el expediente operativo.
@@ -688,21 +690,31 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     switch (activeTab) {
       case "documents":
         return (
-          <PersonnelDocuments
-            documents={documents}
-            onUpload={handleUploadDocument}
-            uploadingDocKey={docUploading}
-          />
+          <WorkspaceErrorBoundary
+            title="No se pudo cargar Documentos"
+            message="El panel documental falló al renderizarse. Reintenta la carga."
+          >
+            <Suspense fallback={<CommandCenterSkeleton />}>
+              <PersonnelDocuments
+                documents={documents}
+                onDocumentUpload={handleUploadDocument}
+                uploadingDocKey={docUploading}
+                uploadProgress={docUploadProgress}
+              />
+            </Suspense>
+          </WorkspaceErrorBoundary>
         );
       case "checklist":
         return (
-          <PersonnelChecklist
-            profileData={profileData}
-            documents={documents}
-            onToggleFlag={handleChecklistToggleValidated}
-            onUpload={handleUploadDocument}
-            uploadingDocKey={docUploading}
-          />
+          <Suspense fallback={<CommandCenterSkeleton />}>
+            <PersonnelChecklist
+              profileData={profileData}
+              documents={documents}
+              onChecklistFlagToggle={handleChecklistToggleValidated}
+              onDocumentUpload={handleUploadDocument}
+              uploadingDocKey={docUploading}
+            />
+          </Suspense>
         );
       case "applicant":
         return (
@@ -718,7 +730,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                 applicants={applicants}
                 loading={applicantsLoading}
                 selectedApplicantId={selectedApplicantId}
-                onSelect={handleSelectApplicant}
+                onSelectApplicant={handleSelectApplicant}
               />
             </div>
           </div>
@@ -728,10 +740,10 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
           <PersonnelRequestComments
             comments={selectedRequest?.comments || []}
             commentText={workflowComment}
-            setCommentText={setWorkflowComment}
+            onCommentTextChange={setWorkflowComment}
             commentInternal={workflowCommentInternal}
-            setCommentInternal={setWorkflowCommentInternal}
-            onAddComment={handleAddComment}
+            onCommentInternalChange={setWorkflowCommentInternal}
+            onCommentSubmit={handleAddComment}
             saving={workflowCommentSaving}
             canMarkInternal={canUnlockSections}
           />
@@ -739,16 +751,28 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
       case "profile":
       default:
         return (
-          <PersonnelProfile
-            profileData={profileData}
-            onChange={handleProfileChangeValidated}
-            onSave={handleValidatedSaveProfile}
-            loading={profileLoading}
-            saving={profileSaving}
-            errors={profileErrorMap}
-            canUnlockSections={canUnlockSections}
-            sections={isCollaboratorContext ? profileSections : applicantProfileSections}
-          />
+          <WorkspaceErrorBoundary
+            title="No se pudo cargar Perfil"
+            message="El formulario del perfil encontró un error. Reintenta la carga."
+          >
+            <Suspense fallback={<CommandCenterSkeleton />}>
+              <PersonnelProfile
+                profileData={profileData}
+                onProfileFieldChange={handleProfileChangeValidated}
+                onProfileSave={handleValidatedSaveProfile}
+                loading={profileLoading}
+                saving={profileSaving}
+                errors={profileErrorMap}
+                sections={isCollaboratorContext ? profileSections : applicantProfileSections}
+                workflowStage={selectedRequest?.status || (isCollaboratorContext ? "completada" : "pendiente")}
+                draftKey={
+                  isCollaboratorContext
+                    ? `collaborator:${selectedCollaboratorId || "active"}`
+                    : `request:${selectedRequest?.id || "active"}`
+                }
+              />
+            </Suspense>
+          </WorkspaceErrorBoundary>
         );
     }
   };
@@ -810,8 +834,8 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
         (collaboratorProfileLoading || collaboratorProfileSyncing)));
 
   return (
-    <DashboardLayout includeWidgets={false} className="bg-slate-100">
-      <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-6">
+    <DashboardLayout includeWidgets={false} className="bg-slate-100 dark:bg-slate-900 dark:text-slate-100">
+      <div className="mx-auto flex w-full max-w-[1480px] flex-col gap-6 text-slate-900 dark:text-slate-100">
         {showLoadingSkeleton || showEntityBootstrapSkeleton ? (
           <CommandCenterSkeleton />
         ) : (
@@ -851,7 +875,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                   return (
                     <div key={card.key} className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                       <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700">
-                        <Icon size={20} />
+                        <Icon size={20} title={`Icono de resumen: ${card.title}`} />
                       </div>
                       <h3 className="mt-4 text-base font-semibold text-slate-900">{card.title}</h3>
                       <p className="mt-2 text-sm leading-6 text-slate-600">{card.detail}</p>
@@ -895,19 +919,10 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                       onChangeTab={setActiveTab}
                       footer={
                         profileData ? (
-                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                          <div className="flex flex-col gap-3">
                             <p className="text-xs text-slate-500">
                               Validacion activa con React Hook Form + Zod antes de persistir en JSONB.
                             </p>
-                            <Button
-                              variant="primary"
-                              size="sm"
-                              onClick={handleValidatedSaveProfile}
-                              disabled={profileSaving || profileLoading}
-                              rightIcon={FiArrowRight}
-                            >
-                              Guardar cambios
-                            </Button>
                           </div>
                         ) : null
                       }
@@ -936,7 +951,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
                               </option>
                             ))}
                           </select>
-                          <Button type="submit" variant="secondary" size="sm" className="mt-4 w-full">
+                          <Button type="submit" variant="secondary" size="sm" className="mt-4 w-full" aria-label="Guardar responsable operativo de la solicitud">
                             Guardar responsable
                           </Button>
                         </form>
@@ -964,7 +979,13 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
         />
 
         <div className="fixed bottom-5 right-5 z-30 xl:hidden">
-          <Button variant="primary" size="sm" onClick={() => setBrowserOpen(true)} leftIcon={FiMenu}>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setBrowserOpen(true)}
+            leftIcon={<FiMenu title="Icono de navegación" />}
+            aria-label="Abrir panel de navegación contextual"
+          >
             Navegar
           </Button>
         </div>

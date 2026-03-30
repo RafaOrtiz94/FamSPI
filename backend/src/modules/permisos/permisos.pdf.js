@@ -738,6 +738,13 @@ async function generateFirmaLegalValidationPdf({ solicitud, signatures = [], ver
 function formatDate(date, options = {}) {
   const includeTime = Boolean(options.includeTime);
   if (!date) return "";
+  const rawValue = String(date).trim();
+  const dateOnlyMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  // Preserve calendar dates exactly as stored when the value has no time component.
+  if (!includeTime && dateOnlyMatch) {
+    const [, year, month, day] = dateOnlyMatch;
+    return `${day}/${month}/${year}`;
+  }
   const d = new Date(date);
   if (Number.isNaN(d.getTime())) return "";
   if (includeTime) {

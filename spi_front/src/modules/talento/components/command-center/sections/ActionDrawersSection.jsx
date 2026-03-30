@@ -31,9 +31,10 @@ const ActionDrawersSection = ({
               <button
                 type="button"
                 onClick={onCloseBrowser}
+                aria-label="Cerrar navegador contextual"
                 className="rounded-full border border-slate-300 bg-white p-2 text-slate-700"
               >
-                <FiX />
+                <FiX title="Icono para cerrar panel" />
               </button>
             </div>
             <CommandCenterEntityBrowser {...browserProps} />
@@ -57,9 +58,10 @@ const ActionDrawersSection = ({
               <button
                 type="button"
                 onClick={onCloseCreateDrawer}
+                aria-label="Cerrar formulario de solicitud"
                 className="rounded-full border border-slate-300 bg-white p-2 text-slate-700"
               >
-                <FiX />
+                <FiX title="Icono para cerrar panel" />
               </button>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -80,15 +82,16 @@ const ActionDrawersSection = ({
               <button
                 type="button"
                 onClick={onCloseReview}
+                aria-label="Cerrar revisión de solicitud"
                 className="rounded-full border border-slate-300 bg-white p-2 text-slate-700 shadow-sm"
               >
-                <FiX />
+                <FiX title="Icono para cerrar modal de revisión" />
               </button>
             </div>
             <PersonnelRequestReview
               request={reviewRequestData}
-              onCancel={onCloseReview}
-              onUpdate={onRequestReviewed}
+              onRequestCancel={onCloseReview}
+              onRequestUpdate={onRequestReviewed}
               canApprove={canApprovePersonnel}
             />
           </div>

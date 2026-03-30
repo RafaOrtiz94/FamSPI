@@ -11,7 +11,8 @@ const { PrivatePurchaseStateMachine, PRIVATE_PURCHASE_STATES, FLOW_TYPES } = req
 const notificationManager = require('../notifications/notificationManager');
 const { createDeliveryEvents } = require('../calendar/calendar.service');
 const { createAllDayEvent } = require("../../utils/calendar");
-const { uploadBase64File, ensureFolder } = require("../../utils/drive");
+const { uploadBase64File, ensureFolder, drive } = require("../../utils/drive");
+const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { sendAndArchive } = require("../../utils/emailArchive");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
@@ -1568,6 +1569,10 @@ class PrivatePurchasesService {
       const targetFolder = await ensureFolder('Contrato firmado cliente', baseFolderId);
       const stored = await uploadBase64File(fileName, contractBase64, mimeType || 'application/pdf', targetFolder?.id || baseFolderId);
       resolvedFileId = stored.id;
+    } else {
+      // Si recibimos un ID externo, resolver integridad en segundo plano
+      resolveExternalDriveIntegrity(resolvedFileId, drive)
+        .catch((err) => logger.warn({ err, fileId: resolvedFileId }, "Error resolviendo integridad externa para contrato privado"));
     }
 
     const { rows: updatedRows } = await db.query(

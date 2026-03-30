@@ -12,13 +12,20 @@ const formatDateTime = (value) => {
 const PersonnelRequestComments = ({
  comments = [],
  commentText,
+ onCommentTextChange,
  setCommentText,
  commentInternal,
+ onCommentInternalChange,
  setCommentInternal,
+ onCommentSubmit,
  onAddComment,
  saving = false,
  canMarkInternal = false,
 }) => {
+ const handleCommentTextChange = onCommentTextChange || setCommentText;
+ const handleCommentInternalChange = onCommentInternalChange || setCommentInternal;
+ const handleCommentSubmit = onCommentSubmit || onAddComment;
+
  return (
  <div className="space-y-4">
  <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -29,15 +36,16 @@ const PersonnelRequestComments = ({
  Cada comentario queda asociado al usuario, fecha y visibilidad.
  </p>
  </div>
- <FiMessageSquare className="text-slate-400" size={20} />
+ <FiMessageSquare className="text-slate-400" size={20} title="Icono de comentarios" />
  </div>
 
- <form className="space-y-3" onSubmit={onAddComment}>
+ <form className="space-y-3" onSubmit={handleCommentSubmit}>
  <textarea
  className="min-h-[120px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
  placeholder="Escribe un comentario operativo o una nota interna"
  value={commentText}
- onChange={(e) => setCommentText(e.target.value)}
+ onChange={(e) => handleCommentTextChange?.(e.target.value)}
+ aria-label="Campo para registrar comentario operativo"
  />
  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
  {canMarkInternal ? (
@@ -45,9 +53,10 @@ const PersonnelRequestComments = ({
  <input
  type="checkbox"
  checked={commentInternal}
- onChange={(e) => setCommentInternal(e.target.checked)}
+ onChange={(e) => handleCommentInternalChange?.(e.target.checked)}
+ aria-label="Marcar comentario como interno"
  />
- <FiLock size={14} />
+ <FiLock size={14} title="Icono de comentario interno" />
  Comentario interno
  </label>
  ) : (
@@ -55,7 +64,7 @@ const PersonnelRequestComments = ({
  Los comentarios externos quedan visibles en el flujo del solicitante.
  </div>
  )}
- <Button type="submit" variant="primary" disabled={saving || !String(commentText || "").trim()}>
+ <Button type="submit" variant="primary" disabled={saving || !String(commentText || "").trim()} aria-label="Agregar comentario al flujo de solicitud">
  {saving ? "Guardando..." : "Agregar comentario"}
  </Button>
  </div>
@@ -72,12 +81,12 @@ const PersonnelRequestComments = ({
  <div key={comment.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
  <div className="mb-2 flex flex-wrap items-center gap-2">
  <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">
- <FiUser size={12} />
+ <FiUser size={12} title="Icono de autor de comentario" />
  {comment.user_name || comment.user_email || "Sistema"}
  </span>
  {comment.is_internal ? (
  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-[11px] font-semibold text-amber-700">
- <FiLock size={12} />
+ <FiLock size={12} title="Icono de comentario interno" />
  Interno
  </span>
  ) : (

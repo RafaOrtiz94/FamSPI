@@ -47,6 +47,26 @@ export const getClientDetail = async (clientId) => {
  return data.data || data;
 };
 
+export const fetchClientLocations = async (clientId) => {
+ const { data } = await api.get(`/clients/${clientId}/locations`);
+ return data.data || [];
+};
+
+export const addClientLocation = async (clientId, payload = {}) => {
+ const { data } = await api.post(`/clients/${clientId}/locations`, payload);
+ return data.data || data;
+};
+
+export const updateClientLocation = async (clientId, locationId, payload = {}) => {
+ const { data } = await api.put(`/clients/${clientId}/locations/${locationId}`, payload);
+ return data.data || data;
+};
+
+export const removeClientLocation = async (clientId, locationId) => {
+ const { data } = await api.delete(`/clients/${clientId}/locations/${locationId}`);
+ return data.data || data;
+};
+
 export const updateClient = async (clientId, formData = {}, files = {}) => {
  const data = new FormData();
 

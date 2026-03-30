@@ -57,6 +57,8 @@ const useDebouncedValue = (value, delay = 350) => {
   return debounced;
 };
 
+const COMMAND_CENTER_STALE_TIME = 1000 * 60 * 5;
+
 const mergeUploadDocuments = (response, current = []) => {
   const nested = response?.data || {};
   if (Array.isArray(response?.documents)) return response.documents;
@@ -74,6 +76,98 @@ const flattenProfileErrors = (error) => {
     if (key) acc[key] = item.message || "Campo invalido";
     return acc;
   }, {});
+};
+
+const MAX_CARNET_IMAGE_BYTES = 500 * 1024;
+
+const loadImageFromFile = (file) =>
+  new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("No se pudo leer la imagen para compresion"));
+    };
+    image.src = objectUrl;
+  });
+
+const canvasToBlob = (canvas, type, quality) =>
+  new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("No se pudo serializar la imagen comprimida"));
+          return;
+        }
+        resolve(blob);
+      },
+      type,
+      quality,
+    );
+  });
+
+const optimizeCarnetImage = async (file) => {
+  if (!file || file.size <= MAX_CARNET_IMAGE_BYTES || !/^image\//i.test(file.type || "")) {
+    return file;
+  }
+
+  try {
+    const image = await loadImageFromFile(file);
+    const originalWidth = image.naturalWidth || image.width;
+    const originalHeight = image.naturalHeight || image.height;
+
+    let quality = 0.9;
+    let scale = 1;
+    let bestBlob = null;
+
+    for (let i = 0; i < 12; i += 1) {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(320, Math.round(originalWidth * scale));
+      canvas.height = Math.max(320, Math.round(originalHeight * scale));
+      const context = canvas.getContext("2d");
+      if (!context) break;
+      context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const blob = await canvasToBlob(canvas, "image/jpeg", quality);
+      if (!bestBlob || blob.size < bestBlob.size) bestBlob = blob;
+      if (blob.size <= MAX_CARNET_IMAGE_BYTES) {
+        return new File([blob], `${file.name.replace(/\.[a-z0-9]+$/i, "")}.jpg`, {
+          type: "image/jpeg",
+          lastModified: Date.now(),
+        });
+      }
+
+      if (quality > 0.55) {
+        quality -= 0.1;
+      } else {
+        scale *= 0.85;
+      }
+    }
+
+    if (bestBlob) {
+      return new File([bestBlob], `${file.name.replace(/\.[a-z0-9]+$/i, "")}.jpg`, {
+        type: "image/jpeg",
+        lastModified: Date.now(),
+      });
+    }
+  } catch (_error) {
+    // Si falla la compresion, se sube el archivo original.
+  }
+
+  return file;
+};
+
+const prepareDocumentForUpload = async (docType, file) => {
+  if (String(docType || "").toUpperCase() !== "FOTO_CARNET") return file;
+  const optimizedFile = await optimizeCarnetImage(file);
+  if (optimizedFile.size > MAX_CARNET_IMAGE_BYTES) {
+    throw new Error("No se pudo comprimir la foto carnet por debajo de 500KB.");
+  }
+  return optimizedFile;
 };
 
 export default function useCommandCenterState({ initialView = "solicitudes" } = {}) {
@@ -105,6 +199,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const [documents, setDocuments] = useState([]);
   const [profileErrors, setProfileErrors] = useState({});
   const [docUploading, setDocUploading] = useState(null);
+  const [docUploadProgress, setDocUploadProgress] = useState({});
 
   const normalizedInitialView = useMemo(() => normalizeWorkspaceView(initialView), [initialView]);
   const [activeView, setActiveView] = useState(normalizedInitialView);
@@ -146,6 +241,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const requestsQuery = useQuery({
     queryKey: ["talento", "requests", debouncedSearch],
+    staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
       const response = await getPersonnelRequests({ pageSize: 80, q: debouncedSearch || undefined });
       const list = response?.data || [];
@@ -156,6 +252,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const requestWorkspaceQuery = useQuery({
     queryKey: ["talento", "request-workspace", shouldLoadAsRequest ? String(id || "") : "", debouncedSearch],
     enabled: Boolean(id && shouldLoadAsRequest),
+    staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
       const response = await getPersonnelRequestWorkspace(id, { q: debouncedSearch || undefined, page: 1, pageSize: 50 });
       return response?.data || null;
@@ -165,6 +262,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const requestApplicantsQuery = useQuery({
     queryKey: ["talento", "request-applicants", shouldLoadAsRequest ? String(id || "") : "", debouncedSearch],
     enabled: Boolean(id && shouldLoadAsRequest),
+    staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
       const response = await getPersonnelRequestApplicants(id, { q: debouncedSearch || undefined, page: 1, pageSize: 50 });
       return response?.data || [];
@@ -174,6 +272,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const collaboratorsQuery = useQuery({
     queryKey: ["talento", "collaborators", debouncedSearch],
     enabled: activeView === "colaboradores" || canReassignPersonnel || Boolean(resolvedCollaboratorId),
+    staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
       const response = await listCollaborators({ page: 1, pageSize: 80, search: debouncedSearch || undefined });
       return Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : [];
@@ -183,6 +282,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const collaboratorProfileQuery = useQuery({
     queryKey: ["talento", "collaborator-profile", resolvedCollaboratorId],
     enabled: Boolean(resolvedCollaboratorId),
+    staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => getCollaboratorProfile(resolvedCollaboratorId),
   });
 
@@ -267,22 +367,30 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     },
     onSuccess: async () => {
       setProfileErrors({});
-      toast.success("Perfil guardado correctamente");
       await queryClient.invalidateQueries({ queryKey: ["talento", "requests"] });
       if (selectedRequest?.id) await queryClient.invalidateQueries({ queryKey: ["talento", "request-workspace", String(selectedRequest.id)] });
       if (resolvedCollaboratorId) await queryClient.invalidateQueries({ queryKey: ["talento", "collaborator-profile", resolvedCollaboratorId] });
     },
     onError: (error) => {
       setProfileErrors(flattenProfileErrors(error));
-      toast.error(error?.response?.data?.message || "Error al guardar perfil");
     },
   });
 
   const uploadMutation = useMutation({
-    mutationFn: async ({ docType, file }) => {
-      if (resolvedCollaboratorId) return uploadCollaboratorDocument(resolvedCollaboratorId, docType, file);
+    mutationFn: async ({ docType, file, onProgress }) => {
+      const uploadOptions = {
+        onUploadProgress: (event) => {
+          if (!event?.total || typeof onProgress !== "function") return;
+          const percent = Math.round((event.loaded * 100) / event.total);
+          onProgress(Math.max(0, Math.min(100, percent)));
+        },
+      };
+
+      if (resolvedCollaboratorId) {
+        return uploadCollaboratorDocument(resolvedCollaboratorId, docType, file, uploadOptions);
+      }
       if (!selectedRequest?.id) throw new Error("No existe contexto activo para subir documentos");
-      return uploadPersonnelRequestDocument(selectedRequest.id, docType, file);
+      return uploadPersonnelRequestDocument(selectedRequest.id, docType, file, uploadOptions);
     },
     onSuccess: async (response) => {
       setDocuments((current) => mergeUploadDocuments(response, current));
@@ -291,7 +399,16 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
       if (resolvedCollaboratorId) await queryClient.invalidateQueries({ queryKey: ["talento", "collaborator-profile", resolvedCollaboratorId] });
     },
     onError: (error) => toast.error(error?.response?.data?.message || "Error al subir documento"),
-    onSettled: () => setDocUploading(null),
+    onSettled: (_, __, variables) => {
+      setDocUploading(null);
+      if (variables?.docType) {
+        setDocUploadProgress((current) => {
+          const next = { ...current };
+          delete next[variables.docType];
+          return next;
+        });
+      }
+    },
   });
 
   const commentMutation = useMutation({
@@ -333,8 +450,22 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const handleSaveProfile = async (payloadOverride = null) => saveProfileMutation.mutateAsync(payloadOverride || profileData);
   const handleUploadDocument = async (docType, file) => {
     if (!file) return;
+    let preparedFile = file;
+    try {
+      preparedFile = await prepareDocumentForUpload(docType, file);
+    } catch (error) {
+      toast.error(error?.message || "No se pudo preparar el archivo para subida.");
+      return;
+    }
     setDocUploading(docType);
-    await uploadMutation.mutateAsync({ docType, file });
+    setDocUploadProgress((current) => ({ ...current, [docType]: 0 }));
+    await uploadMutation.mutateAsync({
+      docType,
+      file: preparedFile,
+      onProgress: (percent) => {
+        setDocUploadProgress((current) => ({ ...current, [docType]: percent }));
+      },
+    });
   };
   const handleProfileChange = (section, key, value) => setProfileData((prev) => ({ ...(prev || {}), [section]: { ...(prev?.[section] || {}), [key]: value } }));
   const handleChecklistToggle = (flagKey) => setProfileData((prev) => ({ ...(prev || {}), onboarding: { ...(prev?.onboarding || {}), [flagKey]: !prev?.onboarding?.[flagKey] } }));
@@ -499,6 +630,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     profileErrors,
     documents,
     docUploading,
+    docUploadProgress,
     activeView,
     setActiveView: handleSetView,
     activeTab,

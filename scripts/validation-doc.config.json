@@ -220,56 +220,64 @@
                                                                                          ],
                                                                     "definitions":  [
                                                                                         {
-                                                                                            "term":  "Colaborador",
-                                                                                            "definition":  "Usuario interno activo cuya informacion laboral, documental y operativa se administra dentro del dominio de talento y control laboral."
+                                                                                            "term":  "Colaborador (Empleado)",
+                                                                                            "definition":  "Es toda persona que trabaja en la empresa. El sistema administra su información personal, su contrato, sus documentos (como cédula o títulos) y todo lo que hace en su día a día laboral."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Solicitud de personal",
-                                                                                            "definition":  "Requerimiento formal para cubrir una necesidad de talento, con perfil, historial, comentarios y eventual contratacion."
+                                                                                            "term":  "Solicitud de Personal (Reclutamiento)",
+                                                                                            "definition":  "Es el proceso para contratar a alguien nuevo. Incluye desde que se detecta la necesidad de un nuevo empleado hasta que se elige al candidato, se revisan sus documentos y se firma su contrato."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Perfil de colaborador",
-                                                                                            "definition":  "Conjunto estructurado de datos personales, laborales, de onboarding y soporte documental asociado a un usuario."
+                                                                                            "term":  "Perfil del Colaborador",
+                                                                                            "definition":  "Es como una 'hoja de vida' digital dentro del sistema que contiene los datos del empleado, su cargo, el departamento al que pertenece y todos los documentos que ha entregado a la empresa."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Certificacion",
-                                                                                            "definition":  "Registro de competencia, formacion o habilitacion del usuario con posible archivo de respaldo y vigencia operativa."
+                                                                                            "term":  "Certificación Laboral",
+                                                                                            "definition":  "Es un registro de los cursos, capacitaciones o habilidades que tiene un empleado. El sistema permite guardar el diploma o certificado para demostrar que el empleado está capacitado."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Asistencia",
-                                                                                            "definition":  "Registro diario de entrada, almuerzo, salida, excepciones y horas extra del colaborador."
+                                                                                            "term":  "Registro de Asistencia",
+                                                                                            "definition":  "Es el control de las horas trabajadas. El empleado marca su entrada, su hora de almuerzo y su salida. El sistema usa esto para saber si cumplió su jornada o si trabajó horas extra."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Excepcion de asistencia",
-                                                                                            "definition":  "Salida temporal no ordinaria durante la jornada con seguimiento de estado y trazabilidad de regreso."
+                                                                                            "term":  "Excepción de Asistencia (Salidas Temporales)",
+                                                                                            "definition":  "Ocurre cuando un empleado debe salir de la oficina por un momento (por ejemplo, una cita médica rápida o una diligencia) y luego regresa para continuar trabajando."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Hora extra",
-                                                                                            "definition":  "Tiempo adicional registrado o calculado sobre la jornada ordinaria del colaborador."
+                                                                                            "term":  "Horas Extra (Sobretiempo)",
+                                                                                            "definition":  "Es el tiempo adicional que un empleado trabaja después de haber terminado su horario normal. El sistema calcula automáticamente este tiempo para que pueda ser pagado o compensado."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Permiso recuperable",
-                                                                                            "definition":  "Permiso cuya compensacion puede coordinarse mediante plan de recuperacion dentro del plazo operativo definido."
+                                                                                            "term":  "Permiso Recuperable",
+                                                                                            "definition":  "Es un permiso para faltar unas horas o días que el empleado se compromete a 'devolver' trabajando en otro horario, según lo acuerde con su jefe."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Matricula de estudios",
-                                                                                            "definition":  "Evidencia academica previa requerida para habilitar permisos por estudios."
+                                                                                            "term":  "Matrícula de Estudios",
+                                                                                            "definition":  "Documento que demuestra que un empleado está estudiando. Es obligatorio subir este documento al sistema para que se le puedan otorgar permisos especiales por estudios."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "Saldo de vacaciones",
-                                                                                            "definition":  "Disponibilidad calculada de dias y horas de vacaciones del colaborador segun perfil, historial y solicitudes aprobadas."
+                                                                                            "term":  "Saldo de Vacaciones",
+                                                                                            "definition":  "Es la cantidad de días de descanso que el empleado tiene acumulados y disponibles para usar. El sistema los calcula automáticamente según el tiempo que lleva trabajando."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "IQ",
-                                                                                            "definition":  "Calificacion de instalacion que verifica montaje, dependencias y prerrequisitos del area."
+                                                                                            "term":  "Onboarding (Bienvenida y Registro)",
+                                                                                            "definition":  "Es el proceso inicial cuando alguien entra a trabajar. Incluye la creación de su usuario, la entrega de sus herramientas de trabajo y la carga de sus primeros documentos legales."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "OQ",
-                                                                                            "definition":  "Calificacion operacional que valida funcionamiento esperado y manejo de error del area."
+                                                                                            "term":  "Dossier Digital (Expediente)",
+                                                                                            "definition":  "Es la carpeta digital donde se guardan todos los documentos legales y contratos del empleado de forma segura y organizada."
                                                                                         },
                                                                                         {
-                                                                                            "term":  "PQ",
-                                                                                            "definition":  "Calificacion de desempeno que evalua estabilidad y consistencia del area en uso representativo."
+                                                                                            "term":  "Validación de Instalación (IQ)",
+                                                                                            "definition":  "Prueba técnica para asegurar que el sistema está correctamente instalado en los servidores de la empresa y listo para ser usado."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Validación de Funcionamiento (OQ)",
+                                                                                            "definition":  "Prueba para confirmar que cada botón y cada formulario del sistema hace exactamente lo que se supone que debe hacer sin errores."
+                                                                                        },
+                                                                                        {
+                                                                                            "term":  "Validación de Desempeño (PQ)",
+                                                                                            "definition":  "Prueba final donde se usa el sistema como si fuera un día normal de trabajo para asegurar que es estable y confiable para los usuarios."
                                                                                         }
                                                                                     ],
                                                                     "modules":  [

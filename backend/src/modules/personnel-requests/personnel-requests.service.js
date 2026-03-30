@@ -6,7 +6,8 @@
 const db = require('../../config/db');
 const logger = require('../../config/logger');
 const { logAction } = require('../../utils/audit');
-const { ensureFolder, uploadBase64File } = require('../../utils/drive');
+const { HASH_ALGORITHM, computeSha256HexFromBuffer, resolveExternalDriveIntegrity } = require('../../utils/documentHash');
+const { ensureFolder, uploadBase64File, drive } = require('../../utils/drive');
 const { ensureApplicantsTables, getApplicantById, listApplicants } = require('../applicants/applicants.service');
 const gmailService = require('../../services/gmail.service');
 const {
@@ -45,9 +46,17 @@ async function ensurePersonnelProfileTables() {
       drive_url TEXT,
       file_name TEXT,
       mime_type TEXT,
+      content_hash_sha256 VARCHAR(64),
+      hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',
       uploaded_by INTEGER REFERENCES users(id),
       created_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+    await db.query(`
+    ALTER TABLE personnel_request_documents
+    ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
   `);
 
     await db.query(`
@@ -111,9 +120,17 @@ async function ensureCollaboratorTables() {
       drive_url TEXT,
       file_name TEXT,
       mime_type TEXT,
+      content_hash_sha256 VARCHAR(64),
+      hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',
       uploaded_by INTEGER REFERENCES users(id),
       created_at TIMESTAMPTZ DEFAULT now()
     );
+  `);
+
+    await db.query(`
+    ALTER TABLE collaborator_documents
+    ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
   `);
 }
 
@@ -458,7 +475,7 @@ const recordPersonnelRequestHistory = async (
 const listPersonnelRequestDocuments = async (requestId) => {
   const result = await db.query(
     `
-    SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, uploaded_by, created_at
+    SELECT id, doc_type, drive_file_id, drive_url, file_name, mime_type, content_hash_sha256, hash_algorithm, uploaded_by, created_at
     FROM personnel_request_documents
     WHERE personnel_request_id = $1
     ORDER BY created_at DESC
@@ -1589,6 +1606,7 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
     }
 
     const base64 = file.buffer.toString('base64');
+    const contentHashSha256 = computeSha256HexFromBuffer(file?.buffer);
     const uploaded = await uploadBase64File(
         file.originalname || `${docType}.pdf`,
         base64,
@@ -1604,8 +1622,10 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
         drive_url,
         file_name,
         mime_type,
+        content_hash_sha256,
+        hash_algorithm,
         uploaded_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
       RETURNING *
     `;
 
@@ -1616,8 +1636,27 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
         uploaded.webViewLink || uploaded.webContentLink || null,
         file.originalname || uploaded.name || `${docType}`,
         file.mimetype || null,
+        contentHashSha256,
+        HASH_ALGORITHM,
         userId,
     ]);
+
+    const newDoc = insertResult.rows[0];
+
+    // Si no hay hash pero hay file_id, intentar resolver integridad en segundo plano
+    if (!contentHashSha256 && newDoc?.drive_file_id) {
+        resolveExternalDriveIntegrity(newDoc.drive_file_id, drive)
+            .then(async (result) => {
+                if (result) {
+                    await db.query(
+                        `UPDATE personnel_request_documents SET content_hash_sha256 = $1, hash_algorithm = $2 WHERE id = $3`,
+                        [result.hash, result.algorithm, newDoc.id]
+                    );
+                    logger.info({ fileId: newDoc.drive_file_id }, 'Integridad resuelta para documento de solicitud');
+                }
+            })
+            .catch((err) => logger.warn({ err }, 'Error asíncrono resolviendo integridad de solicitud'));
+    }
 
     const collaboratorUserId = requestQuery.rows[0]?.collaborator_user_id;
     if (collaboratorUserId) {
@@ -1631,8 +1670,10 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
               drive_url,
               file_name,
               mime_type,
+              content_hash_sha256,
+              hash_algorithm,
               uploaded_by
-            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             `,
             [
                 collaboratorUserId,
@@ -1641,6 +1682,8 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
                 uploaded.webViewLink || uploaded.webContentLink || null,
                 file.originalname || uploaded.name || `${docType}`,
                 file.mimetype || null,
+                contentHashSha256,
+                HASH_ALGORITHM,
                 userId,
             ]
         );
@@ -1657,6 +1700,8 @@ async function addPersonnelDocument(requestId, docType, file, userId = null) {
                 doc_type: docType,
                 file_name: file.originalname || uploaded.name || `${docType}`,
                 drive_file_id: uploaded.id || null,
+                content_hash_sha256: contentHashSha256,
+                hash_algorithm: HASH_ALGORITHM,
                 collaborator_user_id: collaboratorUserId || null,
             },
         });
@@ -1827,9 +1872,11 @@ async function hirePersonnelRequest(requestId, userId) {
               drive_url,
               file_name,
               mime_type,
+              content_hash_sha256,
+              hash_algorithm,
               uploaded_by
             )
-            SELECT $1, doc_type, drive_file_id, drive_url, file_name, mime_type, $2
+            SELECT $1, doc_type, drive_file_id, drive_url, file_name, mime_type, content_hash_sha256, hash_algorithm, $2
             FROM personnel_request_documents
             WHERE personnel_request_id = $3
               AND NOT EXISTS (
@@ -2009,9 +2056,11 @@ async function linkApplicantToRequest(requestId, applicantId, userId) {
                   drive_url,
                   file_name,
                   mime_type,
+                  content_hash_sha256,
+                  hash_algorithm,
                   uploaded_by
                 )
-                SELECT $1, ad.doc_type, ad.drive_file_id, ad.drive_url, ad.file_name, ad.mime_type, $2
+                SELECT $1, ad.doc_type, ad.drive_file_id, ad.drive_url, ad.file_name, ad.mime_type, ad.content_hash_sha256, ad.hash_algorithm, $2
                 FROM applicant_documents ad
                 WHERE ad.applicant_id = $3
                   AND ad.doc_type IN ('HOJA_VIDA', 'CARTA_MOTIVACION')

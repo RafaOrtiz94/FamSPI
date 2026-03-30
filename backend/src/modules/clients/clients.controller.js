@@ -157,6 +157,117 @@ const registerProspectVisit = async (req, res) => {
   }
 };
 
+const registerInteraction = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { type, notes } = req.body || {};
+    const data = await clientsService.registerInteraction({
+      clientId: Number(id),
+      user: req.user,
+      type,
+      notes,
+    });
+    return res.status(201).json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error registrando interacción CRM",
+    });
+  }
+};
+
+const getClientHistory = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { limit } = req.query || {};
+    const data = await clientsService.getClientHistory({
+      clientId: Number(id),
+      user: req.user,
+      limit,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error obteniendo historial del cliente",
+    });
+  }
+};
+
+const listClientLocations = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await clientsService.listClientLocations({
+      clientId: Number(id),
+      user: req.user,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error obteniendo sedes del cliente",
+    });
+  }
+};
+
+const addClientLocation = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await clientsService.addLocation({
+      clientId: Number(id),
+      user: req.user,
+      payload: req.body || {},
+    });
+    return res.status(201).json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error creando sede del cliente",
+    });
+  }
+};
+
+const updateClientLocation = async (req, res) => {
+  try {
+    const { id, locationId } = req.params;
+    const data = await clientsService.updateLocation({
+      clientId: Number(id),
+      locationId: Number(locationId),
+      user: req.user,
+      payload: req.body || {},
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error actualizando sede del cliente",
+    });
+  }
+};
+
+const removeClientLocation = async (req, res) => {
+  try {
+    const { id, locationId } = req.params;
+    const data = await clientsService.removeLocation({
+      clientId: Number(id),
+      locationId: Number(locationId),
+      user: req.user,
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = error.status || 500;
+    return res.status(status).json({
+      ok: false,
+      message: error.message || "Error eliminando sede del cliente",
+    });
+  }
+};
+
 module.exports = {
   listClients,
   getClientDetail,
@@ -164,4 +275,10 @@ module.exports = {
   assignClient,
   setVisitStatus,
   registerProspectVisit,
+  registerInteraction,
+  getClientHistory,
+  listClientLocations,
+  addClientLocation,
+  updateClientLocation,
+  removeClientLocation,
 };

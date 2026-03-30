@@ -20,6 +20,15 @@ router.post("/marcar/entrada", verifyToken, controller.clockIn);
 router.post("/marcar/almuerzo-salida", verifyToken, controller.clockOutLunch);
 router.post("/marcar/almuerzo-entrada", verifyToken, controller.clockInLunch);
 router.post("/marcar/salida", verifyToken, controller.clockOut);
+
+// 📍 Field Attendance Aliases (Commercial & Tech Service)
+router.post("/marcar/visita-entrada", verifyToken, controller.clockInField);
+router.post("/marcar/visita-salida", verifyToken, controller.clockOutField);
+
+// 🚨 Unexpected Exit Aliases (iPhone Shortcut compatible)
+router.post("/marcar/salida-imprevista", verifyToken, controller.clockOutUnexpected);
+router.post("/marcar/regreso-imprevisto", verifyToken, controller.clockInUnexpected);
+
 router.post("/location-sync", verifyToken, controller.syncLocation);
 router.post("/exception", verifyToken, controller.registerException);
 router.post("/exception/status", verifyToken, controller.updateExceptionStatus);

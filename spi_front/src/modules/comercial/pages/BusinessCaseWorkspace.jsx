@@ -18,7 +18,7 @@ import WorkspaceContent from "../components/workspace/WorkspaceContent";
 import UIGuidancePanel from "../components/workspace/UIGuidancePanel";
 import BusinessCasePicker from "../components/BusinessCasePicker";
 import ErrorBoundary from "../../../core/ui/components/ErrorBoundary";
-import { BusinessCaseWorkspaceContext } from "../components/workspace/BusinessCaseWorkspaceContext";
+import { BusinessCaseWorkspaceProviders } from "../components/workspace/BusinessCaseWorkspaceContext";
 import Modal from "../../../core/ui/components/Modal";
 import Button from "../../../core/ui/components/Button";
 import { resolveRoleSectionConfig } from "../components/workspace/roleSectionConfig";
@@ -457,8 +457,29 @@ const BusinessCaseWorkspace = () => {
  onRefresh: handleRefresh,
  };
 
+ const documentsContextValue = {
+ bcId,
+ documents:
+ businessCase?.documents ||
+ businessCase?.modern_bc_metadata?.documents ||
+ [],
+ onRefresh: handleRefresh,
+ };
+
+ const calculationsContextValue = {
+ bcId,
+ selectedSection,
+ businessCase,
+ uiGuidance,
+ onSectionSave: handleSectionSave,
+ };
+
  return (
- <BusinessCaseWorkspaceContext.Provider value={workspaceContextValue}>
+ <BusinessCaseWorkspaceProviders
+ workspaceValue={workspaceContextValue}
+ documentsValue={documentsContextValue}
+ calculationsValue={calculationsContextValue}
+ >
  <div className={workspaceShellClass}>
  <div className={workspaceContainerClass}>
  {/* Header Area */}
@@ -664,7 +685,7 @@ const BusinessCaseWorkspace = () => {
  </Modal>
  </div>
  </div>
- </BusinessCaseWorkspaceContext.Provider>
+ </BusinessCaseWorkspaceProviders>
  );
 };
 

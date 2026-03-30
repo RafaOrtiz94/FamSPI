@@ -1,14 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { FiCheckCircle, FiChevronDown, FiUsers } from "react-icons/fi";
 import { useParams } from "react-router-dom";
 import api from "../../../../../core/api";
 import { useUI } from "../../../../../core/ui/UIContext";
 import SectionObservationAlert from "../SectionObservationAlert";
+import LocationManager from "../../LocationManager";
 
 const SECTION_FIELDS = {
  general: [
  "client",
+ "locationId",
  "clientType",
  "contractingEntity",
  "provinceCity",
@@ -52,6 +54,13 @@ const resolveProvinceCityFromClient = (client) => {
  toCleanText(client?.ciudad) ||
  toCleanText(client?.city);
 
+ return [province, city].filter(Boolean).join(", ");
+};
+
+const resolveProvinceCityFromLocation = (location) => {
+ if (!location || typeof location !== "object") return "";
+ const province = toCleanText(location?.province);
+ const city = toCleanText(location?.city);
  return [province, city].filter(Boolean).join(", ");
 };
 
@@ -128,22 +137,42 @@ const ClientDataSection = ({
  const [showClientDropdown, setShowClientDropdown] = useState(false);
  const [filteredClients, setFilteredClients] = useState([]);
  const [isNewClient, setIsNewClient] = useState(false);
+ const [clientLocations, setClientLocations] = useState([]);
+ const [selectedLocation, setSelectedLocation] = useState(null);
 
  // Explicit state for selected client to handle async reconciliation
  const [selectedClient, setSelectedClient] = useState(null);
- const fallbackBusinessCase = uiGuidance?.businessCase || {};
+ const fallbackBusinessCase = useMemo(() => uiGuidance?.businessCase || null, [uiGuidance?.businessCase]);
  const bcPurchaseType = businessCase?.bc_purchase_type || fallbackBusinessCase?.bc_purchase_type || "";
  const startedAsPublic = isPublicPurchaseType(bcPurchaseType);
  const originLabel = startedAsPublic ? "Compra publica" : "Compra privada";
 
- // FIX: Initialize form with empty values - don't set client ID until options are loaded
- const initializeForm = () => {
+ const defaultValues = useMemo(() => ({}), []);
+
+ const {
+ register,
+ handleSubmit,
+ watch,
+ reset,
+ setValue,
+ formState: { errors },
+ } = useForm({ defaultValues });
+
+ const [naFields, setNaFields] = useState({});
+ const watchClient = watch("client");
+ const watchLocationId = watch("locationId");
+ const watchClientType = watch("clientType");
+ const [openSections, setOpenSections] = useState(() =>
+ SECTION_ORDER.reduce((acc, id) => {
+ acc[id] = id === "general";
+ return acc;
+ }, {}),
+ );
+
+ const initializeForm = useCallback(() => {
  if (!bcId) return;
 
- console.log("DEBUG: initializeForm called, businessCase:", businessCase);
-
  try {
- // Initialize form with empty/default values (don't set client ID yet)
  const metadata =
  businessCase?.modern_bc_metadata ||
  fallbackBusinessCase?.modern_bc_metadata ||
@@ -152,6 +181,12 @@ const ClientDataSection = ({
  metadata?.general_data && typeof metadata.general_data === "object"
  ? metadata.general_data
  : {};
+ const savedLocationId =
+  businessCase?.client_location_id ||
+  fallbackBusinessCase?.client_location_id ||
+  metadata.client_location_id ||
+  metadataGeneral.client_location_id ||
+  "";
  const initialData = {
  client:
  businessCase?.client_name ||
@@ -197,39 +232,24 @@ const ClientDataSection = ({
  metadata.notes ||
  metadataGeneral.notes ||
  "",
+ locationId: savedLocationId ? String(savedLocationId) : "",
  };
 
- console.log("DEBUG: Initializing form with empty client field:", initialData);
  reset(initialData);
-
  } catch (err) {
  showToast("Error inicializando formulario", "error");
  console.error("Error initializing form:", err);
  } finally {
  setLoading(false);
  }
- };
-
- const defaultValues = useMemo(() => ({}), []);
-
- const {
- register,
- handleSubmit,
- watch,
+ }, [
+ bcId,
+ businessCase,
+ fallbackBusinessCase,
  reset,
- setValue,
- formState: { errors },
- } = useForm({ defaultValues });
-
- const [naFields, setNaFields] = useState({});
- const watchClient = watch("client");
- const watchClientType = watch("clientType");
- const [openSections, setOpenSections] = useState(() =>
- SECTION_ORDER.reduce((acc, id) => {
- acc[id] = id === "general";
- return acc;
- }, {}),
- );
+ showToast,
+ startedAsPublic,
+ ]);
 
  const sectionHasErrors = (sectionId) =>
  SECTION_FIELDS[sectionId]?.some((field) => Boolean(errors[field])) ?? false;
@@ -283,7 +303,7 @@ const ClientDataSection = ({
 
  useEffect(() => {
  initializeForm();
- }, [bcId, businessCase]);
+ }, [initializeForm]);
 
  useEffect(() => {
  SECTION_ORDER.forEach((sectionId) => {
@@ -297,7 +317,7 @@ const ClientDataSection = ({
  });
  }, [errors]);
 
- const findClientByInput = (value) => {
+ const findClientByInput = useCallback((value) => {
  const needle = normalizeText(value);
  if (!needle) return null;
  return (
@@ -307,7 +327,7 @@ const ClientDataSection = ({
  clients.find((c) => normalizeText(getClientLabel(c)) === needle) ||
  null
  );
- };
+ }, [clients]);
 
  useEffect(() => {
  const fetchClients = async () => {
@@ -354,7 +374,7 @@ const ClientDataSection = ({
  setSelectedClient(fromName);
  setValue("client", getClientLabel(fromName), { shouldDirty: false });
  }
- }, [clients, businessCase?.client_id, businessCase?.client_name, setValue]);
+ }, [clients, businessCase?.client_id, businessCase?.client_name, setValue, findClientByInput]);
 
  useEffect(() => {
  const term = normalizeText(watchClient);
@@ -362,6 +382,9 @@ const ClientDataSection = ({
  setFilteredClients([]);
  setShowClientDropdown(false);
  setSelectedClient(null);
+ setClientLocations([]);
+ setSelectedLocation(null);
+ setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
  setIsNewClient(false);
  return;
  }
@@ -374,7 +397,25 @@ const ClientDataSection = ({
  .filter((client) => normalizeText(getClientLabel(client)).includes(term))
  .slice(0, 8);
  setFilteredClients(matches);
- }, [watchClient, clients]);
+ }, [watchClient, clients, setValue, findClientByInput]);
+
+ useEffect(() => {
+ if (!selectedClient) return;
+ if (!Array.isArray(clientLocations) || !clientLocations.length) {
+ setSelectedLocation(null);
+ setValue("locationId", "", { shouldDirty: false, shouldValidate: false });
+ return;
+ }
+
+ const byFormId = clientLocations.find((location) => String(location.id) === String(watchLocationId));
+ const fallbackLocation = byFormId || clientLocations.find((location) => location.is_main) || clientLocations[0];
+ if (!fallbackLocation) return;
+
+ setSelectedLocation(fallbackLocation);
+ if (!byFormId) {
+ setValue("locationId", String(fallbackLocation.id), { shouldDirty: false, shouldValidate: false });
+ }
+ }, [selectedClient, clientLocations, watchLocationId, setValue]);
 
  useEffect(() => {
  const naClientType = Boolean(naFields.clientType);
@@ -390,7 +431,9 @@ const ClientDataSection = ({
  return;
  }
 
- const provinceCity = resolveProvinceCityFromClient(selectedClient);
+ const provinceCity = selectedLocation
+ ? resolveProvinceCityFromLocation(selectedLocation)
+ : resolveProvinceCityFromClient(selectedClient);
 
  if (!naClientType && !startedAsPublic) {
  setValue(
@@ -407,7 +450,15 @@ const ClientDataSection = ({
  if (!naProvinceCity) {
  setValue("provinceCity", provinceCity || "", { shouldDirty: false });
  }
- }, [selectedClient, setValue, naFields.clientType, naFields.provinceCity, startedAsPublic, watchClientType]);
+ }, [
+ selectedClient,
+ selectedLocation,
+ setValue,
+ naFields.clientType,
+ naFields.provinceCity,
+ startedAsPublic,
+ watchClientType
+ ]);
 
  const handleSave = async (formData) => {
  if (!bcId) {
@@ -418,6 +469,22 @@ const ClientDataSection = ({
  const selected = selectedClient || findClientByInput(formData.client);
  const client_name = selected ? getClientLabel(selected) : String(formData.client || "").trim();
  const client_id = selected?.id && Number.isFinite(Number(selected.id)) ? Number(selected.id) : undefined;
+ const selectedLocationValue =
+ selectedLocation ||
+ clientLocations.find((location) => String(location.id) === String(formData.locationId));
+ const client_location_id =
+ selectedLocationValue?.id && Number.isFinite(Number(selectedLocationValue.id))
+ ? Number(selectedLocationValue.id)
+ : null;
+ const client_location_name = selectedLocationValue?.name || null;
+ const locationProvinceCity = selectedLocationValue
+ ? resolveProvinceCityFromLocation(selectedLocationValue)
+ : "";
+
+ if (selected && clientLocations.length > 0 && !client_location_id) {
+ showToast("Selecciona una sede de instalación para continuar.", "warning");
+ return;
+ }
 
  const finalClientType = startedAsPublic
  ? "persona_juridica"
@@ -427,12 +494,26 @@ const ClientDataSection = ({
  notes: formData.notes,
  clientType: finalClientType,
  contractingEntity: formData.contractingEntity,
- provinceCity: formData.provinceCity,
+ provinceCity: formData.provinceCity || locationProvinceCity || "",
+ client_location_id,
+ client_location_name,
+ installation_address: selectedLocationValue?.address || null,
+ installation_city: selectedLocationValue?.city || null,
+ installation_province: selectedLocationValue?.province || null,
+ installation_lat: selectedLocationValue?.lat ?? null,
+ installation_lng: selectedLocationValue?.lng ?? null,
  general_data: {
  notes: formData.notes,
  clientType: finalClientType,
  contractingEntity: formData.contractingEntity,
- provinceCity: formData.provinceCity,
+ provinceCity: formData.provinceCity || locationProvinceCity || "",
+ client_location_id,
+ client_location_name,
+ installation_address: selectedLocationValue?.address || null,
+ installation_city: selectedLocationValue?.city || null,
+ installation_province: selectedLocationValue?.province || null,
+ installation_lat: selectedLocationValue?.lat ?? null,
+ installation_lng: selectedLocationValue?.lng ?? null,
  },
  };
 
@@ -440,25 +521,14 @@ const ClientDataSection = ({
  setSaving(true);
 
  try {
- console.log("DEBUG: Saving ClientDataSection", {
- bcId,
- client_id,
- client_name,
- process_code: formData.processCode || null,
- contract_object: formData.contractObject || null,
- modern_bc_metadata: metadata,
- });
-
  // Update business case metadata
- const response = await api.put(`/business-case/${bcId}`, {
+ await api.put(`/business-case/${bcId}`, {
  client_id,
  client_name,
  process_code: formData.processCode || null,
  contract_object: formData.contractObject || null,
  modern_bc_metadata: metadata,
  });
-
- console.log("DEBUG: Save response", response);
 
  showToast("Datos del cliente guardados correctamente", "success");
 
@@ -596,6 +666,9 @@ const ClientDataSection = ({
  const label = getClientLabel(client);
  setValue("client", label, { shouldDirty: true, shouldValidate: true });
  setSelectedClient(client);
+ setClientLocations([]);
+ setSelectedLocation(null);
+ setValue("locationId", "", { shouldDirty: true, shouldValidate: true });
  setIsNewClient(false);
  setShowClientDropdown(false);
  }}
@@ -609,6 +682,32 @@ const ClientDataSection = ({
  {loadingClients && <p className="text-xs text-blue-500 font-medium ml-1">Cargando clientes...</p>}
  {errors.client && <p className="text-xs text-rose-500 font-medium ml-1">{errors.client.message}</p>}
  </label>
+
+ <input type="hidden" {...register("locationId")} />
+ <div className="md:col-span-2">
+ {selectedClient ? (
+ <LocationManager
+ clientId={selectedClient.id}
+ canEdit={canEdit()}
+ selectedLocationId={watchLocationId}
+ onSelectLocation={(location) => {
+ setSelectedLocation(location || null);
+ setValue("locationId", location?.id ? String(location.id) : "", { shouldDirty: true, shouldValidate: true });
+ const autoProvinceCity = resolveProvinceCityFromLocation(location);
+ if (!naFields.provinceCity && autoProvinceCity) {
+ setValue("provinceCity", autoProvinceCity, { shouldDirty: true, shouldValidate: false });
+ }
+ }}
+ onLocationsChange={(locations) => {
+ setClientLocations(Array.isArray(locations) ? locations : []);
+ }}
+ />
+ ) : (
+ <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-5 text-sm text-slate-500">
+ Selecciona primero un cliente para gestionar sus sedes de instalación.
+ </div>
+ )}
+ </div>
 
  <label className="flex flex-col gap-1.5">
  <div className="flex items-center justify-between">

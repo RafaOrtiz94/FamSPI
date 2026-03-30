@@ -2,6 +2,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const schedulesService = require("../schedules/schedules.service");
 const { uploadBase64File } = require("../../utils/drive");
+const axios = require("axios");
 
 const FULL_ACCESS_ROLES = new Set([
   "jefe_comercial",
@@ -24,7 +25,7 @@ const ASSIGNER_ROLES = new Set([
   "ti",
 ]);
 
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
+const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
 const ASSIGNABLE_ADVISOR_ROLES = new Set([
   "comercial",
   "acp_comercial",
@@ -41,6 +42,8 @@ const ACTIVE_ASSIGNMENT_CONDITION = `
 // Estados válidos para registros de visita.
 // "in_visit" representa una visita en curso que aún no ha sido cerrada.
 const VALID_VISIT_STATUS = new Set(["visited", "pending", "skipped", "in_visit"]);
+const VALID_INTERACTION_TYPES = new Set(["call", "visit"]);
+const GOOGLE_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 
 function hasRole(user, allowedRoles) {
   return allowedRoles.has(user?.role?.toLowerCase?.() || "");
@@ -56,6 +59,98 @@ function canAssignClients(user) {
 
 function isAdvisor(user) {
   return isManager(user) || ADVISOR_ROLES.has(user?.role?.toLowerCase?.() || "");
+}
+
+function normalizeInteractionType(type) {
+  const raw = String(type || "").trim().toLowerCase();
+  if (!raw) return null;
+  if (["call", "llamada", "phone_call", "telefono"].includes(raw)) return "call";
+  if (["visit", "visita"].includes(raw)) return "visit";
+  return raw;
+}
+
+function toCoordinateNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildLocationAddress({ address, city, province }) {
+  return [address, city, province, "Ecuador"]
+    .map((part) => String(part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+function getMapsApiKey() {
+  return (
+    process.env.GOOGLE_MAPS_SERVER_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    ""
+  ).trim();
+}
+
+async function geocodeAddress({ address, city, province }) {
+  const apiKey = getMapsApiKey();
+  if (!apiKey) {
+    logger.warn("GOOGLE_MAPS_SERVER_API_KEY no configurada, se omite geocodificacion de sedes");
+    return { lat: null, lng: null, geocoded: false, geocode_status: "MISSING_API_KEY" };
+  }
+
+  const fullAddress = buildLocationAddress({ address, city, province });
+  if (!fullAddress) {
+    return { lat: null, lng: null, geocoded: false, geocode_status: "EMPTY_ADDRESS" };
+  }
+
+  try {
+    const { data } = await axios.get(GOOGLE_GEOCODING_URL, {
+      params: {
+        address: fullAddress,
+        region: "ec",
+        language: "es",
+        key: apiKey,
+      },
+      timeout: 15000,
+    });
+
+    if (!data || data.status !== "OK" || !Array.isArray(data.results) || !data.results.length) {
+      return {
+        lat: null,
+        lng: null,
+        geocoded: false,
+        geocode_status: data?.status || "NO_RESULTS",
+        geocode_error: data?.error_message || null,
+      };
+    }
+
+    const location = data.results[0]?.geometry?.location || {};
+    const lat = toCoordinateNumber(location.lat);
+    const lng = toCoordinateNumber(location.lng);
+    if (lat === null || lng === null) {
+      return { lat: null, lng: null, geocoded: false, geocode_status: "INVALID_GEOMETRY" };
+    }
+
+    return { lat, lng, geocoded: true, geocode_status: "OK" };
+  } catch (error) {
+    logger.warn(
+      { error: error.message, address: fullAddress },
+      "Error consultando Google Geocoding para sede de cliente",
+    );
+    return { lat: null, lng: null, geocoded: false, geocode_status: "REQUEST_ERROR" };
+  }
+}
+
+function normalizeLocationPayload(payload = {}) {
+  return {
+    name: String(payload.name || "").trim(),
+    address: String(payload.address || "").trim(),
+    city: String(payload.city || "").trim(),
+    province: String(payload.province || "").trim(),
+    lat: toCoordinateNumber(payload.lat),
+    lng: toCoordinateNumber(payload.lng),
+    is_main: Boolean(payload.is_main),
+  };
 }
 
 function buildDriveLink(fileId) {
@@ -217,6 +312,69 @@ async function ensureTables() {
       updated_at TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_interactions (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
+      type TEXT NOT NULL CHECK (type IN ('call', 'visit')),
+      notes TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_client_interactions_client_created_at
+      ON client_interactions (client_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_client_interactions_created_by
+      ON client_interactions (created_by);
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS client_locations (
+      id SERIAL PRIMARY KEY,
+      client_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      address TEXT NOT NULL,
+      city TEXT,
+      province TEXT,
+      lat DOUBLE PRECISION,
+      lng DOUBLE PRECISION,
+      is_main BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_client_locations_client_id
+      ON client_locations (client_id);
+    CREATE INDEX IF NOT EXISTS idx_client_locations_geo
+      ON client_locations (lat, lng);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_client_locations_single_main
+      ON client_locations (client_id)
+      WHERE is_main = TRUE;
+  `);
+
+  await db.query(`
+    INSERT INTO client_locations (client_id, name, address, city, province, is_main)
+    SELECT
+      cr.id,
+      'Sede principal',
+      COALESCE(NULLIF(TRIM(cr.shipping_address), ''), 'Direccion no registrada'),
+      NULLIF(TRIM(cr.shipping_city), ''),
+      NULLIF(TRIM(cr.shipping_province), ''),
+      TRUE
+    FROM client_requests cr
+    WHERE cr.status = 'approved'
+      AND NULLIF(TRIM(COALESCE(cr.shipping_address, '')), '') IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM client_locations cl
+        WHERE cl.client_id = cr.id
+      );
+  `);
 }
 
 async function getClientOrThrow(clientId) {
@@ -255,6 +413,49 @@ async function ensureClientAccess({ clientId, user }) {
     error.status = 403;
     throw error;
   }
+}
+
+async function getClientLocationsInternal(clientId, clientOrTx = db) {
+  const { rows } = await clientOrTx.query(
+    `
+      SELECT
+        id,
+        client_id,
+        name,
+        address,
+        city,
+        province,
+        lat,
+        lng,
+        is_main,
+        created_at,
+        updated_at
+      FROM client_locations
+      WHERE client_id = $1
+      ORDER BY is_main DESC, created_at ASC, id ASC
+    `,
+    [clientId],
+  );
+  return rows;
+}
+
+async function geocodeLocationIfNeeded(location) {
+  if (location.lat !== null && location.lng !== null) {
+    return { ...location, geocoded: false, geocode_status: "MANUAL_COORDINATES" };
+  }
+  const geocoded = await geocodeAddress({
+    address: location.address,
+    city: location.city,
+    province: location.province,
+  });
+  return {
+    ...location,
+    lat: geocoded.lat !== null ? geocoded.lat : location.lat,
+    lng: geocoded.lng !== null ? geocoded.lng : location.lng,
+    geocoded: geocoded.geocoded,
+    geocode_status: geocoded.geocode_status,
+    geocode_error: geocoded.geocode_error || null,
+  };
 }
 
 async function getClientDetail({ clientId, user }) {
@@ -332,13 +533,362 @@ async function getClientDetail({ clientId, user }) {
     }
   }
   if (!Array.isArray(assignmentDetails)) assignmentDetails = [];
+  const locations = await getClientLocationsInternal(clientId);
 
   return {
     ...request,
     asignados,
     assignment_details: assignmentDetails,
+    locations,
     attachments: isManager(user) ? getClientRequestAttachments(request) : [],
   };
+}
+
+async function listClientLocations({ clientId, user }) {
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+  return getClientLocationsInternal(clientId);
+}
+
+async function addLocation({ clientId, user, payload = {} }) {
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+
+  const normalized = normalizeLocationPayload(payload);
+  if (!normalized.name) {
+    const error = new Error("El nombre de la sede es obligatorio");
+    error.status = 400;
+    throw error;
+  }
+  if (!normalized.address) {
+    const error = new Error("La direccion de la sede es obligatoria");
+    error.status = 400;
+    throw error;
+  }
+
+  const prepared = await geocodeLocationIfNeeded(normalized);
+  const client = await db.getClient();
+
+  try {
+    await client.query("BEGIN");
+
+    const { rows: countRows } = await client.query(
+      "SELECT COUNT(1)::int AS total FROM client_locations WHERE client_id = $1",
+      [clientId],
+    );
+    const hasLocations = Number(countRows[0]?.total || 0) > 0;
+    const shouldBeMain = prepared.is_main || !hasLocations;
+
+    if (shouldBeMain) {
+      await client.query("UPDATE client_locations SET is_main = FALSE, updated_at = NOW() WHERE client_id = $1", [clientId]);
+    }
+
+    const { rows } = await client.query(
+      `
+        INSERT INTO client_locations (
+          client_id,
+          name,
+          address,
+          city,
+          province,
+          lat,
+          lng,
+          is_main
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        RETURNING *
+      `,
+      [
+        clientId,
+        prepared.name,
+        prepared.address,
+        prepared.city || null,
+        prepared.province || null,
+        prepared.lat,
+        prepared.lng,
+        shouldBeMain,
+      ],
+    );
+
+    await client.query("COMMIT");
+    return {
+      ...rows[0],
+      geocoded: prepared.geocoded,
+      geocode_status: prepared.geocode_status || null,
+      geocode_error: prepared.geocode_error || null,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, clientId }, "Error al hacer rollback en addLocation");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function updateLocation({ clientId, locationId, user, payload = {} }) {
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+
+  const incoming = payload && typeof payload === "object" ? payload : {};
+  const hasField = (field) => Object.prototype.hasOwnProperty.call(incoming, field);
+  const normalized = normalizeLocationPayload(incoming);
+
+  const { rows: existingRows } = await db.query(
+    "SELECT * FROM client_locations WHERE id = $1 AND client_id = $2",
+    [locationId, clientId],
+  );
+  const existing = existingRows[0];
+  if (!existing) {
+    const error = new Error("Sede no encontrada");
+    error.status = 404;
+    throw error;
+  }
+
+  const merged = {
+    name: hasField("name") ? normalized.name : String(existing.name || "").trim(),
+    address: hasField("address") ? normalized.address : String(existing.address || "").trim(),
+    city: hasField("city") ? normalized.city : String(existing.city || "").trim(),
+    province: hasField("province") ? normalized.province : String(existing.province || "").trim(),
+    lat: hasField("lat") ? normalized.lat : toCoordinateNumber(existing.lat),
+    lng: hasField("lng") ? normalized.lng : toCoordinateNumber(existing.lng),
+    is_main: hasField("is_main") ? Boolean(incoming.is_main) : Boolean(existing.is_main),
+  };
+
+  if (!merged.name) {
+    const error = new Error("El nombre de la sede es obligatorio");
+    error.status = 400;
+    throw error;
+  }
+  if (!merged.address) {
+    const error = new Error("La direccion de la sede es obligatoria");
+    error.status = 400;
+    throw error;
+  }
+
+  const addressChanged =
+    merged.address !== String(existing.address || "").trim() ||
+    merged.city !== String(existing.city || "").trim() ||
+    merged.province !== String(existing.province || "").trim();
+
+  let prepared = { ...merged, geocoded: false, geocode_status: "UNCHANGED", geocode_error: null };
+  if ((prepared.lat === null || prepared.lng === null) && (addressChanged || hasField("lat") || hasField("lng"))) {
+    prepared = await geocodeLocationIfNeeded(prepared);
+  }
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    if (prepared.is_main) {
+      await client.query(
+        "UPDATE client_locations SET is_main = FALSE, updated_at = NOW() WHERE client_id = $1 AND id <> $2",
+        [clientId, locationId],
+      );
+    }
+
+    const { rows } = await client.query(
+      `
+        UPDATE client_locations
+        SET
+          name = $1,
+          address = $2,
+          city = $3,
+          province = $4,
+          lat = $5,
+          lng = $6,
+          is_main = $7,
+          updated_at = NOW()
+        WHERE id = $8
+          AND client_id = $9
+        RETURNING *
+      `,
+      [
+        prepared.name,
+        prepared.address,
+        prepared.city || null,
+        prepared.province || null,
+        prepared.lat,
+        prepared.lng,
+        prepared.is_main,
+        locationId,
+        clientId,
+      ],
+    );
+
+    if (!rows.length) {
+      const error = new Error("Sede no encontrada");
+      error.status = 404;
+      throw error;
+    }
+
+    const { rows: mainRows } = await client.query(
+      "SELECT id FROM client_locations WHERE client_id = $1 AND is_main = TRUE LIMIT 1",
+      [clientId],
+    );
+    if (!mainRows.length) {
+      await client.query(
+        "UPDATE client_locations SET is_main = TRUE, updated_at = NOW() WHERE id = $1",
+        [locationId],
+      );
+      rows[0].is_main = true;
+    }
+
+    await client.query("COMMIT");
+    return {
+      ...rows[0],
+      geocoded: prepared.geocoded,
+      geocode_status: prepared.geocode_status || null,
+      geocode_error: prepared.geocode_error || null,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, clientId, locationId }, "Error al hacer rollback en updateLocation");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function removeLocation({ clientId, locationId, user }) {
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: existingRows } = await client.query(
+      "SELECT id, is_main FROM client_locations WHERE id = $1 AND client_id = $2 FOR UPDATE",
+      [locationId, clientId],
+    );
+    const existing = existingRows[0];
+    if (!existing) {
+      const error = new Error("Sede no encontrada");
+      error.status = 404;
+      throw error;
+    }
+
+    await client.query("DELETE FROM client_locations WHERE id = $1 AND client_id = $2", [locationId, clientId]);
+
+    const { rows: mainRows } = await client.query(
+      "SELECT id FROM client_locations WHERE client_id = $1 AND is_main = TRUE LIMIT 1",
+      [clientId],
+    );
+    if (!mainRows.length) {
+      const { rows: fallbackRows } = await client.query(
+        "SELECT id FROM client_locations WHERE client_id = $1 ORDER BY created_at ASC, id ASC LIMIT 1",
+        [clientId],
+      );
+      if (fallbackRows.length) {
+        await client.query(
+          "UPDATE client_locations SET is_main = TRUE, updated_at = NOW() WHERE id = $1",
+          [fallbackRows[0].id],
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    return { deleted: true, id: locationId };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, clientId, locationId }, "Error al hacer rollback en removeLocation");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function syncMainLocationFromShippingAddress({
+  clientId,
+  shippingAddress,
+  shippingCity,
+  shippingProvince,
+}) {
+  const address = String(shippingAddress || "").trim();
+  if (!address) return null;
+
+  const city = String(shippingCity || "").trim();
+  const province = String(shippingProvince || "").trim();
+  const geocoded = await geocodeAddress({ address, city, province });
+
+  const client = await db.getClient();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: mainRows } = await client.query(
+      "SELECT id, name, lat, lng FROM client_locations WHERE client_id = $1 AND is_main = TRUE LIMIT 1 FOR UPDATE",
+      [clientId],
+    );
+    const main = mainRows[0] || null;
+
+    if (main) {
+      await client.query(
+        `
+          UPDATE client_locations
+          SET
+            name = COALESCE(NULLIF(TRIM(name), ''), 'Sede principal'),
+            address = $1,
+            city = $2,
+            province = $3,
+            lat = COALESCE($4, lat),
+            lng = COALESCE($5, lng),
+            is_main = TRUE,
+            updated_at = NOW()
+          WHERE id = $6
+        `,
+        [
+          address,
+          city || null,
+          province || null,
+          geocoded.lat,
+          geocoded.lng,
+          main.id,
+        ],
+      );
+    } else {
+      await client.query("UPDATE client_locations SET is_main = FALSE, updated_at = NOW() WHERE client_id = $1", [clientId]);
+      await client.query(
+        `
+          INSERT INTO client_locations (
+            client_id,
+            name,
+            address,
+            city,
+            province,
+            lat,
+            lng,
+            is_main
+          ) VALUES ($1, 'Sede principal', $2, $3, $4, $5, $6, TRUE)
+        `,
+        [clientId, address, city || null, province || null, geocoded.lat, geocoded.lng],
+      );
+    }
+
+    await client.query("COMMIT");
+    return geocoded;
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch (rollbackError) {
+      logger.error({ rollbackError: rollbackError.message, clientId }, "Error al hacer rollback en syncMainLocationFromShippingAddress");
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
@@ -705,6 +1255,27 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
   const { rows: updatedRows } = await db.query(query, values);
   const updated = updatedRows[0];
 
+  if (
+    canEditFull &&
+    (data.shipping_address !== undefined ||
+      data.shipping_city !== undefined ||
+      data.shipping_province !== undefined)
+  ) {
+    try {
+      await syncMainLocationFromShippingAddress({
+        clientId,
+        shippingAddress: updated.shipping_address,
+        shippingCity: updated.shipping_city,
+        shippingProvince: updated.shipping_province,
+      });
+    } catch (locationError) {
+      logger.warn(
+        { locationError: locationError.message, clientId },
+        "No se pudo sincronizar la sede principal despues de actualizar direccion del cliente",
+      );
+    }
+  }
+
   return {
     ...updated,
     attachments: canEditFull ? getClientRequestAttachments(updated) : [],
@@ -1009,11 +1580,93 @@ async function upsertProspectVisit({
   return result.rows[0];
 }
 
+async function registerInteraction({ clientId, user, type, notes }) {
+  if (!isAdvisor(user)) {
+    const error = new Error("No tienes permisos para registrar interacciones");
+    error.status = 403;
+    throw error;
+  }
+
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+
+  const normalizedType = normalizeInteractionType(type);
+  if (!normalizedType || !VALID_INTERACTION_TYPES.has(normalizedType)) {
+    const error = new Error("Tipo de interacción inválido. Usa 'call' o 'visit'.");
+    error.status = 400;
+    throw error;
+  }
+
+  const normalizedNotes = String(notes || "").trim();
+  if (!normalizedNotes) {
+    const error = new Error("Las notas de la interacción son obligatorias.");
+    error.status = 400;
+    throw error;
+  }
+
+  const createdBy = String(user?.email || "").trim().toLowerCase();
+  if (!createdBy) {
+    const error = new Error("Usuario inválido para registrar interacción.");
+    error.status = 400;
+    throw error;
+  }
+
+  const { rows } = await db.query(
+    `INSERT INTO client_interactions (client_id, type, notes, created_by)
+     VALUES ($1, $2, $3, $4)
+     RETURNING id, client_id, type, notes, created_by, created_at`,
+    [clientId, normalizedType, normalizedNotes, createdBy],
+  );
+
+  return rows[0];
+}
+
+async function getClientHistory({ clientId, user, limit = 100 }) {
+  if (!isAdvisor(user)) {
+    const error = new Error("No tienes permisos para consultar historial del cliente");
+    error.status = 403;
+    throw error;
+  }
+
+  await ensureTables();
+  await getClientOrThrow(clientId);
+  await ensureClientAccess({ clientId, user });
+
+  const parsedLimit = Math.max(1, Math.min(Number(limit) || 100, 200));
+  const { rows } = await db.query(
+    `SELECT
+       ci.id,
+       ci.client_id,
+       ci.type,
+       ci.notes,
+       ci.created_by,
+       ci.created_at,
+       COALESCE(u.fullname, u.name, ci.created_by) AS created_by_name,
+       u.role AS created_by_role
+     FROM client_interactions ci
+     LEFT JOIN users u
+       ON LOWER(u.email) = LOWER(ci.created_by)
+     WHERE ci.client_id = $1
+     ORDER BY ci.created_at DESC
+     LIMIT $2`,
+    [clientId, parsedLimit],
+  );
+
+  return rows;
+}
+
 module.exports = {
   listAccessibleClients,
   getClientDetail,
+  listClientLocations,
   updateClient,
+  addLocation,
+  updateLocation,
+  removeLocation,
   assignClient,
   upsertVisitStatus,
-  upsertProspectVisit
+  upsertProspectVisit,
+  registerInteraction,
+  getClientHistory,
 };

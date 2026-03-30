@@ -1,4 +1,12 @@
 const db = require("../../config/db");
+const logger = require("../../config/logger");
+const { columnExists } = require("../../utils/dbMeta");
+const axios = require("axios");
+const { createEvents } = require("ics");
+const { Readable } = require("stream");
+
+const GOOGLE_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json";
+const metadataCache = new Map();
 
 const MANAGER_ROLES = new Set([
   "jefe_comercial",
@@ -44,6 +52,350 @@ function assertCommercial(user) {
     error.status = 403;
     throw error;
   }
+}
+
+function getCurrentMonthYearInAppTimezone() {
+  const timeZone = process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil";
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === "year")?.value || 0);
+  const month = Number(parts.find((part) => part.type === "month")?.value || 0);
+  return { year, month };
+}
+
+function toDateTuple(dateValue) {
+  const normalized = String(dateValue || "").slice(0, 10);
+  const [year, month, day] = normalized.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return [year, month, day];
+}
+
+function shiftDateTuple(tuple, days) {
+  if (!Array.isArray(tuple) || tuple.length < 3) return null;
+  const [year, month, day] = tuple;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + Number(days || 0));
+  return [date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate()];
+}
+
+function createEventsAsync(events) {
+  return new Promise((resolve, reject) => {
+    createEvents(events, (error, value) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(value);
+    });
+  });
+}
+
+function quoteIdentifier(identifier) {
+  return `"${String(identifier || "").replace(/"/g, '""')}"`;
+}
+
+function toFiniteNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatDistanceMeters(meters = 0) {
+  const safeMeters = Number(meters || 0);
+  if (!Number.isFinite(safeMeters) || safeMeters <= 0) return "0 km";
+  if (safeMeters >= 1000) return `${(safeMeters / 1000).toFixed(1)} km`;
+  return `${Math.round(safeMeters)} m`;
+}
+
+function formatDurationSeconds(seconds = 0) {
+  const safeSeconds = Number(seconds || 0);
+  if (!Number.isFinite(safeSeconds) || safeSeconds <= 0) return "0 min";
+  const minutes = Math.round(safeSeconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  return remaining ? `${hours} h ${remaining} min` : `${hours} h`;
+}
+
+async function tableExists(schema, table) {
+  const key = `table:${schema}.${table}`.toLowerCase();
+  if (metadataCache.has(key)) return metadataCache.get(key);
+  try {
+    const { rows } = await db.query(
+      `
+        SELECT 1
+        FROM information_schema.tables
+        WHERE table_schema = $1
+          AND table_name = $2
+        LIMIT 1
+      `,
+      [schema, table],
+    );
+    const exists = rows.length > 0;
+    metadataCache.set(key, exists);
+    return exists;
+  } catch (error) {
+    logger.warn({ error, schema, table }, "No se pudo validar existencia de tabla");
+    metadataCache.set(key, false);
+    return false;
+  }
+}
+
+async function firstExistingColumn(schema, table, candidates = []) {
+  for (const candidate of candidates) {
+    // columnExists ya tiene cache interno por columna.
+    // eslint-disable-next-line no-await-in-loop
+    const exists = await columnExists(schema, table, candidate);
+    if (exists) return candidate;
+  }
+  return null;
+}
+
+async function getCatalogClientsGeoConfig() {
+  const cacheKey = "catalog_clients_geo_config";
+  if (metadataCache.has(cacheKey)) return metadataCache.get(cacheKey);
+
+  const hasCatalogTable = await tableExists("public", "catalog_clients");
+  if (!hasCatalogTable) {
+    metadataCache.set(cacheKey, null);
+    return null;
+  }
+
+  const relationColumn = await firstExistingColumn("public", "catalog_clients", [
+    "client_request_id",
+    "request_id",
+    "client_id",
+  ]);
+  const latitudeColumn = await firstExistingColumn("public", "catalog_clients", [
+    "latitude",
+    "latitud",
+    "shipping_latitude",
+    "geo_latitude",
+    "lat",
+  ]);
+  const longitudeColumn = await firstExistingColumn("public", "catalog_clients", [
+    "longitude",
+    "longitud",
+    "shipping_longitude",
+    "geo_longitude",
+    "lng",
+  ]);
+  const nameColumn = await firstExistingColumn("public", "catalog_clients", [
+    "commercial_name",
+    "nombre_comercial",
+    "name",
+    "client_name",
+    "razon_social",
+  ]);
+
+  if (!relationColumn || !latitudeColumn || !longitudeColumn) {
+    const partial = {
+      relationColumn,
+      latitudeColumn,
+      longitudeColumn,
+      nameColumn,
+    };
+    logger.warn(
+      { partial },
+      "catalog_clients no tiene columnas geoespaciales suficientes para optimizar rutas",
+    );
+    metadataCache.set(cacheKey, null);
+    return null;
+  }
+
+  const config = {
+    relationColumn,
+    latitudeColumn,
+    longitudeColumn,
+    nameColumn,
+  };
+  metadataCache.set(cacheKey, config);
+  return config;
+}
+
+async function getClientRequestsGeoConfig() {
+  const cacheKey = "client_requests_geo_config";
+  if (metadataCache.has(cacheKey)) return metadataCache.get(cacheKey);
+
+  const hasClientRequests = await tableExists("public", "client_requests");
+  if (!hasClientRequests) {
+    metadataCache.set(cacheKey, null);
+    return null;
+  }
+
+  const latitudeColumn = await firstExistingColumn("public", "client_requests", [
+    "shipping_latitude",
+    "latitude",
+    "latitud",
+    "geo_latitude",
+    "lat",
+  ]);
+  const longitudeColumn = await firstExistingColumn("public", "client_requests", [
+    "shipping_longitude",
+    "longitude",
+    "longitud",
+    "geo_longitude",
+    "lng",
+  ]);
+
+  if (!latitudeColumn || !longitudeColumn) {
+    metadataCache.set(cacheKey, null);
+    return null;
+  }
+
+  const config = { latitudeColumn, longitudeColumn };
+  metadataCache.set(cacheKey, config);
+  return config;
+}
+
+function getMapsApiKeyOrThrow() {
+  const apiKey =
+    process.env.GOOGLE_MAPS_SERVER_API_KEY ||
+    process.env.GOOGLE_MAPS_API_KEY ||
+    process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    const error = new Error(
+      "No hay API key de Google Maps configurada. Define GOOGLE_MAPS_SERVER_API_KEY.",
+    );
+    error.status = 500;
+    throw error;
+  }
+  return apiKey;
+}
+
+function normalizeScheduleIds(scheduleIds) {
+  const source = Array.isArray(scheduleIds)
+    ? scheduleIds
+    : scheduleIds !== undefined && scheduleIds !== null
+      ? [scheduleIds]
+      : [];
+  return [...new Set(source.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0))];
+}
+
+function buildVisitAddress(visit = {}) {
+  const parts = [
+    visit.shipping_address,
+    visit.establishment_address,
+    visit.city,
+    visit.shipping_city,
+    visit.establishment_city,
+    visit.shipping_province,
+    visit.establishment_province,
+    "Ecuador",
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+
+  if (!parts.length) return null;
+  return Array.from(new Set(parts)).join(", ");
+}
+
+function resolveVisitLocation(visit = {}) {
+  const latitude = toFiniteNumber(
+    visit.catalog_latitude ?? visit.request_latitude ?? visit.client_latitude ?? visit.latitude,
+  );
+  const longitude = toFiniteNumber(
+    visit.catalog_longitude ?? visit.request_longitude ?? visit.client_longitude ?? visit.longitude,
+  );
+
+  if (latitude !== null && longitude !== null) {
+    return {
+      latitude,
+      longitude,
+      locationQuery: `${latitude},${longitude}`,
+      source: "coordinates",
+      address: buildVisitAddress(visit),
+    };
+  }
+
+  const address = buildVisitAddress(visit);
+  if (!address) return null;
+  return {
+    latitude: null,
+    longitude: null,
+    locationQuery: address,
+    source: "address",
+    address,
+  };
+}
+
+function buildGoogleMapsDeepLink(orderedStops = []) {
+  if (!orderedStops.length) return null;
+  const first = orderedStops[0]?.locationQuery;
+  const last = orderedStops[orderedStops.length - 1]?.locationQuery;
+  if (!first || !last) return null;
+
+  const params = new URLSearchParams({
+    api: "1",
+    travelmode: "driving",
+    origin: first,
+    destination: last,
+  });
+  const waypointValues = orderedStops
+    .slice(1, -1)
+    .map((stop) => stop.locationQuery)
+    .filter(Boolean);
+  if (waypointValues.length) {
+    params.set("waypoints", waypointValues.join("|"));
+  }
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+function buildWazeDeepLink(orderedStops = []) {
+  const lastStop = orderedStops[orderedStops.length - 1];
+  if (!lastStop) return null;
+  const latitude = toFiniteNumber(lastStop.latitude);
+  const longitude = toFiniteNumber(lastStop.longitude);
+  if (latitude === null || longitude === null) return null;
+  return `https://waze.com/ul?ll=${encodeURIComponent(`${latitude},${longitude}`)}&navigate=yes`;
+}
+
+async function requestGoogleOptimizedRoute(points, apiKey) {
+  if (!Array.isArray(points) || points.length < 2) return null;
+  if (points.length > 24) {
+    const error = new Error(
+      "Google Directions permite optimizar hasta 23 waypoints por solicitud. Divide la ruta diaria.",
+    );
+    error.status = 400;
+    throw error;
+  }
+
+  const origin = points[0].locationQuery;
+  const waypointQueries = points.slice(1).map((point) => point.locationQuery);
+  const waypointsParam = `optimize:true|${waypointQueries.join("|")}`;
+
+  const { data } = await axios.get(GOOGLE_DIRECTIONS_URL, {
+    params: {
+      origin,
+      destination: origin,
+      waypoints: waypointsParam,
+      mode: "driving",
+      units: "metric",
+      language: "es",
+      region: "ec",
+      key: apiKey,
+    },
+    timeout: 20000,
+  });
+
+  if (!data || data.status !== "OK") {
+    const detail = data?.error_message || data?.status || "UNKNOWN";
+    const error = new Error(`Google Directions devolvio un error: ${detail}`);
+    error.status = 502;
+    throw error;
+  }
+
+  const route = data.routes?.[0];
+  if (!route) {
+    const error = new Error("Google Directions no devolvio una ruta utilizable");
+    error.status = 502;
+    throw error;
+  }
+  return route;
 }
 
 async function findScheduleOrThrow(id) {
@@ -627,6 +979,362 @@ async function getApprovedScheduleCurrent({ userEmail, month, year, user }) {
   return { ...schedule, schedule_id: schedule.id, visits };
 }
 
+async function getMyCalendarIcsStream({ user }) {
+  assertCommercial(user);
+  const targetEmail = String(user?.email || "").trim().toLowerCase();
+  if (!targetEmail) {
+    const error = new Error("No se pudo resolver el correo del usuario autenticado");
+    error.status = 400;
+    throw error;
+  }
+
+  const { month, year } = getCurrentMonthYearInAppTimezone();
+  const { rows } = await db.query(
+    `SELECT
+       sv.id,
+       sv.planned_date,
+       sv.city,
+       sv.priority,
+       sv.notes,
+       cr.commercial_name AS client_name
+     FROM visit_schedules vs
+     JOIN scheduled_visits sv
+       ON sv.schedule_id = vs.id
+     LEFT JOIN client_requests cr
+       ON cr.id = sv.client_request_id
+     WHERE LOWER(vs.user_email) = LOWER($1)
+       AND vs.status = 'approved'
+       AND vs.month = $2
+       AND vs.year = $3
+     ORDER BY sv.planned_date ASC, sv.priority ASC, sv.id ASC`,
+    [targetEmail, month, year],
+  );
+
+  const events = rows
+    .map((visit) => {
+      const start = toDateTuple(visit.planned_date);
+      if (!start) return null;
+      const end = shiftDateTuple(start, 1);
+      if (!end) return null;
+      const titleBase = String(visit.client_name || "").trim() || `Cliente #${visit.id}`;
+      const descriptionParts = [
+        `Tipo: Visita comercial`,
+        `Cliente: ${titleBase}`,
+        `Prioridad: ${visit.priority || 1}`,
+      ];
+      if (visit.notes) {
+        descriptionParts.push(`Notas: ${String(visit.notes).trim()}`);
+      }
+
+      return {
+        uid: `visit-${visit.id}-${year}${String(month).padStart(2, "0")}@famspi`,
+        title: `Visita comercial - ${titleBase}`,
+        start,
+        end,
+        startOutputType: "local",
+        endOutputType: "local",
+        status: "CONFIRMED",
+        busyStatus: "BUSY",
+        location: String(visit.city || "Sin ciudad definida"),
+        description: descriptionParts.join("\n"),
+        categories: ["Comercial", "Visitas"],
+      };
+    })
+    .filter(Boolean);
+
+  const icsContent = await createEventsAsync(events);
+  const monthLabel = String(month).padStart(2, "0");
+  const fileName = `my-calendar-${year}-${monthLabel}.ics`;
+  const stream = Readable.from([icsContent], { encoding: "utf8" });
+  return { stream, fileName, eventsCount: events.length, month, year };
+}
+
+async function optimizeRoute({ scheduleIds, user }) {
+  assertCommercial(user);
+  const normalizedScheduleIds = normalizeScheduleIds(scheduleIds);
+  if (!normalizedScheduleIds.length) {
+    const error = new Error("Debes enviar al menos un schedule_id valido para optimizar ruta");
+    error.status = 400;
+    throw error;
+  }
+
+  const { rows: schedules } = await db.query(
+    `
+      SELECT id, user_email, month, year
+      FROM visit_schedules
+      WHERE id = ANY($1::int[])
+    `,
+    [normalizedScheduleIds],
+  );
+
+  if (!schedules.length) {
+    const error = new Error("No se encontraron cronogramas para los IDs enviados");
+    error.status = 404;
+    throw error;
+  }
+
+  const foundIds = new Set(schedules.map((row) => Number(row.id)));
+  const missingIds = normalizedScheduleIds.filter((id) => !foundIds.has(id));
+  if (missingIds.length) {
+    const error = new Error(`No existen cronogramas para los IDs: ${missingIds.join(", ")}`);
+    error.status = 404;
+    throw error;
+  }
+
+  if (!isManager(user)) {
+    const unauthorized = schedules.find(
+      (schedule) => String(schedule.user_email || "").toLowerCase() !== String(user.email || "").toLowerCase(),
+    );
+    if (unauthorized) {
+      const error = new Error("No puedes optimizar rutas de cronogramas que no te pertenecen");
+      error.status = 403;
+      throw error;
+    }
+  }
+
+  const mapsApiKey = getMapsApiKeyOrThrow();
+  const catalogGeoConfig = await getCatalogClientsGeoConfig();
+  const requestGeoConfig = await getClientRequestsGeoConfig();
+
+  const catalogJoinClause = catalogGeoConfig
+    ? `
+      LEFT JOIN public.catalog_clients cc
+        ON cc.${quoteIdentifier(catalogGeoConfig.relationColumn)} = sv.client_request_id
+    `
+    : "";
+
+  const catalogLatSelect = catalogGeoConfig
+    ? `cc.${quoteIdentifier(catalogGeoConfig.latitudeColumn)} AS catalog_latitude`
+    : `NULL::double precision AS catalog_latitude`;
+  const catalogLngSelect = catalogGeoConfig
+    ? `cc.${quoteIdentifier(catalogGeoConfig.longitudeColumn)} AS catalog_longitude`
+    : `NULL::double precision AS catalog_longitude`;
+  const catalogNameSelect = catalogGeoConfig?.nameColumn
+    ? `cc.${quoteIdentifier(catalogGeoConfig.nameColumn)}`
+    : `NULL`;
+
+  const requestLatSelect = requestGeoConfig
+    ? `cr.${quoteIdentifier(requestGeoConfig.latitudeColumn)} AS request_latitude`
+    : `NULL::double precision AS request_latitude`;
+  const requestLngSelect = requestGeoConfig
+    ? `cr.${quoteIdentifier(requestGeoConfig.longitudeColumn)} AS request_longitude`
+    : `NULL::double precision AS request_longitude`;
+
+  const { rows: visits } = await db.query(
+    `
+      SELECT
+        sv.id AS visit_id,
+        sv.schedule_id,
+        sv.client_request_id,
+        sv.planned_date,
+        sv.priority,
+        sv.notes,
+        sv.city,
+        vs.user_email,
+        COALESCE(
+          ${catalogNameSelect},
+          cr.commercial_name,
+          cr.establishment_name,
+          cr.shipping_contact_name,
+          ('Cliente #' || sv.client_request_id::text)
+        ) AS client_name,
+        ${catalogLatSelect},
+        ${catalogLngSelect},
+        ${requestLatSelect},
+        ${requestLngSelect},
+        cr.shipping_address,
+        cr.shipping_city,
+        cr.shipping_province,
+        cr.establishment_address,
+        cr.establishment_city,
+        cr.establishment_province
+      FROM scheduled_visits sv
+      INNER JOIN visit_schedules vs
+        ON vs.id = sv.schedule_id
+      LEFT JOIN client_requests cr
+        ON cr.id = sv.client_request_id
+      ${catalogJoinClause}
+      WHERE sv.schedule_id = ANY($1::int[])
+      ORDER BY sv.planned_date ASC, sv.priority DESC, sv.id ASC
+    `,
+    [normalizedScheduleIds],
+  );
+
+  if (!visits.length) {
+    return {
+      schedule_ids: normalizedScheduleIds,
+      routes_by_date: [],
+      total_visits: 0,
+      message: "No hay visitas planificadas para optimizar en los cronogramas enviados",
+    };
+  }
+
+  const groupedByDate = visits.reduce((acc, visit) => {
+    const key = String(visit.planned_date || "").slice(0, 10);
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(visit);
+    return acc;
+  }, {});
+
+  const routesByDate = [];
+  let totalDistanceMeters = 0;
+  let totalTravelSeconds = 0;
+
+  for (const [plannedDate, visitsForDate] of Object.entries(groupedByDate)) {
+    const mappable = [];
+    const excluded = [];
+
+    visitsForDate.forEach((visit) => {
+      const location = resolveVisitLocation(visit);
+      if (!location) {
+        excluded.push({
+          visit_id: visit.visit_id,
+          schedule_id: visit.schedule_id,
+          client_request_id: visit.client_request_id,
+          client_name: visit.client_name,
+          reason: "No existe coordenada ni direccion para la visita",
+        });
+        return;
+      }
+
+      mappable.push({
+        visit_id: visit.visit_id,
+        schedule_id: visit.schedule_id,
+        client_request_id: visit.client_request_id,
+        client_name: visit.client_name,
+        planned_date: String(visit.planned_date || "").slice(0, 10),
+        priority: Number(visit.priority || 1),
+        notes: visit.notes || null,
+        city: visit.city || null,
+        ...location,
+      });
+    });
+
+    if (mappable.length < 2) {
+      routesByDate.push({
+        planned_date: plannedDate,
+        optimized: false,
+        reason: "Se requieren al menos 2 visitas geolocalizables para optimizar la ruta",
+        ordered_visit_ids: mappable.map((item) => item.visit_id),
+        ordered_visits: mappable.map((visit, index) => ({ ...visit, route_order: index + 1 })),
+        excluded_visits: excluded,
+        segments: [],
+        estimated_distance_meters: 0,
+        estimated_distance_label: "0 km",
+        estimated_travel_time_seconds: 0,
+        estimated_travel_time_label: "0 min",
+        google_maps_url: buildGoogleMapsDeepLink(mappable),
+        waze_url: buildWazeDeepLink(mappable),
+      });
+      // eslint-disable-next-line no-continue
+      continue;
+    }
+
+    try {
+      const route = await requestGoogleOptimizedRoute(mappable, mapsApiKey);
+      const waypointOrder = Array.isArray(route.waypoint_order)
+        ? route.waypoint_order
+        : mappable.slice(1).map((_, index) => index);
+      const orderedStops = [
+        mappable[0],
+        ...waypointOrder
+          .map((waypointIndex) => mappable[Number(waypointIndex) + 1])
+          .filter(Boolean),
+      ];
+
+      const orderedVisits = orderedStops.map((stop, index) => ({
+        ...stop,
+        route_order: index + 1,
+      }));
+
+      const legs = Array.isArray(route.legs) ? route.legs : [];
+      const usableLegs = legs.slice(0, Math.max(orderedVisits.length - 1, 0));
+      const segments = usableLegs.map((leg, index) => {
+        const from = orderedVisits[index];
+        const to = orderedVisits[index + 1];
+        const estimatedDistanceMeters = Number(leg?.distance?.value || 0);
+        const estimatedTravelSeconds = Number(leg?.duration?.value || 0);
+        return {
+          segment_order: index + 1,
+          from_visit_id: from?.visit_id || null,
+          from_client_name: from?.client_name || null,
+          to_visit_id: to?.visit_id || null,
+          to_client_name: to?.client_name || null,
+          estimated_distance_meters: estimatedDistanceMeters,
+          estimated_distance_label: leg?.distance?.text || formatDistanceMeters(estimatedDistanceMeters),
+          estimated_travel_time_seconds: estimatedTravelSeconds,
+          estimated_travel_time_label: leg?.duration?.text || formatDurationSeconds(estimatedTravelSeconds),
+        };
+      });
+
+      const routeDistanceMeters = segments.reduce(
+        (acc, segment) => acc + Number(segment.estimated_distance_meters || 0),
+        0,
+      );
+      const routeTravelSeconds = segments.reduce(
+        (acc, segment) => acc + Number(segment.estimated_travel_time_seconds || 0),
+        0,
+      );
+
+      totalDistanceMeters += routeDistanceMeters;
+      totalTravelSeconds += routeTravelSeconds;
+
+      routesByDate.push({
+        planned_date: plannedDate,
+        optimized: true,
+        ordered_visit_ids: orderedVisits.map((item) => item.visit_id),
+        ordered_visits: orderedVisits,
+        excluded_visits: excluded,
+        segments,
+        estimated_distance_meters: routeDistanceMeters,
+        estimated_distance_label: formatDistanceMeters(routeDistanceMeters),
+        estimated_travel_time_seconds: routeTravelSeconds,
+        estimated_travel_time_label: formatDurationSeconds(routeTravelSeconds),
+        google_maps_url: buildGoogleMapsDeepLink(orderedStops),
+        waze_url: buildWazeDeepLink(orderedStops),
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          error: error.message,
+          plannedDate,
+          scheduleIds: normalizedScheduleIds,
+          stops: mappable.length,
+        },
+        "No se pudo optimizar ruta diaria en schedules.optimizeRoute",
+      );
+      routesByDate.push({
+        planned_date: plannedDate,
+        optimized: false,
+        reason: error.message || "No se pudo optimizar la ruta diaria",
+        ordered_visit_ids: mappable.map((item) => item.visit_id),
+        ordered_visits: mappable.map((visit, index) => ({ ...visit, route_order: index + 1 })),
+        excluded_visits: excluded,
+        segments: [],
+        estimated_distance_meters: 0,
+        estimated_distance_label: "0 km",
+        estimated_travel_time_seconds: 0,
+        estimated_travel_time_label: "0 min",
+        google_maps_url: buildGoogleMapsDeepLink(mappable),
+        waze_url: buildWazeDeepLink(mappable),
+      });
+    }
+  }
+
+  routesByDate.sort((a, b) => new Date(a.planned_date) - new Date(b.planned_date));
+
+  return {
+    schedule_ids: normalizedScheduleIds,
+    optimized_by: user.email,
+    routes_by_date: routesByDate,
+    total_visits: visits.length,
+    total_distance_meters: totalDistanceMeters,
+    total_distance_label: formatDistanceMeters(totalDistanceMeters),
+    total_travel_time_seconds: totalTravelSeconds,
+    total_travel_time_label: formatDurationSeconds(totalTravelSeconds),
+  };
+}
+
 async function getAnalytics(user) {
   assertManager(user);
   const { rows } = await db.query(
@@ -653,7 +1361,9 @@ module.exports = {
   deleteVisit,
   approveSchedule,
   rejectSchedule,
+  optimizeRoute,
   getAnalytics,
   getApprovedScheduleCurrent,
   findApprovedScheduleForMonth,
+  getMyCalendarIcsStream,
 };

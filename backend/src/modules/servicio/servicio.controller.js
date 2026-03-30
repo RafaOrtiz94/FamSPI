@@ -1,7 +1,9 @@
 const db = require("../../config/db");
+const logger = require("../../config/logger");
 const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { generatePDF } = require("./desinfeccion.service");
+const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 
 // ===============================================================
 // 🔐 CONFIGURACIÓN GOOGLE DRIVE / DOCS
@@ -107,12 +109,13 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
         [defaults.stage_key || null, driveFolderId, requestId, metadata, existing[0].id],
       );
     } else {
-      await db.query(
+      const { rows: inserted } = await db.query(
         `INSERT INTO servicio.workflow_documents (
             source_type, source_id, document_code, stage_key, drive_file_id, drive_folder_id,
             request_id, created_by, created_by_email, metadata, created_at, updated_at
           )
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,now(),now())`,
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,now(),now())
+          RETURNING id, drive_file_id`,
         [
           sourceType,
           sourceId,
@@ -126,6 +129,21 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
           metadata,
         ],
       );
+
+      const newDoc = inserted[0];
+      if (newDoc?.drive_file_id) {
+        resolveExternalDriveIntegrity(newDoc.drive_file_id, drive)
+          .then(async (result) => {
+            if (result) {
+              await db.query(
+                `UPDATE servicio.workflow_documents SET metadata = jsonb_set(metadata, '{integrity}', $1::jsonb) WHERE id = $2`,
+                [JSON.stringify({ hash: result.hash, algorithm: result.algorithm }), newDoc.id],
+              );
+              logger.info({ fileId: newDoc.drive_file_id }, "Integridad resuelta para documento de workflow de servicio");
+            }
+          })
+          .catch((err) => logger.warn({ err }, "Error asíncrono resolviendo integridad de workflow de servicio"));
+      }
     }
   } catch (error) {
     console.warn("⚠️ No se pudo registrar documento de workflow ST-01-01:", error?.message || error);

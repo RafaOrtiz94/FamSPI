@@ -24,6 +24,8 @@ export const fetchApprovedSchedule = (params = {}) =>
  .get("/schedules/approved/current", { params })
  .then((res) => res.data?.data)
  .catch(() => null);
+export const optimizeRoute = (payload) =>
+ api.post("/schedules/optimize-route", payload).then((res) => res.data?.data);
 
 export default {
  fetchSchedules,
@@ -40,4 +42,5 @@ export default {
  rejectSchedule,
  fetchTeamSchedules,
  fetchScheduleAnalytics,
+ optimizeRoute,
 };

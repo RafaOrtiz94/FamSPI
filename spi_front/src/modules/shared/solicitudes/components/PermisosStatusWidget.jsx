@@ -105,7 +105,7 @@ const getTodayLocalDate = () => {
 const canCancelByDateRule = (solicitud = {}) => {
  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
  if (!startDate) return false;
- return getTodayLocalDate() < startDate;
+ return getTodayLocalDate() <= startDate;
 };
 
 const RECOVERY_COORDINATION_LABELS = {
@@ -119,6 +119,7 @@ const RECOVERY_COORDINATION_LABELS = {
 const INITIAL_VISIBLE_COUNTS = {
  mine: 8,
  approve: 8,
+ cancellation_requests: 8,
  study_enrollments: 6,
  waiting: 8,
  upload_docs: 6,
@@ -263,7 +264,7 @@ const PermisosStatusWidget = () => {
  const approverRole = (solicitud.approver_role || "").toLowerCase();
  const approverEmail = (solicitud.approver_email || "").toLowerCase();
  const approverUserId = solicitud.approver_user_id;
- if (approverUserId && userId && approverUserId === userId) return true;
+ if (approverUserId && userId && Number(approverUserId) === Number(userId)) return true;
  if (approverEmail && userEmail && approverEmail === userEmail.toLowerCase()) return true;
  if (approverRole) {
  if (gerenciaGeneralRoles.has(approverRole)) {
@@ -303,14 +304,19 @@ const PermisosStatusWidget = () => {
  updated_at: normalizeDateValue(solicitud?.updated_at),
  });
 
- const isApprovedSolicitud = (solicitud) =>
+const isApprovedSolicitud = (solicitud) =>
  ["approved", "aprobado"].includes(String(solicitud?.status || "").toLowerCase());
 
- const isCoordinationPendingSolicitud = (solicitud) => {
- if (!isApprovedSolicitud(solicitud) || !solicitud?.es_recuperable) return false;
+ const canCoordinateRecoveryByStatus = (solicitud) =>
+ ["partially_approved", "pending_final", "approved", "aprobado"].includes(
+ String(solicitud?.status || "").toLowerCase()
+ );
+
+const isCoordinationPendingSolicitud = (solicitud) => {
+ if (!canCoordinateRecoveryByStatus(solicitud) || !solicitud?.es_recuperable) return false;
  const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
  return ["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus);
- };
+};
 
  const canCurrentUserCancelSolicitud = (solicitud) => {
  const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
@@ -737,12 +743,40 @@ const PermisosStatusWidget = () => {
 
  pendientesParcial.forEach((solicitud) => upsert(solicitud, ["approval_pending"]));
  pendientesFinal.forEach((solicitud) => upsert(solicitud, ["approval_pending"]));
- pendientesCancelacion.forEach((solicitud) => upsert(solicitud, ["cancellation_pending"]));
  pendientesAprobadas.forEach((solicitud) => {
  const kinds = [];
  if (isCoordinationPendingSolicitud(solicitud)) kinds.push("coordination_pending");
- if (canCurrentUserCancelSolicitud(solicitud)) kinds.push("cancellable");
  upsert(solicitud, kinds);
+ });
+
+ return Array.from(itemsById.values()).sort(
+ (left, right) => getApprovalSortTimestamp(right) - getApprovalSortTimestamp(left)
+ );
+ })();
+
+ const cancellationQueue = (() => {
+ const itemsById = new Map();
+
+ const upsert = (solicitud, kinds = []) => {
+ if (!solicitud || kinds.length === 0) return;
+ const existing = itemsById.get(solicitud.id);
+ if (existing) {
+ existing.approvalQueueKinds = Array.from(
+ new Set([...(existing.approvalQueueKinds || []), ...kinds])
+ );
+ return;
+ }
+ itemsById.set(solicitud.id, {
+ ...solicitud,
+ approvalQueueKinds: kinds,
+ });
+ };
+
+ pendientesCancelacion.forEach((solicitud) => upsert(solicitud, ["cancellation_pending"]));
+ pendientesAprobadas.forEach((solicitud) => {
+ if (canCurrentUserCancelSolicitud(solicitud)) {
+ upsert(solicitud, ["cancellable"]);
+ }
  });
 
  return Array.from(itemsById.values()).sort(
@@ -801,6 +835,13 @@ const PermisosStatusWidget = () => {
  visible: true,
  icon: FiCheck,
  });
+ base.push({
+ id: "cancellation_requests",
+ label: "Cancelaciones",
+ count: cancellationQueue.length,
+ visible: true,
+ icon: FiAlertCircle,
+ });
  if (pendingStudyEnrollments.length > 0) {
  base.push({
  id: "study_enrollments",
@@ -823,6 +864,7 @@ const PermisosStatusWidget = () => {
  }, [
  misSolicitudes.length,
  approvalQueue.length,
+ cancellationQueue.length,
  pendingStudyEnrollments.length,
  misEsperandoGerencia.length,
  isApprover,
@@ -946,6 +988,7 @@ const PermisosStatusWidget = () => {
  }
  const signatureSummary = solicitud.firma_avanzada_resumen || null;
  const normalizedStatus = String(solicitud?.status || "").toLowerCase();
+ const isRecoveryCoordinationEnabled = canCoordinateRecoveryByStatus(solicitud);
  const isRejectedStatus = ["rejected", "rechazado"].includes(normalizedStatus);
  const isCancelledStatus = ["cancelled", "cancelado"].includes(normalizedStatus);
  const timeRange = formatTimeRange(solicitud);
@@ -957,14 +1000,17 @@ const PermisosStatusWidget = () => {
  const isApproverOfSolicitud = canCurrentUserActAsAssignedApprover(solicitud);
  const canEditRecovery =
  Boolean(solicitud?.es_recuperable) &&
+ isRecoveryCoordinationEnabled &&
  !["agreed", "finalized_by_approver"].includes(coordinationStatus) &&
  !["rejected", "rechazado", "cancelled", "cancelado"].includes(normalizedStatus) &&
  (isRequesterOfSolicitud || isApproverOfSolicitud);
  const canApproveRecoveryProposal =
+ isRecoveryCoordinationEnabled &&
  (isRequesterOfSolicitud || isApproverOfSolicitud) &&
  ["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus) &&
  recoveryPlan.length > 0;
  const canApproverFinalize =
+ isRecoveryCoordinationEnabled &&
  isApproverOfSolicitud &&
  coordinationStatus === "pending_approver_proposal" &&
  Number(solicitud?.recovery_coordination_round || 0) > 0 &&
@@ -1054,7 +1100,7 @@ const PermisosStatusWidget = () => {
  )}
  </div>
 
- {solicitud.es_recuperable && (
+ {solicitud.es_recuperable && isRecoveryCoordinationEnabled && (
  <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
  <div className="flex items-center justify-between gap-2">
  <p className="text-xs font-semibold text-emerald-900">
@@ -1462,6 +1508,33 @@ const PermisosStatusWidget = () => {
  renderSolicitudCard(sol, { showActions: true, showUser: true })
  )}
  {renderListControls("approve", approvalQueue.length)}
+ </>
+ );
+ }
+
+ if (activeTab === "cancellation_requests") {
+ if (!isApprover) return null;
+ if (cancellationQueue.length === 0) {
+ return (
+ <div className="text-center py-10">
+ <FiAlertCircle className="w-12 h-12 text-rose-300 mx-auto mb-3" />
+ <p className="text-sm font-medium text-gray-900">No hay cancelaciones por gestionar</p>
+ <p className="text-xs text-gray-500 mt-1">No existen solicitudes pendientes ni cancelables en este momento</p>
+ </div>
+ );
+ }
+ const visibleItems = cancellationQueue.slice(0, getVisibleCountForSection("cancellation_requests"));
+ return (
+ <>
+ <div className="mb-3 rounded-lg border border-rose-200 bg-rose-50 p-3">
+ <p className="text-xs text-rose-800">
+ Aquí puedes revisar cancelaciones solicitadas por colaboradores y también cancelar solicitudes aprobadas como jefe inmediato o gerencia.
+ </p>
+ </div>
+ {visibleItems.map((sol) =>
+ renderSolicitudCard(sol, { showActions: true, showUser: true })
+ )}
+ {renderListControls("cancellation_requests", cancellationQueue.length)}
  </>
  );
  }

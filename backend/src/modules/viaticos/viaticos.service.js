@@ -1,5 +1,6 @@
 const db = require("../../config/db");
 const { uploadBase64File } = require("../../utils/drive");
+const { HASH_ALGORITHM, computeSha256HexFromBase64 } = require("../../utils/documentHash");
 
 const FINANCE_ROLES = ["finanzas", "jefe_finanzas", "jefe_financiero", "gerencia", "gerencia_general"];
 const REQUESTER_ROLES = [
@@ -187,6 +188,8 @@ async function ensureSchema() {
       mime_type TEXT,
       drive_file_id TEXT,
       drive_link TEXT,
+      content_hash_sha256 VARCHAR(64),
+      hash_algorithm VARCHAR(20) DEFAULT 'SHA-256',
       amount NUMERIC(12,2),
       expense_date DATE,
       invoice_number TEXT,
@@ -194,6 +197,12 @@ async function ensureSchema() {
       uploaded_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
       uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await db.query(`
+    ALTER TABLE travel_allowance_documents
+    ADD COLUMN IF NOT EXISTS content_hash_sha256 VARCHAR(64),
+    ADD COLUMN IF NOT EXISTS hash_algorithm VARCHAR(20) DEFAULT 'SHA-256';
   `);
 
   await db.query(`
@@ -825,6 +834,12 @@ async function createAllowanceDocument({ allowanceId, actorUser, payload }) {
   let driveFileId = payload.drive_file_id || null;
   let driveLink = payload.drive_link || null;
   let mimeType = payload.mime_type || null;
+  let contentHashSha256 = typeof payload.content_hash_sha256 === "string"
+    ? payload.content_hash_sha256.trim().toLowerCase()
+    : null;
+  let hashAlgorithm = contentHashSha256
+    ? String(payload.hash_algorithm || HASH_ALGORITHM).trim() || HASH_ALGORITHM
+    : null;
 
   if (!driveFileId && !driveLink) {
     if (!payload.file_base64) {
@@ -834,6 +849,8 @@ async function createAllowanceDocument({ allowanceId, actorUser, payload }) {
     }
 
     const parsed = parseBase64Input(payload.file_base64);
+    contentHashSha256 = computeSha256HexFromBase64(parsed.base64) || contentHashSha256;
+    hashAlgorithm = contentHashSha256 ? HASH_ALGORITHM : hashAlgorithm;
     const targetMime = mimeType || parsed.mimeType || "application/pdf";
     const estimatedBytes = Math.ceil((parsed.base64.length * 3) / 4);
     const maxBytes = 15 * 1024 * 1024;
@@ -857,9 +874,10 @@ async function createAllowanceDocument({ allowanceId, actorUser, payload }) {
     `
       INSERT INTO travel_allowance_documents (
         allowance_id, doc_type, file_name, mime_type, drive_file_id, drive_link,
+        content_hash_sha256, hash_algorithm,
         amount, expense_date, invoice_number, notes, uploaded_by_user_id, uploaded_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW())
       RETURNING *
     `,
     [
@@ -869,6 +887,8 @@ async function createAllowanceDocument({ allowanceId, actorUser, payload }) {
       mimeType,
       driveFileId,
       driveLink,
+      contentHashSha256,
+      hashAlgorithm,
       amount,
       payload.expense_date || null,
       payload.invoice_number || null,

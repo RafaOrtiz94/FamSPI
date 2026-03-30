@@ -81,6 +81,7 @@ const LoginCallback = () => {
 
  const roleRoutes = {
  gerencia: "/dashboard/gerencia",
+ gerencia_general: "/dashboard/gerencia",
  gerente_general: "/dashboard/gerencia",
  director: "/dashboard/gerencia",
  finanzas: "/dashboard/finanzas",
@@ -91,6 +92,7 @@ const LoginCallback = () => {
  jefe_comercial: "/dashboard/comercial",
  backoffice_comercial: "/dashboard/comercial",
  acp_comercial: "/dashboard/comercial",
+ analista_comercial: "/dashboard/comercial",
  servicio_tecnico: "/dashboard/servicio-tecnico",
  "servicio-tecnico": "/dashboard/servicio-tecnico",
  jefe_servicio_tecnico: "/dashboard/servicio-tecnico",
@@ -108,7 +110,7 @@ const LoginCallback = () => {
 
  const target = sessionStorage.getItem("redirectTo") || (isPendingRole
  ? "/registro-en-proceso"
- : stored.dashboard || roleRoutes[scope] || roleRoutes[role] || "/unauthorized");
+ : stored.dashboard || roleRoutes[role] || roleRoutes[scope] || "/unauthorized");
  sessionStorage.removeItem("redirectTo");
  console.log(`🚀 Redirigiendo a: ${target}`);
  navigate(target, { replace: true });

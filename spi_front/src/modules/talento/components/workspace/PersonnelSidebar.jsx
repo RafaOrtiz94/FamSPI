@@ -9,6 +9,7 @@ import PersonnelApprovalsModal from "./PersonnelApprovalsModal";
 const PersonnelSidebar = ({
  className = "",
  activeView,
+ onActiveViewChange,
  setActiveView,
  requests,
  loadingRequests,
@@ -27,6 +28,7 @@ const PersonnelSidebar = ({
  selectedRequestTitle, // To show context in Applicant view
  onCreateRequest,
 }) => {
+ const handleActiveViewChange = onActiveViewChange || setActiveView;
  const [approvalsOpen, setApprovalsOpen] = useState(false);
  const [requestSearch, setRequestSearch] = useState("");
  const [applicantSearch, setApplicantSearch] = useState("");
@@ -62,7 +64,9 @@ const PersonnelSidebar = ({
         <p className="text-xs text-gray-500">Gestión de Talento Humano</p>
         <div className="mt-3 grid grid-cols-2 gap-2">
           <button
-            onClick={() => setActiveView("solicitudes")}
+            type="button"
+            onClick={() => handleActiveViewChange?.("solicitudes")}
+            aria-label="Cambiar a vista de contratación"
             className={`flex-1 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
               isHiringView
                 ? "bg-blue-600 text-white"
@@ -72,7 +76,9 @@ const PersonnelSidebar = ({
             Contratación
           </button>
           <button
-            onClick={() => setActiveView("colaboradores")}
+            type="button"
+            onClick={() => handleActiveViewChange?.("colaboradores")}
+            aria-label="Cambiar a vista de colaboradores"
             className={`flex-1 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors ${
               activeView === "colaboradores"
                 ? "bg-blue-600 text-white"
@@ -89,12 +95,12 @@ const PersonnelSidebar = ({
           <div className="p-3">
             <div className="mb-3 grid gap-2">
               {canRequestPersonnel && (
-                <Button variant="primary" size="sm" onClick={onCreateRequest} className="w-full">
+                <Button variant="primary" size="sm" onClick={onCreateRequest} className="w-full" aria-label="Crear nueva solicitud de personal">
                   Nueva solicitud
                 </Button>
               )}
               {canApprovePersonnel && (
-                <Button variant="secondary" size="sm" onClick={() => setApprovalsOpen(true)} className="w-full">
+                <Button variant="secondary" size="sm" onClick={() => setApprovalsOpen(true)} className="w-full" aria-label="Revisar solicitudes pendientes">
                   Revisar solicitudes
                 </Button>
               )}
@@ -104,6 +110,7 @@ const PersonnelSidebar = ({
               value={requestSearch}
               onChange={(e) => setRequestSearch(e.target.value)}
               placeholder="Buscar solicitud..."
+              aria-label="Buscar solicitud por nombre o código"
               className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
 
@@ -118,7 +125,7 @@ const PersonnelSidebar = ({
               <RequestList
                 requests={filteredRequests}
                 selectedRequestId={selectedRequestId}
-                onSelect={onSelectRequest}
+                onSelectRequest={onSelectRequest}
               />
             )}
           </div>
@@ -130,6 +137,7 @@ const PersonnelSidebar = ({
               value={collaboratorSearch}
               onChange={(e) => setCollaboratorSearch(e.target.value)}
               placeholder="Buscar colaborador..."
+              aria-label="Buscar colaborador por nombre, correo o departamento"
               className="mb-3 w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
 
@@ -137,7 +145,7 @@ const PersonnelSidebar = ({
               collaborators={filteredCollaborators}
               loading={loadingCollaborators}
               selectedCollaboratorId={selectedCollaboratorId}
-              onSelect={onSelectCollaborator}
+              onSelectCollaborator={onSelectCollaborator}
             />
           </div>
         )}

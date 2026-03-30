@@ -201,6 +201,11 @@ async function main() {
   const onlyMissing = process.argv.includes("--only-missing");
   const emailArg = process.argv.find((arg) => arg.startsWith("--user-email="));
   const userEmailFilter = emailArg ? String(emailArg.split("=")[1] || "").trim().toLowerCase() : null;
+  const idArg = process.argv.find((arg) => arg.startsWith("--id="));
+  const requestIdFilter = idArg ? Number(idArg.split("=")[1]) : null;
+  if (idArg && !Number.isInteger(requestIdFilter)) {
+    throw new Error(`ID de solicitud invalido: ${idArg}`);
+  }
 
   const stats = {
     totalApproved: 0,
@@ -216,10 +221,19 @@ async function main() {
     SELECT *
       FROM permisos_vacaciones
      WHERE status = 'approved'
-       ${userEmailFilter ? "AND LOWER(user_email) = LOWER($1)" : ""}
+       ${requestIdFilter ? "AND id = $1" : ""}
+       ${requestIdFilter && userEmailFilter ? "AND LOWER(user_email) = LOWER($2)" : ""}
+       ${!requestIdFilter && userEmailFilter ? "AND LOWER(user_email) = LOWER($1)" : ""}
      ORDER BY id ASC
   `;
-  const { rows } = await db.query(query, userEmailFilter ? [userEmailFilter] : []);
+  const queryParams = requestIdFilter
+    ? userEmailFilter
+      ? [requestIdFilter, userEmailFilter]
+      : [requestIdFilter]
+    : userEmailFilter
+      ? [userEmailFilter]
+      : [];
+  const { rows } = await db.query(query, queryParams);
   stats.totalApproved = rows.length;
 
   const candidates = onlyMissing
@@ -228,7 +242,7 @@ async function main() {
   stats.toProcess = candidates.length;
 
   console.log(
-    `[FRH10_REGEN] approved=${stats.totalApproved} to_process=${stats.toProcess} dry_run=${dryRun} force=${force} only_missing=${onlyMissing} user_email=${userEmailFilter || "ALL"}`
+    `[FRH10_REGEN] approved=${stats.totalApproved} to_process=${stats.toProcess} dry_run=${dryRun} force=${force} only_missing=${onlyMissing} request_id=${requestIdFilter || "ALL"} user_email=${userEmailFilter || "ALL"}`
   );
 
   for (const row of candidates) {

@@ -102,6 +102,34 @@ const getApprovedSchedule = (req, res) =>
   );
 
 const analytics = (req, res) => respond(res, service.getAnalytics(req.user));
+const optimizeRoute = (req, res) =>
+  respond(
+    res,
+    service.optimizeRoute({
+      scheduleIds: req.body.schedule_ids || req.body.scheduleIds,
+      user: req.user,
+    }),
+  );
+
+const getMyCalendarIcs = async (req, res) => {
+  try {
+    const { stream, fileName } = await service.getMyCalendarIcsStream({ user: req.user });
+    res.setHeader("Content-Type", "text/calendar; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
+    res.setHeader("Cache-Control", "no-store");
+    stream.on("error", () => {
+      if (!res.headersSent) {
+        res.status(500).json({ ok: false, message: "No se pudo generar el calendario" });
+        return;
+      }
+      res.end();
+    });
+    stream.pipe(res);
+  } catch (error) {
+    const status = error.status || 500;
+    res.status(status).json({ ok: false, message: error.message || "Error exportando calendario" });
+  }
+};
 
 module.exports = {
   listMySchedules,
@@ -119,4 +147,6 @@ module.exports = {
   rejectSchedule,
   analytics,
   getApprovedSchedule,
+  getMyCalendarIcs,
+  optimizeRoute,
 };

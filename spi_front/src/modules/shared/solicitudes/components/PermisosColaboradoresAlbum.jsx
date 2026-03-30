@@ -6,14 +6,16 @@ import { getResumenColaboradores } from "../../../../core/api/permisosApi";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
 import { useUI } from "../../../../core/ui/UIContext";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
+import { formatCalendarDate } from "../utils/solicitudesHelpers";
 
 const formatDate = (dateStr) => {
  if (!dateStr) return "-";
- return new Date(dateStr).toLocaleDateString("es-EC", {
+ const formatted = formatCalendarDate(dateStr, {
  year: "numeric",
  month: "short",
  day: "numeric",
  });
+ return formatted === "N/A" ? "-" : formatted;
 };
 
 const computePermisoDuration = (item) => {
