@@ -17,5 +17,6 @@ router.post("/:id/cancel", controller.cancel);
 router.patch("/:id/dates", controller.updateDates);
 router.post("/:id/cancel/review", controller.reviewCancel);
 router.get("/summary/data", controller.getSummary);
+router.get("/validate-balance", controller.validateBalance);
 
 module.exports = router;

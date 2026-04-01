@@ -655,6 +655,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     canHireApplicant,
     canReassignPersonnel,
     canUnlockSections,
+    currentUserRole: role,
     isRequestContext,
     isApplicantContext,
     isCollaboratorContext,

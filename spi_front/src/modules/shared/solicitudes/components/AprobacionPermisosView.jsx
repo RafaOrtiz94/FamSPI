@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   FiCheck,
@@ -134,6 +135,12 @@ const AprobacionPermisosView = ({ compact = false }) => {
   const { showToast, showLoader, hideLoader } = useUI();
   const { user } = useAuth();
   const [stage, setStage] = useState("pending");
+  const location = useLocation();
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const urlTab = searchParams.get("tab");
+  const urlSolicitudId = searchParams.get("solicitudId");
+  const urlEnrollmentId = searchParams.get("enrollmentId");
+  const urlOpenRecovery = searchParams.get("openRecovery");
   const [loading, setLoading] = useState(true);
   const [solicitudes, setSolicitudes] = useState([]);
   const [pendingStudyEnrollments, setPendingStudyEnrollments] = useState([]);
@@ -910,6 +917,49 @@ const AprobacionPermisosView = ({ compact = false }) => {
     { id: "study_enrollments", label: "Matriculas", icon: FiFileText, color: "indigo" },
     { id: "approved", label: "Aprobadas Definitivas", icon: FiCheckCircle, color: "emerald", hidden: !canSeeApproved },
   ].filter((tab) => !tab.hidden);
+
+  useEffect(() => {
+    if (!urlTab) return;
+    const tabToStage = {
+      approve: "pending",
+      cancellation_requests: "cancellation_pending",
+      study_enrollments: "study_enrollments",
+      waiting: "pending",
+    };
+    const targetStage = tabToStage[urlTab];
+    if (targetStage) {
+      setStage(targetStage);
+    }
+  }, [urlTab]);
+
+  useEffect(() => {
+    if (!urlSolicitudId) return;
+    const target = (solicitudes || []).find((s) => String(s?.id) === String(urlSolicitudId));
+    if (!target) return;
+    setSelectedSolicitud(target);
+    if (urlOpenRecovery === "true") {
+      openRecoveryEditor(target);
+    }
+  }, [urlSolicitudId, urlOpenRecovery, solicitudes]);
+
+  useEffect(() => {
+    if (!urlEnrollmentId || pendingStudyEnrollments.length === 0) return;
+    const target = pendingStudyEnrollments.find((e) => String(e?.id) === String(urlEnrollmentId));
+    if (!target) return;
+    setSelectedEnrollment(target);
+    setEnrollmentReviewDecision("approve");
+    setEnrollmentReviewReason("");
+    setShowEnrollmentReviewModal(true);
+  }, [urlEnrollmentId, pendingStudyEnrollments]);
+
+  useEffect(() => {
+    if (location.search && (urlTab || urlSolicitudId || urlEnrollmentId || urlOpenRecovery)) {
+      const timer = setTimeout(() => {
+        window.history.replaceState(null, "", location.pathname);
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeColors = {
     blue: "text-blue-700",

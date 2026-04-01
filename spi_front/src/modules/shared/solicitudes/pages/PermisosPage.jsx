@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { FiCalendar, FiCheckSquare, FiGlobe, FiUsers } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -102,6 +103,7 @@ const SectionLoader = ({ label }) => (
 const PermisosPage = () => {
  const { showToast } = useUI();
  const { user } = useAuth();
+ const location = useLocation();
  const [openModal, setOpenModal] = useState(false);
  const [submitted, setSubmitted] = useState(false);
  const [vacationSummary, setVacationSummary] = useState(null);
@@ -247,12 +249,24 @@ const PermisosPage = () => {
 
     return sections;
   }, [isGerenciaGeneral, isTalentRole, canViewGlobalRequestsWidget, isJefeRole]);
+ const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+ const urlTab = searchParams.get("tab");
 
  useEffect(() => {
  if (activeSection !== "mine" && !availableSections.includes(activeSection)) {
  setActiveSection(availableSections[0] || "mine");
  }
  }, [activeSection, availableSections]);
+
+ useEffect(() => {
+ if (!urlTab) return;
+ const approvalTabs = new Set(["approve", "cancellation_requests", "study_enrollments", "waiting"]);
+ if (approvalTabs.has(urlTab) && availableSections.includes("gerencia_approvals")) {
+ setActiveSection("gerencia_approvals");
+ } else if (urlTab === "mine" && availableSections.includes("mine")) {
+ setActiveSection("mine");
+ }
+ }, [urlTab, availableSections]);
  const containerClass = isGerenciaGeneral ? "p-4 max-w-7xl mx-auto space-y-4" : "p-6 max-w-7xl mx-auto space-y-6";
 
   const renderActiveSection = () => {

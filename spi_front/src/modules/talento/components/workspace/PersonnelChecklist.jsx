@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   FiCheck,
@@ -10,9 +10,26 @@ import {
 } from "react-icons/fi";
 import { checklistSections } from "../collaboratorProfileDefinitions";
 
+const normalizeRole = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+const CHECKLIST_ROLE_RULES = {
+  computadora_entregada: ["ti", "jefe_ti"],
+  salida_equipos: ["ti", "jefe_ti"],
+  salida_cuentas: ["ti", "jefe_ti"],
+  salida_sri: ["talento_humano", "jefe_talento_humano"],
+  liquidacion: ["jefe_financiero", "jefe_talento_humano"],
+};
+
+const formatRoleRuleLabel = (roles = []) =>
+  roles.map((role) => role.replace(/_/g, " ")).join(" / ");
+
 const PersonnelChecklist = ({
   profileData,
-  documents,
+  documents = [],
   onChecklistFlagToggle,
   onToggleFlag,
   onDocumentUpload,
@@ -20,16 +37,29 @@ const PersonnelChecklist = ({
   uploadingDocKey,
   lockedSections = [],
   readOnly = false,
+  userRole = "",
+  checklistMode = "all",
 }) => {
   const handleChecklistFlagToggle = onChecklistFlagToggle || onToggleFlag;
   const handleDocumentUpload = onDocumentUpload || onUpload;
+  const normalizedRole = normalizeRole(userRole);
+
+  const visibleSections = useMemo(() => {
+    if (checklistMode === "exit") {
+      return checklistSections.filter((section) => String(section?.title || "").toLowerCase().includes("salida"));
+    }
+    if (checklistMode === "entry") {
+      return checklistSections.filter((section) => !String(section?.title || "").toLowerCase().includes("salida"));
+    }
+    return checklistSections;
+  }, [checklistMode]);
 
   const isDocUploaded = (docKey) => documents.some((doc) => doc.doc_type === docKey);
 
   const getOverallCompletion = () => {
     let total = 0;
     let done = 0;
-    checklistSections.forEach((section) => {
+    visibleSections.forEach((section) => {
       section.items.forEach((item) => {
         total += 1;
         const isChecked =
@@ -89,7 +119,7 @@ const PersonnelChecklist = ({
       </div>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {checklistSections.map((section, sectionIndex) => {
+        {visibleSections.map((section, sectionIndex) => {
           const { total, done, complete } = getSectionStatus(section);
           const isLocked = lockedSections.includes(section.title);
           const progressPercent = total > 0 ? Math.round((done / total) * 100) : 0;
@@ -127,6 +157,9 @@ const PersonnelChecklist = ({
               <div className="flex-1 space-y-2">
                 {section.items.map((item) => {
                   const isDoc = item.type === "doc";
+                  const roleRule = !isDoc ? CHECKLIST_ROLE_RULES[item.flagKey] : null;
+                  const canToggleByRole =
+                    !roleRule || roleRule.some((role) => normalizeRole(role) === normalizedRole);
                   const isChecked = isDoc
                     ? isDocUploaded(item.docType)
                     : Boolean(profileData?.onboarding?.[item.flagKey]);
@@ -184,11 +217,16 @@ const PersonnelChecklist = ({
                         <>
                           <button
                             type="button"
-                            onClick={() => !isLocked && !readOnly && handleChecklistFlagToggle?.(item.flagKey)}
-                            disabled={isLocked || readOnly}
+                            onClick={() =>
+                              !isLocked &&
+                              !readOnly &&
+                              canToggleByRole &&
+                              handleChecklistFlagToggle?.(item.flagKey)
+                            }
+                            disabled={isLocked || readOnly || !canToggleByRole}
                             aria-label={`${isChecked ? "Desmarcar" : "Marcar"} item ${item.label}`}
                             className={`mt-0.5 shrink-0 focus:outline-none ${
-                              isLocked || readOnly
+                              isLocked || readOnly || !canToggleByRole
                                 ? "cursor-not-allowed opacity-50"
                                 : "cursor-pointer"
                             }`}
@@ -202,6 +240,11 @@ const PersonnelChecklist = ({
                           <span className={isChecked ? "font-medium text-brand-hr-primary" : ""}>
                             {item.label}
                           </span>
+                          {!canToggleByRole && roleRule ? (
+                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">
+                              Solo {formatRoleRuleLabel(roleRule)}
+                            </span>
+                          ) : null}
                         </>
                       )}
                     </div>

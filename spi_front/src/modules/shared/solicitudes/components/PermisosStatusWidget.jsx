@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import {
  FiClock,
  FiCheck,
@@ -170,6 +171,12 @@ const PermisosStatusWidget = () => {
  const scope = normalizeRole(user?.scope || role);
  const userEmail = user?.email || "";
  const userId = user?.id;
+ const location = useLocation();
+ const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+ const urlTab = searchParams.get("tab");
+ const urlSolicitudId = searchParams.get("solicitudId");
+ const urlEnrollmentId = searchParams.get("enrollmentId");
+ const urlOpenRecovery = searchParams.get("openRecovery");
  const gerenciaGeneralRoles = new Set(["gerencia_general", "gerente_general"]);
 
  const roleCandidates = expandRoleAliases([role, scope].filter(Boolean));
@@ -871,6 +878,66 @@ const isCoordinationPendingSolicitud = (solicitud) => {
  isGerencia,
  isJefe,
  ]);
+
+ useEffect(() => {
+ if (urlTab && tabs.some((t) => t.id === urlTab)) {
+ setActiveTab(urlTab);
+ }
+ }, [urlTab, tabs]);
+
+ useEffect(() => {
+ if (!urlSolicitudId) return;
+ const allSolicitudes = [
+ ...misSolicitudes,
+ ...pendientesParcial,
+ ...pendientesFinal,
+ ...pendientesAprobadas,
+ ...pendientesCancelacion,
+ ];
+ const target = allSolicitudes.find((s) => String(s?.id) === String(urlSolicitudId));
+ if (target) {
+ if (String(selectedSolicitud?.id || "") !== String(target?.id || "")) {
+ setSelectedSolicitud(target);
+ }
+ if (urlOpenRecovery === "true" && !showRecoveryModal) {
+ const initialRows = Array.isArray(target.recovery_plan)
+ ? target.recovery_plan.map((r) => ({ ...r }))
+ : [];
+ setRecoveryRows(initialRows);
+ setShowRecoveryModal(true);
+ }
+ }
+ }, [
+ urlSolicitudId,
+ urlOpenRecovery,
+ misSolicitudes,
+ pendientesParcial,
+ pendientesFinal,
+ pendientesAprobadas,
+ pendientesCancelacion,
+ selectedSolicitud?.id,
+ showRecoveryModal,
+ ]);
+
+ useEffect(() => {
+ if (!urlEnrollmentId || pendingStudyEnrollments.length === 0) return;
+ const target = pendingStudyEnrollments.find((e) => String(e?.id) === String(urlEnrollmentId));
+ if (target) {
+ setSelectedEnrollment(target);
+ setEnrollmentReviewDecision("approve");
+ setEnrollmentReviewReason("");
+ setShowEnrollmentReviewModal(true);
+ }
+ }, [urlEnrollmentId, pendingStudyEnrollments]);
+
+ useEffect(() => {
+ if (location.search && (urlTab || urlSolicitudId || urlEnrollmentId || urlOpenRecovery)) {
+ const timer = setTimeout(() => {
+ window.history.replaceState(null, "", location.pathname);
+ }, 500);
+ return () => clearTimeout(timer);
+ }
+ }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
  useEffect(() => {
  if (!tabs.some((tab) => tab.id === activeTab)) {

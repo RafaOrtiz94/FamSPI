@@ -34,6 +34,7 @@ const notificationsRoutes = require("../modules/notifications/notifications.rout
 const userProfileRoutes = require("../modules/user-profile/userProfile.routes");
 const userCertificationsRoutes = require("../modules/user-certifications/userCertifications.routes");
 const collaboratorsRoutes = require("../modules/collaborators/collaborators.routes");
+const offboardingRoutes = require("../modules/offboarding/offboarding.routes");
 const signatureRoutes = require("../modules/signature/signature.routes");
 const signatureV1Routes = require("../modules/signature/signature.v1.routes");
 const dashboardRoutes = require("../modules/dashboard/dashboard.routes");
@@ -68,6 +69,7 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/mantenimientos", mantenimientosRoutes);
   app.use("/api/v1/users", usersRoutes);
   app.use("/api/v1/collaborators", collaboratorsRoutes);
+  app.use("/api/v1/offboarding", offboardingRoutes);
   app.use("/api/v1/inventario", inventarioRoutes);
   app.use("/api/v1/attendance", attendanceRoutes);
   // Alias for iPhone shortcuts and Spanish-speaking users

@@ -10,6 +10,7 @@ import {
  registerStudyEnrollment,
  getMyStudyEnrollments,
 } from "../../../../core/api/permisosApi";
+import api from "../../../../core/api";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
 import { formatVacationDaysHours } from "../utils/vacationDisplay";
 
@@ -28,6 +29,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const [tipoPermiso, setTipoPermiso] = useState(""); // 'estudios', 'personal', 'salud', 'calamidad'
  const [subtipoCalamidad, setSubtipoCalamidad] = useState(""); // 'fallecimiento', 'accidente', 'desastre'
  const [vacationSummary, setVacationSummary] = useState(null);
+ const [vacationBalanceValidation, setVacationBalanceValidation] = useState(null);
+ const [validatingVacationBalance, setValidatingVacationBalance] = useState(false);
  const [requestedVacationDays, setRequestedVacationDays] = useState(0);
  const [approvedVacationDays, setApprovedVacationDays] = useState(0);
  const [pendingVacationDays, setPendingVacationDays] = useState(0);
@@ -197,6 +200,62 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  loadVacationSummary();
  }
  }, [open, step, tipoSolicitud]);
+
+ useEffect(() => {
+ if (!open || tipoSolicitud !== "vacaciones" || step !== 2) {
+ setVacationBalanceValidation(null);
+ setValidatingVacationBalance(false);
+ return;
+ }
+
+ const requestedDays = vacacionMedioDia
+ ? 0.5
+ : (() => {
+ if (!formData.fecha_inicio || !formData.fecha_fin) return 0;
+ const start = new Date(formData.fecha_inicio);
+ const end = new Date(formData.fecha_fin);
+ const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+ return diff >= 0 ? diff + 1 : 0;
+ })();
+
+ if (!formData.fecha_inicio || requestedDays <= 0) {
+ setVacationBalanceValidation(null);
+ return;
+ }
+
+ const timeoutId = setTimeout(async () => {
+ try {
+ setValidatingVacationBalance(true);
+ const response = await api.get("/vacaciones/validate-balance", {
+ params: {
+ start_date: formData.fecha_inicio,
+ days: requestedDays,
+ },
+ });
+ if (response?.data?.ok) {
+ setVacationBalanceValidation(response.data.data);
+ } else {
+ setVacationBalanceValidation(null);
+ }
+ } catch (error) {
+ console.error("Error validating vacation negative balance:", error);
+ setVacationBalanceValidation(null);
+ } finally {
+ setValidatingVacationBalance(false);
+ }
+ }, 400);
+
+ return () => clearTimeout(timeoutId);
+ }, [
+ open,
+ tipoSolicitud,
+ step,
+ vacacionMedioDia,
+ formData.fecha_inicio,
+ formData.fecha_fin,
+ formData.vacation_start_time,
+ formData.vacation_end_time,
+ ]);
 
  useEffect(() => {
  if (tipoPermiso !== "salud") {
@@ -400,6 +459,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setSaludDuracionTipo("dias");
  setVacacionMedioDia(false);
  setVacationSummary(null);
+ setVacationBalanceValidation(null);
+ setValidatingVacationBalance(false);
  setRequestedVacationDays(0);
  setApprovedVacationDays(0);
  setPendingVacationDays(0);
@@ -573,6 +634,25 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  throw new Error("No se pudo calcular la duración por horas para vacaciones.");
  }
  payload.duracion_horas = computedVacationHours;
+ }
+
+ if (tipoSolicitud === "vacaciones") {
+ const toNumber = (value) => {
+ const parsed = Number(value);
+ return Number.isFinite(parsed) ? parsed : 0;
+ };
+ const summaryRemaining = vacationSummary?.remaining;
+ const summaryAllowance = vacationSummary?.allowance ?? 0;
+ const summaryTaken = vacationSummary?.approved ?? vacationSummary?.taken ?? 0;
+ const summaryPending = vacationSummary?.pending ?? 0;
+ const baseRemaining = summaryRemaining !== undefined && summaryRemaining !== null
+ ? toNumber(summaryRemaining)
+ : toNumber(summaryAllowance) - toNumber(summaryTaken) - toNumber(summaryPending);
+ const allowMissingHireDate = Boolean(vacationSummary?.missing_hire_date);
+ const isAdvanceRequest = vacationSummary?.eligible === false && !allowMissingHireDate;
+ const requestedDays = vacacionMedioDia ? 0.5 : calculateDays(payload);
+ const exceedsBalance = !allowMissingHireDate && !isAdvanceRequest && requestedDays > baseRemaining;
+ payload.allow_negative = exceedsBalance;
  }
 
  const response = await createSolicitud(payload);
@@ -1303,10 +1383,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  vacationSummary.taken !== undefined &&
  vacationSummary.pending !== undefined;
  const remaining = summaryHasUsage
- ? (isAdvanceRequest ? baseRemaining : Math.max(0, baseRemaining))
- : (isAdvanceRequest
- ? baseRemaining - approvedVacationDays - pendingVacationDays
- : Math.max(0, baseRemaining - approvedVacationDays - pendingVacationDays));
+ ? baseRemaining
+ : baseRemaining - approvedVacationDays - pendingVacationDays;
  const usedDisplay = summaryHasUsage ? toNumber(summaryTaken) : approvedVacationDays;
  const requestedDisplay = summaryHasUsage ? toNumber(summaryRequested) : requestedVacationDays;
  const rejectedDisplay = summaryHasUsage ? toNumber(summaryRejected) : rejectedVacationDays;
@@ -1319,7 +1397,8 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const hasDates = formData.fecha_inicio && (vacacionMedioDia || formData.fecha_fin);
  const hasVacationTimeRange = !vacacionMedioDia || (formData.vacation_start_time && formData.vacation_end_time);
  const allowMissingHireDate = vacationSummary?.missing_hire_date;
- const canSubmit = days > 0 && hasDates && hasVacationTimeRange && (allowMissingHireDate || isAdvanceRequest || days <= remaining);
+ const exceedsBalance = !allowMissingHireDate && !isAdvanceRequest && days > remaining;
+ const canSubmit = days > 0 && hasDates && hasVacationTimeRange;
 
  return (
  <div className="space-y-4">
@@ -1462,18 +1541,47 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
  {days > 0 && (
  <div
- className={`p-4 border rounded-lg ${canSubmit ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"
+ className={`p-4 border rounded-lg ${exceedsBalance ? "bg-red-50 border-red-200" : "bg-emerald-50 border-emerald-200"
  }`}
  >
- <p className={`text-sm font-medium ${canSubmit ? "text-emerald-900" : "text-red-900"}`}>
+ <p className={`text-sm font-medium ${exceedsBalance ? "text-red-900" : "text-emerald-900"}`}>
  Días solicitados: <span className="text-lg font-bold">{vacacionMedioDia ? "0.5 (4h)" : days}</span>
  </p>
- <p className={`text-xs ${canSubmit ? "text-emerald-700" : "text-red-700"}`}>
- {canSubmit
+ <p className={`text-xs ${exceedsBalance ? "text-red-700" : "text-emerald-700"}`}>
+ {!exceedsBalance
  ? `Quedarían ${formatVacationDaysHours(remaining - days).text} disponibles`
  : `No tienes suficientes días. Solo tienes ${remainingVacationDisplay.text} disponibles.`}
  </p>
  </div>
+ )}
+
+ {exceedsBalance && (
+ <div className="p-4 bg-rose-50 border border-rose-200 rounded-lg space-y-2">
+ <p className="text-sm font-semibold text-rose-900">Solicitud con saldo negativo</p>
+ <p className="text-xs text-rose-700">
+ Puedes continuar. Esta solicitud se registrará con saldo negativo en tu historial de vacaciones.
+ </p>
+{validatingVacationBalance ? (
+<p className="text-xs text-rose-700 animate-pulse">Calculando saldo proyectado...</p>
+) : (
+<>
+<p className="text-xs text-rose-700">
+Déficit proyectado:{" "}
+<strong>
+ {formatVacationDaysHours(
+ Number.isFinite(Number(vacationBalanceValidation?.deficit_days))
+ ? Number(vacationBalanceValidation.deficit_days)
+ : Math.abs(Number(vacationBalanceValidation?.projected_remaining || 0))
+).text}
+</strong>
+</p>
+<p className="text-xs text-rose-700">
+Saldo resultante:{" "}
+<strong>{formatVacationDaysHours(Number(vacationBalanceValidation?.projected_remaining || 0)).text}</strong>
+</p>
+</>
+)}
+</div>
  )}
 
  <div className="flex gap-3 pt-4">
@@ -1605,14 +1713,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  }
  />
  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
- <div className="fixed inset-0 overflow-y-auto">
+ <div className="fixed inset-0 overflow-hidden">
  <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
- <Dialog.Panel className="w-full max-w-3xl">
+ <Dialog.Panel className="w-full max-w-3xl max-h-[calc(100vh-3rem)]">
  <motion.div
  initial={{ opacity: 0, scale: 0.95 }}
  animate={{ opacity: 1, scale: 1 }}
  exit={{ opacity: 0, scale: 0.95 }}
- className="overflow-hidden rounded-2xl bg-white shadow-2xl"
+ className="max-h-[calc(100vh-3rem)] overflow-y-auto rounded-2xl bg-white shadow-2xl"
  >
  <div className="flex items-center justify-between gap-3 border-b px-6 py-5">
  <div className="flex items-center gap-3">

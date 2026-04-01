@@ -1,4 +1,4 @@
-﻿const service = require("./vacaciones.service");
+const service = require("./vacaciones.service");
 const logger = require("../../config/logger");
 const { shouldRespondJson, renderVerificationHtml } = require("../../utils/legalVerificationView");
 
@@ -163,4 +163,38 @@ async function getSummary(req, res) {
   }
 }
 
-module.exports = { create, list, updateStatus, cancel, updateDates, reviewCancel, getSummary, verifyLegalToken };
+async function validateBalance(req, res) {
+  try {
+    const { start_date, days } = req.query;
+    const userId = req.user.id;
+    // Si se pasan parámetros de validación específica
+    if (start_date && days) {
+      const hireDate = await service.getHireDate(userId);
+      const validation = await service.computeVacationBalanceValidation({
+        userId,
+        userEmail: req.user.email,
+        startDate: start_date,
+        requestedDays: days,
+        hireDateValue: hireDate,
+      });
+      return res.json({ ok: true, data: validation });
+    }
+    const data = await service.getVacationSummary(userId);
+    res.json({ ok: true, data });
+  } catch (err) {
+    logger.error(err, "Error validando saldo de vacaciones");
+    res.status(getErrorStatus(err, 400)).json({ ok: false, message: err.message });
+  }
+}
+
+module.exports = { 
+  create, 
+  list, 
+  updateStatus, 
+  cancel, 
+  updateDates, 
+  reviewCancel, 
+  getSummary, 
+  verifyLegalToken,
+  validateBalance 
+};

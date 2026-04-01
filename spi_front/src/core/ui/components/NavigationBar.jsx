@@ -272,6 +272,17 @@ const privateDeliveriesLink = {
 
 // Sistema de prioridades por rol
 const getPriorityGroups = (scope, role, auditActive) => {
+ const roleSet = new Set(
+ String(role || "")
+ .split(",")
+ .map((item) => item.trim().toLowerCase())
+ .filter(Boolean)
+ );
+ const hideBusinessCaseForFinance =
+ ["jefe_financiero", "financiero"].includes(String(scope || "").toLowerCase()) ||
+ roleSet.has("jefe_financiero") ||
+ roleSet.has("financiero");
+
  const groups = {
  critical: [], // Funciones cri­ticas diarias - siempre visibles
  primary: [], // Funciones principales del rol
@@ -292,7 +303,10 @@ const getPriorityGroups = (scope, role, auditActive) => {
 
  // ðŸ’° FINANZAS - Control presupuestario
  else if (["finanzas", "jefe_finanzas", "jefe_financiero", "financiero"].includes(scope)) {
- groups.primary.push(viaticosLink, asistenciaReportesLink, businessCaseLink, permisosLink); // Control financiero principal
+ groups.primary.push(viaticosLink, asistenciaReportesLink, permisosLink); // Control financiero principal
+ if (!hideBusinessCaseForFinance) {
+ groups.primary.push(businessCaseLink);
+ }
  if (auditActive) groups.secondary.push(auditPrepLink);
  }
 

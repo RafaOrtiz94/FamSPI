@@ -8,6 +8,7 @@ export * from "./auditoriaApi";
 export * from "./privatePurchasesApi";
 export * from "./availabilityApi";
 export * from "./vacationsApi";
+export * from "./offboardingApi";
 export * from "./clientsApi";
 export * from "./technicalApplicationsApi";
 export * from "./schedulesApi";

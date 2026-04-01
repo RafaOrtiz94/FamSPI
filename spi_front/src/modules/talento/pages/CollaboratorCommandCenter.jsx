@@ -39,6 +39,13 @@ import commandCenterProfileSchema from "../schemas/commandCenterProfileSchema";
 
 const READY_REQUEST_STATUSES = new Set(["aprobada", "en_proceso", "completada"]);
 const REVIEWABLE_REQUEST_STATUSES = new Set(["pendiente", "en_revision"]);
+const OFFBOARDING_ALLOWED_ROLES = new Set([
+  "jefe_financiero",
+  "jefe_finanzas",
+  "jefe_talento_humano",
+  "admin",
+  "administrador",
+]);
 
 const BROWSER_VIEW_MAP = {
   solicitudes: "requests",
@@ -117,6 +124,7 @@ const overviewCards = [
 const PersonnelProfile = lazy(() => import("../components/workspace/PersonnelProfile"));
 const PersonnelChecklist = lazy(() => import("../components/workspace/PersonnelChecklist"));
 const PersonnelDocuments = lazy(() => import("../components/workspace/PersonnelDocuments"));
+const OffboardingWorkspace = lazy(() => import("../components/workspace/OffboardingWorkspace"));
 
 const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const [focusMode, setFocusMode] = useState(false);
@@ -167,6 +175,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     canHireApplicant,
     canReassignPersonnel,
     canUnlockSections,
+    currentUserRole,
     isRequestContext,
     isCollaboratorContext,
     currentEntity,
@@ -206,6 +215,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     !selectedRequest ||
     READY_REQUEST_STATUSES.has(String(selectedRequest.status || "").toLowerCase());
   const browserView = toBrowserView(activeView);
+  const canAccessOffboarding = OFFBOARDING_ALLOWED_ROLES.has(String(currentUserRole || "").toLowerCase());
 
   const detailTabs = useMemo(() => {
     const tabs = [];
@@ -222,13 +232,17 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     tabs.push({ key: "checklist", label: "Checklist" });
     tabs.push({ key: "documents", label: "Documentos" });
 
+    if (isCollaboratorContext && canAccessOffboarding) {
+      tabs.push({ key: "offboarding", label: "Salida" });
+    }
+
     // Comentarios solo para solicitudes
     if (isRequestContext) {
       tabs.push({ key: "comments", label: "Comentarios" });
     }
 
     return tabs;
-  }, [isRequestContext]);
+  }, [canAccessOffboarding, isCollaboratorContext, isRequestContext]);
 
   useEffect(() => {
     if (!detailTabs.some((tab) => tab.key === activeTab)) {
@@ -710,6 +724,21 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
             <PersonnelChecklist
               profileData={profileData}
               documents={documents}
+              onChecklistFlagToggle={handleChecklistToggleValidated}
+              onDocumentUpload={handleUploadDocument}
+              uploadingDocKey={docUploading}
+              userRole={currentUserRole}
+            />
+          </Suspense>
+        );
+      case "offboarding":
+        return (
+          <Suspense fallback={<CommandCenterSkeleton />}>
+            <OffboardingWorkspace
+              collaboratorId={selectedCollaboratorId}
+              profileData={profileData}
+              documents={documents}
+              userRole={currentUserRole}
               onChecklistFlagToggle={handleChecklistToggleValidated}
               onDocumentUpload={handleUploadDocument}
               uploadingDocKey={docUploading}

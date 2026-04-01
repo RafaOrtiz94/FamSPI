@@ -47,45 +47,75 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
  }
  };
 
- const calculateDays = () => {
- if (!formData.start_date || !formData.end_date) return 0;
- const start = new Date(formData.start_date);
- const end = new Date(formData.end_date);
- const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
- return diff >= 0 ? diff + 1 : 0;
- };
+  const calculateDays = () => {
+    if (!formData.start_date || !formData.end_date) return 0;
+    const start = new Date(formData.start_date);
+    const end = new Date(formData.end_date);
+    const diff = Math.round((end - start) / (1000 * 60 * 60 * 24));
+    return diff >= 0 ? diff + 1 : 0;
+  };
 
- const days = calculateDays();
- const remaining = summary?.remaining || 0;
- const allowanceDisplay = formatVacationDaysHours(summary?.allowance || 0);
- const remainingDisplay = formatVacationDaysHours(remaining);
- const takenDisplay = formatVacationDaysHours(summary?.taken || 0);
- const pendingDisplay = formatVacationDaysHours(summary?.pending || 0);
- const missingHireDate = summary?.missing_hire_date;
- const isAdvance = summary?.eligible === false && !missingHireDate;
- const eligibleFrom = summary?.eligible_from || null;
- const canSubmit = days > 0 && formData.start_date && formData.end_date && (missingHireDate || isAdvance || days <= remaining);
+  const days = calculateDays();
+  const remaining = summary?.remaining || 0;
+  const allowanceDisplay = formatVacationDaysHours(summary?.allowance || 0);
+  const remainingDisplay = formatVacationDaysHours(remaining);
+  const takenDisplay = formatVacationDaysHours(summary?.taken || 0);
+  const pendingDisplay = formatVacationDaysHours(summary?.pending || 0);
+  const missingHireDate = summary?.missing_hire_date;
+  const isAdvance = summary?.eligible === false && !missingHireDate;
+  const eligibleFrom = summary?.eligible_from || null;
 
- const handleSubmit = async (e) => {
- e.preventDefault();
+  // New logic: allow negative balance
+  const exceedsBalance = days > remaining && !missingHireDate && !isAdvance;
+  const canSubmit = days > 0 && formData.start_date && formData.end_date;
 
- if (!canSubmit) {
- showToast("Por favor completa todos los campos correctamente", "error");
- return;
- }
+  const [validation, setValidation] = useState(null);
+  const [loadingValidation, setLoadingValidation] = useState(false);
 
- if (!missingHireDate && !isAdvance && days > remaining) {
- showToast(`Solo tienes ${remainingDisplay.text} disponibles`, "error");
- return;
- }
+  // Recalcular validación extendida cuando cambian los días
+  useEffect(() => {
+    if (days > 0 && formData.start_date) {
+      const timeoutId = setTimeout(() => {
+        revalidateBalance();
+      }, 500);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [days, formData.start_date]);
 
- try {
- setLoading(true);
- const response = await api.post("/vacaciones", {
- ...formData,
- days,
- allow_advance: isAdvance,
- });
+  const revalidateBalance = async () => {
+    try {
+      setLoadingValidation(true);
+      const response = await api.get("/vacaciones/validate-balance", {
+        params: {
+          start_date: formData.start_date,
+          days: days,
+        },
+      });
+      if (response.data?.ok) {
+        setValidation(response.data.data);
+      }
+    } catch (error) {
+      console.error("Error validating balance:", error);
+    } finally {
+      setLoadingValidation(false);
+    }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    if (!canSubmit) {
+      showToast("Por favor completa todos los campos correctamente", "error");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await api.post("/vacaciones", {
+        ...formData,
+        days,
+        allow_negative: exceedsBalance,
+      });
 
  if (response.data?.ok) {
  showToast("Solicitud de vacaciones creada exitosamente", "success");
@@ -121,14 +151,14 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
  {open && (
  <Dialog open={open} onClose={handleClose} className="fixed inset-0 z-50">
  <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" aria-hidden="true" />
- <div className="fixed inset-0 overflow-y-auto">
+ <div className="fixed inset-0 overflow-hidden">
  <div className="flex min-h-full items-center justify-center px-4 py-6 sm:px-6">
- <Dialog.Panel className="w-full max-w-5xl">
+ <Dialog.Panel className="w-full max-w-5xl max-h-[calc(100vh-3rem)]">
  <motion.div
  initial={{ opacity: 0, scale: 0.95 }}
  animate={{ opacity: 1, scale: 1 }}
  exit={{ opacity: 0, scale: 0.95 }}
- className="overflow-hidden rounded-2xl bg-white dark:bg-gray-900 shadow-2xl"
+ className="max-h-[calc(100vh-3rem)] overflow-y-auto rounded-2xl bg-white dark:bg-gray-900 shadow-2xl"
  >
  {/* Header */}
  <div className="flex items-center justify-between border-b border-gray-200 px-6 py-5">
@@ -291,12 +321,42 @@ const VacationRequestModal = ({ open, onClose, onSuccess }) => {
  )}
 
  {/* Advertencia si excede días disponibles */}
- {!isAdvance && days > remaining && (
- <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+ {exceedsBalance && (
+ <div className="p-4 bg-red-50 border border-red-200 rounded-lg space-y-3">
+ <div className="flex items-center gap-3">
  <FiAlertCircle className="w-5 h-5 text-red-600" />
- <p className="text-sm text-red-700">
- No tienes suficientes días disponibles. Solo tienes {remainingDisplay.text}.
+ <p className="text-sm font-bold text-red-700">
+ Solicitud con saldo negativo
  </p>
+ </div>
+ <div className="pl-8 text-xs text-red-600 space-y-1">
+ <p>
+ Esta solicitud excede tus días disponibles ({remainingDisplay.text}).
+ </p>
+{loadingValidation ? (
+<p className="animate-pulse">Calculando saldo proyectado...</p>
+) : validation ? (
+<>
+<p>
+⏱️ Déficit proyectado:{" "}
+<strong>
+ {formatVacationDaysHours(
+ Number.isFinite(Number(validation?.deficit_days))
+ ? Number(validation.deficit_days)
+ : Math.abs(Number(validation?.projected_remaining || 0))
+).text}
+</strong>
+</p>
+<p>
+📉 Saldo resultante:{" "}
+<strong>{formatVacationDaysHours(Number(validation?.projected_remaining || 0)).text}</strong>
+</p>
+<p className="mt-2 italic">
+Al proseguir, aceptas que estos días se contabilicen de forma negativa en tu historial.
+</p>
+</>
+) : null}
+ </div>
  </div>
  )}
 

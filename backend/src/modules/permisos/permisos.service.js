@@ -6,6 +6,7 @@ const { generateFRH10, generateFirmaLegalValidationPdf } = require("./permisos.p
 const notificationManager = require("../notifications/notificationManager");
 const logger = require("../../config/logger");
 const { createTimeOffEvent } = require("../../utils/calendar");
+const { sendMail } = require("../../utils/mailer");
 const { uploadStudyEnrollmentDocument } = require("./permisos.drive");
 
 const ANNUAL_ALLOWANCE = 15;
@@ -53,6 +54,12 @@ const ROLE_APPROVER = {
 
 const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
 const AUTO_FINAL_PERMISO_TYPES = new Set(["estudios", "personal"]);
+const GENERAL_UNAVAILABILITY_EMAILS = String(
+  process.env.TIMEOFF_GENERAL_NOTIFY_EMAILS || "general@fam-project.com"
+)
+  .split(",")
+  .map((value) => String(value || "").trim().toLowerCase())
+  .filter(Boolean);
 const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS || "")
   .split(",")
   .map((value) => String(value || "").trim().toLowerCase())
@@ -118,7 +125,8 @@ async function getUserIdentity(userId) {
           u.id,
           u.email,
           COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email) AS fullname,
-          cp.profile->'personal'->>'cedula' AS cedula
+          cp.profile->'personal'->>'cedula' AS cedula,
+          cp.profile->'laboral'->>'sueldo' AS salary
         FROM users u
         LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
         WHERE u.id = $1
@@ -132,7 +140,8 @@ async function getUserIdentity(userId) {
           u.id,
           u.email,
           COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email) AS fullname,
-          NULL::text AS cedula
+          NULL::text AS cedula,
+          NULL::text AS salary
         FROM users u
         WHERE u.id = $1
         LIMIT 1`,
@@ -182,9 +191,9 @@ function buildCancellationVerification(row) {
       (directCancellation
         ? row?.cancelled_by_name || row?.cancelled_by_email
         : row?.cancellation_reviewed_by_name ||
-          row?.cancellation_reviewed_by_email ||
-          row?.cancelled_by_name ||
-          row?.cancelled_by_email) || "No disponible",
+        row?.cancellation_reviewed_by_email ||
+        row?.cancelled_by_name ||
+        row?.cancelled_by_email) || "No disponible",
     final_reason:
       row?.cancellation_reason ||
       row?.cancellation_review_reason ||
@@ -459,6 +468,35 @@ function roundToTwo(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
+function computeVacationNegativeProjection({
+  remaining = 0,
+  requestedDays = 0,
+  allowancePerYear = ANNUAL_ALLOWANCE,
+  startDate = null,
+}) {
+  const remainingValue = roundToTwo(remaining);
+  const requestedValue = roundToTwo(requestedDays);
+  const projectedRemaining = roundToTwo(remainingValue - requestedValue);
+  const exceedsBalance = projectedRemaining < 0;
+
+  let deficitDays = 0;
+  let deficitHours = 0;
+  if (exceedsBalance) {
+    deficitDays = roundToTwo(Math.abs(projectedRemaining));
+    deficitHours = roundToTwo(deficitDays * HOURS_PER_VACATION_DAY);
+  }
+
+  return {
+    remaining: remainingValue,
+    requested_days: requestedValue,
+    projected_remaining: projectedRemaining,
+    exceeds_balance: exceedsBalance,
+    recovery_date: null,
+    deficit_days: deficitDays,
+    deficit_hours: deficitHours,
+  };
+}
+
 function addDaysToDateOnly(value, days = 0) {
   const normalized = normalizeDateOnly(value);
   if (!normalized) return null;
@@ -520,6 +558,76 @@ function buildWorkdayDateTime(dateValue, timeValue) {
   return `${dateOnly}T${timeValue}:00`;
 }
 
+function formatDateForGeneralNotice(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("es-EC", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil",
+  });
+}
+
+function formatDateTimeForGeneralNotice(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("es-EC", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: process.env.APP_TIMEZONE || process.env.TZ || "America/Guayaquil",
+  });
+}
+
+function buildGeneralUnavailabilityPeriodLabel(solicitud = {}) {
+  const startDateTime = formatDateTimeForGeneralNotice(solicitud?.fecha_inicio_hora);
+  const endDateTime = formatDateTimeForGeneralNotice(solicitud?.fecha_fin_hora);
+  if (startDateTime && endDateTime) return `${startDateTime} - ${endDateTime}`;
+
+  const startDate = formatDateForGeneralNotice(solicitud?.fecha_inicio);
+  const endDate = formatDateForGeneralNotice(solicitud?.fecha_fin);
+  if (startDate && endDate) return `${startDate} - ${endDate}`;
+  return startDate || endDate || "No especificado";
+}
+
+function buildGeneralUnavailabilityMailContent(solicitud = {}) {
+  const collaborator = solicitud?.user_fullname || solicitud?.user_email || "Colaborador";
+  const typeLabel = solicitud?.tipo_solicitud === "vacaciones" ? "Vacaciones" : "Permiso";
+  const periodLabel = buildGeneralUnavailabilityPeriodLabel(solicitud);
+  const subject = `[SPI] Aviso general de no disponibilidad: ${collaborator}`;
+  const text = [
+    "Aviso general para planificacion operativa",
+    `El colaborador ${collaborator} no estara disponible por ${typeLabel.toLowerCase()}.`,
+    `Periodo: ${periodLabel}.`,
+    "Esta notificacion se envia al grupo general para que cada area lo tenga en cuenta.",
+  ].join("\n");
+  const html = `
+    <p><strong>Aviso general para planificacion operativa.</strong></p>
+    <p>El colaborador <strong>${collaborator}</strong> no estara disponible por <strong>${typeLabel.toLowerCase()}</strong>.</p>
+    <p>Periodo: <strong>${periodLabel}</strong>.</p>
+    <p>Esta notificacion se envia al grupo general para que cada area lo tenga en cuenta.</p>
+  `;
+  return { subject, text, html };
+}
+
+async function sendGeneralUnavailabilityNotification(solicitud = {}) {
+  if (!GENERAL_UNAVAILABILITY_EMAILS.length) return;
+  const { subject, text, html } = buildGeneralUnavailabilityMailContent(solicitud);
+  await sendMail({
+    to: GENERAL_UNAVAILABILITY_EMAILS,
+    subject,
+    text,
+    html,
+    source: "permisos_vacaciones",
+  });
+}
+
 function buildSolicitudCalendarEventInput(solicitud = {}) {
   const isVacation = solicitud?.tipo_solicitud === "vacaciones";
   const startDateTime = isVacation
@@ -553,6 +661,14 @@ function buildSolicitudCalendarEventInput(solicitud = {}) {
 async function createSolicitudCalendarEvent(solicitud, warningMessage) {
   try {
     await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
+    try {
+      await sendGeneralUnavailabilityNotification(solicitud);
+    } catch (mailError) {
+      logger.warn(
+        { mailError, solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
+        "No se pudo enviar aviso general de no disponibilidad por correo"
+      );
+    }
   } catch (calendarError) {
     logger.warn(
       { calendarError, solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
@@ -985,6 +1101,10 @@ async function ensureTable() {
       pdf_generado_url TEXT,
       pdf_validacion_legal_url TEXT,
       observaciones TEXT[],
+      allow_negative BOOLEAN NOT NULL DEFAULT false,
+      projected_remaining_days DECIMAL(8,2),
+      recovery_date DATE,
+      monetary_debt NUMERIC(12,2),
       status TEXT DEFAULT 'pending',
       created_at TIMESTAMPTZ DEFAULT now(),
       updated_at TIMESTAMPTZ DEFAULT now(),
@@ -1026,6 +1146,10 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_to_vacation_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS charged_to_vacation_reason TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS pdf_validacion_legal_url TEXT");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS allow_negative BOOLEAN NOT NULL DEFAULT false");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS projected_remaining_days DECIMAL(8,2)");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_date DATE");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS monetary_debt NUMERIC(12,2)");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_token TEXT");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS legal_verification_created_at TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ");
@@ -1336,7 +1460,12 @@ async function registerStudyEnrollment({ actor, payload, file }) {
       source: "permisos_vacaciones",
       priority: 1,
       email: true,
-      meta: { enrollment_id: rows[0]?.id, user_id: actorId, status: "pending_validation" },
+      meta: {
+        enrollment_id: rows[0]?.id,
+        user_id: actorId,
+        status: "pending_validation",
+        target_path: `/dashboard/talento-humano/permisos?tab=study_enrollments&enrollmentId=${rows[0]?.id}`,
+      },
     });
   } catch (notifyError) {
     logger.warn({ notifyError, enrollmentId: rows[0]?.id }, "No se pudo notificar matrícula pendiente");
@@ -1440,7 +1569,12 @@ async function reviewStudyEnrollment({ id, approver, decision, reason }) {
       source: "permisos_vacaciones",
       priority: 1,
       email: true,
-      meta: { enrollment_id: updated?.id, decision: normalizedDecision, reason: reviewReason },
+      meta: {
+        enrollment_id: updated?.id,
+        decision: normalizedDecision,
+        reason: reviewReason,
+        target_path: `/dashboard/talento-humano/permisos?tab=mine`,
+      },
     });
   } catch (notifyError) {
     logger.warn({ notifyError, enrollmentId: updated?.id }, "No se pudo notificar revisión de matrícula");
@@ -1465,6 +1599,10 @@ async function createSolicitud({ body, user, meta }) {
   payload.user_email = requesterIdentity?.email || user?.email;
   payload.user_fullname = requesterIdentity?.fullname || getDisplayName(user);
   payload.user_id = requesterUserId;
+  payload.allow_negative = Boolean(payload.allow_negative);
+  payload.projected_remaining_days = null;
+  payload.recovery_date = null;
+  payload.monetary_debt = null;
   const consentVersion = String(payload.fam_sign_notice_version || "FS-WF-2026.02").trim();
   const consentTextFromUi = String(payload.fam_sign_consent_text || "").trim();
   const famSignConsentText =
@@ -1687,14 +1825,27 @@ async function createSolicitud({ body, user, meta }) {
     });
     const remaining =
       allowanceInfo.allowance + historicalBalance - consumption.approved - consumption.pending;
-
-    if (allowanceInfo.eligible && !allowanceInfo.missingHireDate) {
-      if (Number(payload.duracion_dias || 0) > Math.max(remaining, 0)) {
-        const err = new Error("No tienes días disponibles para enviar esta solicitud de vacaciones.");
-        err.status = 400;
-        throw err;
-      }
+    const requestedVacationDays = Number(payload.duracion_dias || 0);
+    const projection = computeVacationNegativeProjection({
+      remaining,
+      requestedDays: requestedVacationDays,
+      allowancePerYear: allowanceInfo.allowance || ANNUAL_ALLOWANCE,
+      startDate: payload.fecha_inicio || new Date(),
+    });
+    const exceedsBalance =
+      allowanceInfo.eligible &&
+      !allowanceInfo.missingHireDate &&
+      projection.exceeds_balance;
+    if (exceedsBalance && !payload.allow_negative) {
+      const err = new Error(
+        `La solicitud excede tu saldo. Déficit proyectado: ${projection.deficit_days} días (${projection.deficit_hours} horas). Saldo resultante: ${projection.projected_remaining} días. Confirma envío para continuar.`
+      );
+      err.status = 400;
+      throw err;
     }
+    payload.projected_remaining_days = projection.projected_remaining;
+    payload.recovery_date = null;
+    payload.monetary_debt = null;
 
     // Generar documento en Drive para vacaciones
     try {
@@ -1720,8 +1871,9 @@ async function createSolicitud({ body, user, meta }) {
       es_recuperable, periodo_vacaciones, justificacion_requerida, study_enrollment_id,
       recovery_plan, recovery_plan_total_hours, recovery_plan_updated_at, recovery_plan_updated_by_user_id, recovery_coordination_status,
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
+      allow_negative, projected_remaining_days, recovery_date, monetary_debt,
       status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,'pending') RETURNING *`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,'pending') RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -1755,6 +1907,10 @@ async function createSolicitud({ body, user, meta }) {
       driveMeta.drive_doc_link || null,
       driveMeta.drive_pdf_link || null,
       driveMeta.folderId || null,
+      payload.allow_negative,
+      payload.projected_remaining_days,
+      payload.recovery_date,
+      payload.monetary_debt,
     ]
   );
 
@@ -1776,6 +1932,7 @@ async function createSolicitud({ body, user, meta }) {
           solicitante: payload.user_email,
           approver_user_id: payload.approver_user_id,
           fam_sign_notice_version: consentVersion,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
         },
       });
     }
@@ -1792,6 +1949,7 @@ async function createSolicitud({ body, user, meta }) {
           solicitud_id: rows[0].id,
           tipo_solicitud: payload.tipo_solicitud,
           solicitante: payload.user_email,
+          target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${rows[0].id}`,
         },
       });
     }
@@ -1890,7 +2048,11 @@ async function aprobarParcial({ id, approver, meta }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: rows[0].id, tipo_solicitud: rows[0].tipo_solicitud },
+        meta: {
+          solicitud_id: rows[0].id,
+          tipo_solicitud: rows[0].tipo_solicitud,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
+        },
       });
     }
   } catch (notifyError) {
@@ -2035,7 +2197,11 @@ async function subirJustificantes({ id, urls, user }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: solicitud.id, tipo_solicitud: solicitud.tipo_solicitud },
+        meta: {
+          solicitud_id: solicitud.id,
+          tipo_solicitud: solicitud.tipo_solicitud,
+          target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${solicitud.id}`,
+        },
       });
     }
   } catch (notifyError) {
@@ -2084,7 +2250,11 @@ async function aprobarFinal({ id, approver, meta }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: update.rows[0].id, tipo_solicitud: update.rows[0].tipo_solicitud },
+        meta: {
+          solicitud_id: update.rows[0].id,
+          tipo_solicitud: update.rows[0].tipo_solicitud,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${update.rows[0].id}`,
+        },
       });
     }
   } catch (notifyError) {
@@ -2338,7 +2508,12 @@ async function rechazar({ id, approver, observaciones, meta }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: rows[0].id, tipo_solicitud: rows[0].tipo_solicitud, observaciones: rows[0].observaciones },
+        meta: {
+          solicitud_id: rows[0].id,
+          tipo_solicitud: rows[0].tipo_solicitud,
+          observaciones: rows[0].observaciones,
+          target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${rows[0].id}`,
+        },
       });
     }
   } catch (notifyError) {
@@ -2448,7 +2623,12 @@ async function cancelarSolicitud({ id, actor, reason }) {
           source: "permisos_vacaciones",
           priority: 1,
           email: true,
-          meta: { solicitud_id: updated.id, cancellation_status: "pending", reason: trimmedReason },
+          meta: {
+            solicitud_id: updated.id,
+            cancellation_status: "pending",
+            reason: trimmedReason,
+            target_path: `/dashboard/talento-humano/permisos?tab=cancellation_requests&solicitudId=${updated.id}`,
+          },
         });
       }
     } catch (notifyError) {
@@ -2491,7 +2671,12 @@ async function cancelarSolicitud({ id, actor, reason }) {
           source: "permisos_vacaciones",
           priority: 1,
           email: true,
-          meta: { solicitud_id: updated.id, reason: trimmedReason, status: "cancelled" },
+          meta: {
+            solicitud_id: updated.id,
+            reason: trimmedReason,
+            status: "cancelled",
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated.id}`,
+          },
         });
       }
     } catch (notifyError) {
@@ -2625,7 +2810,12 @@ async function revisarCancelacionSolicitud({ id, actor, decision, reason }) {
         source: "permisos_vacaciones",
         priority: 1,
         email: true,
-        meta: { solicitud_id: updated.id, decision: normalizedDecision, reason: reviewReason },
+        meta: {
+          solicitud_id: updated.id,
+          decision: normalizedDecision,
+          reason: reviewReason,
+          target_path: `/dashboard/talento-humano/permisos?tab=cancellation_requests&solicitudId=${updated.id}`,
+        },
       });
     }
   } catch (notifyError) {
@@ -2786,8 +2976,8 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
       recoveryAction === "accept"
         ? "aprobar_plan_recuperacion"
         : recoveryAction === "finalize"
-        ? "cerrar_plan_recuperacion"
-        : "proponer_plan_recuperacion",
+          ? "cerrar_plan_recuperacion"
+          : "proponer_plan_recuperacion",
   });
 
   try {
@@ -2797,10 +2987,10 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
         recoveryAction === "accept"
           ? "La propuesta de recuperación fue aprobada y la coordinación quedó cerrada."
           : recoveryAction === "finalize"
-          ? `No hubo acuerdo en la recuperación y el permiso se cargó a vacaciones (${vacationCharge?.hours || 0}h).`
-          : isApprover
-          ? "El jefe inmediato propuso tramos de recuperación para revisión del solicitante."
-          : "El solicitante propuso ajustes al plan de recuperación.";
+            ? `No hubo acuerdo en la recuperación y el permiso se cargó a vacaciones (${vacationCharge?.hours || 0}h).`
+            : isApprover
+              ? "El jefe inmediato propuso tramos de recuperación para revisión del solicitante."
+              : "El solicitante propuso ajustes al plan de recuperación.";
       await notificationManager.sendNotification({
         userId: notifyTo,
         customTitle: "Plan de recuperación actualizado",
@@ -2817,6 +3007,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
           charged_to_vacation: Boolean(updated?.charged_to_vacation),
           charged_vacation_hours: updated?.charged_vacation_hours || null,
           charged_vacation_days: updated?.charged_vacation_days || null,
+          target_path: `/dashboard/talento-humano/permisos?tab=approve&solicitudId=${updated.id}&openRecovery=true`,
         },
       });
     }
@@ -2842,12 +3033,12 @@ async function listarPendientes({ stage, approver }) {
     normalizedStatusFilter === "approved"
       ? ["approved", "aprobado"]
       : normalizedStatusFilter === "rejected"
-      ? ["rejected", "rechazado"]
-      : normalizedStatusFilter === "cancelled"
-      ? ["cancelled", "cancelado"]
-      : normalizedStatusFilter === "pending"
-      ? ["pending", "pendiente"]
-      : [normalizedStatusFilter];
+        ? ["rejected", "rechazado"]
+        : normalizedStatusFilter === "cancelled"
+          ? ["cancelled", "cancelado"]
+          : normalizedStatusFilter === "pending"
+            ? ["pending", "pendiente"]
+            : [normalizedStatusFilter];
   const roleCandidates = getApproverRoleCandidates(approver);
   if (!approver?.id && roleCandidates.length === 0) return [];
   const { rows } = await db.query(
@@ -2935,10 +3126,7 @@ async function listarPorUsuario({ user }) {
   });
   const totalAllowance = allowanceInfo.allowance + historicalBalance;
   const remainingRaw = totalAllowance - approvedVacationDays - pendingVacationDays;
-  const remaining =
-    allowanceInfo.eligible === false && !allowanceInfo.missingHireDate
-      ? remainingRaw
-      : Math.max(remainingRaw, 0);
+  const remaining = remainingRaw;
 
   summary.vacaciones = {
     year: currentYear,
@@ -3290,10 +3478,7 @@ async function listarResumenColaboradores() {
     const saldo = record.vacaciones.dias_disponibles -
       record.vacaciones.dias_aprobados -
       record.vacaciones.dias_pendientes;
-    record.vacaciones.dias_restantes =
-      record.vacaciones.eligible === false && !record.vacaciones.missing_hire_date
-        ? saldo
-        : Math.max(0, saldo);
+    record.vacaciones.dias_restantes = saldo;
     return record;
   });
 }
