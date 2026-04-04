@@ -227,9 +227,11 @@ const PermisosPage = () => {
  }, [user]);
 
  const isJefeRole = useMemo(() => {
-    if (!user || !user.role) return false;
-    const role = user.role.toLowerCase();
-    return role.includes("jefe") || role.includes("gerencia") || role === "admin";
+    const normalize = (val) => String(val || "").trim().toLowerCase();
+    const candidates = [user?.role, user?.scope, user?.role_name].map(normalize);
+    return candidates.some(
+      (c) => c.includes("jefe") || c.includes("gerencia") || c.includes("gerente") || c === "admin"
+    );
   }, [user]);
 
   const availableSections = useMemo(() => {

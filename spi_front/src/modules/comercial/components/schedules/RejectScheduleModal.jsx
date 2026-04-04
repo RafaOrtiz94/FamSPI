@@ -2,7 +2,16 @@ import React, { useState, useEffect } from "react";
 import Button from "../../../../core/ui/components/Button";
 import Modal from "../../../../core/ui/components/Modal";
 
-const RejectScheduleModal = ({ open, onClose, onConfirm, loading = false, disabled = false }) => {
+const RejectScheduleModal = ({
+  open,
+  onClose,
+  onConfirm,
+  loading = false,
+  disabled = false,
+  title = "Rechazar cronograma",
+  description = "Incluye notes obligatorias para registrar la auditoria de la decision.",
+  actionLabel = "Confirmar rechazo",
+}) => {
   const [reason, setReason] = useState("");
 
   useEffect(() => {
@@ -10,15 +19,13 @@ const RejectScheduleModal = ({ open, onClose, onConfirm, loading = false, disabl
   }, [open]);
 
   return (
-    <Modal open={open} onClose={onClose} title="Rechazar Cronograma">
+    <Modal open={open} onClose={onClose} title={title}>
       <div className="space-y-3">
-        <p className="text-sm text-gray-600">
-          Por favor indica la razón del rechazo para que el asesor pueda corregir
-        </p>
+        <p className="text-sm text-gray-600">{description}</p>
         <textarea
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Ejemplo: Falta cobertura en Cuenca, agregar más visitas..."
+          placeholder="Escribe notes de auditoria..."
           rows={4}
           className="w-full border rounded-lg p-3"
         />
@@ -32,7 +39,7 @@ const RejectScheduleModal = ({ open, onClose, onConfirm, loading = false, disabl
             loading={loading}
             onClick={() => onConfirm(reason)}
           >
-            Confirmar Rechazo
+            {actionLabel}
           </Button>
         </div>
       </div>
@@ -41,3 +48,4 @@ const RejectScheduleModal = ({ open, onClose, onConfirm, loading = false, disabl
 };
 
 export default RejectScheduleModal;
+

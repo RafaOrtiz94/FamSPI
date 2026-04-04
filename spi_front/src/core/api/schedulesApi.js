@@ -1,6 +1,7 @@
 import api from "./index";
 
 export const fetchSchedules = () => api.get("/schedules").then((res) => res.data?.data || []);
+export const fetchScheduleHolidays = () => api.get("/schedules/holidays").then((res) => res.data?.data || {});
 export const fetchScheduleDetail = (id) => api.get(`/schedules/${id}`).then((res) => res.data?.data);
 export const createSchedule = (payload) => api.post("/schedules", payload).then((res) => res.data?.data);
 export const updateSchedule = (id, payload) => api.put(`/schedules/${id}`, payload).then((res) => res.data?.data);
@@ -13,10 +14,10 @@ export const deleteScheduledVisit = (id, visitId) =>
  api.delete(`/schedules/${id}/visits/${visitId}`).then((res) => res.data?.data);
 export const fetchPendingSchedules = () =>
  api.get("/schedules/pending-approval").then((res) => res.data?.data || []);
-export const approveSchedule = (id, comments = "") =>
- api.post(`/schedules/${id}/approve`, { comments }).then((res) => res.data?.data);
-export const rejectSchedule = (id, rejection_reason) =>
- api.post(`/schedules/${id}/reject`, { rejection_reason }).then((res) => res.data?.data);
+export const approveSchedule = (id, notes) =>
+ api.post(`/schedules/${id}/approve`, { notes }).then((res) => res.data?.data);
+export const rejectSchedule = (id, notes) =>
+ api.post(`/schedules/${id}/reject`, { notes, rejection_reason: notes }).then((res) => res.data?.data);
 export const fetchTeamSchedules = () => api.get("/schedules/team").then((res) => res.data?.data || []);
 export const fetchScheduleAnalytics = () => api.get("/schedules/analytics").then((res) => res.data?.data || {});
 export const fetchApprovedSchedule = (params = {}) =>
@@ -27,8 +28,9 @@ export const fetchApprovedSchedule = (params = {}) =>
 export const optimizeRoute = (payload) =>
  api.post("/schedules/optimize-route", payload).then((res) => res.data?.data);
 
-export default {
+const schedulesApi = {
  fetchSchedules,
+ fetchScheduleHolidays,
  fetchScheduleDetail,
  createSchedule,
  updateSchedule,
@@ -44,3 +46,5 @@ export default {
  fetchScheduleAnalytics,
  optimizeRoute,
 };
+
+export default schedulesApi;

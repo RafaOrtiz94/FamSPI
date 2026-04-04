@@ -1389,13 +1389,27 @@ const getOvertimeRecords = async (req, res) => {
 const generatePDF = async (req, res) => {
   try {
     const { userId } = req.params;
-    const { start, end } = req.query;
+    const { start, end, periodType, period, year } = req.query;
+    const normalizedPeriodType =
+      String(periodType || period || "monthly").trim().toLowerCase() === "annual"
+        ? "annual"
+        : "monthly";
 
-    if (!start || !end) {
+    if (normalizedPeriodType === "monthly" && (!start || !end)) {
       return res.status(400).json({
         ok: false,
-        message: "Fechas de inicio y fin requeridas (start, end)",
+        message: "Fechas de inicio y fin requeridas (start, end) para reporte mensual",
       });
+    }
+
+    if (normalizedPeriodType === "annual" && year !== undefined) {
+      const parsedYear = Number.parseInt(year, 10);
+      if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+        return res.status(400).json({
+          ok: false,
+          message: "El anio del reporte anual es invalido",
+        });
+      }
     }
 
     if (String(userId || "").trim().toLowerCase() === "all") {
@@ -1413,12 +1427,32 @@ const generatePDF = async (req, res) => {
       });
     }
 
-    const pdfBuffer = await generateAttendancePDF(targetUserId, start, end);
+    const pdfResult = await generateAttendancePDF(targetUserId, start, end, {
+      periodType: normalizedPeriodType,
+      year,
+    });
+    const pdfBuffer = pdfResult?.buffer;
+    const hashSha256 = pdfResult?.hashSha256;
+    const hashAlgorithm = pdfResult?.hashAlgorithm || "SHA-256";
+    const fileLabel =
+      pdfResult?.fileLabel ||
+      (normalizedPeriodType === "annual"
+        ? `${year || new Date().getFullYear()}-anual`
+        : `${start}-${end}`);
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename=asistencia-${targetUserId}-${start}-${end}.pdf`
+      `attachment; filename=asistencia-${targetUserId}-${fileLabel}.pdf`
+    );
+    res.setHeader("Cache-Control", "no-store");
+    if (hashSha256) {
+      res.setHeader("X-Document-Hash-SHA256", hashSha256);
+      res.setHeader("X-Document-Hash-Algorithm", hashAlgorithm);
+    }
+    res.setHeader(
+      "X-Document-Integrity-Notice",
+      "Documento bloqueado al generarse. Cualquier alteracion invalida su integridad."
     );
 
     return res.send(pdfBuffer);

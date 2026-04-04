@@ -167,6 +167,8 @@ async function validateBalance(req, res) {
   try {
     const { start_date, days } = req.query;
     const userId = req.user.id;
+    const data = await service.getVacationSummary(userId);
+    
     // Si se pasan parámetros de validación específica
     if (start_date && days) {
       const hireDate = await service.getHireDate(userId);
@@ -176,10 +178,11 @@ async function validateBalance(req, res) {
         startDate: start_date,
         requestedDays: days,
         hireDateValue: hireDate,
+        salary: data.salary, // loadUser already got the salary
       });
       return res.json({ ok: true, data: validation });
     }
-    const data = await service.getVacationSummary(userId);
+
     res.json({ ok: true, data });
   } catch (err) {
     logger.error(err, "Error validando saldo de vacaciones");

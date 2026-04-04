@@ -7,7 +7,8 @@ const router = express.Router({ mergeParams: true });
 const advisorRoles = ["comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
 const managerRoles = ["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"];
 
-router.get("/", requireRole(advisorRoles), controller.listMySchedules);
+router.get("/", requireRole([...advisorRoles, ...managerRoles]), controller.listMySchedules);
+router.get("/holidays", requireRole([...advisorRoles, ...managerRoles]), controller.getHolidays);
 router.get("/pending-approval", requireRole(managerRoles), controller.listPendingApproval);
 router.get("/team", requireRole(managerRoles), controller.listTeamSchedules);
 router.get("/analytics", requireRole(managerRoles), controller.analytics);

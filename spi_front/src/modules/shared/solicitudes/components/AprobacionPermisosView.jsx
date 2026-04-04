@@ -11,11 +11,18 @@ import {
   FiFileText,
   FiUsers,
   FiX,
+  FiShield,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import { useUI } from "../../../../core/ui/UIContext";
 import { DATA_UPDATE_SCOPES, useScopedAutoUpdate } from "../../../../core/api";
+import {
+  STATUS_META,
+  formatDateShort,
+  hasJustificantes,
+} from "../utils/solicitudesHelpers";
+import { formatVacationDaysHours } from "../utils/vacationDisplay";
 import {
   aprobarFinal,
   aprobarParcial,
@@ -28,6 +35,63 @@ import {
   reviewStudyEnrollment,
 } from "../../../../core/api/permisosApi";
 import { useAuth } from "../../../../core/auth/AuthContext";
+
+const INITIAL_VISIBLE_COUNTS = {
+  pending: 8,
+  pending_final: 8,
+  cancellation_pending: 8,
+  study_enrollments: 6,
+  approved: 8,
+};
+
+const expandRoleAliases = (roles = []) => {
+  const set = new Set((roles || []).filter(Boolean));
+  if (set.has("jefe_finanzas")) set.add("jefe_financiero");
+  if (set.has("jefe_financiero")) set.add("jefe_finanzas");
+  if (set.has("finanzas")) set.add("financiero");
+  if (set.has("financiero")) set.add("finanzas");
+  return Array.from(set);
+};
+
+const formatDateTime = (value) => {
+  if (!value) return "N/A";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "N/A";
+  return parsed.toLocaleString();
+};
+
+const formatTimeRange = (solicitud = {}) => {
+  const start = solicitud?.fecha_inicio_hora || solicitud?.start_time || null;
+  const end = solicitud?.fecha_fin_hora || solicitud?.end_time || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const startLabel = startDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const endLabel = endDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return `${startLabel} - ${endLabel}`;
+};
+
+const getEnrollmentRequesterName = (enrollment = {}) =>
+  enrollment.requester_name ||
+  enrollment.user_fullname ||
+  enrollment.user_name ||
+  enrollment.user_email ||
+  "Solicitante no registrado";
+
+const getVacationShiftLabel = (solicitud = {}) => {
+  const start = solicitud?.start_time || solicitud?.fecha_inicio_hora || null;
+  const end = solicitud?.end_time || solicitud?.fecha_fin_hora || null;
+  if (!start || !end) return null;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+  const startHour = startDate.getHours();
+  const endAsDecimal = endDate.getHours() + endDate.getMinutes() / 60;
+  if (startHour < 13 && endAsDecimal <= 13) return "Mañana";
+  if (startHour >= 13) return "Tarde";
+  return "Horario mixto";
+};
 
 const RECOVERY_COORDINATION_LABELS = {
   not_required: "No requiere coordinacion",
@@ -157,6 +221,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
   const [selectedRecoverySolicitud, setSelectedRecoverySolicitud] = useState(null);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [recoveryRows, setRecoveryRows] = useState([]);
+  const [visibleItemsBySection, setVisibleItemsBySection] = useState(INITIAL_VISIBLE_COUNTS);
 
   const canSeeApproved = useMemo(() => {
     const role = String(user?.role || "").toLowerCase();
@@ -166,13 +231,77 @@ const AprobacionPermisosView = ({ compact = false }) => {
   const userId = user?.id;
   const userEmail = String(user?.email || "").toLowerCase();
   const roleCandidates = useMemo(
-    () => [user?.role, user?.scope, user?.role_name].map(normalizeRoleValue).filter(Boolean),
+    () => expandRoleAliases([user?.role, user?.scope, user?.role_name].map(normalizeRoleValue).filter(Boolean)),
     [user],
   );
   const gerenciaGeneralRoles = useMemo(() => new Set(["gerencia_general", "gerente_general"]), []);
 
+  const showAdvancedSignatureWidget = roleCandidates.some((candidate) =>
+    ["jefe_financiero", "jefe_finanzas", "jefe_ti"].includes(candidate)
+  );
+  const canViewLegalValidationDoc = roleCandidates.some((candidate) =>
+    ["jefe_financiero", "jefe_finanzas", "jefe_ti", "gerencia_general", "gerente_general"].includes(candidate)
+  );
+
   const gapClass = compact ? "grid gap-3 sm:grid-cols-2 xl:grid-cols-3" : "grid gap-4";
   const actionButton = compact ? "flex-1 text-xs py-1.5" : "flex-1";
+
+  const getVisibleCountForSection = (section) =>
+    visibleItemsBySection[section] || INITIAL_VISIBLE_COUNTS[section] || 0;
+
+  const showMoreItems = (section, total) => {
+    setVisibleItemsBySection((current) => {
+      const currentVisible = current[section] || INITIAL_VISIBLE_COUNTS[section] || 0;
+      const step = INITIAL_VISIBLE_COUNTS[section] || 6;
+      return {
+        ...current,
+        [section]: Math.min(total, currentVisible + step),
+      };
+    });
+  };
+
+  const showLessItems = (section) => {
+    setVisibleItemsBySection((current) => ({
+      ...current,
+      [section]: INITIAL_VISIBLE_COUNTS[section] || current[section] || 0,
+    }));
+  };
+
+  const renderListControls = (section, total) => {
+    const initial = INITIAL_VISIBLE_COUNTS[section] || total;
+    const visible = Math.min(getVisibleCountForSection(section), total);
+    if (total <= initial) return null;
+    return (
+      <div className="mt-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-medium text-gray-600">
+          Mostrando <span className="font-semibold text-gray-900">{visible}</span> de{" "}
+          <span className="font-semibold text-gray-900">{total}</span> registros
+        </p>
+        <div className="flex gap-2">
+          {visible < total && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => showMoreItems(section, total)}
+              className="text-xs"
+            >
+              Ver más
+            </Button>
+          )}
+          {visible > initial && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => showLessItems(section)}
+              className="text-xs"
+            >
+              Mostrar menos
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  };
 
   const canCurrentUserActAsAssignedApprover = useCallback((solicitud) => {
     if (!solicitud) return false;
@@ -475,17 +604,12 @@ const AprobacionPermisosView = ({ compact = false }) => {
   };
 
   const getStatusBadge = (status) => {
-    const badges = {
-      pending: { label: "Pendiente", color: "bg-yellow-100 text-yellow-800" },
-      partially_approved: { label: "Aprobado Parcialmente", color: "bg-blue-100 text-blue-800" },
-      pending_final: { label: "Esperando Aprobacion Final", color: "bg-purple-100 text-purple-800" },
-      approved: { label: "Aprobado", color: "bg-green-100 text-green-800" },
-      rejected: { label: "Rechazado", color: "bg-red-100 text-red-800" },
-    };
-    const badge = badges[status] || badges.pending;
+    const meta = STATUS_META[status] || STATUS_META.pending;
+    const Icon = meta.icon;
     return (
-      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${badge.color}`}>
-        {badge.label}
+      <span className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md ${meta.color}`}>
+        <Icon className="w-3 h-3" />
+        {meta.label}
       </span>
     );
   };
@@ -501,332 +625,444 @@ const AprobacionPermisosView = ({ compact = false }) => {
     return tipos[solicitud.tipo_permiso] || "Permiso";
   };
 
-  const formatDateCalendar = (value) => {
-    if (!value) return "N/A";
-    const text = String(value);
-    const datePart = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (datePart) {
-      const year = Number(datePart[1]);
-      const month = Number(datePart[2]) - 1;
-      const day = Number(datePart[3]);
-      return new Date(year, month, day).toLocaleDateString("es-EC");
-    }
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "N/A";
-    return parsed.toLocaleDateString("es-EC");
-  };
-
-  const formatTimeRange = (solicitud = {}) => {
-    const start = solicitud?.fecha_inicio_hora || solicitud?.start_time;
-    const end = solicitud?.fecha_fin_hora || solicitud?.end_time;
-    if (!start || !end) return null;
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
-    return `${startDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false })} - ${endDate.toLocaleTimeString("es-EC", { hour: "2-digit", minute: "2-digit", hour12: false })}`;
-  };
-
-  const formatEnrollmentDate = (value) => {
-    if (!value) return "No disponible";
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "No disponible";
-    return parsed.toLocaleDateString("es-EC");
-  };
-
-  const getEnrollmentRequesterName = (enrollment = {}) =>
-    enrollment?.user_fullname || enrollment?.user_email || "No disponible";
-
   const renderSolicitudCard = (solicitud) => {
     const recoveryPlan = Array.isArray(solicitud?.recovery_plan) ? solicitud.recovery_plan : [];
     const recoveryTotal = Number(solicitud?.recovery_plan_total_hours || 0);
     const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
     const isCoordinationEnabled = canCoordinateRecoveryByStatus(solicitud);
     const recoveryCoordinationDeadline = getRecoveryCoordinationDeadline(solicitud);
+    const normalizedStatus = String(solicitud?.status || "").toLowerCase();
+    const isVacation = solicitud.tipo_solicitud === "vacaciones";
+    const approverDisplay =
+      solicitud.approver_email ||
+      solicitud.approver_role ||
+      (solicitud.approver_user_id ? `Usuario #${solicitud.approver_user_id}` : "No asignado");
+
+    const traceabilityItems = [];
+    const rejectionNotes = Array.isArray(solicitud.observaciones)
+      ? solicitud.observaciones.filter(Boolean)
+      : solicitud.observaciones
+        ? [solicitud.observaciones]
+        : [];
+    if (rejectionNotes.length > 0) {
+      rejectionNotes.forEach((note) => {
+        traceabilityItems.push({ label: "Observación", text: note });
+      });
+    }
+    if (solicitud?.cancellation_request_reason) {
+      traceabilityItems.push({
+        label: "Motivo solicitud de cancelación",
+        text: solicitud.cancellation_request_reason,
+      });
+    }
+
+    const signatureSummary = solicitud.firma_avanzada_resumen || null;
+    const vacationShift = isVacation ? getVacationShiftLabel(solicitud) : null;
+    const isRequesterOfSolicitud = Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id));
+    const isApproverOfSolicitud = canCurrentUserActAsAssignedApprover(solicitud);
+
     const canEditRecovery =
       Boolean(solicitud?.es_recuperable) &&
       isCoordinationEnabled &&
       !["agreed", "finalized_by_approver"].includes(coordinationStatus) &&
       !solicitud?.charged_to_vacation &&
-      canCurrentUserActAsAssignedApprover(solicitud);
+      (isRequesterOfSolicitud || isApproverOfSolicitud);
     const canApproveRecoveryProposal =
       isCoordinationEnabled &&
+      (isRequesterOfSolicitud || isApproverOfSolicitud) &&
       ["pending_approver_proposal", "pending_requester_acceptance"].includes(coordinationStatus) &&
       recoveryPlan.length > 0;
     const canApproverFinalize =
       isCoordinationEnabled &&
+      isApproverOfSolicitud &&
       coordinationStatus === "pending_approver_proposal" &&
       Number(solicitud?.recovery_coordination_round || 0) > 0 &&
-      recoveryPlan.length > 0 &&
-      canCurrentUserActAsAssignedApprover(solicitud);
-    const normalizedStatus = String(solicitud?.status || "").toLowerCase();
+      recoveryPlan.length > 0;
+
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
     const canCancelThis =
       ["approved", "aprobado"].includes(normalizedStatus) &&
       cancellationStatus !== "pending" &&
       canCancelByDateRule(solicitud) &&
-      canCurrentUserActAsAssignedApprover(solicitud);
+      (isRequesterOfSolicitud || isApproverOfSolicitud);
+
+    const isRejectedStatus = ["rejected", "rechazado"].includes(normalizedStatus);
+    const isCancelledStatus = ["cancelled", "cancelado"].includes(normalizedStatus);
+
+    const canViewLegalForThis =
+      canViewLegalValidationDoc ||
+      (userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+      (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
+      (userEmail && solicitud?.user_email && String(userEmail).toLowerCase() === String(solicitud.user_email).toLowerCase()) ||
+      (userEmail && solicitud?.approver_email && String(userEmail).toLowerCase() === String(solicitud.approver_email).toLowerCase());
+
+    const signatureStatusColor =
+      signatureSummary?.estado === "completa"
+        ? "text-emerald-700 border-emerald-200 bg-emerald-50"
+        : signatureSummary?.estado === "parcial"
+          ? "text-amber-700 border-amber-200 bg-amber-50"
+          : "text-slate-600 border-slate-200 bg-slate-50";
+
+    const chargedVacationDisplay = formatVacationDaysHours(Number(solicitud?.charged_vacation_days || 0));
 
     return (
       <motion.div
-      key={solicitud.id}
-      initial={{ opacity: 0, y: 6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition"
+        key={solicitud.id}
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm hover:shadow-md transition"
       >
-      <div
-        className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
-          solicitud.status === "approved" || solicitud.status === "aprobado"
-            ? "bg-green-500"
-            : solicitud.status === "partially_approved"
-              ? "bg-blue-500"
-              : solicitud.status === "pending_final"
-                ? "bg-purple-500"
-                : solicitud.status === "rejected"
-                  ? "bg-red-500"
-                  : "bg-amber-400"
-        }`}
-      />
+        <div
+          className={`absolute left-0 top-0 h-full w-1 rounded-l-xl ${
+            solicitud.status === "approved" || solicitud.status === "aprobado"
+              ? "bg-green-500"
+              : solicitud.status === "partially_approved"
+                ? "bg-blue-500"
+                : solicitud.status === "pending_final"
+                  ? "bg-purple-500"
+                  : solicitud.status === "rejected"
+                    ? "bg-red-500"
+                    : "bg-amber-400"
+          }`}
+        />
 
-      <div className="flex items-start justify-between gap-3 mb-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-bold text-gray-900">{getTipoLabel(solicitud)}</span>
-            {getStatusBadge(solicitud.status)}
-          </div>
-          <p className="text-xs text-gray-600 mb-1">
-            <FiUsers className="inline mr-1" />
-            {solicitud.user_fullname || solicitud.user_email || "Sin solicitante"}
-          </p>
-          <div className="flex items-center gap-3 text-xs text-gray-500">
-            <span>
-              {formatDateCalendar(solicitud.fecha_inicio)} - {formatDateCalendar(solicitud.fecha_fin)}
-            </span>
-            <span className="font-medium text-gray-700">
-              {solicitud.duracion_horas ? `${solicitud.duracion_horas}h` : `${solicitud.duracion_dias}d`}
-            </span>
-            {formatTimeRange(solicitud) && (
-              <span className="font-medium text-indigo-700">{formatTimeRange(solicitud)}</span>
-            )}
-          </div>
-        </div>
-        <div className="text-right text-[10px] text-gray-400 whitespace-nowrap">ID: #{solicitud.id}</div>
-      </div>
-
-      {solicitud?.es_recuperable && isCoordinationEnabled && (
-        <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs font-semibold text-emerald-900">
-              Plan de recuperacion
-              {recoveryTotal > 0 ? ` (${recoveryTotal}h)` : ""}
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-bold text-gray-900">{getTipoLabel(solicitud)}</span>
+              {getStatusBadge(solicitud.status)}
+            </div>
+            <p className="text-xs text-gray-600 mb-1">
+              <FiUsers className="inline mr-1" />
+              {solicitud.user_fullname || solicitud.user_email || "Sin solicitante"}
+              {solicitud.user_email && solicitud.user_fullname ? (
+                <span className="text-[11px] text-gray-500 ml-1">({solicitud.user_email})</span>
+              ) : null}
             </p>
-            {canEditRecovery && (
-              <Button
-                size="sm"
-                variant="secondary"
-                className="text-xs py-1 px-2"
-                onClick={() => openRecoveryEditor(solicitud)}
-              >
-                Coordinar tramos
-              </Button>
-            )}
-          </div>
-          <p className="text-[11px] text-emerald-800 mt-1">Estado: {getRecoveryCoordinationLabel(solicitud)}</p>
-          {recoveryCoordinationDeadline && (
-            <p className="text-[11px] text-emerald-800 mt-1">
-              Coordinar hasta: {formatDateCalendar(recoveryCoordinationDeadline)}
-            </p>
-          )}
-          {solicitud?.charged_to_vacation && (
-            <p className="text-[11px] text-amber-800 mt-1">
-              Descuento aplicado a vacaciones: {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
-            </p>
-          )}
-          {recoveryPlan.length > 0 ? (
-            <div className="mt-1 space-y-1">
-              {recoveryPlan.slice(0, 4).map((row, idx) => (
-                <p key={`${solicitud.id}-recovery-${idx}`} className="text-[11px] text-emerald-800">
-                  {row?.date || "N/A"} · {row?.start_time || "--:--"} - {row?.end_time || "--:--"}
-                  {row?.notes ? ` · ${row.notes}` : ""}
-                </p>
-              ))}
-              {recoveryPlan.length > 4 && (
-                <p className="text-[11px] text-emerald-700">+{recoveryPlan.length - 4} tramo(s) adicionales</p>
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <span>
+                {formatDateShort(solicitud.fecha_inicio)} - {formatDateShort(solicitud.fecha_fin)}
+              </span>
+              <span className="font-medium text-gray-700">
+                {solicitud.duracion_horas ? `${solicitud.duracion_horas}h` : `${solicitud.duracion_dias}d`}
+              </span>
+              {formatTimeRange(solicitud) && (
+                <span className="font-medium text-indigo-700">{formatTimeRange(solicitud)}</span>
               )}
             </div>
-          ) : (
-            <p className="text-[11px] text-emerald-800 mt-1">Sin tramos definidos aun.</p>
-          )}
-          {(canApproveRecoveryProposal || canApproverFinalize) && (
-            <div className="mt-2">
-              {canApproveRecoveryProposal && (
-                <p className="text-[11px] text-emerald-800">
-                  Existe una propuesta de coordinacion pendiente. Cualquiera de las dos partes puede aprobarla y cerrarla.
-                </p>
-              )}
-              {canApproverFinalize && (
-                <p className="text-[11px] text-emerald-800">
-                  Hay una contrapropuesta del solicitante pendiente de decision definitiva.
-                </p>
+          </div>
+          <div className="text-right text-[10px] text-gray-400 whitespace-nowrap">
+            ID: #{solicitud.requester_sequence || solicitud.id}
+          </div>
+        </div>
+
+        {solicitud?.es_recuperable && isCoordinationEnabled && (
+          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-emerald-900">
+                Plan de recuperación
+                {recoveryTotal > 0 ? ` (${recoveryTotal}h)` : ""}
+              </p>
+              {canEditRecovery && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="text-xs py-1 px-2"
+                  onClick={() => openRecoveryEditor(solicitud)}
+                >
+                  Coordinar tramos
+                </Button>
               )}
             </div>
-          )}
-        </div>
-      )}
+            <p className="text-[11px] text-emerald-800 mt-1">Estado: {getRecoveryCoordinationLabel(solicitud)}</p>
+            {recoveryCoordinationDeadline && (
+              <p className="text-[11px] text-emerald-800 mt-1">
+                Coordinar hasta: {formatDateShort(recoveryCoordinationDeadline)}
+              </p>
+            )}
+            {solicitud?.charged_to_vacation && (
+              <p className="text-[11px] text-amber-800 mt-1">
+                Descuento aplicado a vacaciones:
+                {" "}
+                {Number(solicitud?.charged_vacation_hours || 0) || recoveryTotal || 0}h
+                {Number(solicitud?.charged_vacation_days || 0)
+                  ? ` (${chargedVacationDisplay.text})`
+                  : ""}
+              </p>
+            )}
+            {recoveryPlan.length > 0 ? (
+              <div className="mt-1 space-y-1">
+                {recoveryPlan.slice(0, 4).map((row, idx) => (
+                  <p key={`${solicitud.id}-recovery-${idx}`} className="text-[11px] text-emerald-800">
+                    {row?.date || "N/A"} · {row?.start_time || "--:--"} - {row?.end_time || "--:--"}
+                    {row?.notes ? ` · ${row.notes}` : ""}
+                  </p>
+                ))}
+                {recoveryPlan.length > 4 && (
+                  <p className="text-[11px] text-emerald-700">+{recoveryPlan.length - 4} tramo(s) adicionales</p>
+                )}
+              </div>
+            ) : (
+              <p className="text-[11px] text-emerald-800 mt-1">Sin tramos definidos aún.</p>
+            )}
+            {(canApproveRecoveryProposal || canApproverFinalize) && (
+              <div className="mt-2">
+                {canApproveRecoveryProposal && (
+                  <p className="text-[11px] text-emerald-800">
+                    Existe una propuesta de coordinación pendiente. Cualquiera de las dos partes puede aprobarla y cerrarla.
+                  </p>
+                )}
+                {canApproverFinalize && (
+                  <p className="text-[11px] text-emerald-800">
+                    Hay una contrapropuesta del solicitante pendiente de decisión definitiva.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
-      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
-        <div className="text-[11px]">
-          <p className="text-gray-500">Solicitante</p>
-          <p className="font-medium text-gray-800 truncate">{solicitud.user_email || "N/A"}</p>
-        </div>
-        <div className="text-[11px]">
-          <p className="text-gray-500">Creado</p>
-          <p className="font-medium text-gray-800">{formatDateCalendar(solicitud.created_at)}</p>
-        </div>
-        {solicitud.tipo_solicitud === "vacaciones" && solicitud.periodo_vacaciones && (
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 rounded-lg border border-gray-100 bg-gray-50 p-2.5">
           <div className="text-[11px]">
-            <p className="text-gray-500">Periodo</p>
-            <p className="font-medium text-gray-800">{solicitud.periodo_vacaciones}</p>
+            <p className="text-gray-500">Solicitante</p>
+            <p className="font-medium text-gray-800 truncate">{solicitud.user_email || "N/A"}</p>
+          </div>
+          <div className="text-[11px]">
+            <p className="text-gray-500">Creado</p>
+            <p className="font-medium text-gray-800">{formatDateTime(solicitud.created_at)}</p>
+          </div>
+          <div className="text-[11px]">
+            <p className="text-gray-500">Aprobador asignado</p>
+            <p className="font-medium text-gray-800 truncate">{approverDisplay}</p>
+          </div>
+          {isVacation && solicitud.periodo_vacaciones && (
+            <div className="text-[11px]">
+              <p className="text-gray-500">Periodo</p>
+              <p className="font-medium text-gray-800">{solicitud.periodo_vacaciones}</p>
+            </div>
+          )}
+          {vacationShift && (
+            <div className="text-[11px]">
+              <p className="text-gray-500">Jornada</p>
+              <p className="font-medium text-gray-800">{vacationShift}</p>
+            </div>
+          )}
+          {solicitud.aprobacion_parcial_at && (
+            <div className="text-[11px]">
+              <p className="text-gray-500">Aprobación parcial</p>
+              <p className="font-medium text-gray-800 truncate">
+                {formatDateTime(solicitud.aprobacion_parcial_at)}
+                {solicitud.aprobacion_parcial_por ? ` - ${solicitud.aprobacion_parcial_por}` : ""}
+              </p>
+            </div>
+          )}
+          {solicitud.aprobacion_final_at && (
+            <div className="text-[11px]">
+              <p className="text-gray-500">Aprobación final</p>
+              <p className="font-medium text-gray-800 truncate">
+                {formatDateTime(solicitud.aprobacion_final_at)}
+                {solicitud.aprobacion_final_por ? ` - ${solicitud.aprobacion_final_por}` : ""}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {traceabilityItems.length > 0 && (
+          <div className="bg-rose-50 border border-rose-200 rounded-lg p-2 mt-2">
+            <p className="text-xs font-semibold text-rose-900 mb-1">Trazabilidad / mensajes relevantes:</p>
+            <ul className="space-y-1">
+              {traceabilityItems.map((item, idx) => (
+                <li key={`${solicitud.id}-trace-${idx}`} className="text-xs text-rose-800">
+                  <span className="font-semibold">{item.label}:</span> {item.text}
+                </li>
+              ))}
+            </ul>
           </div>
         )}
-        {solicitud.observaciones && (
-          <div className="col-span-full text-[11px] mt-1 border-t border-gray-100 pt-1">
-            <p className="text-gray-500 font-semibold uppercase tracking-tighter">Observaciones:</p>
-            <p className="text-gray-700 italic bg-amber-50/50 p-1.5 rounded-md mt-0.5 border border-amber-100">
-              {solicitud.observaciones}
-            </p>
-          </div>
-        )}
+
         {hasPendingCancellation && (
-          <div className="col-span-full text-[11px] mt-1 border-t border-amber-100 pt-1">
-            <p className="text-amber-700 font-semibold uppercase tracking-tighter">
-              Solicitud de cancelacion pendiente:
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+            <p className="text-amber-700 font-semibold text-[11px] uppercase tracking-tighter">
+              Solicitud de cancelación pendiente:
             </p>
-            <p className="text-amber-800 bg-amber-50 p-1.5 rounded-md mt-0.5 border border-amber-100">
+            <p className="text-amber-800 text-[11px] mt-0.5">
               {solicitud.cancellation_request_reason || "Sin motivo registrado"}
             </p>
           </div>
         )}
-      </div>
 
-      {solicitud.justificantes_urls && solicitud.justificantes_urls.length > 0 && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2">
-          <p className="text-[11px] font-semibold text-blue-900 mb-1.5">Documentos justificantes:</p>
-          <div className="flex flex-wrap gap-1.5">
-            {solicitud.justificantes_urls.map((url, idx) => (
-              <a
-                key={`${solicitud.id}-just-${idx}`}
-                href={url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-blue-300 rounded text-[10px] font-medium text-blue-700 hover:bg-blue-100 transition-colors"
-              >
-                <FiEye className="w-3 h-3" />
-                Doc {idx + 1}
-              </a>
-            ))}
+        {hasJustificantes(solicitud) && (
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mt-2">
+            <p className="text-[11px] font-semibold text-blue-900 mb-1.5">Documentos justificantes:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {solicitud.justificantes_urls.map((url, idx) => (
+                <a
+                  key={`${solicitud.id}-just-${idx}`}
+                  href={url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-blue-300 rounded text-[10px] font-medium text-blue-700 hover:bg-blue-100 transition-colors"
+                >
+                  <FiEye className="w-3 h-3" />
+                  Doc {idx + 1}
+                </a>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {solicitud.pdf_generado_url && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-2">
-          <p className="text-[11px] font-semibold text-emerald-900 mb-1.5">Formulario PDF generado:</p>
-          <a
-            href={solicitud.pdf_generado_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
-          >
-            <FiDownload className="w-3 h-3" />
-            Descargar F.RH-10
-          </a>
-        </div>
-      )}
+        {solicitud.pdf_generado_url && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2 mt-2">
+            <p className="text-[11px] font-semibold text-emerald-900 mb-1.5">Formulario PDF generado:</p>
+            <a
+              href={solicitud.pdf_generado_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-emerald-300 rounded text-[10px] font-medium text-emerald-700 hover:bg-emerald-100 transition-colors"
+            >
+              <FiDownload className="w-3 h-3" />
+              {isCancelledStatus ? "Descargar F.RH-10 cancelado" : "Descargar F.RH-10"}
+            </a>
+          </div>
+        )}
 
-      {solicitud.status !== "approved" && solicitud.status !== "aprobado" && (
-        <div className="flex gap-2 mt-3">
-          {stage === "pending" && (
-            <>
-              <Button
-                variant="primary"
-                onClick={() =>
-                  solicitud.tipo_solicitud === "vacaciones"
-                    ? handleAprobarFinal(solicitud.id)
-                    : handleAprobarParcial(solicitud.id)
-                }
-                disabled={!!actionLoading}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
-              >
-                <FiCheck className="w-3.5 h-3.5 mr-1.5" />
-                {solicitud.tipo_solicitud === "vacaciones" ? "Aprobar" : "Aprobar Parcial"}
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setSelectedSolicitud(solicitud);
-                  setShowRejectModal(true);
-                }}
-                disabled={!!actionLoading}
-                className="flex-1 text-xs py-1.5"
-              >
-                <FiX className="w-3.5 h-3.5 mr-1.5" />
-                Rechazar
-              </Button>
-            </>
-          )}
+        {canViewLegalForThis && !isRejectedStatus && solicitud.pdf_validacion_legal_url && (
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-2 mt-2">
+            <p className="text-[11px] font-semibold text-slate-900 mb-1.5">Constancia legal de firma:</p>
+            <a
+              href={solicitud.pdf_validacion_legal_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-[10px] font-medium text-slate-700 hover:bg-slate-100 transition-colors"
+            >
+              <FiDownload className="w-3 h-3" />
+              {isCancelledStatus ? "Descargar validación legal cancelada" : "Descargar validación legal"}
+            </a>
+          </div>
+        )}
 
-          {stage === "pending_final" && (
-            <>
-              <Button
-                variant="primary"
-                onClick={() => handleAprobarFinal(solicitud.id)}
-                disabled={!!actionLoading}
-                className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
-              >
-                <FiCheck className="w-3.5 h-3.5 mr-1.5" />
-                Aprobar Final
-              </Button>
-              <Button
-                variant="secondary"
-                onClick={() => {
-                  setSelectedSolicitud(solicitud);
-                  setShowRejectModal(true);
-                }}
-                disabled={!!actionLoading}
-                className="flex-1 text-xs py-1.5"
-              >
-                <FiX className="w-3.5 h-3.5 mr-1.5" />
-                Rechazar
-              </Button>
-            </>
-          )}
-        </div>
-      )}
-      {stage === "cancellation_pending" && hasPendingCancellation && (
-        <div className="mt-3">
-          <Button
-            variant="primary"
-            onClick={() => openCancelModal(solicitud)}
-            disabled={!!actionLoading}
-            className="w-full bg-amber-600 hover:bg-amber-700 text-xs py-1.5"
-          >
-            Revisar cancelacion
-          </Button>
-        </div>
-      )}
-      {stage === "approved" && canCancelThis && (
-        <div className="mt-3">
-          <Button
-            variant="secondary"
-            onClick={() => openCancelModal(solicitud)}
-            disabled={!!actionLoading}
-            className="w-full bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs py-1.5"
-          >
-            Cancelar solicitud
-          </Button>
-        </div>
-      )}
+        {showAdvancedSignatureWidget && !isRejectedStatus && signatureSummary && (
+          <div className={`rounded-lg border p-2 mt-2 ${signatureStatusColor}`}>
+            <p className="text-[11px] font-semibold mb-1.5 flex items-center gap-1">
+              <FiShield className="w-3 h-3" />
+              FamSign workflow ({signatureSummary.estado || "pendiente"})
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[10px]">
+              <div>
+                <p className="font-semibold">Solicitante</p>
+                <p>
+                  {signatureSummary.solicitud_firmada
+                    ? `${signatureSummary.solicitud?.signer_name || "Firmado"} · ${formatDateTime(
+                      signatureSummary.solicitud?.signed_at
+                    )}`
+                    : "Pendiente"}
+                </p>
+              </div>
+              <div>
+                <p className="font-semibold">Aprobación</p>
+                <p>
+                  {signatureSummary.aprobacion_firmada
+                    ? `${signatureSummary.aprobacion?.signer_name || "Firmado"} · ${formatDateTime(
+                      signatureSummary.aprobacion?.signed_at
+                    )}`
+                    : "Pendiente"}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {solicitud.status !== "approved" && solicitud.status !== "aprobado" && (
+          <div className="flex gap-2 mt-3">
+            {stage === "pending" && (
+              <>
+                {(() => {
+                  const isDirectFinalApproval =
+                    !isVacation &&
+                    ["estudios", "personal"].includes(String(solicitud?.tipo_permiso || "").toLowerCase());
+                  return (
+                    <Button
+                      variant="primary"
+                      onClick={() =>
+                        isVacation || isDirectFinalApproval
+                          ? handleAprobarFinal(solicitud.id)
+                          : handleAprobarParcial(solicitud.id)
+                      }
+                      disabled={!!actionLoading}
+                      className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                    >
+                      <FiCheck className="w-3.5 h-3.5 mr-1.5" />
+                      {isVacation || isDirectFinalApproval ? "Aprobar definitiva" : "Aprobar parcial"}
+                    </Button>
+                  );
+                })()}
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setShowRejectModal(true);
+                  }}
+                  disabled={!!actionLoading}
+                  className="flex-1 text-xs py-1.5"
+                >
+                  <FiX className="w-3.5 h-3.5 mr-1.5" />
+                  Rechazar
+                </Button>
+              </>
+            )}
+
+            {stage === "pending_final" && (
+              <>
+                <Button
+                  variant="primary"
+                  onClick={() => handleAprobarFinal(solicitud.id)}
+                  disabled={!!actionLoading}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-xs py-1.5"
+                >
+                  <FiCheck className="w-3.5 h-3.5 mr-1.5" />
+                  Aprobar Final
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() => {
+                    setSelectedSolicitud(solicitud);
+                    setShowRejectModal(true);
+                  }}
+                  disabled={!!actionLoading}
+                  className="flex-1 text-xs py-1.5"
+                >
+                  <FiX className="w-3.5 h-3.5 mr-1.5" />
+                  Rechazar
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+        {stage === "cancellation_pending" && hasPendingCancellation && (
+          <div className="mt-3">
+            <Button
+              variant="primary"
+              onClick={() => openCancelModal(solicitud)}
+              disabled={!!actionLoading}
+              className="w-full bg-amber-600 hover:bg-amber-700 text-xs py-1.5"
+            >
+              Revisar cancelación
+            </Button>
+          </div>
+        )}
+        {stage === "approved" && canCancelThis && (
+          <div className="mt-3">
+            <Button
+              variant="secondary"
+              onClick={() => openCancelModal(solicitud)}
+              disabled={!!actionLoading}
+              className="w-full bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs py-1.5"
+            >
+              Cancelar solicitud
+            </Button>
+          </div>
+        )}
       </motion.div>
     );
   };
@@ -862,11 +1098,11 @@ const AprobacionPermisosView = ({ compact = false }) => {
         </div>
         <div className="text-[11px]">
           <p className="text-gray-500">Inicio</p>
-          <p className="font-medium text-gray-800">{formatEnrollmentDate(enrollment.valid_from)}</p>
+          <p className="font-medium text-gray-800">{formatDateShort(enrollment.valid_from)}</p>
         </div>
         <div className="text-[11px]">
           <p className="text-gray-500">Vence</p>
-          <p className="font-medium text-gray-800">{formatEnrollmentDate(enrollment.valid_until)}</p>
+          <p className="font-medium text-gray-800">{formatDateShort(enrollment.valid_until)}</p>
         </div>
       </div>
 
@@ -986,7 +1222,8 @@ const AprobacionPermisosView = ({ compact = false }) => {
     }
 
     if (stage === "study_enrollments") {
-      if (pendingStudyEnrollments.length === 0) {
+      const total = pendingStudyEnrollments.length;
+      if (total === 0) {
         return (
           <div className="col-span-full py-12 text-center">
             <FiCheck className="w-16 h-16 text-gray-200 mx-auto mb-4" />
@@ -994,10 +1231,19 @@ const AprobacionPermisosView = ({ compact = false }) => {
           </div>
         );
       }
-      return pendingStudyEnrollments.map(renderEnrollmentCard);
+      const visible = getVisibleCountForSection(stage);
+      return (
+        <>
+          {pendingStudyEnrollments.slice(0, visible).map(renderEnrollmentCard)}
+          <div className="col-span-full">
+            {renderListControls(stage, total)}
+          </div>
+        </>
+      );
     }
 
-    if (solicitudes.length === 0) {
+    const total = solicitudes.length;
+    if (total === 0) {
       return (
         <div className="col-span-full py-12 text-center">
           <FiCheck className="w-16 h-16 text-gray-200 mx-auto mb-4" />
@@ -1009,7 +1255,15 @@ const AprobacionPermisosView = ({ compact = false }) => {
         </div>
       );
     }
-    return solicitudes.map(renderSolicitudCard);
+    const visible = getVisibleCountForSection(stage);
+    return (
+      <>
+        {solicitudes.slice(0, visible).map(renderSolicitudCard)}
+        <div className="col-span-full">
+          {renderListControls(stage, total)}
+        </div>
+      </>
+    );
   };
 
   const requestedRecoveryHours = estimateRequestedHoursFromSolicitud(selectedRecoverySolicitud || {});

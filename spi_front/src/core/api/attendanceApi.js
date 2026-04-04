@@ -177,25 +177,53 @@ export const getAttendanceRange = async (startDate, endDate, userId = null, stat
 /**
  * Download Attendance PDF
  */
-export const downloadAttendancePDF = async (userId, startDate, endDate) => {
- const response = await api.get(
- `/attendance/pdf/${userId}?start=${startDate}&end=${endDate}`,
- {
- responseType: "blob",
+export const downloadAttendancePDF = async (userId, startDate, endDate, options = {}) => {
+ const reportType = String(options?.periodType || "monthly").toLowerCase() === "annual" ? "annual" : "monthly";
+ const params = new URLSearchParams();
+
+ if (reportType === "annual") {
+ const reportYear = Number.parseInt(options?.year, 10);
+ if (Number.isInteger(reportYear)) {
+ params.set("year", String(reportYear));
  }
- );
+ params.set("periodType", "annual");
+ } else {
+ params.set("start", startDate);
+ params.set("end", endDate);
+ params.set("periodType", "monthly");
+ }
 
- // Create download link
- const url = window.URL.createObjectURL(new Blob([response.data]));
- const link = document.createElement("a");
- link.href = url;
- link.setAttribute("download", `asistencia-${userId}-${startDate}-${endDate}.pdf`);
- document.body.appendChild(link);
- link.click();
- link.remove();
- window.URL.revokeObjectURL(url);
+  const response = await api.get(
+ `/attendance/pdf/${userId}?${params.toString()}`,
+  {
+  responseType: "blob",
+  }
+  );
 
- return true;
+ const fileNameByType = reportType === "annual"
+ ? `asistencia-${userId}-anual-${options?.year || new Date().getFullYear()}.pdf`
+ : `asistencia-${userId}-${startDate}-${endDate}.pdf`;
+ const disposition = response.headers?.["content-disposition"] || "";
+ const match = disposition.match(/filename=([^;]+)/i);
+ const fileName = match ? String(match[1]).replace(/"/g, "").trim() : fileNameByType;
+
+  // Create download link
+  const url = window.URL.createObjectURL(new Blob([response.data]));
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+
+  return {
+  ok: true,
+  hash: response.headers?.["x-document-hash-sha256"] || null,
+  hashAlgorithm: response.headers?.["x-document-hash-algorithm"] || null,
+  notice: response.headers?.["x-document-integrity-notice"] || null,
+  fileName,
+  };
 };
 
 /**

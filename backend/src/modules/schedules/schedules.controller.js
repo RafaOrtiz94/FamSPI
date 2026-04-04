@@ -9,6 +9,7 @@ const respond = (res, fn) =>
     });
 
 const listMySchedules = (req, res) => respond(res, service.listMySchedules(req.user));
+const getHolidays = (req, res) => respond(res, service.getHolidays(req.user));
 const listPendingApproval = (req, res) => respond(res, service.listPendingApproval(req.user));
 const listTeamSchedules = (req, res) => respond(res, service.listTeamSchedules(req.user));
 const getScheduleDetail = (req, res) =>
@@ -78,7 +79,14 @@ const deleteVisit = (req, res) =>
   );
 
 const approveSchedule = (req, res) =>
-  respond(res, service.approveSchedule({ id: Number(req.params.id), user: req.user }));
+  respond(
+    res,
+    service.approveSchedule({
+      id: Number(req.params.id),
+      notes: req.body.notes || req.body.comment || req.body.comments || null,
+      user: req.user,
+    }),
+  );
 
 const rejectSchedule = (req, res) =>
   respond(
@@ -86,6 +94,7 @@ const rejectSchedule = (req, res) =>
     service.rejectSchedule({
       id: Number(req.params.id),
       reason: req.body.rejection_reason || req.body.reason,
+      notes: req.body.notes || req.body.rejection_reason || req.body.reason || null,
       user: req.user,
     }),
   );
@@ -133,6 +142,7 @@ const getMyCalendarIcs = async (req, res) => {
 
 module.exports = {
   listMySchedules,
+  getHolidays,
   listPendingApproval,
   listTeamSchedules,
   getScheduleDetail,

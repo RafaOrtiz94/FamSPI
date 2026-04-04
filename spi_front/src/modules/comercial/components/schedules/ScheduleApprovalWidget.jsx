@@ -29,6 +29,8 @@ const ScheduleApprovalWidget = () => {
  const [modalLoading, setModalLoading] = useState(false);
  const [showDetailModal, setShowDetailModal] = useState(false);
  const [showRejectModal, setShowRejectModal] = useState(false);
+ const [showApproveModal, setShowApproveModal] = useState(false);
+ const [approveNotes, setApproveNotes] = useState("");
  const [actionLoadingKey, setActionLoadingKey] = useState(null);
 
  const schedulesList = useMemo(() => {
@@ -86,24 +88,39 @@ const ScheduleApprovalWidget = () => {
  }
  };
 
- const handleApprove = async (scheduleId) => {
+ const openApproveModal = (schedule) => {
+ setSelectedSchedule(schedule || null);
+ setApproveNotes("");
+ setShowApproveModal(true);
+ };
+
+ const confirmApprove = async () => {
+ if (!selectedSchedule) return;
+ const notes = approveNotes.trim();
+ if (!notes) {
+ showToast("Debes incluir notes para aprobar", "warning");
+ return;
+ }
+ const scheduleId = selectedSchedule.id;
  await runActionWithLoader(`approve-${scheduleId}`, "Aprobando cronograma...", async () => {
  try {
- await approve(scheduleId);
+ await approve(scheduleId, notes);
  showToast("Cronograma aprobado", "success");
+ setShowApproveModal(false);
  setShowDetailModal(false);
  setSelectedSchedule(null);
+ setApproveNotes("");
  } catch (error) {
  showToast(error.message || "No se pudo aprobar", "error");
  }
  });
  };
 
- const handleReject = async (reason) => {
+ const handleReject = async (notes) => {
  if (!selectedSchedule) return;
  await runActionWithLoader(`reject-${selectedSchedule.id}`, "Rechazando cronograma...", async () => {
  try {
- await reject(selectedSchedule.id, reason);
+ await reject(selectedSchedule.id, notes);
  showToast("Cronograma rechazado", "success");
  setShowRejectModal(false);
  setShowDetailModal(false);
@@ -119,7 +136,7 @@ const ScheduleApprovalWidget = () => {
  <div className="flex items-center justify-between">
  <div>
  <h3 className="text-lg font-semibold text-gray-900">
- {isGerenciaGeneral ? "Cronogramas del equipo" : "Cronogramas Pendientes de Aprobacion"}
+ {isGerenciaGeneral ? "Cronogramas del equipo" : "Cronogramas pendientes de aprobacion"}
  </h3>
  <p className="text-sm text-gray-500">
  {isGerenciaGeneral
@@ -161,7 +178,7 @@ const ScheduleApprovalWidget = () => {
  <ScheduleCard
  key={schedule.id}
  schedule={schedule}
- onApprove={handleApprove}
+ onApprove={() => openApproveModal(schedule)}
  onReject={() => {
  setSelectedSchedule(schedule);
  setShowRejectModal(true);
@@ -175,7 +192,7 @@ const ScheduleApprovalWidget = () => {
  try {
  const fullData = await fetchScheduleDetail(schedule.id);
  setSelectedSchedule(fullData);
- } catch (err) {
+ } catch (_err) {
  showToast("No se pudo cargar el detalle", "error");
  } finally {
  hideLoader();
@@ -212,7 +229,7 @@ const ScheduleApprovalWidget = () => {
  ) : selectedSchedule ? (
  <ScheduleDetailModal
  schedule={selectedSchedule}
- onApprove={() => handleApprove(selectedSchedule.id)}
+ onApprove={() => openApproveModal(selectedSchedule)}
  onReject={() => {
  setShowRejectModal(true);
  }}
@@ -231,7 +248,45 @@ const ScheduleApprovalWidget = () => {
  onConfirm={handleReject}
  loading={selectedSchedule ? actionLoadingKey === `reject-${selectedSchedule.id}` : false}
  disabled={Boolean(actionLoadingKey)}
+ title="Rechazar cronograma"
+ description="Debes registrar notes obligatorias para rechazo."
+ actionLabel="Guardar rechazo"
  />
+
+ <Modal
+ open={showApproveModal}
+ onClose={() => {
+ if (!actionLoadingKey) {
+ setShowApproveModal(false);
+ setApproveNotes("");
+ }
+ }}
+ title="Aprobar cronograma"
+ >
+ <div className="space-y-3">
+ <p className="text-sm text-gray-600">Incluye notes obligatorias para aprobar y auditar la decision.</p>
+ <textarea
+ value={approveNotes}
+ onChange={(event) => setApproveNotes(event.target.value)}
+ rows={4}
+ className="w-full border rounded-lg p-3"
+ placeholder="Escribe notes de aprobacion..."
+ />
+ <div className="flex justify-end gap-2">
+ <Button variant="ghost" onClick={() => setShowApproveModal(false)} disabled={Boolean(actionLoadingKey)}>
+ Cancelar
+ </Button>
+ <Button
+ variant="success"
+ onClick={confirmApprove}
+ loading={selectedSchedule ? actionLoadingKey === `approve-${selectedSchedule.id}` : false}
+ disabled={Boolean(actionLoadingKey) || !approveNotes.trim()}
+ >
+ Guardar aprobacion
+ </Button>
+ </div>
+ </div>
+ </Modal>
 
  <div className="flex items-center justify-end gap-2">
  <Button
@@ -256,3 +311,4 @@ const ScheduleApprovalWidget = () => {
 };
 
 export default ScheduleApprovalWidget;
+

@@ -49,11 +49,17 @@ export const useScheduleApproval = () => {
   }, []);
 
   const approve = useCallback(
-    async (id) => {
+    async (id, notes) => {
+      const safeNotes = String(notes || "").trim();
+      if (!safeNotes) {
+        const error = new Error("Debes ingresar notes para aprobar");
+        setError(error.message);
+        throw error;
+      }
       setLoading(true);
       setError(null);
       try {
-        const data = await approveSchedule(id);
+        const data = await approveSchedule(id, safeNotes);
         await Promise.all([loadPending(), loadTeamSchedules(), loadAnalytics()]);
         return data;
       } catch (err) {
@@ -67,11 +73,17 @@ export const useScheduleApproval = () => {
   );
 
   const reject = useCallback(
-    async (id, reason) => {
+    async (id, notes) => {
+      const safeNotes = String(notes || "").trim();
+      if (!safeNotes) {
+        const error = new Error("Debes ingresar notes para rechazar");
+        setError(error.message);
+        throw error;
+      }
       setLoading(true);
       setError(null);
       try {
-        const data = await rejectSchedule(id, reason);
+        const data = await rejectSchedule(id, safeNotes);
         await Promise.all([loadPending(), loadTeamSchedules(), loadAnalytics()]);
         return data;
       } catch (err) {

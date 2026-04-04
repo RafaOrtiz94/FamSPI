@@ -1,6 +1,7 @@
 const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { columnExists } = require("../../utils/dbMeta");
+const HOLIDAYS_EC = require("../../config/holidays.ec.json");
 const axios = require("axios");
 const { createEvents } = require("ics");
 const { Readable } = require("stream");
@@ -40,7 +41,7 @@ function assertAdvisor(user) {
 
 function assertManager(user) {
   if (!isManager(user)) {
-    const error = new Error("Solo los jefes pueden realizar esta acción");
+    const error = new Error("Solo los jefes pueden realizar esta acciÃ³n");
     error.status = 403;
     throw error;
   }
@@ -119,6 +120,38 @@ function formatDurationSeconds(seconds = 0) {
   const hours = Math.floor(minutes / 60);
   const remaining = minutes % 60;
   return remaining ? `${hours} h ${remaining} min` : `${hours} h`;
+}
+
+function normalizeReviewNotes(notes) {
+  return String(notes || "").trim();
+}
+
+function buildAuditNote({ action, notes, user }) {
+  const safeAction = String(action || "review").toUpperCase();
+  const safeUser = String(user?.email || "unknown");
+  const stamp = new Date().toISOString();
+  return `[AUDIT ${safeAction}] ${stamp} ${safeUser}: ${String(notes || "").trim()}`;
+}
+
+async function ensureVisitScheduleReviewNotesColumn() {
+  const cacheKey = "public.visit_schedules.review_notes";
+  if (metadataCache.has(cacheKey)) return metadataCache.get(cacheKey);
+
+  const exists = await columnExists("public", "visit_schedules", "review_notes");
+  if (exists) {
+    metadataCache.set(cacheKey, true);
+    return true;
+  }
+
+  try {
+    await db.query("ALTER TABLE visit_schedules ADD COLUMN IF NOT EXISTS review_notes TEXT");
+    metadataCache.set(cacheKey, true);
+    return true;
+  } catch (error) {
+    logger.warn({ error }, "No se pudo crear la columna review_notes en visit_schedules");
+    metadataCache.set(cacheKey, false);
+    return false;
+  }
 }
 
 async function tableExists(schema, table) {
@@ -417,7 +450,7 @@ function validateVisitDateWithinSchedule(plannedDate, schedule) {
 
   const parsed = new Date(plannedDate);
   if (Number.isNaN(parsed.getTime())) {
-    const error = new Error("La fecha planificada no es válida");
+    const error = new Error("La fecha planificada no es vÃ¡lida");
     error.status = 400;
     throw error;
   }
@@ -487,12 +520,25 @@ function resolveCity({ city, client }) {
 }
 
 async function listMySchedules(user) {
-  assertAdvisor(user);
+  assertCommercial(user);
   const { rows } = await db.query(
     `SELECT * FROM visit_schedules WHERE user_email = $1 ORDER BY year DESC, month DESC`,
     [user.email],
   );
   return rows;
+}
+
+async function getHolidays(user) {
+  assertCommercial(user);
+  const source = HOLIDAYS_EC && typeof HOLIDAYS_EC === "object" ? HOLIDAYS_EC : {};
+  const flatDates = Object.values(source)
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .filter(Boolean);
+  const uniqueDates = [...new Set(flatDates)].sort();
+  return {
+    by_year: source,
+    dates: uniqueDates,
+  };
 }
 
 async function listPendingApproval(user) {
@@ -751,7 +797,7 @@ async function getScheduleDetail({ id, user }) {
 async function createSchedule({ month, year, notes, user }) {
   assertAdvisor(user);
   if (!month || !year) {
-    const error = new Error("Mes y año son obligatorios");
+    const error = new Error("Mes y aÃ±o son obligatorios");
     error.status = 400;
     throw error;
   }
@@ -905,43 +951,106 @@ async function deleteVisit({ scheduleId, visitId, user }) {
   return { deleted: true };
 }
 
-async function approveSchedule({ id, user }) {
+async function approveSchedule({ id, notes, user }) {
   assertManager(user);
+  const reviewNotes = normalizeReviewNotes(notes);
+  if (!reviewNotes) {
+    const error = new Error("Debes incluir notes para aprobar el cronograma");
+    error.status = 400;
+    throw error;
+  }
+
   const schedule = await findScheduleOrThrow(id);
   if (schedule.status !== "pending_approval") {
     const error = new Error("Solo puedes aprobar cronogramas pendientes");
     error.status = 400;
     throw error;
   }
+
+  const hasReviewNotesColumn = await ensureVisitScheduleReviewNotesColumn();
+  if (hasReviewNotesColumn) {
+    const { rows } = await db.query(
+      `UPDATE visit_schedules
+       SET status = 'approved',
+           reviewed_by_email = $1,
+           reviewed_at = NOW(),
+           rejection_reason = NULL,
+           review_notes = $2,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [user.email, reviewNotes, id],
+    );
+    return rows[0];
+  }
+
+  const auditNote = buildAuditNote({ action: "approve", notes: reviewNotes, user });
   const { rows } = await db.query(
     `UPDATE visit_schedules
-     SET status = 'approved', reviewed_by_email = $1, reviewed_at = NOW()
-     WHERE id = $2
+     SET status = 'approved',
+         reviewed_by_email = $1,
+         reviewed_at = NOW(),
+         rejection_reason = NULL,
+         notes = CASE
+           WHEN notes IS NULL OR btrim(notes) = '' THEN $2
+           ELSE notes || E'\n' || $2
+         END,
+         updated_at = NOW()
+     WHERE id = $3
      RETURNING *`,
-    [user.email, id],
+    [user.email, auditNote, id],
   );
   return rows[0];
 }
 
-async function rejectSchedule({ id, reason, user }) {
+async function rejectSchedule({ id, reason, notes, user }) {
   assertManager(user);
-  if (!reason) {
-    const error = new Error("Debes incluir una razón de rechazo");
+  const reviewNotes = normalizeReviewNotes(notes || reason);
+  if (!reviewNotes) {
+    const error = new Error("Debes incluir notes para rechazar el cronograma");
     error.status = 400;
     throw error;
   }
+
   const schedule = await findScheduleOrThrow(id);
   if (schedule.status !== "pending_approval") {
     const error = new Error("Solo puedes rechazar cronogramas pendientes");
     error.status = 400;
     throw error;
   }
+
+  const hasReviewNotesColumn = await ensureVisitScheduleReviewNotesColumn();
+  if (hasReviewNotesColumn) {
+    const { rows } = await db.query(
+      `UPDATE visit_schedules
+       SET status = 'rejected',
+           reviewed_by_email = $1,
+           reviewed_at = NOW(),
+           rejection_reason = $2,
+           review_notes = $2,
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [user.email, reviewNotes, id],
+    );
+    return rows[0];
+  }
+
+  const auditNote = buildAuditNote({ action: "reject", notes: reviewNotes, user });
   const { rows } = await db.query(
     `UPDATE visit_schedules
-     SET status = 'rejected', reviewed_by_email = $1, reviewed_at = NOW(), rejection_reason = $2
-     WHERE id = $3
+     SET status = 'rejected',
+         reviewed_by_email = $1,
+         reviewed_at = NOW(),
+         rejection_reason = $2,
+         notes = CASE
+           WHEN notes IS NULL OR btrim(notes) = '' THEN $3
+           ELSE notes || E'\n' || $3
+         END,
+         updated_at = NOW()
+     WHERE id = $4
      RETURNING *`,
-    [user.email, reason, id],
+    [user.email, reviewNotes, auditNote, id],
   );
   return rows[0];
 }
@@ -1349,6 +1458,7 @@ async function getAnalytics(user) {
 
 module.exports = {
   listMySchedules,
+  getHolidays,
   listPendingApproval,
   listTeamSchedules,
   getScheduleDetail,
@@ -1367,3 +1477,5 @@ module.exports = {
   findApprovedScheduleForMonth,
   getMyCalendarIcsStream,
 };
+
+

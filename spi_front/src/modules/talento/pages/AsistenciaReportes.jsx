@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiDownload, FiFilter, FiList, FiPieChart } from "react-icons/fi";
+import { FiDownload, FiFilter, FiList, FiPieChart, FiCalendar, FiClock } from "react-icons/fi";
 import toast from "react-hot-toast";
 
 import Card from "../../../core/ui/components/Card";
@@ -8,11 +8,13 @@ import Select from "../../../core/ui/components/Select";
 import { DashboardLayout, DashboardHeader } from "../../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../../core/api/usersApi";
 import { downloadAttendancePDF, getAttendanceRange } from "../../../core/api/attendanceApi";
+import { getResumenColaboradores } from "../../../core/api/permisosApi";
 import { formatDateSafe, formatTimeSafe } from "../../../shared/utils/dateUtils";
 
 const REPORT_MODES = {
  official: "official",
  admin: "admin",
+ timeoff: "timeoff",
 };
 
 const STATUS_OPTIONS = [
@@ -21,6 +23,11 @@ const STATUS_OPTIONS = [
  { label: "Jornada abierta", value: "working" },
  { label: "Almuerzo abierto", value: "lunch_open" },
  { label: "Jornada cerrada", value: "completed" },
+];
+
+const OFFICIAL_PDF_PERIOD_OPTIONS = [
+ { label: "Mensual", value: "monthly" },
+ { label: "Anual (12 meses)", value: "annual" },
 ];
 
 const getTodayInputDate = () => {
@@ -51,13 +58,17 @@ const TalentoAsistenciaReportes = () => {
  const [mode, setMode] = useState(REPORT_MODES.official);
  const [loadingPdf, setLoadingPdf] = useState(false);
  const [loadingQuery, setLoadingQuery] = useState(false);
+ const [loadingTimeoff, setLoadingTimeoff] = useState(false);
  const [startDate, setStartDate] = useState("");
  const [endDate, setEndDate] = useState("");
  const [selectedUserId, setSelectedUserId] = useState("");
  const [selectedStatus, setSelectedStatus] = useState("");
+ const [officialPdfPeriod, setOfficialPdfPeriod] = useState("monthly");
+ const [annualYear, setAnnualYear] = useState(String(new Date().getFullYear()));
  const [userOptions, setUserOptions] = useState([]);
  const [reportRows, setReportRows] = useState([]);
  const [reportSummary, setReportSummary] = useState(null);
+ const [timeoffData, setTimeoffData] = useState([]);
 
  const loadUsers = useCallback(async () => {
  try {
@@ -105,25 +116,39 @@ const TalentoAsistenciaReportes = () => {
  }, [selectedStatus]);
 
  const handleDownloadPDF = useCallback(async () => {
- if (!startDate || !endDate) {
- return toast.error("Selecciona un rango de fechas.");
- }
+  if (officialPdfPeriod === "monthly" && (!startDate || !endDate)) {
+  return toast.error("Selecciona un rango de fechas.");
+  }
 
- if (!selectedUserId || selectedUserId === "all") {
- return toast.error("Selecciona un usuario especifico.");
- }
+  if (!selectedUserId || selectedUserId === "all") {
+  return toast.error("Selecciona un usuario especifico.");
+  }
 
- setLoadingPdf(true);
- try {
- await downloadAttendancePDF(selectedUserId, startDate, endDate);
- toast.success("PDF generado correctamente");
- } catch (err) {
- console.error("Error descargando PDF:", err);
- toast.error("No se pudo generar el PDF.");
- } finally {
- setLoadingPdf(false);
- }
- }, [selectedUserId, startDate, endDate]);
+  if (officialPdfPeriod === "annual") {
+  const parsedYear = Number.parseInt(annualYear, 10);
+  if (!Number.isInteger(parsedYear) || parsedYear < 2000 || parsedYear > 2100) {
+  return toast.error("Ingresa un anio valido para el reporte anual.");
+  }
+  }
+
+  setLoadingPdf(true);
+  try {
+  const result = await downloadAttendancePDF(selectedUserId, startDate, endDate, {
+  periodType: officialPdfPeriod,
+  year: annualYear,
+  });
+  if (result?.hash) {
+  toast.success(`PDF generado. Hash SHA-256: ${result.hash.slice(0, 16)}...`);
+  } else {
+  toast.success("PDF generado correctamente");
+  }
+  } catch (err) {
+  console.error("Error descargando PDF:", err);
+  toast.error("No se pudo generar el PDF.");
+  } finally {
+  setLoadingPdf(false);
+  }
+  }, [selectedUserId, startDate, endDate, officialPdfPeriod, annualYear]);
 
  const handleConsultRange = useCallback(async () => {
  if (!startDate || !endDate) {
@@ -150,17 +175,86 @@ const TalentoAsistenciaReportes = () => {
  }
  }, [endDate, selectedStatus, selectedUserId, startDate]);
 
- const statusCounters = useMemo(() => {
- const byStatus = reportSummary?.byStatus || {};
- return [
- { label: "Registros", value: reportSummary?.total ?? reportRows.length },
- { label: "Coincidencias", value: reportSummary?.filteredTotal ?? reportRows.length },
- { label: "Sin entrada", value: byStatus.no_entry ?? 0 },
- { label: "Jornada abierta", value: byStatus.working ?? 0 },
- { label: "Almuerzo abierto", value: byStatus.lunch_open ?? 0 },
- { label: "Jornada cerrada", value: byStatus.completed ?? 0 },
- ];
+const statusCounters = useMemo(() => {
+  const byStatus = reportSummary?.byStatus || {};
+  return [
+   { label: "Registros", value: reportSummary?.total ?? reportRows.length },
+   { label: "Coincidencias", value: reportSummary?.filteredTotal ?? reportRows.length },
+   { label: "Sin entrada", value: byStatus.no_entry ?? 0 },
+   { label: "Jornada abierta", value: byStatus.working ?? 0 },
+   { label: "Almuerzo abierto", value: byStatus.lunch_open ?? 0 },
+   { label: "Jornada cerrada", value: byStatus.completed ?? 0 },
+  ];
  }, [reportRows.length, reportSummary]);
+
+ const loadTimeoffReport = useCallback(async () => {
+  setLoadingTimeoff(true);
+  try {
+   const res = await getResumenColaboradores();
+   const data = Array.isArray(res?.data) ? res.data : [];
+   setTimeoffData(data);
+   toast.success(`Cargados ${data.length} colaboradores`);
+  } catch (err) {
+   console.error("Error cargando informe de permisos/vacaciones:", err);
+   toast.error(err.response?.data?.message || "No se pudo cargar el informe");
+  } finally {
+   setLoadingTimeoff(false);
+  }
+ }, []);
+
+ useEffect(() => {
+  if (mode === REPORT_MODES.timeoff && timeoffData.length === 0) {
+   loadTimeoffReport();
+  }
+ }, [mode, loadTimeoffReport, timeoffData.length]);
+
+ const timeoffCounters = useMemo(() => {
+  let totalPermisos = 0;
+  let totalVacaciones = 0;
+  let permisosPendientes = 0;
+  let vacacionesPendientes = 0;
+  timeoffData.forEach((colab) => {
+   const p = colab?.permisos?.summary || {};
+   const v = colab?.vacaciones?.summary || {};
+   totalPermisos += Number(p.total_approved || 0);
+   totalVacaciones += Number(v.allowance || 0);
+   permisosPendientes += Number(p.total_pending || 0);
+   vacacionesPendientes += Number(v.total_pending || 0);
+  });
+  return [
+   { label: "Colaboradores", value: timeoffData.length },
+   { label: "Permisos tomados", value: totalPermisos },
+   { label: "Vacaciones autorizadas", value: totalVacaciones },
+   { label: "Permisos pendientes", value: permisosPendientes },
+   { label: "Vacaciones pendientes", value: vacacionesPendientes },
+  ];
+ }, [timeoffData]);
+
+ const handleExportTimeoff = useCallback(() => {
+  if (timeoffData.length === 0) return;
+  const headers = ["Colaborador", "Departamento", "Email", "Permisos aprobados", "Permisos pendientes", "Vacaciones disponibles", "Vacaciones tomadas", "Vacaciones pendientes"];
+  const rows = timeoffData.map((colab) => [
+   colab.fullname || colab.email || "N/A",
+   colab.department_name || "-",
+   colab.email || "-",
+   colab?.permisos?.summary?.total_approved || 0,
+   colab?.permisos?.summary?.total_pending || 0,
+   colab?.vacaciones?.summary?.allowance || 0,
+   colab?.vacaciones?.summary?.taken || 0,
+   colab?.vacaciones?.summary?.pending || 0,
+  ]);
+  const csvContent = [headers, ...rows].map((row) => row.join(",")).join("\n");
+  const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `informe_permisos_vacaciones_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  toast.success("Informe exportado");
+ }, [timeoffData]);
 
  return (
  <DashboardLayout includeWidgets={false}>
@@ -179,38 +273,54 @@ const TalentoAsistenciaReportes = () => {
  </p>
  </div>
 
- <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
- <button
- type="button"
- onClick={() => setMode(REPORT_MODES.official)}
- className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
- mode === REPORT_MODES.official
- ? "border-blue-200 bg-blue-50 text-blue-900"
- : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
- }`}
- >
- <FiDownload className="text-xl" />
- <div>
- <div className="text-sm font-semibold">Reporte oficial RH-09</div>
- <div className="text-xs opacity-75">PDF por usuario y rango especifico.</div>
- </div>
- </button>
+<div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+  <button
+  type="button"
+  onClick={() => setMode(REPORT_MODES.official)}
+  className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
+   mode === REPORT_MODES.official
+   ? "border-blue-200 bg-blue-50 text-blue-900"
+   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+  }`}
+  >
+  <FiDownload className="text-xl" />
+  <div>
+  <div className="text-sm font-semibold">Reporte oficial RH-09</div>
+  <div className="text-xs opacity-75">PDF por usuario y rango especifico.</div>
+  </div>
+  </button>
 
- <button
- type="button"
- onClick={() => setMode(REPORT_MODES.admin)}
- className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
- mode === REPORT_MODES.admin
- ? "border-emerald-200 bg-emerald-50 text-emerald-900"
- : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
- }`}
- >
- <FiPieChart className="text-xl" />
- <div>
- <div className="text-sm font-semibold">Consulta administrativa</div>
- <div className="text-xs opacity-75">Usuario, rango y estado derivado de jornada.</div>
- </div>
- </button>
+  <button
+  type="button"
+  onClick={() => setMode(REPORT_MODES.admin)}
+  className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
+   mode === REPORT_MODES.admin
+   ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+  }`}
+  >
+  <FiPieChart className="text-xl" />
+  <div>
+  <div className="text-sm font-semibold">Consulta administrativa</div>
+  <div className="text-xs opacity-75">Usuario, rango y estado derivado de jornada.</div>
+  </div>
+  </button>
+
+  <button
+  type="button"
+  onClick={() => setMode(REPORT_MODES.timeoff)}
+  className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
+   mode === REPORT_MODES.timeoff
+   ? "border-indigo-200 bg-indigo-50 text-indigo-900"
+   : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+  }`}
+  >
+  <FiCalendar className="text-xl" />
+  <div>
+  <div className="text-sm font-semibold">Permisos y Vacaciones</div>
+  <div className="text-xs opacity-75">Informe consolidado de todos los colaboradores.</div>
+  </div>
+  </button>
  </div>
 
  <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
@@ -277,6 +387,39 @@ const TalentoAsistenciaReportes = () => {
  )}
  </div>
 
+ {mode === REPORT_MODES.official ? (
+ <div className="grid grid-cols-1 gap-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 md:grid-cols-2">
+ <div>
+ <label className="mb-2 block text-sm font-medium text-blue-900">
+ Tipo de reporte oficial
+ </label>
+ <Select
+ value={officialPdfPeriod}
+ options={OFFICIAL_PDF_PERIOD_OPTIONS}
+ onChange={(e) => setOfficialPdfPeriod(e.target.value)}
+ className="w-full"
+ />
+ </div>
+ <div>
+ <label className="mb-2 block text-sm font-medium text-blue-900">
+ Anio (solo anual)
+ </label>
+ <input
+ type="number"
+ min="2000"
+ max="2100"
+ value={annualYear}
+ onChange={(e) => setAnnualYear(e.target.value)}
+ disabled={officialPdfPeriod !== "annual"}
+ className="w-full rounded-lg border-2 border-blue-200 bg-white px-3 py-2 text-sm transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+ />
+ <p className="mt-1 text-xs text-blue-800">
+ En anual se genera un acta con 12 meses para el colaborador.
+ </p>
+ </div>
+ </div>
+ ) : null}
+
  <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-6">
  {statusCounters.map((card) => (
  <div key={card.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -295,7 +438,9 @@ const TalentoAsistenciaReportes = () => {
  <span>{mode === REPORT_MODES.admin ? selectedStatusLabel : "PDF oficial por usuario"}</span>
  <span className="text-slate-400">|</span>
  <span>
- Periodo: {startDate || "fecha inicio"} a {endDate || "fecha fin"}
+ {mode === REPORT_MODES.official && officialPdfPeriod === "annual"
+ ? `Periodo anual: ${annualYear || "anio"}`
+ : `Periodo: ${startDate || "fecha inicio"} a ${endDate || "fecha fin"}`}
  </span>
  </div>
  </div>
@@ -369,33 +514,126 @@ const TalentoAsistenciaReportes = () => {
  </div>
  )}
  </div>
- ) : (
- <div className="space-y-4">
- <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4">
- <h3 className="text-sm font-semibold text-blue-900">Reporte oficial RH-09</h3>
- <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-blue-800">
- <li>Genera un PDF por usuario, no un consolidado global.</li>
- <li>El reporte incluye entradas, salidas, almuerzos y horas trabajadas.</li>
- <li>Se generan firmas electronicas cuando estan disponibles.</li>
- <li>La consulta administrativa usa el mismo rango, pero no sustituye el PDF oficial.</li>
- </ul>
- </div>
+) : mode === REPORT_MODES.timeoff ? (
+  <div className="space-y-4">
+  <div className="rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-4">
+   <h3 className="text-sm font-semibold text-indigo-900">Informe de Permisos y Vacaciones</h3>
+   <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-indigo-800">
+    <li>Muestra el saldo de días de vacaciones y permisos de todos los colaboradores.</li>
+    <li>Solo usuarios con rol de Talento Humano, Finanzas, Gerencia o Admin tienen acceso.</li>
+    <li>Exporta un archivo CSV con los datos actuales.</li>
+   </ul>
+  </div>
 
- <div className="flex justify-end">
- <Button
- variant="primary"
- icon={FiDownload}
- onClick={handleDownloadPDF}
- disabled={loadingPdf}
- className="w-full md:w-auto"
- >
- {loadingPdf ? "Generando..." : "Descargar PDF oficial"}
- </Button>
- </div>
- </div>
- )}
+  <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-5">
+   {timeoffCounters.map((card) => (
+    <div key={card.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+     <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+      {card.label}
+     </div>
+     <div className="mt-2 text-2xl font-bold text-slate-950">{card.value}</div>
+    </div>
+   ))}
+  </div>
+
+  <div className="flex justify-end gap-2">
+   <Button
+    variant="secondary"
+    icon={FiClock}
+    onClick={loadTimeoffReport}
+    disabled={loadingTimeoff}
+    className="w-full md:w-auto"
+   >
+    {loadingTimeoff ? "Cargando..." : "Actualizar"}
+   </Button>
+   <Button
+    variant="primary"
+    icon={FiDownload}
+    onClick={handleExportTimeoff}
+    disabled={loadingTimeoff || timeoffData.length === 0}
+    className="w-full md:w-auto"
+   >
+    {timeoffData.length === 0 ? "Sin datos" : "Exportar CSV"}
+   </Button>
+  </div>
+
+  {timeoffData.length > 0 ? (
+   <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="max-h-96 overflow-x-auto">
+     <table className="min-w-full divide-y divide-slate-200 text-sm">
+      <thead className="bg-indigo-900 text-white sticky top-0">
+       <tr>
+        <th className="px-4 py-3 text-left font-semibold">Colaborador</th>
+        <th className="px-4 py-3 text-left font-semibold">Departamento</th>
+        <th className="px-4 py-3 text-center font-semibold">Permisos tomados</th>
+        <th className="px-4 py-3 text-center font-semibold">Permisos pend.</th>
+        <th className="px-4 py-3 text-center font-semibold">Vacaciones disp.</th>
+        <th className="px-4 py-3 text-center font-semibold">Vacaciones tomados</th>
+        <th className="px-4 py-3 text-center font-semibold">Vacaciones pend.</th>
+       </tr>
+      </thead>
+      <tbody className="divide-y divide-slate-100">
+       {timeoffData.map((row) => (
+        <tr key={row.user_id || row.id} className="bg-white">
+         <td className="px-4 py-3">
+          <div className="font-semibold text-slate-950">{row.fullname || row.email || "Usuario"}</div>
+          <div className="text-xs text-slate-500">{row.email || "-"}</div>
+         </td>
+         <td className="px-4 py-3 text-slate-700">{row.department_name || "-"}</td>
+         <td className="px-4 py-3 text-center font-semibold text-green-700">
+          {row?.permisos?.summary?.total_approved || 0}
+         </td>
+         <td className="px-4 py-3 text-center font-semibold text-amber-700">
+          {row?.permisos?.summary?.total_pending || 0}
+         </td>
+         <td className="px-4 py-3 text-center font-semibold text-blue-700">
+          {row?.vacaciones?.summary?.remaining || row?.vacaciones?.summary?.allowance || 0}
+         </td>
+         <td className="px-4 py-3 text-center font-semibold text-green-700">
+          {row?.vacaciones?.summary?.taken || 0}
+         </td>
+         <td className="px-4 py-3 text-center font-semibold text-amber-700">
+          {row?.vacaciones?.summary?.pending || 0}
+         </td>
+        </tr>
+       ))}
+      </tbody>
+     </table>
+    </div>
+   </div>
+  ) : (
+   <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
+    Presiona <span className="font-semibold text-slate-700">Actualizar</span> para cargar el informe de permisos y vacaciones.
+   </div>
+  )}
+  </div>
+ ) : (
+  <div className="space-y-4">
+  <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4">
+  <h3 className="text-sm font-semibold text-blue-900">Reporte oficial RH-09</h3>
+  <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-blue-800">
+  <li>Genera un PDF por colaborador en formato mensual o anual.</li>
+  <li>En anual se emiten 12 meses y, si aplica, se marca desde fecha de ingreso.</li>
+  <li>El acta se descarga bloqueada (campos no editables) y con hash SHA-256.</li>
+  <li>La consulta administrativa usa el mismo rango, pero no sustituye el PDF oficial.</li>
+  </ul>
+  </div>
+
+  <div className="flex justify-end">
+  <Button
+  variant="primary"
+  icon={FiDownload}
+  onClick={handleDownloadPDF}
+  disabled={loadingPdf}
+  className="w-full md:w-auto"
+  >
+  {loadingPdf ? "Generando..." : "Descargar PDF oficial"}
+  </Button>
+  </div>
+  </div>
+  )}
  </Card>
- </DashboardLayout>
+</DashboardLayout>
  );
 };
 
