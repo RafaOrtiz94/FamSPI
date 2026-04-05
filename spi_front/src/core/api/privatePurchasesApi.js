@@ -34,6 +34,8 @@ export const PRIVATE_PURCHASE_ENDPOINTS = {
  INSPECTION_REQUEST: '/private-purchases/:id/inspection-request',
  COORDINATE_INSPECTION_DATE: '/private-purchases/:id/coordinate-inspection-date',
  REVIEW_INSPECTION_DATE: '/private-purchases/:id/review-inspection-date',
+ SITE_INSPECTION: '/private-purchases/:id/site-inspection',
+ INSTALLATION_WORKFLOW: '/private-purchases/:id/installation-workflow',
  DELIVERY_GUIDES: '/private-purchases/:id/delivery-guides',
  REQUEST_DELIVERY_DATES: '/private-purchases/:id/request-delivery-dates',
  SUBMIT_DELIVERY_DATES: '/private-purchases/:id/submit-delivery-dates',
@@ -977,6 +979,70 @@ export const reviewPrivatePurchaseInspectionDate = async (
  }
 };
 
+export const registerPrivatePurchaseSiteInspection = async (
+ id,
+ {
+ result,
+ checklist,
+ observations,
+ recommendations,
+ follow_up_date,
+ is_reinspection,
+ client_signer_name,
+ expected_updated_at,
+ } = {},
+) => {
+ try {
+ const response = await api.patch(
+ PRIVATE_PURCHASE_ENDPOINTS.SITE_INSPECTION.replace(':id', id),
+ {
+ result,
+ checklist,
+ observations,
+ recommendations,
+ follow_up_date,
+ is_reinspection,
+ client_signer_name,
+ expected_updated_at,
+ },
+ );
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error registrando inspección en sitio');
+ }
+ return response.data.data;
+ } catch (error) {
+ const apiMessage = error.response?.data?.error || error.response?.data?.message;
+ if (apiMessage) {
+ error.message = apiMessage;
+ }
+ console.error(`[PrivatePurchasesAPI] Error registrando inspección en sitio ${id}:`, error);
+ throw error;
+ }
+};
+
+export const updatePrivatePurchaseInstallationWorkflow = async (
+ id,
+ { action, payload = {}, expected_updated_at } = {},
+) => {
+ try {
+ const response = await api.patch(
+ PRIVATE_PURCHASE_ENDPOINTS.INSTALLATION_WORKFLOW.replace(':id', id),
+ { action, payload, expected_updated_at },
+ );
+ if (!response.data?.ok) {
+ throw new Error(response.data?.message || 'Error actualizando workflow de instalacion');
+ }
+ return response.data.data;
+ } catch (error) {
+ const apiMessage = error.response?.data?.error || error.response?.data?.message;
+ if (apiMessage) {
+ error.message = apiMessage;
+ }
+ console.error(`[PrivatePurchasesAPI] Error actualizando workflow de instalacion ${id}:`, error);
+ throw error;
+ }
+};
+
 /**
  * Subir guias de despacho (operaciones)
  * @param {string} id - ID de la solicitud
@@ -1257,8 +1323,10 @@ export default {
  uploadPrivatePurchaseClientSignedContract,
  savePrivatePurchaseInspectionRequest,
  coordinatePrivatePurchaseInspectionDate,
- reviewPrivatePurchaseInspectionDate,
- uploadPrivatePurchaseDeliveryGuides,
+reviewPrivatePurchaseInspectionDate,
+registerPrivatePurchaseSiteInspection,
+ updatePrivatePurchaseInstallationWorkflow,
+uploadPrivatePurchaseDeliveryGuides,
  registerPrivateClient,
  requestClientRegistration,
  forwardPrivatePurchaseToAcp,

@@ -1,7 +1,7 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
-import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiDownload, FiUpload } from "react-icons/fi";
+import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload } from "react-icons/fi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { generateTrainingCoordinationPDF } from "../../../core/api/servicioApi";
@@ -31,13 +31,14 @@ const STEPS = [
  },
 ];
 
-const EntrenamientoStepper = () => {
+const EntrenamientoStepper = ({ workflowContext: workflowContextProp = null, onCompleted = null, hideHeader = false }) => {
  const [searchParams] = useSearchParams();
- const workflowContext = {
+ const queryWorkflowContext = {
  source_type: searchParams.get("source_type") || undefined,
  source_id: searchParams.get("source_id") || undefined,
  request_id: searchParams.get("request_id") || undefined,
  };
+ const workflowContext = workflowContextProp || queryWorkflowContext;
  const [currentStep, setCurrentStep] = useState(0);
  const [completedSteps, setCompletedSteps] = useState(new Set());
  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -48,7 +49,6 @@ const EntrenamientoStepper = () => {
  const {
  register,
  handleSubmit,
- watch,
  setValue,
  reset,
  formState: { errors },
@@ -168,6 +168,7 @@ const EntrenamientoStepper = () => {
  if (result.ok) {
  setIsCompleted(true);
  setCompletionData(result);
+ if (typeof onCompleted === "function") onCompleted(result);
  showToast(`Coordinación registrada: ${result.ordenNumero} - ${result.cliente}`, "success");
  } else {
  showToast(result.message || "Error al procesar la coordinación", "error");
@@ -504,7 +505,7 @@ const EntrenamientoStepper = () => {
  if (isCompleted && completionData) {
  return (
  <div className="max-w-4xl mx-auto p-6">
- <div className="mb-8">
+ {!hideHeader && <div className="mb-8">
  <div className="text-center">
  <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
  <FiCheckCircle className="w-8 h-8 text-green-600" />
@@ -516,7 +517,7 @@ const EntrenamientoStepper = () => {
  La coordinación de entrenamiento ha sido registrada correctamente
  </p>
  </div>
- </div>
+ </div>}
 
  <Card className="p-6 mb-6">
  <div className="space-y-4">
@@ -593,14 +594,14 @@ const EntrenamientoStepper = () => {
 
  return (
  <div className="max-w-4xl mx-auto p-6">
- <div className="mb-8">
+ {!hideHeader && <div className="mb-8">
  <h1 className="text-2xl font-bold text-gray-900 text-center">
  Coordinación de la Fecha de Entrenamiento
  </h1>
  <p className="text-sm text-gray-500 text-center mt-2">
  Formulario F.ST-04 - V03 - Planificación de entrenamientos
  </p>
- </div>
+ </div>}
 
  {renderStepIndicator()}
 

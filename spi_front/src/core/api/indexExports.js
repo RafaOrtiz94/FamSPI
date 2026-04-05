@@ -15,3 +15,5 @@ export * from "./schedulesApi";
 export * from "./inventarioApi";
 export * from "./permisosApi";
 export * from "./signatureApi";
+export * from "./externalCasesApi";
+export * from "./integrationsApi";

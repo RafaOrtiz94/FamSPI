@@ -679,6 +679,7 @@ exports.registerSiteInspection = async (req, res, next) => {
       checklist,
       observations,
       recommendations,
+      client_signer_name,
       follow_up_date,
       is_reinspection,
       expected_updated_at,
@@ -691,6 +692,7 @@ exports.registerSiteInspection = async (req, res, next) => {
       checklist,
       observations,
       recommendations,
+      client_signer_name,
       follow_up_date,
       is_reinspection,
       expected_updated_at,
@@ -710,6 +712,32 @@ exports.registerSiteInspection = async (req, res, next) => {
           ? "site_inspection_completed"
           : "site_inspection_requires_reinspection",
       meta: { result: String(result || "").toLowerCase() || null },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateInstallationWorkflow = async (req, res, next) => {
+  try {
+    const { action, payload, expected_updated_at } = req.body || {};
+    const updated = await service.upsertInstallationWorkflow({
+      id: req.params.id,
+      user: req.user,
+      action,
+      payload,
+      expected_updated_at,
+    });
+    const normalizedUpdated = normalizeDatesDeep(updated, {
+      endpoint: "equipment_purchases",
+      keysToNormalize: ["created_at", "updated_at", "provider_response_at"],
+    });
+    respondAndBroadcast({
+      res,
+      req,
+      payload: normalizedUpdated,
+      action: "installation_workflow_updated",
+      meta: { installation_action: String(action || payload?.action || "").toLowerCase() || null },
     });
   } catch (error) {
     next(error);

@@ -33,6 +33,9 @@ const STEPS = [
 
 const VerificacionStepper = () => {
  const [searchParams] = useSearchParams();
+ const prefilledClient = searchParams.get("client_name") || "";
+ const prefilledEquipment = searchParams.get("equipment_name") || "";
+ const prefilledSerial = searchParams.get("equipment_serial") || "";
  const workflowContext = {
  source_type: searchParams.get("source_type") || undefined,
  source_id: searchParams.get("source_id") || undefined,
@@ -56,6 +59,12 @@ const VerificacionStepper = () => {
  } = useForm({
  defaultValues: {
  Fecha: new Date().toISOString().split("T")[0],
+ Cliente: prefilledClient,
+ Equipo: prefilledEquipment,
+ Serie: prefilledSerial,
+ verification_result: "passed",
+ criteria_reference: "",
+ remediation_notes: "",
  },
  });
 
@@ -128,10 +137,22 @@ const VerificacionStepper = () => {
  if (!data.ANALISIS || data.ANALISIS.trim().length < 10) {
  return "El análisis es obligatorio y debe contener al menos 10 caracteres";
  }
+ if (!data.criteria_reference || data.criteria_reference.trim().length < 6) {
+ return "Debes registrar la fuente o criterio técnico de verificación";
+ }
+ if (!["passed", "failed"].includes(String(data.verification_result || "").trim().toLowerCase())) {
+ return "Debes indicar si la verificación fue aprobada o fallida";
+ }
  break;
  case 3: // Certificación
  if (!data.firma_af_image || data.firma_af_image.length < 10) {
  return "La firma del especialista es obligatoria";
+ }
+ if (
+ String(data.verification_result || "").trim().toLowerCase() === "failed" &&
+ (!data.remediation_notes || data.remediation_notes.trim().length < 6)
+ ) {
+ return "Cuando F.ST-09 falla debes registrar notas de remediación";
  }
  break;
  }
@@ -182,6 +203,9 @@ const VerificacionStepper = () => {
 
  // 6️⃣ ANEXOS / EVIDENCIA FOTOGRÁFICA
  anexos_af_image: annexes.length > 0 ? annexes : undefined,
+ verification_result: String(data.verification_result || "").trim().toLowerCase(),
+ criteria_reference: data.criteria_reference,
+ remediation_notes: data.remediation_notes || undefined,
  };
 
  console.log("Submitting verification data:", {
@@ -429,6 +453,37 @@ const VerificacionStepper = () => {
  • "REQUIERE SOPORTE" - Problemas que requieren intervención técnica
  </p>
  </div>
+ <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">
+ Resultado de verificación *
+ </label>
+ <select
+ {...register("verification_result", { required: true })}
+ className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+ >
+ <option value="passed">Aprobada</option>
+ <option value="failed">Fallida (requiere remediación)</option>
+ </select>
+ </div>
+ <div>
+ <label className="block text-sm font-medium text-gray-700 mb-1">
+ Fuente/Criterio técnico *
+ </label>
+ <input
+ type="text"
+ placeholder="Ej: Manual fabricante v2.1, sección 4.3"
+ {...register("criteria_reference", {
+ required: "Campo obligatorio",
+ minLength: { value: 6, message: "Debe contener al menos 6 caracteres" },
+ })}
+ className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500"
+ />
+ {errors.criteria_reference && (
+ <p className="text-xs text-red-500 mt-1">{errors.criteria_reference.message}</p>
+ )}
+ </div>
+ </div>
  </Card>
  </div>
  );
@@ -503,6 +558,24 @@ const VerificacionStepper = () => {
  profesionalmente fundadas."
  </p>
  </Card>
+
+ {String(watch("verification_result") || "").trim().toLowerCase() === "failed" && (
+ <Card className="p-4 border-amber-200 bg-amber-50">
+ <h4 className="font-medium text-amber-900 mb-2">Notas de remediación *</h4>
+ <textarea
+ rows="4"
+ placeholder="Describe revisión técnica, ajustes y siguiente acción antes de repetir F.ST-09"
+ {...register("remediation_notes", {
+ required: "Campo obligatorio cuando la verificación falla",
+ minLength: { value: 6, message: "Debe contener al menos 6 caracteres" },
+ })}
+ className="w-full border rounded-lg px-3 py-2 focus:ring-2 focus:ring-amber-500"
+ />
+ {errors.remediation_notes && (
+ <p className="text-xs text-red-500 mt-1">{errors.remediation_notes.message}</p>
+ )}
+ </Card>
+ )}
  </div>
  );
 

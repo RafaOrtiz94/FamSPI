@@ -120,6 +120,50 @@ export const generateAttendanceListPDF = async (attendanceData, workflowContext 
  return response.data;
 };
 
+export const getTrainingWorkflow = async ({ source_type, source_id } = {}) => {
+ if (!source_type || !source_id) return null;
+ const { data } = await api.get("/servicio/entrenamiento/workflow", {
+ params: { source_type, source_id },
+ });
+ return data?.workflow || null;
+};
+
+export const updateTrainingWorkflowAction = async (payload = {}, workflowContext = null) => {
+ const requestPayload = withWorkflowContext(payload, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/workflow", requestPayload);
+ return data?.workflow || null;
+};
+
+export const generateTrainingEvaluationPDF = async (evaluationData, workflowContext = null) => {
+ const payload = withWorkflowContext(evaluationData, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/evaluacion/pdf", payload);
+ return data;
+};
+
+export const generateTrainingSpecialistEvaluationPDF = async (evaluationData, workflowContext = null) => {
+ const payload = withWorkflowContext(evaluationData, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/evaluacion-especialista/pdf", payload);
+ return data;
+};
+
+export const generateTrainingConformityPDF = async (conformityData, workflowContext = null) => {
+ const payload = withWorkflowContext(conformityData, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/conformidad/pdf", payload);
+ return data;
+};
+
+export const issueTrainingCertificate = async (payload = {}, workflowContext = null) => {
+ const requestPayload = withWorkflowContext(payload, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/certificado/emitir", requestPayload);
+ return data;
+};
+
+export const deliverTrainingCertificate = async (payload = {}, workflowContext = null) => {
+ const requestPayload = withWorkflowContext(payload, workflowContext);
+ const { data } = await api.post("/servicio/entrenamiento/certificado/entregar", requestPayload);
+ return data;
+};
+
 // ======================================================
 // 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
 // ======================================================
@@ -155,6 +199,49 @@ export const generateEquipmentVerificationPDF = async (verificationData, workflo
  return response.data;
 };
 
+export const listWithdrawalWorkflowStatuses = async ({
+ source_type,
+ status = null,
+ q = "",
+ limit = 100,
+} = {}) => {
+ const { data } = await api.get("/servicio/withdrawal/workflow/list", {
+ params: {
+ source_type,
+ status,
+ q,
+ limit,
+ },
+ });
+ return data?.rows || [];
+};
+
+export const getWithdrawalWorkflow = async ({
+ source_type,
+ source_id,
+ request_id,
+} = {}) => {
+ const params = {
+ source_type: source_type || undefined,
+ source_id: source_id || undefined,
+ request_id: request_id || undefined,
+ };
+ const { data } = await api.get("/servicio/withdrawal/workflow", { params });
+ return data?.workflow || null;
+};
+
+export const updateWithdrawalWorkflowAction = async (payload = {}, workflowContext = null) => {
+ const requestPayload = withWorkflowContext(payload, workflowContext);
+ const { data } = await api.post("/servicio/withdrawal/workflow", requestPayload);
+ return data?.workflow || null;
+};
+
+export const generateWithdrawalActPDF = async (payload = {}, workflowContext = null) => {
+ const requestPayload = withWorkflowContext(payload, workflowContext);
+ const { data } = await api.post("/servicio/withdrawal/fst11/pdf", requestPayload);
+ return data;
+};
+
 export const listWorkflowDocuments = async ({ source_type, source_id } = {}) => {
  const { data } = await api.get("/servicio/workflow-documents", {
  params: { source_type, source_id },
@@ -174,4 +261,107 @@ export const listWorkflowDocumentsSummary = async ({ source_type, source_ids = [
  },
  });
  return data?.rows || [];
+};
+
+export const getWorkflowReportingSummary = async () => {
+ const { data } = await api.get("/servicio/workflow/reporting-summary");
+ return data?.data || { metrics: {}, warnings: [] };
+};
+
+export const getWorkflowCatalog = async ({ with_compatibility = true, include_inactive = false } = {}) => {
+ const { data } = await api.get("/servicio/workflow/catalog", {
+ params: { with_compatibility, include_inactive },
+ });
+ return data?.rows || [];
+};
+
+export const getWorkflowStateMachines = async () => {
+ const { data } = await api.get("/servicio/workflow/state-machines");
+ return data?.rows || [];
+};
+
+export const getWorkflowRegistry = async ({ source_type, source_id, procedure_code = "ST-01-01" } = {}) => {
+ if (!source_type || !source_id) return null;
+ const { data } = await api.get("/servicio/workflow/registry", {
+ params: { source_type, source_id, procedure_code },
+ });
+ return data?.workflow || null;
+};
+
+export const upsertWorkflowRegistry = async (payload = {}) => {
+ const { data } = await api.post("/servicio/workflow/registry", payload);
+ return data?.row || null;
+};
+
+export const getWorkflowTimeline = async ({
+ source_type,
+ source_id,
+ procedure_code = "ST-01-01",
+ limit = 100,
+} = {}) => {
+ if (!source_type || !source_id) return [];
+ const { data } = await api.get("/servicio/workflow/timeline", {
+ params: { source_type, source_id, procedure_code, limit },
+ });
+ return data?.rows || [];
+};
+
+// ======================================================
+// ST-01-03 Correctivos CEAC / Dispatcher
+// ======================================================
+export const createCorrectiveCase = async (payload = {}) => {
+ const { data } = await api.post("/servicio/corrective-cases", payload);
+ return data?.case || null;
+};
+
+export const listCorrectiveCasesWorkspace = async (params = {}) => {
+ const { data } = await api.get("/servicio/corrective-cases/workspace/list", { params });
+ return data?.rows || [];
+};
+
+export const getCorrectiveCasesWorkspaceKpi = async (params = {}) => {
+ const { data } = await api.get("/servicio/corrective-cases/workspace/kpi", { params });
+ return data?.data || {};
+};
+
+export const getCorrectiveCaseDetail = async (caseId) => {
+ if (!caseId) return null;
+ const { data } = await api.get(`/servicio/corrective-cases/${caseId}`);
+ return data?.case || null;
+};
+
+export const getCorrectiveCaseTimeline = async (caseId) => {
+ if (!caseId) return [];
+ const { data } = await api.get(`/servicio/corrective-cases/${caseId}/timeline`);
+ return data?.rows || [];
+};
+
+export const listCorrectiveCaseEvents = async (caseId) => {
+ if (!caseId) return [];
+ const { data } = await api.get(`/servicio/corrective-cases/${caseId}/events`);
+ return data?.rows || [];
+};
+
+export const listCorrectiveCaseComments = async (caseId) => {
+ if (!caseId) return [];
+ const { data } = await api.get(`/servicio/corrective-cases/${caseId}/comments`);
+ return data?.rows || [];
+};
+
+export const addCorrectiveCaseComment = async (caseId, payload = {}) => {
+ if (!caseId) return null;
+ const { data } = await api.post(`/servicio/corrective-cases/${caseId}/comments`, payload);
+ return data?.comment || null;
+};
+
+export const listCorrectiveCaseEvidences = async (caseId) => {
+ if (!caseId) return [];
+ const { data } = await api.get(`/servicio/corrective-cases/${caseId}/evidences`);
+ return data?.rows || [];
+};
+
+export const runCorrectiveCaseAction = async (caseId, payload = {}) => {
+ if (!caseId) return null;
+ const { data } = await api.post(`/servicio/corrective-cases/${caseId}/actions`, payload);
+ return data?.case || null;
 };

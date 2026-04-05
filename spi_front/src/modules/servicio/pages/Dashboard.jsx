@@ -201,16 +201,17 @@ const ServicioDashboard = () => {
 
  if (role.includes("jefe") || role.includes("gerente") || role.includes("director")) {
  return (
- <JefeTecnicoView
- stats={stats}
- maintenances={safeMantenimientos}
- approvals={safeApprovals}
- availability={safeAvailability}
- onRefresh={refreshSnapshots}
- onOpenPublicPurchases={() => navigate("/dashboard/servicio-tecnico/workspace-procedimiento?tab=public")}
- />
- );
- }
+	 <JefeTecnicoView
+	 stats={stats}
+	 maintenances={safeMantenimientos}
+	 approvals={safeApprovals}
+	 availability={safeAvailability}
+	 onRefresh={refreshSnapshots}
+	 onOpenPublicPurchases={() => navigate("/dashboard/servicio-tecnico/workspace-procedimiento?tab=public")}
+	 onOpenWithdrawals={() => navigate("/dashboard/servicio-tecnico/retiros")}
+	 />
+	 );
+	 }
 
  // Default to Tecnico view
  // Filter maintenances for this technician
@@ -286,6 +287,19 @@ const ServicioDashboard = () => {
  })}
  </div>
  )}
+ </Card>
+ <Card className="p-5">
+ <div className="flex items-center justify-between gap-3">
+ <div>
+ <h2 className="text-lg font-semibold text-gray-900">Integración Externa ST-01-04</h2>
+ <p className="text-sm text-gray-500">
+ Gestiona casos externos, salud de proveedores y reintentos de sincronización con trazabilidad completa.
+ </p>
+ </div>
+ <Button className="text-sm px-4 py-2" onClick={() => navigate("/dashboard/servicio-tecnico/casos-externos")}>
+ Abrir workspace
+ </Button>
+ </div>
  </Card>
  <div className="mt-6">
  <PermisosStatusWidget />

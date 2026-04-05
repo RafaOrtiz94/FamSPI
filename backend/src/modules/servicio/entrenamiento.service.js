@@ -14,6 +14,7 @@ const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { registerFst04TrainingDocument } = require("./trainingWorkflow.service");
 
 const TEMPLATE_PATH = path.join(
     __dirname,
@@ -317,6 +318,21 @@ const generateTrainingPDF = async (req, res) => {
             imageCount: driveResult.images?.length || 0
         }, "Archivos de coordinación de entrenamiento guardados en Google Drive");
 
+        let workflowDetail = null;
+        try {
+            workflowDetail = await registerFst04TrainingDocument({
+                payload: trainingData,
+                document: {
+                    file_id: driveResult.pdfFile?.id || null,
+                    folder_id: driveResult.folderId || null,
+                    link: driveResult.pdfFile?.webViewLink || null,
+                },
+                user: req.userInfo || req.user || null,
+            });
+        } catch (workflowError) {
+            logger.warn({ workflowError }, "No se pudo sincronizar workflow de entrenamiento para F.ST-04");
+        }
+
         // Return success without downloading PDF
         res.json({
             ok: true,
@@ -324,7 +340,8 @@ const generateTrainingPDF = async (req, res) => {
             driveFolderId: driveResult.folderId,
             pdfId: driveResult.pdfFile?.id,
             ordenNumero: trainingData.ORDNumero,
-            cliente: trainingData.ORDCliente
+            cliente: trainingData.ORDCliente,
+            workflow: workflowDetail,
         });
     } catch (err) {
         logger.error({ err }, "Error en endpoint de PDF de coordinación de entrenamiento");

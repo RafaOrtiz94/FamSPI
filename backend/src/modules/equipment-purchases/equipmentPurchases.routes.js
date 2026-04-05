@@ -159,5 +159,11 @@ router.patch(
   requireRole(technicalInspectionExecutionRoles),
   ctrl.registerSiteInspection,
 );
+router.patch(
+  "/:id/installation-workflow",
+  verifyToken,
+  requireRole(deliveryRoles),
+  ctrl.updateInstallationWorkflow,
+);
 
 module.exports = router;

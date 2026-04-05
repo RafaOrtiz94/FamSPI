@@ -7,6 +7,21 @@ const { createAllDayEvent } = require("../../utils/calendar");
 const { sendMail } = require("../../utils/mailer");
 const inventarioService = require("../inventario/inventario.service");
 const notificationManager = require("../notifications/notificationManager");
+const { trackFst07WorkflowDocument } = require("../servicio/fst07.service");
+const { trackFst14WorkflowDocument } = require("../servicio/fst14.service");
+const { generateFst14PdfBuffer, buildFst14FileName } = require("../servicio/fst14Pdf.service");
+const {
+  normalizeInstallationWorkflowState,
+  buildDispatchRequestPatch,
+  buildLogisticsValidationPatch,
+  buildVisualReceptionPatch,
+  buildVerificationDecisionPatch,
+  buildVerificationRemediationPatch,
+  buildCuProviderReportPatch,
+  computeInstallationClosureGate,
+  enrichInstallationWorkflowWithGate,
+  createInstallationWorkflowError,
+} = require("../servicio/installationWorkflow.service");
 const {
   createRequest: createServiceRequest,
   generateActa,
@@ -679,6 +694,7 @@ function getInspectionSiteState(extra = {}) {
     observations: raw.observations || null,
     recommendations: raw.recommendations || null,
     responsible_name: raw.responsible_name || null,
+    client_signer_name: raw.client_signer_name || null,
     updated_at: raw.updated_at || null,
     updated_by: raw.updated_by || null,
     updated_by_email: raw.updated_by_email || null,
@@ -686,10 +702,31 @@ function getInspectionSiteState(extra = {}) {
   };
 }
 
+function getInstallationWorkflowState(extra = {}, { equipment = [], siteReady = true, requiresSiteInspection = true } = {}) {
+  const source = extra?.installation_workflow && typeof extra.installation_workflow === "object"
+    ? extra.installation_workflow
+    : {};
+  const normalized = normalizeInstallationWorkflowState(source, { equipment });
+  const gate = computeInstallationClosureGate({
+    workflow: normalized,
+    siteReady,
+    requiresSiteInspection,
+  });
+  return {
+    ...normalized,
+    closure_gate: gate,
+  };
+}
+
 function mapRequestRow(row = {}) {
   const extra = typeof row.extra === "string" ? safeJsonParse(row.extra) : row.extra;
   const checklist = typeof row.checklist === "string" ? safeJsonParse(row.checklist, {}) : (row.checklist || {});
   const inspectionSite = getInspectionSiteState(extra || {});
+  const installationWorkflow = getInstallationWorkflowState(extra || {}, {
+    equipment: Array.isArray(row?.equipment) ? row.equipment : [],
+    siteReady: Boolean(inspectionSite?.ready_for_installation),
+    requiresSiteInspection: Boolean(row?.inspection_request_id || row?.inspection_scheduled_date),
+  });
   const autoBusinessCaseStage = row?.auto_business_case_stage || extra?.auto_business_case_stage || null;
   const autoBusinessCaseStatus = row?.auto_business_case_status || extra?.auto_business_case_status || null;
   const autoBusinessCaseResolvedFactible =
@@ -759,10 +796,28 @@ function mapRequestRow(row = {}) {
     inspection_site_observations: inspectionSite.observations,
     inspection_site_recommendations: inspectionSite.recommendations,
     inspection_site_responsible_name: inspectionSite.responsible_name,
+    inspection_site_client_signer_name: inspectionSite.client_signer_name,
     inspection_site_updated_at: inspectionSite.updated_at,
     inspection_site_updated_by: inspectionSite.updated_by,
     inspection_site_updated_by_email: inspectionSite.updated_by_email,
     inspection_site_history: inspectionSite.history,
+    installation_workflow: installationWorkflow,
+    installation_can_close: Boolean(installationWorkflow?.closure_gate?.can_close),
+    installation_blocked_reasons: installationWorkflow?.closure_gate?.blocked_reasons || [],
+    installation_dispatch_request: installationWorkflow?.dispatch_request || null,
+    installation_logistics_validation: installationWorkflow?.logistics_validation || null,
+    installation_visual_reception: installationWorkflow?.visual_reception || null,
+    installation_verification_decision: installationWorkflow?.verification_decision || null,
+    installation_verification_cycle: installationWorkflow?.verification_cycle || null,
+    installation_cu_flow: installationWorkflow?.cu_flow || null,
+    installation_delivery_act: installationWorkflow?.delivery_act || null,
+    fst14_report_file_id: installationWorkflow?.visual_reception?.report_file_id || null,
+    fst14_report_link: installationWorkflow?.visual_reception?.report_link || null,
+    verification_decision_applies: installationWorkflow?.verification_decision?.applies,
+    verification_cycle_status: installationWorkflow?.verification_cycle?.status || null,
+    verification_attempts: Array.isArray(installationWorkflow?.verification_cycle?.attempts)
+      ? installationWorkflow.verification_cycle.attempts
+      : [],
     auto_business_case_stage: autoBusinessCaseStage,
     auto_business_case_status: autoBusinessCaseStatus,
     auto_business_case_resolved_factible: autoBusinessCaseResolvedFactible,
@@ -925,6 +980,28 @@ function assertChecklistReady(request, action) {
       },
     );
   }
+}
+
+function assertSiteReadyForInstallation(request) {
+  const ready = Boolean(
+    request?.inspection_site_ready_for_installation ||
+      request?.extra?.inspection_site?.ready_for_installation,
+  );
+  if (ready) return;
+  throw createAppError("El sitio inspeccionado no está conforme para instalar el equipo", {
+    status: 409,
+    code: "SITE_NOT_READY_FOR_INSTALLATION",
+    details: {
+      inspection_site_status:
+        request?.inspection_site_status ||
+        request?.extra?.inspection_site?.status ||
+        SITE_INSPECTION_STATUS.PENDING,
+      follow_up_date:
+        request?.inspection_site_follow_up_date ||
+        request?.extra?.inspection_site?.follow_up_date ||
+        null,
+    },
+  });
 }
 
 function getAcceptedItems(request) {
@@ -1594,6 +1671,7 @@ async function generateFst07InspectionDocument({
   observations,
   recommendations,
   responsibleName,
+  clientSignerName,
   followUpDate,
   isReinspection,
 }) {
@@ -1624,6 +1702,7 @@ async function generateFst07InspectionDocument({
   const clientName = request?.client_name || "Cliente";
   const inspectionDate = formatDateEsLabel(request?.inspection_scheduled_date);
   const responsible = String(responsibleName || user?.fullname || user?.name || user?.email || "").trim() || "N/D";
+  const clientSigner = String(clientSignerName || "").trim() || "N/D";
   const resultLabel =
     result === "compliant"
       ? "AREA LISTA PARA INSTALACION: SI"
@@ -1646,6 +1725,7 @@ async function generateFst07InspectionDocument({
     doc.text(`Cliente: ${clientName}`);
     doc.text(`Equipo: ${equipmentName}`);
     doc.text(`Responsable: ${responsible}`);
+    doc.text(`Representante cliente: ${clientSigner}`);
     doc.moveDown(0.6);
     doc.font("Helvetica-Bold").text("Checklist de inspección");
     doc.moveDown(0.3);
@@ -3363,6 +3443,7 @@ async function registerSiteInspection({
   checklist,
   observations,
   recommendations,
+  client_signer_name,
   follow_up_date,
   is_reinspection,
   expected_updated_at,
@@ -3396,6 +3477,13 @@ async function registerSiteInspection({
   }
 
   const normalizedChecklist = normalizeFst07Checklist(checklist);
+  const clientSignerName = String(client_signer_name || "").trim();
+  if (!clientSignerName) {
+    throw createAppError("Debes registrar el nombre de quien firma por parte del cliente", {
+      status: 400,
+      code: "CLIENT_SIGNATURE_REQUIRED",
+    });
+  }
   const scheduledDate = normalizeDateOnlyInput(request.inspection_scheduled_date);
   const normalizedFollowUpDate = normalizeDateOnlyInput(follow_up_date);
 
@@ -3443,6 +3531,7 @@ async function registerSiteInspection({
     observations,
     recommendations,
     responsibleName,
+    clientSignerName,
     followUpDate: normalizedFollowUpDate,
     isReinspection: Boolean(is_reinspection),
   });
@@ -3458,6 +3547,7 @@ async function registerSiteInspection({
     observations: String(observations || "").trim() || null,
     recommendations: String(recommendations || "").trim() || null,
     responsible_name: responsibleName,
+    client_signer_name: clientSignerName,
     updated_at: nowIso,
     updated_by: Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
     updated_by_email: user?.email || null,
@@ -3482,6 +3572,7 @@ async function registerSiteInspection({
     observations: String(observations || "").trim() || null,
     recommendations: String(recommendations || "").trim() || null,
     responsible_name: responsibleName,
+    client_signer_name: clientSignerName,
     updated_at: nowIso,
     updated_by: Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
     updated_by_email: user?.email || null,
@@ -3512,6 +3603,26 @@ async function registerSiteInspection({
   }
 
   const updated = mapRequestRow(rows[0]);
+  await trackFst07WorkflowDocument({
+    sourceType: "public_purchase",
+    sourceId: String(updated.id),
+    requestId: updated.inspection_request_id || null,
+    driveFileId: report?.file_id || null,
+    driveFolderId: updated.drive_folder_id || null,
+    driveLink: report?.link || null,
+    result: normalizedResult,
+    followUpDate: normalizedResult === "non_compliant" ? normalizedFollowUpDate || null : null,
+    isReinspection: Boolean(is_reinspection),
+    clientName: updated.client_name || null,
+    equipmentName: Array.isArray(updated?.equipment)
+      ? updated.equipment.map((item) => item?.name || item?.sku).filter(Boolean).join(", ")
+      : null,
+    user,
+    metadata: {
+      source_module: "equipment_purchases",
+      public_purchase_id: updated.id,
+    },
+  });
   try {
     await notifyUsers({
       userIds: [updated.created_by, updated.assigned_to],
@@ -3537,6 +3648,275 @@ async function registerSiteInspection({
   }
 
   return updated;
+}
+
+async function storeFst14EvidencePhoto(folderId, photo, index = 0) {
+  const source = typeof photo === "string" ? { raw: photo } : (photo || {});
+  const fileId = source.file_id || source.id || null;
+  const link = source.link || source.url || null;
+  if (fileId || link) {
+    return { file_id: fileId || null, link: link || driveLink(fileId) };
+  }
+
+  const rawImage = source.raw || source.base64 || source.data || null;
+  if (!rawImage || typeof rawImage !== "string") return null;
+  if (!rawImage.startsWith("data:image")) return null;
+
+  const mimeTypeMatch = rawImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+  const mimeType = mimeTypeMatch?.[1] || "image/png";
+  const extension = mimeType.includes("jpeg") ? "jpg" : mimeType.split("/")[1] || "png";
+  const base64 = rawImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+  if (!base64) return null;
+
+  const evidenceFolder = await ensureFolder("F.ST-14 Evidencias", folderId);
+  const fileName = `F.ST-14-evidencia-${Date.now()}-${index + 1}.${extension}`;
+  const stored = await uploadBase64File(
+    fileName,
+    base64,
+    mimeType,
+    evidenceFolder?.id || folderId,
+  );
+  return {
+    file_id: stored?.id || null,
+    link: stored?.webViewLink || (stored?.id ? driveLink(stored.id) : null),
+  };
+}
+
+async function upsertInstallationWorkflow({
+  id,
+  user,
+  action,
+  payload = {},
+  expected_updated_at,
+}) {
+  await ensureTables();
+  if (!canManageDelivery(user) && !canRegisterSiteInspection(user)) {
+    throw createAppError("Tu rol no puede actualizar el workflow de instalacion", {
+      status: 403,
+      code: "FORBIDDEN_ROLE_ACTION",
+    });
+  }
+
+  const normalizedAction = String(action || payload?.action || "").trim().toLowerCase();
+  if (!normalizedAction) {
+    throw createInstallationWorkflowError("Debe indicar la accion del workflow de instalacion", {
+      status: 400,
+      code: "INSTALLATION_ACTION_REQUIRED",
+    });
+  }
+
+  const request = await getById(id, user);
+  assertRequestExists(request);
+  assertNoStaleWrite(request, expected_updated_at);
+  const extraBase = request?.extra || {};
+  const currentWorkflow = normalizeInstallationWorkflowState(extraBase.installation_workflow || {}, {
+    equipment: request?.equipment || [],
+  });
+  let nextWorkflow = currentWorkflow;
+
+  if (normalizedAction === "dispatch_request") {
+    nextWorkflow = buildDispatchRequestPatch({
+      workflow: currentWorkflow,
+      payload,
+      user,
+      defaults: {
+        client_name: request.client_name || "Cliente",
+        client_address: payload.client_address || "Pendiente",
+        contact_name: request.client_name || null,
+        contact_phone: null,
+      },
+    });
+  } else if (normalizedAction === "logistics_validation") {
+    nextWorkflow = buildLogisticsValidationPatch({
+      workflow: currentWorkflow,
+      payload,
+      user,
+    });
+  } else if (normalizedAction === "visual_inspection_fst14") {
+    if (!canRegisterSiteInspection(user)) {
+      throw createInstallationWorkflowError("Solo el equipo tecnico puede registrar F.ST-14", {
+        status: 403,
+        code: "FORBIDDEN_ROLE_ACTION",
+      });
+    }
+    const folderId = request?.drive_folder_id || null;
+    if (!folderId) {
+      throw createInstallationWorkflowError(
+        "La compra no tiene carpeta de Drive para registrar F.ST-14",
+        {
+          status: 409,
+          code: "FST14_DRIVE_FOLDER_MISSING",
+        },
+      );
+    }
+
+    const installationFolder = await ensureFolder("Instalación y entrega", folderId);
+    const reportFolder = await ensureFolder("F.ST-14", installationFolder?.id || folderId);
+    const photoPayload = Array.isArray(payload.photos) ? payload.photos : [];
+    const storedPhotos = [];
+    for (let i = 0; i < photoPayload.length; i += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const stored = await storeFst14EvidencePhoto(folderId, photoPayload[i], i);
+      if (stored) storedPhotos.push(stored);
+    }
+
+    const equipmentName = Array.isArray(request?.equipment)
+      ? request.equipment.map((item) => item?.name || item?.label || item?.sku).filter(Boolean).join(", ")
+      : "Equipo";
+    const validatorName =
+      currentWorkflow?.logistics_validation?.validated_by_email ||
+      currentWorkflow?.logistics_validation?.validated_by ||
+      "Pendiente";
+
+    const { buffer: fst14Buffer, generatedAt } = await generateFst14PdfBuffer({
+      clientName: request.client_name || "Cliente",
+      clientAddress: payload.client_address || "Pendiente",
+      equipmentName,
+      inspectionDate: payload.inspection_date || new Date().toISOString(),
+      responsibleName: user?.fullname || user?.name || user?.email || "Tecnico",
+      logisticsValidatorName: validatorName,
+      dispatchRequiredDate: currentWorkflow?.dispatch_request?.required_date || null,
+      guideReference:
+        payload.guide_reference ||
+        currentWorkflow?.logistics_validation?.guide_reference ||
+        null,
+      proformaReference:
+        payload.proforma_reference ||
+        currentWorkflow?.logistics_validation?.proforma_reference ||
+        null,
+      checklist: payload.checklist || {},
+      findings: payload.findings || "",
+      correctiveActions: payload.corrective_actions || "",
+      logisticsChainNotes: payload.logistics_chain_notes || "",
+      result: payload.result || "pass",
+      photos: storedPhotos,
+      isPreinstallation: true,
+    });
+    const fileName = buildFst14FileName({
+      clientName: request.client_name || "Cliente",
+      generatedAt: new Date(generatedAt),
+    });
+    const storedReport = await uploadBase64File(
+      fileName,
+      fst14Buffer.toString("base64"),
+      "application/pdf",
+      reportFolder?.id || folderId,
+    );
+    const reportFileId = storedReport?.id || null;
+    if (!reportFileId) {
+      throw createInstallationWorkflowError("No se pudo almacenar F.ST-14 en Drive", {
+        status: 500,
+        code: "FST14_REPORT_STORE_FAILED",
+      });
+    }
+    const reportLink = storedReport?.webViewLink || driveLink(reportFileId);
+
+    nextWorkflow = buildVisualReceptionPatch({
+      workflow: currentWorkflow,
+      payload: {
+        ...payload,
+        photos: storedPhotos,
+      },
+      user,
+      report: {
+        file_id: reportFileId,
+        link: reportLink,
+        generated_at: generatedAt,
+      },
+    });
+
+    await trackFst14WorkflowDocument({
+      sourceType: "public_purchase",
+      sourceId: String(id),
+      requestId: request.inspection_request_id || null,
+      driveFileId: reportFileId,
+      driveFolderId: reportFolder?.id || folderId || null,
+      driveLink: reportLink,
+      clientName: request.client_name || null,
+      equipmentName,
+      user,
+      metadata: {
+        source_module: "equipment_purchases",
+        purchase_id: id,
+        result: nextWorkflow?.visual_reception?.result || null,
+      },
+    });
+  } else if (normalizedAction === "verification_decision") {
+    if (!canReviewInspectionCoordination(user)) {
+      throw createInstallationWorkflowError("Solo jefatura tecnica puede decidir la verificacion", {
+        status: 403,
+        code: "FORBIDDEN_ROLE_ACTION",
+      });
+    }
+    nextWorkflow = buildVerificationDecisionPatch({
+      workflow: currentWorkflow,
+      payload,
+      user,
+    });
+  } else if (normalizedAction === "verification_remediation_review") {
+    nextWorkflow = buildVerificationRemediationPatch({
+      workflow: currentWorkflow,
+      payload,
+      user,
+    });
+  } else if (normalizedAction === "cu_provider_report") {
+    let fileId = payload.provider_repair_report_file_id || payload.file_id || null;
+    let link = payload.provider_repair_report_link || payload.link || null;
+    if (!fileId && payload.file_base64 && payload.file_name) {
+      const folderId = request?.drive_folder_id || null;
+      if (!folderId) {
+        throw createInstallationWorkflowError("No hay carpeta de Drive para almacenar reporte CU", {
+          status: 409,
+          code: "CU_REPORT_DRIVE_FOLDER_MISSING",
+        });
+      }
+      const cuFolder = await ensureFolder("CU Reportes proveedor", folderId);
+      const stored = await uploadBase64File(
+        payload.file_name,
+        String(payload.file_base64).includes(",")
+          ? String(payload.file_base64).split(",")[1]
+          : String(payload.file_base64),
+        payload.mime_type || "application/pdf",
+        cuFolder?.id || folderId,
+      );
+      fileId = stored?.id || null;
+      link = stored?.webViewLink || (fileId ? driveLink(fileId) : null);
+    }
+    nextWorkflow = buildCuProviderReportPatch({
+      workflow: currentWorkflow,
+      payload: {
+        ...payload,
+        provider_repair_report_file_id: fileId,
+        provider_repair_report_link: link,
+      },
+      user,
+    });
+  } else {
+    throw createInstallationWorkflowError("Accion de workflow de instalacion no soportada", {
+      status: 400,
+      code: "INSTALLATION_ACTION_INVALID",
+      details: { action: normalizedAction },
+    });
+  }
+
+  nextWorkflow = enrichInstallationWorkflowWithGate({
+    workflow: nextWorkflow,
+    siteReady: Boolean(request?.inspection_site_ready_for_installation),
+    requiresSiteInspection: Boolean(request?.inspection_request_id || request?.inspection_scheduled_date),
+  });
+  const mergedExtra = mergeExtra(extraBase, {
+    installation_workflow: nextWorkflow,
+  });
+
+  const { rows } = await db.query(
+    `UPDATE equipment_purchase_requests
+        SET extra = $1::jsonb,
+            updated_at = now()
+      WHERE id = $2
+      RETURNING *`,
+    [JSON.stringify(mergedExtra), id],
+  );
+  return mapRequestRow(rows[0]);
 }
 
 async function reviewInspectionDateProposal({ id, user, decision, review_notes, expected_updated_at }) {
@@ -4000,6 +4380,9 @@ async function requestDeliveryDates({ id, user, notes, expected_updated_at }) {
   assertNoStaleWrite(request, expected_updated_at);
   assertActionStatus(request, "request_delivery_dates");
   assertChecklistReady(request, "request_delivery_dates");
+  if (request?.inspection_request_id || request?.inspection_scheduled_date) {
+    assertSiteReadyForInstallation(request);
+  }
 
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
@@ -4174,6 +4557,20 @@ async function completeDelivery({ id, user, notes, expected_updated_at }) {
   assertNoStaleWrite(request, expected_updated_at);
   assertActionStatus(request, "complete_delivery");
   assertChecklistReady(request, "complete_delivery");
+  if (request?.inspection_request_id || request?.inspection_scheduled_date) {
+    assertSiteReadyForInstallation(request);
+  }
+  if (!request?.installation_can_close) {
+    throw createAppError("No se puede cerrar la instalacion: existen prerequisitos pendientes", {
+      status: 409,
+      code: "INSTALLATION_CLOSURE_BLOCKED",
+      details: {
+        blocked_reasons: Array.isArray(request?.installation_blocked_reasons)
+          ? request.installation_blocked_reasons
+          : [],
+      },
+    });
+  }
 
   const { rows } = await db.query(
     `UPDATE equipment_purchase_requests
@@ -4375,6 +4772,7 @@ module.exports = {
   requestInspectionEnvironment,
   coordinateInspectionDate,
   registerSiteInspection,
+  upsertInstallationWorkflow,
   reviewInspectionDateProposal,
   registerPublicPortalOutcome,
   uploadContract,
@@ -4390,4 +4788,3 @@ module.exports = {
   getTechnicalScheduleCalendar,
   STATUS,
 };
-

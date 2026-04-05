@@ -64,6 +64,25 @@ router.patch(
   requireRole(['jefe_tecnico', 'jefe_servicio_tecnico']),
   controller.reviewInspectionDate
 );
+router.patch(
+  '/:id/site-inspection',
+  requireRole(['tecnico', 'jefe_tecnico', 'jefe_servicio_tecnico']),
+  controller.registerSiteInspection,
+);
+router.patch(
+  '/:id/installation-workflow',
+  requireRole([
+    'tecnico',
+    'jefe_tecnico',
+    'jefe_servicio_tecnico',
+    'jefe_operaciones',
+    'jefe_logistica',
+    'logistica',
+    'jefe_comercial',
+    'acp_comercial',
+  ]),
+  controller.updateInstallationWorkflow,
+);
 router.post('/:id/delivery-guides', controller.uploadDeliveryGuides);
 router.post('/:id/request-delivery-dates', controller.requestDeliveryDates);
 router.post('/:id/submit-delivery-dates', controller.submitDeliveryDates);

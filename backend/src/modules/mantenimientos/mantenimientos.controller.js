@@ -9,6 +9,11 @@
 const svc = require("./mantenimientos.service");
 const { asyncHandler } = require("../../middlewares/asyncHandler");
 const { logAction } = require("../../utils/audit");
+const preventivePlanning = require("./preventivePlanning.service");
+const preventiveOffer = require("./preventiveOffer.service");
+const preventiveCompliance = require("./preventiveCompliance.service");
+const { issueFst16Document } = require("./fst16.service");
+const { issueFst17Document } = require("./fst17.service");
 
 // ============================================================
 // 🧾 Crear mantenimiento
@@ -198,4 +203,227 @@ exports.signAdvanced = asyncHandler(async (req, res) => {
   });
 
   res.status(201).json({ ok: true, ...result });
+});
+
+// ============================================================
+// 🧭 ST-01-02 Preventivo - Plan Anual y Ejecución
+// ============================================================
+exports.listPreventiveAnnualPlans = asyncHandler(async (req, res) => {
+  const rows = await preventivePlanning.listPreventiveAnnualPlans({
+    year: req.query?.year || null,
+    status: req.query?.status || null,
+    q: req.query?.q || null,
+    limit: req.query?.limit || 100,
+  });
+  res.json({ ok: true, count: rows.length, rows });
+});
+
+exports.getPreventiveAnnualPlanDetail = asyncHandler(async (req, res) => {
+  const detail = await preventivePlanning.getPreventiveAnnualPlanDetail(req.params.planId);
+  if (!detail) return res.status(404).json({ ok: false, error: "Plan preventivo no encontrado" });
+  res.json({ ok: true, plan: detail });
+});
+
+exports.createPreventiveAnnualPlan = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const detail = await preventivePlanning.createPreventiveAnnualPlan({
+    year: payload.year,
+    title: payload.title,
+    notes: payload.notes,
+    sourceScheduleId: payload.source_schedule_id || payload.sourceScheduleId || null,
+    anexo7Capacity: payload.anexo7_capacity || payload.anexo7Capacity || {},
+    equipmentItems: payload.equipment_items || payload.equipmentItems || [],
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, plan: detail });
+});
+
+exports.publishPreventiveAnnualPlan = asyncHandler(async (req, res) => {
+  const detail = await preventivePlanning.publishPreventiveAnnualPlan({
+    planId: req.params.planId,
+    user: req.user,
+  });
+  res.json({ ok: true, plan: detail });
+});
+
+exports.rebaselinePreventiveAnnualPlan = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const detail = await preventivePlanning.rebaselinePreventiveAnnualPlan({
+    planId: req.params.planId,
+    reason: payload.reason || null,
+    anexo7Capacity: payload.anexo7_capacity || payload.anexo7Capacity || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, plan: detail });
+});
+
+exports.issueFst16 = asyncHandler(async (req, res) => {
+  const result = await issueFst16Document({
+    annualPlanId: req.params.planId,
+    notes: req.body?.notes || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.issueFst17 = asyncHandler(async (req, res) => {
+  const result = await issueFst17Document({
+    planItemId: req.params.itemId,
+    notes: req.body?.notes || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.registerPreventiveOffer = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventiveOffer.issuePreventiveOffer({
+    planItemId: req.params.itemId,
+    validUntil: payload.valid_until || payload.validUntil || null,
+    offerPayload: payload.offer_payload || payload.offerPayload || {},
+    notes: payload.notes || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.decidePreventiveOffer = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventiveOffer.decideOffer({
+    planItemId: req.params.itemId,
+    decision: payload.decision,
+    reason: payload.reason || payload.decision_reason || null,
+    user: req.user,
+  });
+  res.json({ ok: true, ...result });
+});
+
+exports.registerReprogrammingNotice = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventivePlanning.createReprogrammingNotice({
+    planItemId: req.params.itemId,
+    newPlannedDate: payload.new_planned_date || payload.newPlannedDate,
+    reason: payload.reason,
+    payload: payload.anexo5_payload || payload.anexo5Payload || {},
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.registerPreventiveCoordination = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const item = await preventivePlanning.updatePlanItemCoordination({
+    planItemId: req.params.itemId,
+    coordinatedAt: payload.coordinated_at || payload.coordinatedAt || null,
+    coordinationWindow: payload.coordination_window || payload.coordinationWindow || null,
+    notes: payload.notes || null,
+    user: req.user,
+  });
+  res.json({ ok: true, plan_item: item });
+});
+
+exports.registerPreventiveWorkOrder = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const item = await preventivePlanning.upsertPlanItemWorkOrder({
+    planItemId: req.params.itemId,
+    workOrderNumber: payload.work_order_number || payload.workOrderNumber || null,
+    autoCreate:
+      typeof payload.auto_create === "boolean"
+        ? payload.auto_create
+        : typeof payload.autoCreate === "boolean"
+          ? payload.autoCreate
+          : true,
+    notes: payload.notes || null,
+    user: req.user,
+  });
+  res.json({ ok: true, plan_item: item });
+});
+
+exports.requestPreventiveKit = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventivePlanning.requestPreventiveKit({
+    planItemId: req.params.itemId,
+    observations: payload.observations || null,
+    requestedAt: payload.requested_at || payload.requestedAt || null,
+    workOrderNumber: payload.work_order_number || payload.workOrderNumber || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.registerKitWarehouseExit = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventivePlanning.registerKitWarehouseExit({
+    kitRequestId: req.params.kitId,
+    warehouseExitAt: payload.warehouse_exit_at || payload.warehouseExitAt || null,
+    warehouseExitReference:
+      payload.warehouse_exit_reference || payload.warehouseExitReference || null,
+    user: req.user,
+  });
+  res.json({ ok: true, ...result });
+});
+
+exports.closePreventiveExecution = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const result = await preventivePlanning.registerPreventiveExecution({
+    planItemId: req.params.itemId,
+    executedAt: payload.executed_at || payload.executedAt || null,
+    durationMinutes: payload.duration_minutes || payload.durationMinutes || null,
+    activities: payload.activities || [],
+    partsReplaced: payload.parts_replaced || payload.partsReplaced || [],
+    consumables: payload.consumables || [],
+    evidence: payload.evidence || [],
+    reportPayload: payload.report_payload || payload.reportPayload || {},
+    workOrderNumber: payload.work_order_number || payload.workOrderNumber || null,
+    notes: payload.notes || null,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...result });
+});
+
+exports.getPreventiveComplianceDashboard = asyncHandler(async (req, res) => {
+  const data = await preventiveCompliance.getComplianceDashboard({
+    year: req.query?.year || null,
+    month: req.query?.month || null,
+    annualPlanId: req.query?.annual_plan_id || req.query?.annualPlanId || null,
+  });
+  res.json({ ok: true, ...data });
+});
+
+exports.getPreventiveCapacityDashboard = asyncHandler(async (req, res) => {
+  const data = await preventiveCompliance.getCapacityDashboard({
+    annualPlanId: req.query?.annual_plan_id || req.query?.annualPlanId || null,
+    year: req.query?.year || null,
+  });
+  res.json({ ok: true, ...data });
+});
+
+exports.sendPreventiveMonthlyReport = asyncHandler(async (req, res) => {
+  const payload = req.body || {};
+  const recipients = Array.isArray(payload.recipients) ? payload.recipients : [];
+  const data = await preventiveCompliance.sendMonthlyProgressReport({
+    annualPlanId: req.params.planId,
+    month: payload.month || null,
+    recipients,
+    user: req.user,
+  });
+  res.status(201).json({ ok: true, ...data });
+});
+
+exports.getPreventiveTimeline = asyncHandler(async (req, res) => {
+  const rows = await preventivePlanning.listPreventiveTimeline({
+    annualPlanId: req.query?.annual_plan_id || req.query?.annualPlanId || null,
+    planItemId: req.query?.plan_item_id || req.query?.planItemId || null,
+    limit: req.query?.limit || 200,
+  });
+  res.json({ ok: true, count: rows.length, rows });
+});
+
+exports.getPreventiveHistory = asyncHandler(async (req, res) => {
+  const rows = await preventivePlanning.listPreventiveHistory({
+    equipmentId: req.query?.equipment_id || req.query?.equipmentId || null,
+    clientName: req.query?.client_name || req.query?.clientName || null,
+    limit: req.query?.limit || 200,
+  });
+  res.json({ ok: true, count: rows.length, rows });
 });

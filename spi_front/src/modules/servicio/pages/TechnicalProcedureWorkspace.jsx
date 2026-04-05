@@ -6,14 +6,24 @@ import Button from "../../../core/ui/components/Button";
 import Modal from "../../../core/ui/components/Modal";
 import ProcessingOverlay from "../../../core/ui/components/ProcessingOverlay";
 import { useAuth } from "../../../core/auth/AuthContext";
+import WorkflowDocumentsPanel from "../components/WorkflowDocumentsPanel";
+import WorkflowTimeline from "../components/WorkflowTimeline";
+import SiteInspectionStepper from "../components/SiteInspectionStepper";
+import SiteInspectionSummaryCard from "../components/SiteInspectionSummaryCard";
 import {
  coordinateInspectionDate,
  getPublicPurchaseTechnicalSchedule,
  listEquipmentPurchases,
+ reviewInspectionDate,
  registerPublicPurchaseSiteInspection,
 } from "../../../core/api/equipmentPurchasesApi";
-import { getPrivatePurchasesByRole } from "../../../core/api/privatePurchasesApi";
+import {
+ getPrivatePurchasesByRole,
+ reviewPrivatePurchaseInspectionDate,
+ registerPrivatePurchaseSiteInspection,
+} from "../../../core/api/privatePurchasesApi";
 import { listWorkflowDocumentsSummary } from "../../../core/api/servicioApi";
+import { formatDateOnlyEs, normalizeDateOnly, toStatusLabel } from "../../../core/utils/workflowUi";
 
 const TECH_STEP_DEFINITIONS = [
  { code: "F.ST-02", label: "Desinfección", route: "/dashboard/servicio-tecnico/desinfeccion" },
@@ -116,28 +126,6 @@ const isChiefTechnicalUser = (user) => {
  return roles.some((role) => role.includes("jefe_tecnico") || role.includes("jefe_servicio_tecnico"));
 };
 
-const statusLabel = (value) =>
- String(value || "")
- .replace(/_/g, " ")
- .replace(/\b\w/g, (char) => char.toUpperCase());
-
-const normalizeDateOnly = (value) => {
- const raw = String(value || "").trim();
- if (!raw) return "";
- const match = raw.match(/^(\d{4}-\d{2}-\d{2})/);
- if (match) return match[1];
- const parsed = new Date(raw);
- if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().slice(0, 10);
- return "";
-};
-
-const formatDateEs = (value) => {
- const normalized = normalizeDateOnly(value);
- if (!normalized) return "Pendiente";
- const [yyyy, mm, dd] = normalized.split("-");
- return `${dd}/${mm}/${yyyy}`;
-};
-
 const createEmptyFst07Checklist = () => {
  const draft = {};
  FST07_QUESTIONS.forEach((group) => {
@@ -201,7 +189,10 @@ const TechnicalProcedureWorkspace = () => {
  const [publicItems, setPublicItems] = useState([]);
  const [privateItems, setPrivateItems] = useState([]);
  const [workflowSummariesByKey, setWorkflowSummariesByKey] = useState({});
+ const [expandedWorkflowKey, setExpandedWorkflowKey] = useState("");
  const [coordDrafts, setCoordDrafts] = useState({});
+ const [reviewDrafts, setReviewDrafts] = useState({});
+ const [reviewingId, setReviewingId] = useState("");
  const [coordinatingId, setCoordinatingId] = useState("");
  const [coordinationOverlay, setCoordinationOverlay] = useState({ open: false, clientName: "" });
  const [siteInspectionModal, setSiteInspectionModal] = useState({ open: false, item: null });
@@ -211,8 +202,10 @@ const TechnicalProcedureWorkspace = () => {
  observations: "",
  recommendations: "",
  responsible_name: "",
+ client_signer_name: "",
  follow_up_date: "",
  });
+ const [siteInspectionAttemptedSubmit, setSiteInspectionAttemptedSubmit] = useState(false);
  const [siteInspectionSaving, setSiteInspectionSaving] = useState(false);
  const [publicScheduleDays, setPublicScheduleDays] = useState([]);
  const isChiefTechnical = useMemo(() => isChiefTechnicalUser(user), [user]);
@@ -286,6 +279,8 @@ const TechnicalProcedureWorkspace = () => {
  inspectionMinDate: normalizeDateOnly(row.inspection_min_date) || null,
  inspectionMaxDate: normalizeDateOnly(row.inspection_max_date) || null,
  inspectionScheduledDate: normalizeDateOnly(row.inspection_scheduled_date) || null,
+ inspectionProposedDate: normalizeDateOnly(row.inspection_proposed_date) || null,
+ inspectionProposedNotes: row.inspection_proposed_notes || "",
  inspectionCoordinationStatus: row.inspection_coordination_status || null,
  inspectionCoordinationNotes: row.inspection_coordination_notes || null,
  inspectionActaLink: row?.extra?.inspection_acta_link || null,
@@ -301,6 +296,8 @@ const TechnicalProcedureWorkspace = () => {
  inspectionSiteObservations: row.inspection_site_observations || "",
  inspectionSiteRecommendations: row.inspection_site_recommendations || "",
  inspectionSiteResponsibleName: row.inspection_site_responsible_name || "",
+ inspectionSiteClientSignerName: row.inspection_site_client_signer_name || "",
+ inspectionSiteHistory: Array.isArray(row.inspection_site_history) ? row.inspection_site_history : [],
  }));
 
  const normalizedPrivate = (Array.isArray(privateRows) ? privateRows : [])
@@ -316,14 +313,33 @@ const TechnicalProcedureWorkspace = () => {
  clientName: snapshot.commercial_name || snapshot.client_name || snapshot.name || "Cliente",
  status: row.status || "",
  updatedAt: row.updated_at || null,
+ inspectionMinDate: normalizeDateOnly(row.inspection_min_date) || null,
+ inspectionMaxDate: normalizeDateOnly(row.inspection_max_date) || null,
  inspectionScheduledDate: normalizeDateOnly(row.inspection_scheduled_date) || null,
+ inspectionProposedDate: normalizeDateOnly(row.inspection_proposed_date) || null,
+ inspectionProposedNotes: row.inspection_proposed_notes || "",
  inspectionCoordinationStatus: row.inspection_coordination_status || null,
- inspectionActaLink: row.inspection_acta_link || null,
+ inspectionCoordinationNotes: row.inspection_coordination_notes || null,
+ inspectionActaLink:
+ row.inspection_acta_link ||
+ row.inspection_acta_document_link ||
+ (row.inspection_acta_document_id
+ ? `https://drive.google.com/file/d/${row.inspection_acta_document_id}/view`
+ : null),
  inspectionSiteStatus: row.inspection_site_status || null,
  inspectionSiteResult: row.inspection_site_result || null,
  inspectionSiteReportLink: row.inspection_site_report_link || null,
  inspectionSiteFollowUpDate: normalizeDateOnly(row.inspection_site_follow_up_date) || null,
  inspectionSiteReadyForInstallation: Boolean(row.inspection_site_ready_for_installation),
+ inspectionSiteChecklist:
+ row.inspection_site_checklist && typeof row.inspection_site_checklist === "object"
+ ? row.inspection_site_checklist
+ : createEmptyFst07Checklist(),
+ inspectionSiteObservations: row.inspection_site_observations || "",
+ inspectionSiteRecommendations: row.inspection_site_recommendations || "",
+ inspectionSiteResponsibleName: row.inspection_site_responsible_name || "",
+ inspectionSiteClientSignerName: row.inspection_site_client_signer_name || "",
+ inspectionSiteHistory: Array.isArray(row.inspection_site_history) ? row.inspection_site_history : [],
  };
  });
 
@@ -414,6 +430,37 @@ const TechnicalProcedureWorkspace = () => {
  [coordDrafts, loadWorkspaceData],
  );
 
+ const handleReviewInspectionDate = useCallback(
+ async (item, decision) => {
+ if (!item?.sourceId) return;
+ if (decision !== "accept" && decision !== "reject") return;
+ setReviewingId(item.sourceId);
+ setError("");
+ try {
+ const draft = reviewDrafts[item.sourceId] || {};
+ const payload = {
+ decision,
+ review_notes: draft.review_notes || null,
+ };
+ if (item.flowType === "public") {
+ await reviewInspectionDate(item.sourceId, payload);
+ } else {
+ await reviewPrivatePurchaseInspectionDate(item.sourceId, payload);
+ }
+ await loadWorkspaceData();
+ } catch (reviewError) {
+ setError(
+ reviewError?.response?.data?.message ||
+ reviewError?.message ||
+ "No se pudo registrar la decisión de coordinación",
+ );
+ } finally {
+ setReviewingId("");
+ }
+ },
+ [loadWorkspaceData, reviewDrafts],
+ );
+
  const openSiteInspection = useCallback(
  (item) => {
  const nextChecklist = createEmptyFst07Checklist();
@@ -428,32 +475,55 @@ const TechnicalProcedureWorkspace = () => {
  observations: item?.inspectionSiteObservations || "",
  recommendations: item?.inspectionSiteRecommendations || "",
  responsible_name: user?.fullname || user?.name || user?.email || "",
+ client_signer_name: item?.inspectionSiteClientSignerName || "",
  follow_up_date: item?.inspectionSiteFollowUpDate || "",
  });
+ setSiteInspectionAttemptedSubmit(false);
  setSiteInspectionModal({ open: true, item });
  },
  [user],
- );
+);
 
- const closeSiteInspection = useCallback(() => {
- if (siteInspectionSaving) return;
- setSiteInspectionModal({ open: false, item: null });
- }, [siteInspectionSaving]);
+const closeSiteInspection = useCallback(() => {
+if (siteInspectionSaving) return;
+ setSiteInspectionAttemptedSubmit(false);
+setSiteInspectionModal({ open: false, item: null });
+}, [siteInspectionSaving]);
+
+ const siteInspectionChecklistErrors = useMemo(() => {
+ const nextErrors = {};
+ FST07_QUESTIONS.forEach((group) => {
+ group.items.forEach((question) => {
+ const value = String(siteInspectionDraft.checklist?.[question.key] || "").trim().toUpperCase();
+ if (!value) {
+ nextErrors[question.key] = "Selecciona una opción";
+ return;
+ }
+ if (value === "N/A" && !question.allowsNA) {
+ nextErrors[question.key] = "N/A no aplica para este ítem";
+ }
+ });
+ });
+ return nextErrors;
+ }, [siteInspectionDraft.checklist]);
+
+ const siteInspectionChecklistStats = useMemo(() => {
+ const total = FST07_QUESTIONS.reduce((acc, group) => acc + (group.items?.length || 0), 0);
+ const answered = total - Object.keys(siteInspectionChecklistErrors).length;
+ const pending = Math.max(0, total - answered);
+ return { total, answered, pending };
+ }, [siteInspectionChecklistErrors]);
 
  const handleSubmitSiteInspection = useCallback(async () => {
  const item = siteInspectionModal.item;
  if (!item?.sourceId) return;
-
- const missingChecklist = [];
- FST07_QUESTIONS.forEach((group) => {
- group.items.forEach((question) => {
- const value = String(siteInspectionDraft.checklist?.[question.key] || "").trim().toUpperCase();
- if (!value) missingChecklist.push(question.key);
- if (value === "N/A" && !question.allowsNA) missingChecklist.push(question.key);
- });
- });
- if (missingChecklist.length) {
+ setSiteInspectionAttemptedSubmit(true);
+ if (Object.keys(siteInspectionChecklistErrors).length) {
  setError("Checklist F.ST-07 incompleto. Completa todos los ítems requeridos.");
+ return;
+ }
+ if (!String(siteInspectionDraft.client_signer_name || "").trim()) {
+ setError("Debes registrar el nombre de quien firma por parte del cliente.");
  return;
  }
  if (siteInspectionDraft.result === "non_compliant" && !normalizeDateOnly(siteInspectionDraft.follow_up_date)) {
@@ -464,19 +534,26 @@ const TechnicalProcedureWorkspace = () => {
  setSiteInspectionSaving(true);
  setError("");
  try {
- await registerPublicPurchaseSiteInspection(item.sourceId, {
+ const payload = {
  result: siteInspectionDraft.result,
  checklist: siteInspectionDraft.checklist,
  observations: siteInspectionDraft.observations || null,
  recommendations: siteInspectionDraft.recommendations || null,
+ client_signer_name: siteInspectionDraft.client_signer_name || null,
  follow_up_date:
  siteInspectionDraft.result === "non_compliant"
  ? normalizeDateOnly(siteInspectionDraft.follow_up_date)
  : null,
  is_reinspection: item?.inspectionSiteStatus === "non_compliant_reinspection_pending",
  expected_updated_at: item?.updatedAt || null,
- });
+ };
+ if (item.flowType === "public") {
+ await registerPublicPurchaseSiteInspection(item.sourceId, payload);
+ } else {
+ await registerPrivatePurchaseSiteInspection(item.sourceId, payload);
+ }
  setSiteInspectionModal({ open: false, item: null });
+ setSiteInspectionAttemptedSubmit(false);
  await loadWorkspaceData();
  } catch (submitError) {
  setError(
@@ -487,7 +564,12 @@ const TechnicalProcedureWorkspace = () => {
  } finally {
  setSiteInspectionSaving(false);
  }
- }, [loadWorkspaceData, siteInspectionDraft, siteInspectionModal.item]);
+ }, [
+ loadWorkspaceData,
+ siteInspectionChecklistErrors,
+ siteInspectionDraft,
+ siteInspectionModal.item,
+ ]);
 
  const activeItems = useMemo(
  () => (activeTab === "private" ? privateItems : publicItems),
@@ -544,6 +626,10 @@ const TechnicalProcedureWorkspace = () => {
  [navigate],
  );
 
+ const openExternalCasesWorkspace = useCallback(() => {
+ navigate("/dashboard/servicio-tecnico/casos-externos");
+ }, [navigate]);
+
  const handleTabChange = (tab) => {
  setActiveTab(tab);
  syncQueryParams({ tab });
@@ -569,18 +655,23 @@ const TechnicalProcedureWorkspace = () => {
  Ejecución unificada ST-01-01 para compras públicas y privadas.
  </p>
  </div>
+ <div className="flex flex-wrap items-center gap-2">
+ <Button variant="outline" icon={FiExternalLink} onClick={openExternalCasesWorkspace}>
+ Casos externos ST-01-04
+ </Button>
  <Button variant="secondary" icon={FiRefreshCw} onClick={loadWorkspaceData} loading={loading}>
  Actualizar
  </Button>
  </div>
+ </div>
 
  <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-[auto_auto_auto_1fr_auto] md:items-center">
- <div className="inline-flex rounded-lg border border-slate-200 p-1">
+ <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1">
  <button
  type="button"
  onClick={() => handleTabChange("public")}
- className={`rounded-md px-3 py-1.5 text-sm font-medium ${
- activeTab === "public" ? "bg-slate-900 text-white" : "text-slate-700"
+ className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+ activeTab === "public" ? "bg-blue-600 text-white shadow-sm" : "text-slate-700 hover:bg-white"
  }`}
  >
  Compras públicas
@@ -588,8 +679,8 @@ const TechnicalProcedureWorkspace = () => {
  <button
  type="button"
  onClick={() => handleTabChange("private")}
- className={`rounded-md px-3 py-1.5 text-sm font-medium ${
- activeTab === "private" ? "bg-slate-900 text-white" : "text-slate-700"
+ className={`rounded-xl px-3 py-1.5 text-sm font-semibold transition ${
+ activeTab === "private" ? "bg-blue-600 text-white shadow-sm" : "text-slate-700 hover:bg-white"
  }`}
  >
  Compras privadas
@@ -646,6 +737,7 @@ const TechnicalProcedureWorkspace = () => {
  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
  {filteredItems.map((item) => {
  const key = toWorkflowKey(item);
+ const isWorkflowExpanded = expandedWorkflowKey === key;
  const summary = getSummaryByKey(workflowSummariesByKey, item);
  const docCodes = new Set((summary.document_codes || []).map((code) => String(code || "").toUpperCase()));
  const fst20Done = getStep20Done(item);
@@ -668,25 +760,38 @@ const TechnicalProcedureWorkspace = () => {
  item.inspectionMinDate &&
  item.inspectionMaxDate,
  );
+ const canReviewCoordination = Boolean(
+ isChiefTechnical &&
+ item.requestId &&
+ item.inspectionCoordinationStatus === "pending_review" &&
+ item.inspectionProposedDate,
+ );
  const canRegisterSiteInspection = Boolean(
- isTechnicalProcedureUser && item.flowType === "public" && fst20Done,
+ isTechnicalProcedureUser && fst20Done,
  );
  const siteNeedsReinspection = item.inspectionSiteStatus === "non_compliant_reinspection_pending";
+ const proposedDateLabel = item.inspectionProposedDate ? formatDateOnlyEs(item.inspectionProposedDate) : "Pendiente";
  const fst20StatusText = !item.requestId
  ? "Pendiente: ACP Comercial aún no genera la solicitud"
+ : item.inspectionCoordinationStatus === "pending_review"
+ ? `Pendiente aprobación de jefatura técnica · propuesta: ${proposedDateLabel}`
+ : item.inspectionCoordinationStatus === "rejected"
+ ? "Propuesta rechazada, comercial debe coordinar una nueva fecha"
  : !item.inspectionScheduledDate
  ? "Pendiente: coordinación de fecha exacta"
- : `Listo: coordinación confirmada para ${formatDateEs(item.inspectionScheduledDate)}`;
+ : `Listo: coordinación confirmada para ${formatDateOnlyEs(item.inspectionScheduledDate)}`;
  const fst07StatusText = !fst20Done
  ? "Pendiente: primero coordinar F.ST-20"
  : fst07Done
  ? siteNeedsReinspection
- ? `Registrada con observaciones · reinspección: ${formatDateEs(item.inspectionSiteFollowUpDate)}`
+ ? `Registrada con observaciones · reinspección: ${formatDateOnlyEs(item.inspectionSiteFollowUpDate)}`
  : "Listo: acta F.ST-07 generada"
  : siteNeedsReinspection
- ? `Reinspección pendiente para ${formatDateEs(item.inspectionSiteFollowUpDate)}`
+ ? `Reinspección pendiente para ${formatDateOnlyEs(item.inspectionSiteFollowUpDate)}`
  : "Pendiente: inspección en sitio";
- const nextActionLabel = !fst20Done
+ const nextActionLabel = canReviewCoordination
+ ? "Revisar propuesta F.ST-20"
+ : !fst20Done
  ? "Continuar: F.ST-20"
  : !fst07Done
  ? "Continuar: F.ST-07"
@@ -694,6 +799,7 @@ const TechnicalProcedureWorkspace = () => {
  ? `Continuar: ${nextWorkflowStep.code}`
  : "Flujo ST completo";
  const canContinue =
+ canReviewCoordination ||
  (!fst20Done && canCoordinateHere) ||
  (fst20Done && !fst07Done && canRegisterSiteInspection) ||
  Boolean(fst20Done && fst07Done && nextWorkflowStep && item.requestId);
@@ -707,15 +813,15 @@ const TechnicalProcedureWorkspace = () => {
  </p>
  <h3 className="mt-1 text-base font-semibold text-slate-900">{item.clientName}</h3>
  <p className="text-xs text-slate-600">
- Estado: {statusLabel(item.status)}
- {item.inspectionScheduledDate ? ` · Inspección: ${formatDateEs(item.inspectionScheduledDate)}` : ""}
+ Estado: {toStatusLabel(item.status)}
+ {item.inspectionScheduledDate ? ` · Inspección: ${formatDateOnlyEs(item.inspectionScheduledDate)}` : ""}
  </p>
  {item.inspectionCoordinationStatus === "accepted" && item.inspectionScheduledDate && (
  <p className="text-xs font-medium text-emerald-700">Coordinación lista</p>
  )}
  {!item.inspectionScheduledDate && item.inspectionMinDate && item.inspectionMaxDate && (
  <p className="text-xs text-slate-600">
- Ventana comercial: {formatDateEs(item.inspectionMinDate)} - {formatDateEs(item.inspectionMaxDate)}
+ Ventana comercial: {formatDateOnlyEs(item.inspectionMinDate)} - {formatDateOnlyEs(item.inspectionMaxDate)}
  </p>
  )}
  {item.requestId ? (
@@ -785,6 +891,50 @@ const TechnicalProcedureWorkspace = () => {
  El cronograma técnico está lleno para esa fecha.
  </p>
  )}
+ </div>
+ )}
+
+ {canReviewCoordination && (
+ <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50 p-3 space-y-2">
+ <p className="text-xs font-semibold text-indigo-800">
+ Revisión de propuesta F.ST-20 (Jefatura Técnica)
+ </p>
+ <p className="text-xs text-indigo-700">
+ Fecha propuesta por comercial: <span className="font-semibold">{proposedDateLabel}</span>
+ </p>
+ <textarea
+ rows={2}
+ value={reviewDrafts[item.sourceId]?.review_notes || ""}
+ onChange={(event) =>
+ setReviewDrafts((prev) => ({
+ ...prev,
+ [item.sourceId]: {
+ ...prev[item.sourceId],
+ review_notes: event.target.value,
+ },
+ }))
+ }
+ placeholder="Notas de revisión (opcional)"
+ className="w-full rounded border border-indigo-200 bg-white px-2 py-1.5 text-sm"
+ />
+ <div className="flex flex-wrap gap-2">
+ <Button
+ size="sm"
+ variant="success"
+ loading={reviewingId === item.sourceId}
+ onClick={() => handleReviewInspectionDate(item, "accept")}
+ >
+ Aprobar fecha
+ </Button>
+ <Button
+ size="sm"
+ variant="warning"
+ loading={reviewingId === item.sourceId}
+ onClick={() => handleReviewInspectionDate(item, "reject")}
+ >
+ Rechazar fecha
+ </Button>
+ </div>
  </div>
  )}
 
@@ -868,12 +1018,45 @@ const TechnicalProcedureWorkspace = () => {
  })}
  </div>
 
+ <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+ <div className="flex items-center justify-between gap-2">
+ <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Expediente ST</p>
+ <Button
+ size="sm"
+ variant="secondary"
+ onClick={() => setExpandedWorkflowKey((prev) => (prev === key ? "" : key))}
+ >
+ {isWorkflowExpanded ? "Ocultar expediente" : "Ver expediente"}
+ </Button>
+ </div>
+ {!isWorkflowExpanded ? (
+ <p className="mt-1 text-xs text-slate-600">
+ Resumen: {summary?.total_documents || 0} documento{summary?.total_documents === 1 ? "" : "s"}
+ {summary?.last_document_at ? ` · Ultimo: ${formatDateOnlyEs(summary.last_document_at)}` : ""}
+ </p>
+ ) : (
+ <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+ <WorkflowDocumentsPanel
+ sourceType={item.sourceType}
+ sourceId={item.sourceId}
+ summary={summary}
+ />
+ <WorkflowTimeline
+ sourceType={item.sourceType}
+ sourceId={item.sourceId}
+ procedureCode="ST-01-01"
+ />
+ </div>
+ )}
+ </div>
+
  <div className="mt-3 flex flex-wrap gap-2">
  <Button
  size="sm"
  variant="outline"
  disabled={!canContinue}
  onClick={() => {
+ if (canReviewCoordination) return;
  if (!fst20Done && canCoordinateHere) return;
  if (fst20Done && !fst07Done && canRegisterSiteInspection) {
  openSiteInspection(item);
@@ -902,12 +1085,24 @@ const TechnicalProcedureWorkspace = () => {
  maxWidth="max-w-5xl"
  >
  <div className="space-y-4">
- <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
- Fecha coordinada:{" "}
+ <SiteInspectionSummaryCard
+ result={siteInspectionDraft.result}
+ scheduledDate={siteInspectionModal.item?.inspectionScheduledDate}
+ followUpDate={siteInspectionDraft.follow_up_date}
+ answeredCount={siteInspectionChecklistStats.answered}
+ totalCount={siteInspectionChecklistStats.total}
+ pendingCount={siteInspectionChecklistStats.pending}
+ reinspectionPending={siteInspectionModal.item?.inspectionSiteStatus === "non_compliant_reinspection_pending"}
+ />
+ {Array.isArray(siteInspectionModal.item?.inspectionSiteHistory) &&
+ siteInspectionModal.item.inspectionSiteHistory.length > 0 ? (
+ <p className="text-xs text-slate-600">
+ Historial de inspecciones registradas:{" "}
  <span className="font-semibold text-slate-800">
- {formatDateEs(siteInspectionModal.item?.inspectionScheduledDate)}
+ {siteInspectionModal.item.inspectionSiteHistory.length}
  </span>
- </div>
+ </p>
+ ) : null}
 
  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
  <div className="text-sm text-slate-700">
@@ -916,9 +1111,26 @@ const TechnicalProcedureWorkspace = () => {
  {siteInspectionDraft.responsible_name || user?.fullname || user?.name || user?.email || "N/D"}
  </div>
  </div>
+ <label className="text-sm text-slate-700">
+ Nombre del firmante del cliente
+ <input
+ type="text"
+ value={siteInspectionDraft.client_signer_name || ""}
+ onChange={(event) =>
+ setSiteInspectionDraft((prev) => ({ ...prev, client_signer_name: event.target.value }))
+ }
+ placeholder="Ej: Juan Pérez"
+ className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm"
+ />
+ {siteInspectionAttemptedSubmit && !String(siteInspectionDraft.client_signer_name || "").trim() ? (
+ <p className="mt-1 text-xs text-rose-700">Campo obligatorio para emitir F.ST-07</p>
+ ) : null}
+ </label>
+ </div>
+
  <div className="text-sm text-slate-700">
  Resultado del área
- <div className="mt-2 flex gap-4">
+ <div className="mt-2 flex flex-wrap gap-4">
  <label className="inline-flex items-center gap-2">
  <input
  type="radio"
@@ -939,7 +1151,6 @@ const TechnicalProcedureWorkspace = () => {
  </label>
  </div>
  </div>
- </div>
 
  {siteInspectionDraft.result === "non_compliant" && (
  <label className="text-sm text-slate-700">
@@ -952,51 +1163,28 @@ const TechnicalProcedureWorkspace = () => {
  }
  className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm md:w-64"
  />
+ {siteInspectionAttemptedSubmit && !normalizeDateOnly(siteInspectionDraft.follow_up_date) ? (
+ <p className="mt-1 text-xs text-rose-700">Debes definir la fecha de reinspección</p>
+ ) : null}
  </label>
  )}
 
- <div className="space-y-3 rounded-lg border border-slate-200 p-3">
- {FST07_QUESTIONS.map((group) => (
- <div key={group.section} className="space-y-2">
- <h4 className="text-sm font-semibold text-slate-800">{group.section}</h4>
- <div className="space-y-2">
- {group.items.map((question) => {
- const value = siteInspectionDraft.checklist?.[question.key] || "";
- return (
- <div key={question.key} className="rounded border border-slate-200 p-2">
- <p className="text-sm text-slate-700">{question.label}</p>
- <div className="mt-2 flex flex-wrap gap-4 text-sm">
- {["SI", "NO", "N/A"].map((option) => {
- if (option === "N/A" && !question.allowsNA) return null;
- return (
- <label key={option} className="inline-flex items-center gap-2">
- <input
- type="radio"
- name={`${question.key}-${siteInspectionModal.item?.sourceId || "draft"}`}
- value={option}
- checked={value === option}
- onChange={(event) =>
+ <SiteInspectionStepper
+ sections={FST07_QUESTIONS}
+ checklist={siteInspectionDraft.checklist}
+ errors={siteInspectionChecklistErrors}
+ touched={siteInspectionAttemptedSubmit}
+ disabled={siteInspectionSaving}
+ onChange={(key, value) =>
  setSiteInspectionDraft((prev) => ({
  ...prev,
  checklist: {
  ...prev.checklist,
- [question.key]: event.target.value,
+ [key]: value,
  },
  }))
  }
  />
- {option}
- </label>
- );
- })}
- </div>
- </div>
- );
- })}
- </div>
- </div>
- ))}
- </div>
 
  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
  <label className="text-sm text-slate-700">

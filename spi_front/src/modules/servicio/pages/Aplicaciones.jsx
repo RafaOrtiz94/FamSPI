@@ -7,6 +7,7 @@ import DesinfeccionStepper from "../components/DesinfeccionStepper";
 import EntrenamientoStepper from "../components/EntrenamientoStepper";
 import AsistenciaStepper from "../components/AsistenciaStepper";
 import VerificacionStepper from "../components/VerificacionStepper";
+import TrainingWorkflowWorkspace from "../components/TrainingWorkflowWorkspace";
 
 const AplicacionesTecnicas = () => {
  const [applications, setApplications] = useState([]);
@@ -16,6 +17,7 @@ const AplicacionesTecnicas = () => {
  const [showEntrenamientoModal, setShowEntrenamientoModal] = useState(false);
  const [showAsistenciaModal, setShowAsistenciaModal] = useState(false);
  const [showVerificacionModal, setShowVerificacionModal] = useState(false);
+ const [showTrainingWorkflowModal, setShowTrainingWorkflowModal] = useState(false);
 
  const loadApplications = useCallback(async () => {
  setLoading(true);
@@ -68,6 +70,29 @@ const AplicacionesTecnicas = () => {
  <p className="text-sm text-gray-500">Cargando aplicaciones disponibles...</p>
  ) : (
  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+ {/* Workflow Entrenamiento ST Card */}
+ <div
+ className="p-4 rounded-xl border border-sky-200 bg-sky-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
+ onClick={() => setShowTrainingWorkflowModal(true)}
+ >
+ <div className="flex items-start justify-between gap-3">
+ <div>
+ <p className="text-sm text-sky-700">Workflow Integrado</p>
+ <h3 className="text-lg font-semibold text-gray-900">Entrenamiento ST-01-01</h3>
+ </div>
+ <span className="px-2 py-[2px] text-xs rounded-full bg-sky-100 text-sky-700 border border-sky-200">
+ F.ST-04/05/06/08/12
+ </span>
+ </div>
+ <div className="text-sm text-gray-600 space-y-1">
+ <p>Coordinación, asistencia, evaluación, conformidad y certificado</p>
+ <p>Flujo guiado único con timeline y expediente documental</p>
+ </div>
+ <div className="inline-flex items-center gap-2 text-sm text-sky-700 hover:text-sky-800">
+ <FiShield /> Abrir workflow
+ </div>
+ </div>
+
  {/* Desinfección Card - Always shown */}
  <div
  className="p-4 rounded-xl border border-purple-200 bg-purple-50 shadow-sm space-y-3 cursor-pointer hover:shadow-md transition-shadow"
@@ -285,6 +310,26 @@ const AplicacionesTecnicas = () => {
  </div>
  <div className="overflow-y-auto max-h-[calc(90vh-80px)]">
  <VerificacionStepper />
+ </div>
+ </div>
+ </div>
+ )}
+
+ {/* Workflow Entrenamiento Modal */}
+ {showTrainingWorkflowModal && (
+ <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+ <div className="bg-white rounded-lg shadow-xl max-w-7xl w-full mx-4 max-h-[95vh] overflow-hidden">
+ <div className="flex items-center justify-between p-4 border-b">
+ <h2 className="text-lg font-semibold text-gray-900">Workflow Integrado de Entrenamiento ST-01-01</h2>
+ <button
+ onClick={() => setShowTrainingWorkflowModal(false)}
+ className="p-1 hover:bg-gray-100 rounded"
+ >
+ <FiX className="w-5 h-5" />
+ </button>
+ </div>
+ <div className="overflow-y-auto max-h-[calc(95vh-80px)]">
+ <TrainingWorkflowWorkspace />
  </div>
  </div>
  </div>

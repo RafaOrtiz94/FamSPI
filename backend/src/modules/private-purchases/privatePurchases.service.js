@@ -17,6 +17,32 @@ const { sendAndArchive } = require("../../utils/emailArchive");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
 const {
+  SITE_INSPECTION_RESULT,
+  SITE_INSPECTION_STATUS,
+  normalizeDateOnlyInput,
+  normalizeInspectionResult,
+  normalizeFst07Checklist,
+  getSiteInspectionState,
+  createSiteInspectionError,
+  assertFollowUpDateConsistency,
+} = require("../servicio/siteInspectionRules.service");
+const { generateFst07PdfBuffer, buildFst07FileName } = require("../servicio/fst07Pdf.service");
+const { trackFst07WorkflowDocument } = require("../servicio/fst07.service");
+const { generateFst14PdfBuffer, buildFst14FileName } = require("../servicio/fst14Pdf.service");
+const { trackFst14WorkflowDocument, trackFst10WorkflowDocument } = require("../servicio/fst14.service");
+const {
+  normalizeInstallationWorkflowState,
+  buildDispatchRequestPatch,
+  buildLogisticsValidationPatch,
+  buildVisualReceptionPatch,
+  buildVerificationDecisionPatch,
+  buildVerificationRemediationPatch,
+  buildCuProviderReportPatch,
+  computeInstallationClosureGate,
+  enrichInstallationWorkflowWithGate,
+  createInstallationWorkflowError,
+} = require("../servicio/installationWorkflow.service");
+const {
   createRequest: createServiceRequest,
   addDriveAttachment,
 } = require("../requests/requests.service");
@@ -54,6 +80,7 @@ const PRIVATE_CHECKLIST_ITEM_LABELS = {
   client_id_uploaded: "Documento de identificación del cliente cargado",
   contract_draft_uploaded: "Contrato borrador cargado",
   contract_client_signed_uploaded: "Contrato firmado por cliente cargado",
+  inspection_site_compliant: "Sitio conforme para instalación (F.ST-07)",
   equipment_arrived: "Equipo marcado como arribado",
   delivery_dates_submitted: "Fechas de entrega registradas",
 };
@@ -82,6 +109,45 @@ const addDaysIso = (days = 0) => {
   return toIsoDate(date);
 };
 const TECHNICAL_DAILY_CAPACITY = Number.parseInt(process.env.TECHNICAL_DAILY_CAPACITY || "3", 10);
+let privateSiteInspectionColumnsReady = false;
+let privateInstallationWorkflowColumnsReady = false;
+
+const ensurePrivateSiteInspectionColumns = async () => {
+  if (privateSiteInspectionColumnsReady) return;
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS site_inspection JSONB NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS site_inspection_status TEXT,
+      ADD COLUMN IF NOT EXISTS site_inspection_result TEXT,
+      ADD COLUMN IF NOT EXISTS site_inspection_follow_up_date DATE,
+      ADD COLUMN IF NOT EXISTS site_inspection_report_document_id TEXT,
+      ADD COLUMN IF NOT EXISTS site_inspection_report_link TEXT,
+      ADD COLUMN IF NOT EXISTS site_inspection_report_generated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS site_inspection_ready_for_installation BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS site_inspection_requires_reinspection BOOLEAN NOT NULL DEFAULT FALSE,
+      ADD COLUMN IF NOT EXISTS site_inspection_updated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS site_inspection_updated_by INTEGER,
+      ADD COLUMN IF NOT EXISTS site_inspection_updated_by_email TEXT;
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_private_purchase_site_inspection_status
+      ON private_purchase_requests (site_inspection_status, site_inspection_ready_for_installation)`,
+  );
+  privateSiteInspectionColumnsReady = true;
+};
+
+const ensurePrivateInstallationWorkflowColumns = async () => {
+  if (privateInstallationWorkflowColumnsReady) return;
+  await db.query(`
+    ALTER TABLE private_purchase_requests
+      ADD COLUMN IF NOT EXISTS installation_workflow JSONB NOT NULL DEFAULT '{}'::jsonb
+  `);
+  await db.query(
+    `CREATE INDEX IF NOT EXISTS idx_private_purchase_installation_workflow
+      ON private_purchase_requests USING GIN (installation_workflow)`,
+  );
+  privateInstallationWorkflowColumnsReady = true;
+};
 
 class PrivatePurchasesService {
   _normalizeStatusFilter(rawStatus) {
@@ -147,6 +213,224 @@ class PrivatePurchasesService {
 
   _hasAnyRoleToken(user, tokens = []) {
     return tokens.some((token) => this._hasRoleToken(user, token));
+  }
+
+  _getInspectionResponsibleName(user) {
+    const fullName = String(user?.fullname || user?.name || "").trim();
+    if (fullName) return fullName;
+    return String(user?.email || "").trim() || "N/D";
+  }
+
+  _parseSiteInspectionState(row = {}) {
+    const source = row?.site_inspection && typeof row.site_inspection === "object"
+      ? row.site_inspection
+      : {};
+    const mergedSource = {
+      ...source,
+      status: row.site_inspection_status || source.status || null,
+      result: row.site_inspection_result || source.result || null,
+      follow_up_date: row.site_inspection_follow_up_date || source.follow_up_date || null,
+      report_file_id: row.site_inspection_report_document_id || source.report_file_id || null,
+      report_link: row.site_inspection_report_link || source.report_link || null,
+      report_generated_at:
+        row.site_inspection_report_generated_at || source.report_generated_at || null,
+      ready_for_installation:
+        row.site_inspection_ready_for_installation ?? source.ready_for_installation,
+      requires_reinspection:
+        row.site_inspection_requires_reinspection ?? source.requires_reinspection,
+      updated_at: row.site_inspection_updated_at || source.updated_at || null,
+      updated_by: row.site_inspection_updated_by || source.updated_by || null,
+      updated_by_email: row.site_inspection_updated_by_email || source.updated_by_email || null,
+    };
+    return getSiteInspectionState(mergedSource);
+  }
+
+  _applySiteInspectionState(row) {
+    if (!row || typeof row !== "object") return row;
+    const state = this._parseSiteInspectionState(row);
+    row.site_inspection = state;
+    row.site_inspection_status = state.status;
+    row.site_inspection_result = state.result;
+    row.site_inspection_follow_up_date = state.follow_up_date || null;
+    row.site_inspection_report_document_id = state.report_file_id;
+    row.site_inspection_report_link = state.report_link;
+    row.site_inspection_report_generated_at = state.report_generated_at || null;
+    row.site_inspection_ready_for_installation = Boolean(state.ready_for_installation);
+    row.site_inspection_requires_reinspection = Boolean(state.requires_reinspection);
+    row.site_inspection_updated_at = state.updated_at || null;
+    row.site_inspection_updated_by = state.updated_by || null;
+    row.site_inspection_updated_by_email = state.updated_by_email || null;
+
+    // Aliases compat para workspace técnico existente.
+    row.inspection_site_status = state.status;
+    row.inspection_site_result = state.result;
+    row.inspection_site_follow_up_date = state.follow_up_date || null;
+    row.inspection_site_report_file_id = state.report_file_id || null;
+    row.inspection_site_report_link = state.report_link || null;
+    row.inspection_site_report_generated_at = state.report_generated_at || null;
+    row.inspection_site_ready_for_installation = Boolean(state.ready_for_installation);
+    row.inspection_site_requires_reinspection = Boolean(state.requires_reinspection);
+    row.inspection_site_checklist = state.checklist || {};
+    row.inspection_site_observations = state.observations || null;
+    row.inspection_site_recommendations = state.recommendations || null;
+    row.inspection_site_responsible_name = state.responsible_name || null;
+    row.inspection_site_client_signer_name = state.client_signer_name || null;
+    row.inspection_site_inspected_at = state.inspected_at || null;
+    row.inspection_site_history = Array.isArray(state.history) ? state.history : [];
+    return row;
+  }
+
+  _attachSiteInspectionState(rows = []) {
+    const list = Array.isArray(rows) ? rows : [rows];
+    list.forEach((row) => this._applySiteInspectionState(row));
+    return list;
+  }
+
+  _parseInstallationWorkflowState(row = {}) {
+    const normalized = normalizeInstallationWorkflowState(row?.installation_workflow || {}, {
+      equipment: Array.isArray(row?.equipment) ? row.equipment : [],
+    });
+    const gate = computeInstallationClosureGate({
+      workflow: normalized,
+      siteReady: Boolean(this._parseSiteInspectionState(row).ready_for_installation),
+      requiresSiteInspection: Boolean(row?.inspection_request_id || row?.inspection_scheduled_date),
+    });
+    return {
+      ...normalized,
+      closure_gate: gate,
+    };
+  }
+
+  _applyInstallationWorkflowState(row) {
+    if (!row || typeof row !== "object") return row;
+    const state = this._parseInstallationWorkflowState(row);
+    row.installation_workflow = state;
+    row.installation_can_close = Boolean(state?.closure_gate?.can_close);
+    row.installation_blocked_reasons = Array.isArray(state?.closure_gate?.blocked_reasons)
+      ? state.closure_gate.blocked_reasons
+      : [];
+    row.installation_dispatch_request = state.dispatch_request;
+    row.installation_logistics_validation = state.logistics_validation;
+    row.installation_visual_reception = state.visual_reception;
+    row.installation_verification_decision = state.verification_decision;
+    row.installation_verification_cycle = state.verification_cycle;
+    row.installation_cu_flow = state.cu_flow;
+    row.installation_delivery_act = state.delivery_act;
+
+    // Aliases para frontend técnico.
+    row.fst14_report_file_id = state.visual_reception?.report_file_id || null;
+    row.fst14_report_link = state.visual_reception?.report_link || null;
+    row.fst14_result = state.visual_reception?.result || null;
+    row.verification_decision_applies = state.verification_decision?.applies;
+    row.verification_cycle_status = state.verification_cycle?.status || null;
+    row.verification_attempts = Array.isArray(state.verification_cycle?.attempts)
+      ? state.verification_cycle.attempts
+      : [];
+    row.delivery_act_internal_copy_file_id = state.delivery_act?.legal_internal_copy_file_id || null;
+    row.delivery_act_internal_copy_link = state.delivery_act?.legal_internal_copy_link || null;
+    row.delivery_act_client_copy_file_id = state.delivery_act?.legal_client_copy_file_id || null;
+    row.delivery_act_client_copy_link = state.delivery_act?.legal_client_copy_link || null;
+    return row;
+  }
+
+  _attachInstallationWorkflowState(rows = []) {
+    const list = Array.isArray(rows) ? rows : [rows];
+    list.forEach((row) => this._applyInstallationWorkflowState(row));
+    return list;
+  }
+
+  _assertInstallationClosureReady(row = {}) {
+    const state = this._parseInstallationWorkflowState(row);
+    const gate = state?.closure_gate || {};
+    if (gate.can_close) return state;
+    const error = createInstallationWorkflowError(
+      "No se puede cerrar la instalacion: existen prerequisitos pendientes",
+      {
+        status: 409,
+        code: "INSTALLATION_CLOSURE_BLOCKED",
+        details: {
+          blocked_reasons: Array.isArray(gate.blocked_reasons) ? gate.blocked_reasons : [],
+        },
+      },
+    );
+    throw error;
+  }
+
+  _assertSiteReadyForInstallation(row = {}) {
+    const state = this._parseSiteInspectionState(row);
+    if (state.ready_for_installation) return;
+    const error = new Error("El sitio inspeccionado no está conforme para instalación");
+    error.status = 409;
+    error.code = "SITE_NOT_READY_FOR_INSTALLATION";
+    error.details = {
+      inspection_site_status: state.status,
+      follow_up_date: state.follow_up_date || null,
+    };
+    throw error;
+  }
+
+  async _upsertPrivateReinspectionTechnicalActivity({ purchase, followUpDate, user }) {
+    if (!purchase?.id || !followUpDate) return;
+    const sourceType = "private_purchase_reinspection";
+    const sourceId = String(purchase.id);
+    const title = `Reinspección de ambiente - ${purchase?.client_snapshot?.commercial_name || purchase?.client_snapshot?.name || "cliente"}`;
+    const notes = `Reinspección F.ST-07 para compra privada #${purchase.id}`;
+
+    const { rows } = await db.query(
+      `SELECT id
+         FROM servicio.cronograma_actividades_tecnicas
+        WHERE source_type = $1
+          AND source_id = $2
+        ORDER BY id DESC
+        LIMIT 1`,
+      [sourceType, sourceId],
+    );
+
+    if (rows[0]?.id) {
+      await db.query(
+        `UPDATE servicio.cronograma_actividades_tecnicas
+            SET activity_date = $1,
+                title = $2,
+                notes = $3,
+                status = 'programado',
+                updated_at = now()
+          WHERE id = $4`,
+        [followUpDate, title, notes, rows[0].id],
+      );
+      return;
+    }
+
+    await db.query(
+      `INSERT INTO servicio.cronograma_actividades_tecnicas (
+          user_id, activity_date, title, notes, status, source_type, source_id, created_by, created_by_email, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, 'programado', $5, $6, $7, $8, now(), now())`,
+      [
+        Number.isFinite(Number(purchase?.inspection_coordinated_by))
+          ? Number(purchase.inspection_coordinated_by)
+          : null,
+        followUpDate,
+        title,
+        notes,
+        sourceType,
+        sourceId,
+        Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
+        user?.email || null,
+      ],
+    );
+  }
+
+  async _closePrivateReinspectionTechnicalActivity(purchaseId) {
+    if (!purchaseId) return;
+    await db.query(
+      `UPDATE servicio.cronograma_actividades_tecnicas
+          SET status = 'completado',
+              updated_at = now()
+        WHERE source_type = 'private_purchase_reinspection'
+          AND source_id = $1
+          AND COALESCE(lower(status), 'programado') IN ('programado', 'confirmado', 'en_proceso')`,
+      [String(purchaseId)],
+    );
   }
 
   async _listTechnicalScheduleByDate({ date, excludePrivatePurchaseId = null, excludeInspectionRequestId = null }) {
@@ -652,6 +936,8 @@ class PrivatePurchasesService {
   }
 
   async getById(id, user) {
+    await ensurePrivateSiteInspectionColumns();
+    await ensurePrivateInstallationWorkflowColumns();
     const query = `
       SELECT * FROM private_purchase_requests
       WHERE id = $1
@@ -665,6 +951,8 @@ class PrivatePurchasesService {
 
     const purchase = rows[0];
     this._normalizeOfferKindsInRows([purchase]);
+    this._attachSiteInspectionState([purchase]);
+    this._attachInstallationWorkflowState([purchase]);
     await this._attachClientRequestSnapshot(purchase);
     await this._ensureArrivalStates([purchase], user);
     await this._attachChecklistState([purchase]);
@@ -679,8 +967,10 @@ class PrivatePurchasesService {
       `SELECT offer_document_id, offer_signed_document_id, contract_document_id, contract_client_signed_document_id, contract_signed_document_id,
               comodato_document_id, delivery_act_document_id, delivery_act_draft_document_id, delivery_act_logistics_signed_document_id, delivery_guides_json,
               inspection_acta_document_id,
+              site_inspection_report_document_id,
+              site_inspection_report_link,
               availability_email_file_id, reservation_email_file_id, reservation_calendar_event_link,
-              client_snapshot, client_request_id
+              client_snapshot, client_request_id, installation_workflow
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -691,6 +981,7 @@ class PrivatePurchasesService {
     }
 
     const row = rows[0];      const documents = [];
+      const installationWorkflow = normalizeInstallationWorkflowState(row.installation_workflow || {});
       const normalizeLink = (fileRef) => {
         if (!fileRef) return null;
         if (typeof fileRef === 'string' && fileRef.startsWith('http')) return fileRef;
@@ -744,9 +1035,34 @@ class PrivatePurchasesService {
     addDoc('CONTRACT_CLIENT_SIGNED', row.contract_client_signed_document_id);
     addDoc('CONTRACT_SIGNED', row.contract_signed_document_id);
     addDoc('INSPECTION_ACT', row.inspection_acta_document_id);
+    addDoc('F.ST-20', row.inspection_acta_document_id);
+    addDoc('F.ST-07', row.site_inspection_report_document_id);
+    if (!row.site_inspection_report_document_id) {
+      addDocLink('F.ST-07', row.site_inspection_report_link);
+    }
+    addDoc('F.ST-14', installationWorkflow?.visual_reception?.report_file_id);
+    if (!installationWorkflow?.visual_reception?.report_file_id) {
+      addDocLink('F.ST-14', installationWorkflow?.visual_reception?.report_link);
+    }
+    const verificationAttempts = Array.isArray(installationWorkflow?.verification_cycle?.attempts)
+      ? installationWorkflow.verification_cycle.attempts
+      : [];
+    verificationAttempts.forEach((attempt, index) => {
+      const attemptDocType = `F.ST-09_ATTEMPT_${index + 1}`;
+      if (attempt?.document_file_id) addDoc(attemptDocType, attempt.document_file_id);
+      else if (attempt?.document_link) addDocLink(attemptDocType, attempt.document_link);
+    });
     addDoc('DELIVERY_ACT_DRAFT', row.delivery_act_draft_document_id);
     addDoc('DELIVERY_ACT_LOGISTICS_SIGNED', row.delivery_act_logistics_signed_document_id);
     addDoc('DELIVERY_ACT', row.delivery_act_document_id);
+      addDoc('F.ST-10_INTERNAL_COPY', installationWorkflow?.delivery_act?.legal_internal_copy_file_id);
+      if (!installationWorkflow?.delivery_act?.legal_internal_copy_file_id) {
+        addDocLink('F.ST-10_INTERNAL_COPY', installationWorkflow?.delivery_act?.legal_internal_copy_link);
+      }
+      addDoc('F.ST-10_CLIENT_COPY', installationWorkflow?.delivery_act?.legal_client_copy_file_id);
+      if (!installationWorkflow?.delivery_act?.legal_client_copy_file_id) {
+        addDocLink('F.ST-10_CLIENT_COPY', installationWorkflow?.delivery_act?.legal_client_copy_link);
+      }
       addDoc('COMODATO', row.comodato_document_id);
       addDoc('AVAILABILITY_EMAIL', row.availability_email_file_id);
       addDoc('RESERVATION_EMAIL', row.reservation_email_file_id);
@@ -776,6 +1092,8 @@ class PrivatePurchasesService {
    * Listar solicitudes del usuario
    */
   async listByUser(user) {
+    await ensurePrivateSiteInspectionColumns();
+    await ensurePrivateInstallationWorkflowColumns();
     const query = `
       SELECT
         id,
@@ -820,13 +1138,15 @@ class PrivatePurchasesService {
         provider_response_at,\n        reservation_email_sent_at,\n        reservation_email_file_id,\n        reservation_calendar_event_id,\n        reservation_calendar_event_link,\n        includes_starter_kit,\n        operations_notes,\n        estimated_arrival_at,\n        estimated_arrival_updated_at,\n        equipment_arrived_at,\n        equipment_arrived_by,
         dispatch_items_json,
         dispatch_notes,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow\n      FROM private_purchase_requests
       WHERE created_by = $1
       ORDER BY created_at DESC
     `;
 
     const { rows } = await db.query(query, [user.id]);
     this._normalizeOfferKindsInRows(rows);
+    this._attachSiteInspectionState(rows);
+    this._attachInstallationWorkflowState(rows);
     await this._autoResolveClientRegistration(rows, user);
     await this._attachClientRequestSnapshot(rows);
     await this._ensureArrivalStates(rows, user);
@@ -873,6 +1193,8 @@ class PrivatePurchasesService {
    * Listar solicitudes por rol (para dashboards) - FASE 6: hardening acceso
    */
   async listByRole(user, role) {
+    await ensurePrivateSiteInspectionColumns();
+    await ensurePrivateInstallationWorkflowColumns();
     // FASE 6: Verificar que el rol solicitado coincida con permisos del usuario
     logger.debug(`[FLOW_PRIVADA][BE][FASE6][ACCESS][CHECK] Usuario ${user.id} solicita listByRole: ${role}`);
     const userRoles = this._getUserRoles(user);
@@ -972,11 +1294,12 @@ class PrivatePurchasesService {
         break;
 
       case 'tecnico':
-        whereClause = 'status = ANY($1) AND (delivery_act_assigned_to_user_id = $2 OR delivery_act_assigned_to_email = $3)';
+        whereClause = 'status = ANY($1)';
         params = [[
+          PRIVATE_PURCHASE_STATES.INSPECTION_REQUESTED,
           PRIVATE_PURCHASE_STATES.DELIVERY_ACT_LOGISTICS_SIGNED,
           PRIVATE_PURCHASE_STATES.DELIVERY_ACT_GENERATED
-        ], user.id || null, user.email || null];
+        ]];
         break;
 
       default:
@@ -1035,7 +1358,7 @@ class PrivatePurchasesService {
         dispatch_items_json,
         dispatch_notes,
         delivery_act_observations_json,
-        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email\n      FROM private_purchase_requests
+        inspection_request_id,\n        inspection_acta_document_id,\n        inspection_requested_at,\n        inspection_min_date,\n        inspection_max_date,\n        inspection_proposed_date,\n        inspection_proposed_notes,\n        inspection_proposed_at,\n        inspection_proposed_by,\n        inspection_proposed_by_email,\n        inspection_coordination_status,\n        inspection_review_notes,\n        inspection_reviewed_at,\n        inspection_reviewed_by,\n        inspection_reviewed_by_email,\n        inspection_scheduled_date,\n        inspection_coordination_notes,\n        inspection_coordinated_at,\n        inspection_coordinated_by,\n        inspection_coordinated_by_email,\n        site_inspection,\n        site_inspection_status,\n        site_inspection_result,\n        site_inspection_follow_up_date,\n        site_inspection_report_document_id,\n        site_inspection_report_link,\n        site_inspection_report_generated_at,\n        site_inspection_ready_for_installation,\n        site_inspection_requires_reinspection,\n        site_inspection_updated_at,\n        site_inspection_updated_by,\n        site_inspection_updated_by_email,\n        installation_workflow\n      FROM private_purchase_requests
       WHERE ${whereClause}
       ORDER BY
         CASE
@@ -1062,6 +1385,8 @@ class PrivatePurchasesService {
     });
     const { rows } = await db.query(query, params);
     this._normalizeOfferKindsInRows(rows);
+    this._attachSiteInspectionState(rows);
+    this._attachInstallationWorkflowState(rows);
     logger.debug('[FLOW_PRIVADA][BE][LIST_BY_ROLE][RESULT]', {
       role,
       count: rows.length
@@ -1221,8 +1546,21 @@ class PrivatePurchasesService {
   }
 
   async requestDeliveryDates(purchaseId, user) {
+    await ensurePrivateSiteInspectionColumns();
     const { rows } = await db.query(
-      'SELECT status, created_by, client_snapshot, equipment_arrived_at FROM private_purchase_requests WHERE id = $1',
+      `SELECT status,
+              created_by,
+              client_snapshot,
+              equipment_arrived_at,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_status,
+              site_inspection_result,
+              site_inspection_follow_up_date,
+              site_inspection_ready_for_installation
+         FROM private_purchase_requests
+        WHERE id = $1`,
       [purchaseId]
     );
 
@@ -1253,6 +1591,10 @@ class PrivatePurchasesService {
       error.status = 409;
       error.code = 'EQUIPMENT_NOT_ARRIVED';
       throw error;
+    }
+
+    if (rows[0]?.inspection_request_id || rows[0]?.inspection_scheduled_date) {
+      this._assertSiteReadyForInstallation(rows[0]);
     }
 
     await this.transitionState(
@@ -2166,10 +2508,20 @@ class PrivatePurchasesService {
    * FASE 2: Establecer fechas de entrega con idempotencia
    */
   async setDeliveryDates(purchaseId, deliveryDates, user, deliveryNotes = '') {
+    await ensurePrivateSiteInspectionColumns();
     logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][CHECK] Verificando duplicado delivery dates para purchase ${purchaseId}`);
 
     const { rows: existingRows } = await db.query(
-      'SELECT delivery_dates_json FROM private_purchase_requests WHERE id = $1',
+      `SELECT delivery_dates_json,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_status,
+              site_inspection_result,
+              site_inspection_follow_up_date,
+              site_inspection_ready_for_installation
+         FROM private_purchase_requests
+        WHERE id = $1`,
       [purchaseId]
     );
 
@@ -2191,6 +2543,10 @@ class PrivatePurchasesService {
       error.code = 'DOC_ALREADY_EXISTS';
       error.details = { docType: 'DELIVERY_DATES', existingRef: existingDates };
       throw error;
+    }
+
+    if (existingRows[0]?.inspection_request_id || existingRows[0]?.inspection_scheduled_date) {
+      this._assertSiteReadyForInstallation(existingRows[0]);
     }
 
     logger.debug(`[FLOW_PRIVADA][BE][FASE2][IDEMPOTENCY][OK] Delivery dates no existen, permitiendo set para purchase ${purchaseId}`);
@@ -2297,6 +2653,27 @@ class PrivatePurchasesService {
    * Marcar como listo para entrega
    */
   async markReadyForDelivery(purchaseId, user) {
+    await ensurePrivateSiteInspectionColumns();
+    const { rows: inspectionRows } = await db.query(
+      `SELECT id,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_status,
+              site_inspection_result,
+              site_inspection_follow_up_date,
+              site_inspection_ready_for_installation
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!inspectionRows.length) {
+      throw new Error('Solicitud no encontrada');
+    }
+    if (inspectionRows[0]?.inspection_request_id || inspectionRows[0]?.inspection_scheduled_date) {
+      this._assertSiteReadyForInstallation(inspectionRows[0]);
+    }
+
     const query = `
       UPDATE private_purchase_requests
       SET updated_at = NOW()
@@ -2342,6 +2719,27 @@ class PrivatePurchasesService {
    * Finalizar entrega
    */
   async completeDelivery(purchaseId, user, deliveryNotes = '') {
+    await ensurePrivateSiteInspectionColumns();
+    const { rows: inspectionRows } = await db.query(
+      `SELECT id,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_status,
+              site_inspection_result,
+              site_inspection_follow_up_date,
+              site_inspection_ready_for_installation
+         FROM private_purchase_requests
+        WHERE id = $1`,
+      [purchaseId],
+    );
+    if (!inspectionRows.length) {
+      throw new Error('Solicitud no encontrada');
+    }
+    if (inspectionRows[0]?.inspection_request_id || inspectionRows[0]?.inspection_scheduled_date) {
+      this._assertSiteReadyForInstallation(inspectionRows[0]);
+    }
+
     const query = `
       UPDATE private_purchase_requests
       SET
@@ -2502,6 +2900,7 @@ class PrivatePurchasesService {
   }
 
   async updateDispatchDetails(purchaseId, { items = [], notes = '', dispatchedAt, observations } = {}, user) {
+    await ensurePrivateInstallationWorkflowColumns();
     const isLogisticsRole = this._hasAnyRoleToken(user, ['jefe_logistica', 'logistica']);
 
     if (!isLogisticsRole) {
@@ -2526,7 +2925,9 @@ class PrivatePurchasesService {
               delivery_act_observations_json,
               delivery_act_draft_document_id,
               dispatch_items_json,
-              dispatch_notes
+              dispatch_notes,
+              equipment,
+              installation_workflow
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -2586,6 +2987,51 @@ class PrivatePurchasesService {
     }
 
     const updated = rows[0];
+    try {
+      const currentInstallationWorkflow = normalizeInstallationWorkflowState(
+        existing.installation_workflow || {},
+        { equipment: existing.equipment || [] },
+      );
+      const snapshot = existing?.client_snapshot || {};
+      const dispatchWorkflow = buildDispatchRequestPatch({
+        workflow: currentInstallationWorkflow,
+        payload: {
+          required_date: existing.delivery_start_at || existing.delivery_end_at || addDaysIso(15),
+          requires_notice: Boolean(existing.delivery_start_at || existing.delivery_end_at),
+          client_name: snapshot.commercial_name || snapshot.client_name || snapshot.name || "Cliente",
+          client_address: snapshot.shipping_address || snapshot.address || "Pendiente",
+          contact_name: snapshot.shipping_contact_name || snapshot.contact_name || "",
+          contact_phone: snapshot.shipping_phone || snapshot.shipping_cellphone || snapshot.phone || "",
+          items: normalizedItems,
+          notes,
+        },
+        user,
+      });
+      const logisticsWorkflow = buildLogisticsValidationPatch({
+        workflow: dispatchWorkflow,
+        payload: {
+          status: "validated",
+          guide_reference: notes || "Guía validada en despacho",
+          proforma_reference: existing?.delivery_act_number || null,
+          notes,
+        },
+        user,
+      });
+      const mergedInstallationWorkflow = enrichInstallationWorkflowWithGate({
+        workflow: logisticsWorkflow,
+        siteReady: Boolean(this._parseSiteInspectionState(existing).ready_for_installation),
+        requiresSiteInspection: Boolean(existing?.inspection_request_id || existing?.inspection_scheduled_date),
+      });
+      await db.query(
+        `UPDATE private_purchase_requests
+            SET installation_workflow = $2::jsonb,
+                updated_at = now()
+          WHERE id = $1`,
+        [purchaseId, JSON.stringify(mergedInstallationWorkflow)],
+      );
+    } catch (workflowSyncError) {
+      logger.warn({ workflowSyncError, purchaseId }, "No se pudo sincronizar workflow de instalacion en despacho");
+    }
 
     const draftDoc = await this._generateDeliveryActDocument({
       purchaseId,
@@ -2797,6 +3243,7 @@ class PrivatePurchasesService {
   }
 
   async uploadDeliveryActFinalSigned(purchaseId, { fileId, actBase64, fileName, mimeType } = {}, user) {
+    await ensurePrivateInstallationWorkflowColumns();
     const isTechnicalRole = this._hasRoleToken(user, 'tecnico');
 
     if (!isTechnicalRole) {
@@ -2809,6 +3256,7 @@ class PrivatePurchasesService {
     const { rows: existingRows } = await db.query(
       `SELECT id,
               status,
+              delivery_act_number,
               delivery_act_document_id,
               delivery_act_logistics_signed_document_id,
               delivery_act_assigned_to_user_id,
@@ -2817,7 +3265,12 @@ class PrivatePurchasesService {
               drive_folder_id,
               delivery_start_at,
               delivery_end_at,
-              equipment
+              equipment,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_ready_for_installation,
+              installation_workflow
          FROM private_purchase_requests
         WHERE id = $1`,
       [purchaseId]
@@ -2863,27 +3316,67 @@ class PrivatePurchasesService {
       throw error;
     }
 
+    this._assertInstallationClosureReady(existing);
+
     let resolvedFileId = fileId;
+    let resolvedFileLink = fileId ? driveLink(fileId) : null;
+    const baseFolderId = await this._ensureDriveFolder(
+      purchaseId,
+      existing.client_snapshot,
+      existing.drive_folder_id,
+    );
+    const targetFolder = await ensureFolder('Acta de entrega', baseFolderId);
     if (!resolvedFileId) {
       if (!actBase64 || !fileName) {
         const error = new Error('Archivo de acta final requerido');
         error.status = 400;
         throw error;
       }
-      const baseFolderId = await this._ensureDriveFolder(purchaseId, existing.client_snapshot, existing.drive_folder_id);
-      const targetFolder = await ensureFolder('Acta de entrega', baseFolderId);
       const stored = await uploadBase64File(fileName, actBase64, mimeType || 'application/pdf', targetFolder?.id || baseFolderId);
       resolvedFileId = stored.id;
+      resolvedFileLink = stored?.webViewLink || driveLink(stored?.id);
     }
+
+    const legalCopies = await this._createDeliveryActLegalCopies({
+      actaNumber: existing.delivery_act_number || `PP-${String(purchaseId).slice(0, 8)}`,
+      sourceFileId: resolvedFileId,
+      destinationFolderId: targetFolder?.id || baseFolderId,
+      user,
+    });
+    const currentInstallationWorkflow = normalizeInstallationWorkflowState(
+      existing.installation_workflow || {},
+      { equipment: existing.equipment || [] },
+    );
+    const nextInstallationWorkflow = enrichInstallationWorkflowWithGate({
+      workflow: {
+        ...currentInstallationWorkflow,
+        delivery_act: {
+          ...currentInstallationWorkflow.delivery_act,
+          final_file_id: resolvedFileId,
+          final_link: resolvedFileLink || driveLink(resolvedFileId),
+          generated_at: new Date().toISOString(),
+          legal_internal_copy_file_id: legalCopies.internal_copy_file_id || null,
+          legal_internal_copy_link: legalCopies.internal_copy_link || null,
+          legal_client_copy_file_id: legalCopies.client_copy_file_id || null,
+          legal_client_copy_link: legalCopies.client_copy_link || null,
+          legalized_at: legalCopies.legalized_at || null,
+          legalized_by: legalCopies.legalized_by || null,
+          legalized_by_email: legalCopies.legalized_by_email || null,
+        },
+      },
+      siteReady: Boolean(this._parseSiteInspectionState(existing).ready_for_installation),
+      requiresSiteInspection: Boolean(existing?.inspection_request_id || existing?.inspection_scheduled_date),
+    });
 
     const { rows } = await db.query(
       `UPDATE private_purchase_requests
          SET delivery_act_document_id = $2,
              delivery_act_generated_at = NOW(),
+             installation_workflow = $3::jsonb,
              updated_at = NOW()
        WHERE id = $1
        RETURNING *`,
-      [purchaseId, resolvedFileId]
+      [purchaseId, resolvedFileId, JSON.stringify(nextInstallationWorkflow)]
     );
 
     await this.transitionState(
@@ -2892,6 +3385,30 @@ class PrivatePurchasesService {
       user,
       'Acta final firmada por tecnico y cliente'
     );
+
+    await trackFst10WorkflowDocument({
+      sourceType: 'private_purchase',
+      sourceId: String(purchaseId),
+      requestId: existing?.inspection_request_id || null,
+      driveFileId: resolvedFileId,
+      driveFolderId: targetFolder?.id || baseFolderId || null,
+      driveLink: resolvedFileLink || driveLink(resolvedFileId),
+      clientName:
+        existing?.client_snapshot?.commercial_name ||
+        existing?.client_snapshot?.name ||
+        existing?.client_snapshot?.client_name ||
+        null,
+      equipmentName: Array.isArray(existing?.equipment)
+        ? existing.equipment.map((item) => item?.name || item?.label || item?.sku).filter(Boolean).join(', ')
+        : null,
+      user,
+      metadata: {
+        source_module: 'private_purchases',
+        private_purchase_id: purchaseId,
+        legal_internal_copy_file_id: legalCopies.internal_copy_file_id || null,
+        legal_client_copy_file_id: legalCopies.client_copy_file_id || null,
+      },
+    });
 
     const baseDate =
       existing.delivery_start_at ||
@@ -3347,6 +3864,702 @@ class PrivatePurchasesService {
     return updatedRows[0];
   }
 
+  async registerSiteInspection(
+    purchaseId,
+    {
+      result,
+      checklist,
+      observations = "",
+      recommendations = "",
+      follow_up_date = null,
+      is_reinspection = false,
+      client_signer_name = "",
+      expected_updated_at = null,
+    } = {},
+    user,
+  ) {
+    await ensurePrivateSiteInspectionColumns();
+    const canRegister = this._hasAnyRoleToken(user, ["tecnico", "jefe_tecnico", "jefe_servicio_tecnico"]);
+    if (!canRegister) {
+      const error = new Error("No autorizado para registrar F.ST-07");
+      error.status = 403;
+      error.code = "ROLE_NOT_ALLOWED";
+      throw error;
+    }
+
+    const { rows } = await db.query(
+      `SELECT id,
+              status,
+              updated_at,
+              inspection_request_id,
+              inspection_scheduled_date,
+              inspection_coordinated_by,
+              inspection_coordinated_by_email,
+              site_inspection,
+              site_inspection_status,
+              site_inspection_result,
+              site_inspection_follow_up_date,
+              site_inspection_report_document_id,
+              site_inspection_report_link,
+              site_inspection_report_generated_at,
+              site_inspection_ready_for_installation,
+              site_inspection_requires_reinspection,
+              site_inspection_updated_at,
+              site_inspection_updated_by,
+              site_inspection_updated_by_email,
+              client_snapshot,
+              equipment,
+              drive_folder_id,
+              created_by
+         FROM private_purchase_requests
+        WHERE id = $1
+        LIMIT 1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      const error = new Error("Solicitud no encontrada");
+      error.status = 404;
+      error.code = "REQUEST_NOT_FOUND";
+      throw error;
+    }
+    const purchase = rows[0];
+
+    if (expected_updated_at) {
+      const expectedMs = new Date(expected_updated_at).getTime();
+      const currentMs = new Date(purchase?.updated_at).getTime();
+      if (
+        Number.isFinite(expectedMs) &&
+        Number.isFinite(currentMs) &&
+        Math.abs(expectedMs - currentMs) > 1000
+      ) {
+        const error = new Error("La solicitud cambió en otra sesión. Refresca e intenta nuevamente.");
+        error.status = 409;
+        error.code = "STALE_REQUEST_STATE";
+        throw error;
+      }
+    }
+
+    if (!purchase.inspection_request_id || !purchase.inspection_scheduled_date) {
+      throw createSiteInspectionError(
+        "Primero se debe coordinar la fecha exacta de inspección (F.ST-20)",
+        {
+          status: 409,
+          code: "SITE_INSPECTION_NOT_COORDINATED",
+        },
+      );
+    }
+
+    const normalizedResult = normalizeInspectionResult(result);
+    if (!normalizedResult) {
+      throw createSiteInspectionError("Debes indicar un resultado válido para la inspección en sitio", {
+        status: 400,
+        code: "SITE_INSPECTION_RESULT_REQUIRED",
+      });
+    }
+
+    const normalizedChecklist = normalizeFst07Checklist(checklist || {});
+    const normalizedFollowUpDate = assertFollowUpDateConsistency({
+      result: normalizedResult,
+      followUpDate: follow_up_date,
+      scheduledDate: purchase.inspection_scheduled_date,
+    });
+    if (normalizedResult === SITE_INSPECTION_RESULT.NON_COMPLIANT && normalizedFollowUpDate) {
+      const conflicts = await this._listTechnicalScheduleByDate({
+        date: normalizedFollowUpDate,
+        excludePrivatePurchaseId: purchaseId,
+        excludeInspectionRequestId: purchase.inspection_request_id || null,
+      });
+      if (conflicts.length >= TECHNICAL_DAILY_CAPACITY) {
+        const error = new Error("El cronograma técnico está lleno para la reinspección en esa fecha");
+        error.status = 409;
+        error.code = "TECHNICAL_SCHEDULE_FULL";
+        error.details = {
+          date: normalizedFollowUpDate,
+          capacity: TECHNICAL_DAILY_CAPACITY,
+          conflicts_count: conflicts.length,
+        };
+        throw error;
+      }
+    }
+
+    const responsibleName = this._getInspectionResponsibleName(user);
+    const clientSignerName = String(client_signer_name || "").trim();
+    if (!clientSignerName) {
+      throw createSiteInspectionError("Debes registrar el nombre de quien firma por parte del cliente", {
+        status: 400,
+        code: "CLIENT_SIGNATURE_REQUIRED",
+      });
+    }
+
+    const equipmentItems = Array.isArray(purchase?.equipment) ? purchase.equipment : [];
+    const equipmentName =
+      equipmentItems
+        .map((item) => item?.name || item?.label || item?.sku)
+        .filter(Boolean)
+        .join(", ") || "Equipo no especificado";
+    const clientName =
+      purchase?.client_snapshot?.commercial_name ||
+      purchase?.client_snapshot?.name ||
+      purchase?.client_snapshot?.client_name ||
+      "Cliente";
+
+    const baseFolderId = await this._ensureDriveFolder(
+      purchaseId,
+      purchase.client_snapshot,
+      purchase.drive_folder_id,
+    );
+    const siteInspectionFolder = await ensureFolder("Inspección de ambiente", baseFolderId);
+
+    const { buffer: fst07Buffer, generatedAt } = await generateFst07PdfBuffer({
+      clientName,
+      equipmentName,
+      scheduledDate: purchase.inspection_scheduled_date,
+      responsibleName,
+      result: normalizedResult,
+      checklist: normalizedChecklist,
+      observations: String(observations || "").trim() || "",
+      recommendations: String(recommendations || "").trim() || "",
+      followUpDate: normalizedFollowUpDate || null,
+      isReinspection: Boolean(is_reinspection),
+      clientSignerName,
+    });
+
+    const fileName = buildFst07FileName({ clientName, generatedAt });
+    const stored = await uploadBase64File(
+      fileName,
+      fst07Buffer.toString("base64"),
+      "application/pdf",
+      siteInspectionFolder?.id || baseFolderId,
+    );
+    const reportFileId = stored?.id || null;
+    if (!reportFileId) {
+      throw createSiteInspectionError("No se pudo almacenar el documento F.ST-07 en Drive", {
+        status: 500,
+        code: "SITE_INSPECTION_REPORT_FAILED",
+      });
+    }
+    const reportLink = stored?.webViewLink || driveLink(reportFileId);
+
+    if (purchase?.inspection_request_id) {
+      try {
+        await addDriveAttachment({
+          request_id: purchase.inspection_request_id,
+          drive_file_id: reportFileId,
+          title: "F.ST-07 Inspección de Ambiente",
+        });
+      } catch (attachmentError) {
+        logger.warn({ attachmentError, purchaseId }, "No se pudo adjuntar F.ST-07 a la solicitud técnica privada");
+      }
+    }
+
+    const previousState = this._parseSiteInspectionState(purchase);
+    const nowIso = new Date().toISOString();
+    const historyEntry = {
+      result: normalizedResult,
+      is_reinspection: Boolean(is_reinspection),
+      scheduled_date: normalizeDateOnlyInput(purchase.inspection_scheduled_date) || null,
+      follow_up_date:
+        normalizedResult === SITE_INSPECTION_RESULT.NON_COMPLIANT ? normalizedFollowUpDate || null : null,
+      observations: String(observations || "").trim() || null,
+      recommendations: String(recommendations || "").trim() || null,
+      responsible_name: responsibleName,
+      client_signer_name: clientSignerName,
+      inspected_at: nowIso,
+      updated_at: nowIso,
+      updated_by: Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
+      updated_by_email: user?.email || null,
+      report_file_id: reportFileId,
+      report_link: reportLink || null,
+    };
+
+    const nextState = {
+      ...previousState,
+      status:
+        normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT
+          ? SITE_INSPECTION_STATUS.READY_FOR_INSTALLATION
+          : SITE_INSPECTION_STATUS.NON_COMPLIANT_REINSPECTION_PENDING,
+      result: normalizedResult,
+      follow_up_date:
+        normalizedResult === SITE_INSPECTION_RESULT.NON_COMPLIANT ? normalizedFollowUpDate || null : null,
+      report_file_id: reportFileId,
+      report_link: reportLink || null,
+      report_generated_at: generatedAt || nowIso,
+      ready_for_installation: normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT,
+      requires_reinspection: normalizedResult !== SITE_INSPECTION_RESULT.COMPLIANT,
+      checklist: normalizedChecklist,
+      observations: String(observations || "").trim() || null,
+      recommendations: String(recommendations || "").trim() || null,
+      responsible_name: responsibleName,
+      client_signer_name: clientSignerName,
+      inspected_at: nowIso,
+      updated_at: nowIso,
+      updated_by: Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
+      updated_by_email: user?.email || null,
+      history: [...(Array.isArray(previousState.history) ? previousState.history : []), historyEntry].slice(-40),
+    };
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE private_purchase_requests
+          SET site_inspection = $2::jsonb,
+              site_inspection_status = $3,
+              site_inspection_result = $4,
+              site_inspection_follow_up_date = $5,
+              site_inspection_report_document_id = $6,
+              site_inspection_report_link = $7,
+              site_inspection_report_generated_at = $8,
+              site_inspection_ready_for_installation = $9,
+              site_inspection_requires_reinspection = $10,
+              site_inspection_updated_at = now(),
+              site_inspection_updated_by = $11,
+              site_inspection_updated_by_email = $12,
+              updated_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        purchaseId,
+        JSON.stringify(nextState),
+        nextState.status,
+        nextState.result,
+        nextState.follow_up_date || null,
+        nextState.report_file_id || null,
+        nextState.report_link || null,
+        nextState.report_generated_at || null,
+        Boolean(nextState.ready_for_installation),
+        Boolean(nextState.requires_reinspection),
+        Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
+        user?.email || null,
+      ],
+    );
+    const updated = updatedRows[0];
+    this._applySiteInspectionState(updated);
+
+    if (
+      normalizedResult === SITE_INSPECTION_RESULT.NON_COMPLIANT &&
+      normalizedFollowUpDate
+    ) {
+      await this._upsertPrivateReinspectionTechnicalActivity({
+        purchase: updated,
+        followUpDate: normalizedFollowUpDate,
+        user,
+      });
+    } else if (normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT) {
+      await this._closePrivateReinspectionTechnicalActivity(purchaseId);
+    }
+
+    await trackFst07WorkflowDocument({
+      sourceType: "private_purchase",
+      sourceId: String(updated.id),
+      requestId: updated.inspection_request_id || null,
+      driveFileId: reportFileId,
+      driveFolderId: siteInspectionFolder?.id || baseFolderId || null,
+      driveLink: reportLink || null,
+      result: normalizedResult,
+      followUpDate: nextState.follow_up_date || null,
+      isReinspection: Boolean(is_reinspection),
+      clientName,
+      equipmentName,
+      user,
+      metadata: {
+        source_module: "private_purchases",
+        private_purchase_id: updated.id,
+      },
+    });
+
+    await this._notifyInspectionStakeholders(
+      purchaseId,
+      updated,
+      user,
+      normalizedResult === SITE_INSPECTION_RESULT.COMPLIANT
+        ? "F.ST-07 registrado conforme. Se habilita instalación/entrega."
+        : `F.ST-07 no conforme. Reinspección requerida para ${normalizedFollowUpDate || "fecha pendiente"}.`,
+    );
+
+    return updated;
+  }
+
+  async _storeInstallationEvidencePhoto(baseFolderId, photo, index = 0) {
+    const source = typeof photo === "string" ? { raw: photo } : (photo || {});
+    const fileId = source.file_id || source.id || null;
+    const link = source.link || source.url || null;
+    if (fileId || link) {
+      return { file_id: fileId || null, link: link || driveLink(fileId) };
+    }
+
+    const rawImage = source.raw || source.base64 || source.data || null;
+    if (!rawImage || typeof rawImage !== "string") return null;
+    if (!rawImage.startsWith("data:image")) return null;
+
+    const mimeTypeMatch = rawImage.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+    const mimeType = mimeTypeMatch?.[1] || "image/png";
+    const extension = mimeType.includes("jpeg") ? "jpg" : mimeType.split("/")[1] || "png";
+    const base64 = rawImage.replace(/^data:image\/[a-zA-Z0-9.+-]+;base64,/, "");
+    if (!base64) return null;
+
+    const evidenceFolder = await ensureFolder("F.ST-14 Evidencias", baseFolderId);
+    const fileName = `F.ST-14-evidencia-${Date.now()}-${index + 1}.${extension}`;
+    const stored = await uploadBase64File(
+      fileName,
+      base64,
+      mimeType,
+      evidenceFolder?.id || baseFolderId,
+    );
+    return {
+      file_id: stored?.id || null,
+      link: stored?.webViewLink || (stored?.id ? driveLink(stored.id) : null),
+    };
+  }
+
+  async updateInstallationWorkflow(
+    purchaseId,
+    { action, payload = {}, expected_updated_at = null } = {},
+    user,
+  ) {
+    await ensurePrivateSiteInspectionColumns();
+    await ensurePrivateInstallationWorkflowColumns();
+
+    const allowedRoles = [
+      "tecnico",
+      "jefe_tecnico",
+      "jefe_servicio_tecnico",
+      "jefe_operaciones",
+      "jefe_logistica",
+      "logistica",
+      "jefe_comercial",
+      "acp_comercial",
+    ];
+    if (!this._hasAnyRoleToken(user, allowedRoles)) {
+      const error = new Error("Rol no autorizado para actualizar workflow de instalacion");
+      error.status = 403;
+      error.code = "FORBIDDEN";
+      throw error;
+    }
+
+    const normalizedAction = String(action || payload?.action || "")
+      .trim()
+      .toLowerCase();
+    if (!normalizedAction) {
+      throw createInstallationWorkflowError("Debe indicar la accion del workflow de instalacion", {
+        status: 400,
+        code: "INSTALLATION_ACTION_REQUIRED",
+      });
+    }
+
+    const { rows } = await db.query(
+      `SELECT id,
+              status,
+              updated_at,
+              client_snapshot,
+              equipment,
+              drive_folder_id,
+              inspection_request_id,
+              inspection_scheduled_date,
+              site_inspection,
+              site_inspection_ready_for_installation,
+              installation_workflow
+         FROM private_purchase_requests
+        WHERE id = $1
+        LIMIT 1`,
+      [purchaseId],
+    );
+    if (!rows.length) {
+      throw createInstallationWorkflowError("Solicitud no encontrada", {
+        status: 404,
+        code: "REQUEST_NOT_FOUND",
+      });
+    }
+
+    const purchase = rows[0];
+    if (expected_updated_at) {
+      const expectedMs = new Date(expected_updated_at).getTime();
+      const currentMs = new Date(purchase?.updated_at).getTime();
+      if (
+        Number.isFinite(expectedMs) &&
+        Number.isFinite(currentMs) &&
+        Math.abs(expectedMs - currentMs) > 1000
+      ) {
+        throw createInstallationWorkflowError(
+          "La solicitud cambió en otra sesión. Refresca e intenta nuevamente.",
+          {
+            status: 409,
+            code: "STALE_REQUEST_STATE",
+          },
+        );
+      }
+    }
+
+    const currentWorkflow = normalizeInstallationWorkflowState(
+      purchase.installation_workflow || {},
+      { equipment: purchase.equipment || [] },
+    );
+    const snapshot = purchase?.client_snapshot || {};
+    const defaultClientName =
+      snapshot.commercial_name || snapshot.client_name || snapshot.name || "Cliente";
+    const defaultAddress = snapshot.shipping_address || snapshot.address || null;
+    const defaultContactName = snapshot.shipping_contact_name || snapshot.contact_name || null;
+    const defaultContactPhone = snapshot.shipping_phone || snapshot.shipping_cellphone || snapshot.phone || null;
+
+    let nextWorkflow = currentWorkflow;
+    if (normalizedAction === "dispatch_request") {
+      nextWorkflow = buildDispatchRequestPatch({
+        workflow: currentWorkflow,
+        payload,
+        user,
+        defaults: {
+          client_name: defaultClientName,
+          client_address: defaultAddress,
+          contact_name: defaultContactName,
+          contact_phone: defaultContactPhone,
+        },
+      });
+    } else if (normalizedAction === "logistics_validation") {
+      nextWorkflow = buildLogisticsValidationPatch({ workflow: currentWorkflow, payload, user });
+    } else if (normalizedAction === "visual_inspection_fst14") {
+      const canVisualInspect = this._hasAnyRoleToken(user, [
+        "tecnico",
+        "jefe_tecnico",
+        "jefe_servicio_tecnico",
+      ]);
+      if (!canVisualInspect) {
+        throw createInstallationWorkflowError("Solo el equipo tecnico puede registrar F.ST-14", {
+          status: 403,
+          code: "FORBIDDEN",
+        });
+      }
+
+      const baseFolderId = await this._ensureDriveFolder(
+        purchaseId,
+        purchase.client_snapshot,
+        purchase.drive_folder_id,
+      );
+      const installationFolder = await ensureFolder("Instalación y entrega", baseFolderId);
+      const reportFolder = await ensureFolder("F.ST-14", installationFolder?.id || baseFolderId);
+
+      const photoPayload = Array.isArray(payload.photos) ? payload.photos : [];
+      const storedPhotos = [];
+      for (let i = 0; i < photoPayload.length; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        const stored = await this._storeInstallationEvidencePhoto(baseFolderId, photoPayload[i], i);
+        if (stored) storedPhotos.push(stored);
+      }
+
+      const technicalName =
+        user?.fullname || user?.name || user?.email || "Tecnico";
+      const logisticsValidatorName =
+        currentWorkflow?.logistics_validation?.validated_by_email ||
+        currentWorkflow?.logistics_validation?.validated_by ||
+        "Pendiente";
+      const equipmentName = Array.isArray(purchase?.equipment)
+        ? purchase.equipment.map((item) => item?.name || item?.label || item?.sku).filter(Boolean).join(", ")
+        : null;
+
+      const { buffer: fst14Buffer, generatedAt } = await generateFst14PdfBuffer({
+        clientName: defaultClientName,
+        clientAddress: defaultAddress,
+        equipmentName: equipmentName || "Equipo",
+        inspectionDate: payload.inspection_date || new Date().toISOString(),
+        responsibleName: technicalName,
+        logisticsValidatorName,
+        dispatchRequiredDate: currentWorkflow?.dispatch_request?.required_date || null,
+        guideReference:
+          payload.guide_reference ||
+          currentWorkflow?.logistics_validation?.guide_reference ||
+          null,
+        proformaReference:
+          payload.proforma_reference ||
+          currentWorkflow?.logistics_validation?.proforma_reference ||
+          null,
+        checklist: payload.checklist || {},
+        findings: payload.findings || "",
+        correctiveActions: payload.corrective_actions || "",
+        logisticsChainNotes: payload.logistics_chain_notes || "",
+        result: payload.result || "pass",
+        photos: storedPhotos,
+        isPreinstallation: true,
+      });
+
+      const fst14FileName = buildFst14FileName({
+        clientName: defaultClientName,
+        generatedAt: new Date(generatedAt),
+      });
+      const storedReport = await uploadBase64File(
+        fst14FileName,
+        fst14Buffer.toString("base64"),
+        "application/pdf",
+        reportFolder?.id || baseFolderId,
+      );
+      const reportFileId = storedReport?.id || null;
+      if (!reportFileId) {
+        throw createInstallationWorkflowError("No se pudo almacenar F.ST-14 en Drive", {
+          status: 500,
+          code: "FST14_REPORT_STORE_FAILED",
+        });
+      }
+      const reportLink =
+        storedReport?.webViewLink || (reportFileId ? driveLink(reportFileId) : null);
+
+      nextWorkflow = buildVisualReceptionPatch({
+        workflow: currentWorkflow,
+        payload: {
+          ...payload,
+          photos: storedPhotos,
+        },
+        user,
+        report: {
+          file_id: reportFileId,
+          link: reportLink,
+          generated_at: generatedAt,
+        },
+      });
+
+      await trackFst14WorkflowDocument({
+        sourceType: "private_purchase",
+        sourceId: String(purchaseId),
+        requestId: purchase.inspection_request_id || null,
+        driveFileId: reportFileId,
+        driveFolderId: reportFolder?.id || baseFolderId || null,
+        driveLink: reportLink,
+        clientName: defaultClientName,
+        equipmentName: equipmentName || null,
+        user,
+        metadata: {
+          source_module: "private_purchases",
+          private_purchase_id: purchaseId,
+          result: nextWorkflow?.visual_reception?.result || null,
+        },
+      });
+    } else if (normalizedAction === "verification_decision") {
+      const canDecideVerification = this._hasAnyRoleToken(user, [
+        "jefe_tecnico",
+        "jefe_servicio_tecnico",
+      ]);
+      if (!canDecideVerification) {
+        throw createInstallationWorkflowError(
+          "Solo jefatura tecnica puede decidir si aplica verificacion",
+          {
+            status: 403,
+            code: "FORBIDDEN",
+          },
+        );
+      }
+      nextWorkflow = buildVerificationDecisionPatch({
+        workflow: currentWorkflow,
+        payload,
+        user,
+      });
+    } else if (normalizedAction === "verification_remediation_review") {
+      nextWorkflow = buildVerificationRemediationPatch({
+        workflow: currentWorkflow,
+        payload,
+        user,
+      });
+    } else if (normalizedAction === "cu_provider_report") {
+      let fileId = payload.provider_repair_report_file_id || payload.file_id || null;
+      let link = payload.provider_repair_report_link || payload.link || null;
+      if (!fileId && payload.file_base64 && payload.file_name) {
+        const baseFolderId = await this._ensureDriveFolder(
+          purchaseId,
+          purchase.client_snapshot,
+          purchase.drive_folder_id,
+        );
+        const cuFolder = await ensureFolder("CU Reportes proveedor", baseFolderId);
+        const stored = await uploadBase64File(
+          payload.file_name,
+          String(payload.file_base64).includes(",")
+            ? String(payload.file_base64).split(",")[1]
+            : String(payload.file_base64),
+          payload.mime_type || "application/pdf",
+          cuFolder?.id || baseFolderId,
+        );
+        fileId = stored?.id || null;
+        link = stored?.webViewLink || (fileId ? driveLink(fileId) : null);
+      }
+      nextWorkflow = buildCuProviderReportPatch({
+        workflow: currentWorkflow,
+        payload: {
+          ...payload,
+          provider_repair_report_file_id: fileId,
+          provider_repair_report_link: link,
+        },
+        user,
+      });
+    } else {
+      throw createInstallationWorkflowError("Accion de workflow de instalacion no soportada", {
+        status: 400,
+        code: "INSTALLATION_ACTION_INVALID",
+        details: { action: normalizedAction },
+      });
+    }
+
+    nextWorkflow = enrichInstallationWorkflowWithGate({
+      workflow: nextWorkflow,
+      siteReady: Boolean(this._parseSiteInspectionState(purchase).ready_for_installation),
+      requiresSiteInspection: Boolean(purchase?.inspection_request_id || purchase?.inspection_scheduled_date),
+    });
+
+    const { rows: updatedRows } = await db.query(
+      `UPDATE private_purchase_requests
+          SET installation_workflow = $2::jsonb,
+              updated_at = now()
+        WHERE id = $1
+        RETURNING *`,
+      [purchaseId, JSON.stringify(nextWorkflow)],
+    );
+
+    const updated = updatedRows[0] || purchase;
+    this._applySiteInspectionState(updated);
+    this._applyInstallationWorkflowState(updated);
+    return updated;
+  }
+
+  async _createDeliveryActLegalCopies({
+    actaNumber,
+    sourceFileId,
+    destinationFolderId,
+    user,
+  }) {
+    if (!sourceFileId || !destinationFolderId) {
+      return {
+        internal_copy_file_id: null,
+        internal_copy_link: null,
+        client_copy_file_id: null,
+        client_copy_link: null,
+      };
+    }
+
+    const makeCopy = async (name) => {
+      try {
+        const { data } = await drive.files.copy({
+          fileId: sourceFileId,
+          requestBody: {
+            name,
+            parents: [destinationFolderId],
+          },
+          supportsAllDrives: true,
+        });
+        return {
+          file_id: data?.id || null,
+          link: data?.webViewLink || (data?.id ? driveLink(data.id) : null),
+        };
+      } catch (error) {
+        logger.warn({ error, sourceFileId, destinationFolderId, name }, "No se pudo crear copia legalizada de F.ST-10");
+        return { file_id: null, link: null };
+      }
+    };
+
+    const internalCopy = await makeCopy(`ACTA-ENTREGA-${actaNumber}-COPIA-INTERNA.pdf`);
+    const clientCopy = await makeCopy(`ACTA-ENTREGA-${actaNumber}-COPIA-CLIENTE.pdf`);
+
+    return {
+      internal_copy_file_id: internalCopy.file_id,
+      internal_copy_link: internalCopy.link,
+      client_copy_file_id: clientCopy.file_id,
+      client_copy_link: clientCopy.link,
+      legalized_at: new Date().toISOString(),
+      legalized_by: Number.isFinite(Number(user?.id)) ? Number(user.id) : null,
+      legalized_by_email: user?.email || null,
+    };
+  }
+
   async uploadDeliveryGuides(purchaseId, { guides = [] } = {}, user) {
     if (!Array.isArray(guides) || guides.length === 0) {
       const error = new Error('Debe adjuntar al menos una guia');
@@ -3411,6 +4624,8 @@ class PrivatePurchasesService {
    * Listar todas las solicitudes con filtros opcionales
    */
   async listAll(user, filters = {}) {
+    await ensurePrivateSiteInspectionColumns();
+    await ensurePrivateInstallationWorkflowColumns();
     let whereClause = '1=1';
     let params = [];
     let paramIndex = 1;
@@ -3534,6 +4749,19 @@ class PrivatePurchasesService {
         p.inspection_coordinated_at,
         p.inspection_coordinated_by,
         p.inspection_coordinated_by_email,
+        p.site_inspection,
+        p.site_inspection_status,
+        p.site_inspection_result,
+        p.site_inspection_follow_up_date,
+        p.site_inspection_report_document_id,
+        p.site_inspection_report_link,
+        p.site_inspection_report_generated_at,
+        p.site_inspection_ready_for_installation,
+        p.site_inspection_requires_reinspection,
+        p.site_inspection_updated_at,
+        p.site_inspection_updated_by,
+        p.site_inspection_updated_by_email,
+        p.installation_workflow,
         COALESCE(u_creator.fullname, u_creator.name) AS created_by_name,
         COALESCE(u_manager.fullname, u_manager.name) AS manager_contract_decision_by_name
       FROM private_purchase_requests p
@@ -3545,6 +4773,8 @@ class PrivatePurchasesService {
 
     const { rows } = await db.query(query, params);
     this._normalizeOfferKindsInRows(rows);
+    this._attachSiteInspectionState(rows);
+    this._attachInstallationWorkflowState(rows);
     await this._attachClientRequestSnapshot(rows);
     await this._attachChecklistState(rows);
     return rows;
@@ -4006,13 +5236,13 @@ class PrivatePurchasesService {
         return {
           action: "request_delivery_dates",
           action_label: "Solicitar fechas de entrega",
-          requirements: ["equipment_arrived"],
+          requirements: ["inspection_site_compliant", "equipment_arrived"],
         };
       case PRIVATE_PURCHASE_STATES.DELIVERY_DATES_REQUESTED:
         return {
           action: "submit_delivery_dates",
           action_label: "Registrar fechas de entrega",
-          requirements: ["equipment_arrived", "delivery_dates_submitted"],
+          requirements: ["inspection_site_compliant", "equipment_arrived", "delivery_dates_submitted"],
         };
       default:
         return null;
@@ -4052,6 +5282,8 @@ class PrivatePurchasesService {
         return Boolean(row?.inspection_min_date && row?.inspection_max_date);
       case "inspection_date_coordinated":
         return Boolean(row?.inspection_scheduled_date);
+      case "inspection_site_compliant":
+        return Boolean(this._parseSiteInspectionState(row).ready_for_installation);
       case "lopdp_approved": {
         const lopdpStatus = String(clientRequest?.lopdp_consent_status || "").toLowerCase();
         return Boolean(

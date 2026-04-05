@@ -21,10 +21,14 @@ const safeText = (value) => {
 };
 
 const setTextField = (form, fieldName, value) => {
-  try {
-    form.getTextField(fieldName).setText(safeText(value));
-  } catch (error) {
-    // Campos opcionales pueden no existir en la plantilla
+  const fieldNames = Array.isArray(fieldName) ? fieldName : [fieldName];
+  for (const candidate of fieldNames) {
+    try {
+      form.getTextField(candidate).setText(safeText(value));
+      return;
+    } catch (_error) {
+      // Campos opcionales/versionados pueden no existir en la plantilla.
+    }
   }
 };
 
@@ -79,7 +83,7 @@ const generateDeliveryActPdf = async ({
   fillEquipmentRows(form, dispatchItems);
   fillObservations(form, observations);
 
-  setTextField(form, "des_por", dispatchedBy);
+  setTextField(form, ["Des_por", "des_por"], dispatchedBy);
   setTextField(form, "fecha_des", formatDate(dispatchedAt));
   setTextField(form, "ent_por", deliveredBy);
   setTextField(form, "fecha_ent", formatDate(deliveredAt));

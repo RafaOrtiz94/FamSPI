@@ -26,6 +26,18 @@ const EQUIPMENT_PURCHASE_ERROR_MESSAGES = {
  SITE_INSPECTION_FOLLOW_UP_REQUIRED: "Si el área no cumple debes registrar una fecha de reinspección.",
  SITE_INSPECTION_NOT_COORDINATED: "Primero se debe coordinar la fecha exacta de inspección (F.ST-20).",
  SITE_INSPECTION_REPORT_FAILED: "No se pudo generar el documento F.ST-07.",
+ CLIENT_SIGNATURE_REQUIRED: "Debes registrar el nombre del firmante por parte del cliente.",
+ SITE_NOT_READY_FOR_INSTALLATION: "El sitio no está conforme para instalar o entregar el equipo.",
+ INSTALLATION_CLOSURE_BLOCKED: "La instalacion no puede cerrarse porque existen prerequisitos pendientes.",
+ INSTALLATION_ACTION_REQUIRED: "Debes indicar la accion de workflow de instalacion.",
+ INSTALLATION_ACTION_INVALID: "La accion de workflow de instalacion no es valida.",
+ DISPATCH_LEAD_TIME_INVALID: "La solicitud de despacho requiere al menos 15 dias de anticipacion.",
+ FST14_CHECKLIST_INCOMPLETE: "Completa el checklist de recepcion visual F.ST-14.",
+ FST14_RESULT_REQUIRED: "Debes indicar el resultado de la recepcion visual F.ST-14.",
+ VERIFICATION_DECISION_REQUIRED: "Debes registrar si aplica o no verificacion tecnica.",
+ VERIFICATION_CRITERIA_REQUIRED: "Debes registrar el criterio tecnico usado para F.ST-09.",
+ VERIFICATION_NOT_ENABLED: "Primero define en workflow que la verificacion tecnica aplica.",
+ CU_PROVIDER_REPAIR_REPORT_REQUIRED: "Debes adjuntar el reporte del proveedor para equipos CU.",
 };
 
 export const getEquipmentPurchaseApiError = (error, fallback = "No se pudo completar la operación") => {
@@ -260,18 +272,32 @@ export const registerPublicPurchaseSiteInspection = async (
  checklist,
  observations,
  recommendations,
+ client_signer_name,
  follow_up_date,
  is_reinspection,
  expected_updated_at,
- } = {},
+} = {},
 ) => {
  const { data } = await api.patch(`/equipment-purchases/${id}/site-inspection`, {
  result,
  checklist,
  observations,
  recommendations,
+ client_signer_name,
  follow_up_date,
  is_reinspection,
+ expected_updated_at,
+ });
+ return data.data;
+};
+
+export const updatePublicPurchaseInstallationWorkflow = async (
+ id,
+ { action, payload = {}, expected_updated_at } = {},
+) => {
+ const { data } = await api.patch(`/equipment-purchases/${id}/installation-workflow`, {
+ action,
+ payload,
  expected_updated_at,
  });
  return data.data;

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * src/modules/servicio/asistencia-entrenamiento.service.js
  * --------------------------------------------
  * PDF Generation Service for Training Attendance List Records
@@ -11,9 +11,9 @@ const path = require("path");
 const { PDFDocument, StandardFonts } = require("pdf-lib");
 const db = require("../../config/db");
 const logger = require("../../config/logger");
-const { drive } = require("../../config/google");
 const { ensureFolder, uploadBase64File } = require("../../utils/drive");
 const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { registerFst05TrainingDocument } = require("./trainingWorkflow.service");
 
 const TEMPLATE_PATH = path.join(
     __dirname,
@@ -23,6 +23,8 @@ const TEMPLATE_PATH = path.join(
     "plantillas",
     "F.ST-05_V03_LISTA DE ASISTENCIA ENTRENAMIENTOS.pdf"
 );
+
+const MAX_TEMPLATE_ATTENDEES = 7;
 
 /**
  * Safely set a form field text value
@@ -40,20 +42,82 @@ const setFieldText = (form, fieldName, value) => {
     return false;
 };
 
-/**
- * Download signature image from Google Drive (service account)
- */
-const downloadSignatureFromDrive = async (fileId) => {
-    try {
-        const response = await drive.files.get(
-            { fileId, alt: "media", supportsAllDrives: true },
-            { responseType: "arraybuffer" }
-        );
-        return Buffer.from(response.data);
-    } catch (err) {
-        logger.error({ err, fileId }, "Error downloading signature from Drive");
-        return null;
+const toMark = (value) => {
+    if (value === true || value === 1) return "X";
+    const normalized = String(value || "").trim().toLowerCase();
+    if (["x", "si", "sí", "true", "1", "ok", "presente"].includes(normalized)) return "X";
+    return "";
+};
+
+const resolveTemplateDayFieldName = (day, attendeePosition) => (
+    attendeePosition === 1 ? `Dia_${day}` : `Dia_${day}_${attendeePosition}`
+);
+
+const normalizeIncomingAttendees = (attendanceData = {}) => {
+    const incoming = Array.isArray(attendanceData.attendees) ? attendanceData.attendees : [];
+    if (incoming.length > 0) {
+        return incoming
+            .map((attendee, index) => ({
+                id: index + 1,
+                nombre: String(attendee?.nombre || attendee?.name || attendee?.full_name || "").trim(),
+                cargo: String(attendee?.cargo || attendee?.role || attendee?.role_title || "").trim(),
+                email: String(attendee?.email || "").trim(),
+                asistencia: {
+                    dia1: toMark(attendee?.asistencia?.dia1 ?? attendee?.attendance?.day1) === "X",
+                    dia2: toMark(attendee?.asistencia?.dia2 ?? attendee?.attendance?.day2) === "X",
+                    dia3: toMark(attendee?.asistencia?.dia3 ?? attendee?.attendance?.day3) === "X",
+                },
+            }))
+            .filter((attendee) => attendee.nombre);
     }
+
+    const parsed = [];
+    for (let i = 1; i <= 42; i += 1) {
+        const nombre = String(attendanceData[`Nombres_Apellidos${i}`] || "").trim();
+        const cargo = String(attendanceData[`Cargo${i}`] || "").trim();
+        const email = String(attendanceData[`Correo_Electrónico${i}`] || attendanceData[`Correo_Electronico${i}`] || "").trim();
+        if (!nombre && !cargo && !email) {
+            if (i > MAX_TEMPLATE_ATTENDEES) break;
+            continue;
+        }
+        parsed.push({
+            id: i,
+            nombre,
+            cargo,
+            email,
+            asistencia: {
+                dia1: toMark(i === 1 ? (attendanceData.Dia_1 ?? attendanceData.Dia_1_1) : attendanceData[`Dia_1_${i}`]) === "X",
+                dia2: toMark(i === 1 ? (attendanceData.Dia_2 ?? attendanceData.Dia_2_1) : attendanceData[`Dia_2_${i}`]) === "X",
+                dia3: toMark(i === 1 ? (attendanceData.Dia_3 ?? attendanceData.Dia_3_1) : attendanceData[`Dia_3_${i}`]) === "X",
+            },
+        });
+    }
+    return parsed;
+};
+
+const buildTemplateAttendanceData = (attendanceData = {}, attendees = []) => {
+    const payload = { ...attendanceData };
+
+    for (let i = 1; i <= MAX_TEMPLATE_ATTENDEES; i += 1) {
+        payload[`Nombres_Apellidos${i}`] = "";
+        payload[`Cargo${i}`] = "";
+        payload[`Correo_Electrónico${i}`] = "";
+        payload[resolveTemplateDayFieldName(1, i)] = "";
+        payload[resolveTemplateDayFieldName(2, i)] = "";
+        payload[resolveTemplateDayFieldName(3, i)] = "";
+    }
+
+    attendees.slice(0, MAX_TEMPLATE_ATTENDEES).forEach((attendee, index) => {
+        const position = index + 1;
+        payload[`Nombres_Apellidos${position}`] = attendee.nombre || "";
+        payload[`Cargo${position}`] = attendee.cargo || "";
+        payload[`Correo_Electrónico${position}`] = attendee.email || "";
+        payload[resolveTemplateDayFieldName(1, position)] = attendee.asistencia?.dia1 ? "X" : "";
+        payload[resolveTemplateDayFieldName(2, position)] = attendee.asistencia?.dia2 ? "X" : "";
+        payload[resolveTemplateDayFieldName(3, position)] = attendee.asistencia?.dia3 ? "X" : "";
+    });
+
+    return payload;
 };
 
 /**
@@ -65,7 +129,8 @@ const generateAttendanceListPDF = async (attendanceData) => {
         cliente: attendanceData.ORDCliente,
         equipo: attendanceData.ORDEquipo,
         hasAttendees: !!attendanceData.Nombres_Apellidos1,
-        hasSignature: !!attendanceData.Firma_Especialista
+        attendeesCount: (Array.isArray(attendanceData.attendees) ? attendanceData.attendees.length : undefined) || 0,
+        specialistSignatureProvided: !!attendanceData.Firma_Especialista
     });
 
     // Load template
@@ -75,25 +140,6 @@ const generateAttendanceListPDF = async (attendanceData) => {
     const form = pdfDoc.getForm();
     const baseFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
     console.log("[Attendance PDF] PDF template loaded successfully");
-
-    // Handle signature - can be base64 data or Google Drive file ID
-    let signatureBuffer = null;
-    if (attendanceData.Firma_Especialista) {
-        // Check if it's base64 data (starts with signature-like string)
-        if (typeof attendanceData.Firma_Especialista === 'string' && attendanceData.Firma_Especialista.length > 100) {
-            // Assume it's base64 data from the frontend
-            try {
-                const base64Data = attendanceData.Firma_Especialista.replace(/^data:image\/\w+;base64,/, '');
-                signatureBuffer = Buffer.from(base64Data, 'base64');
-                logger.info("Attendance signature processed as base64 data");
-            } catch (err) {
-                logger.warn({ err }, "Error processing attendance signature as base64");
-            }
-        } else {
-            // Try to download from Google Drive
-            signatureBuffer = await downloadSignatureFromDrive(attendanceData.Firma_Especialista);
-        }
-    }
 
     // 1. DATOS GENERALES DEL ENTRENAMIENTO
     setFieldText(form, "Num_Orden", attendanceData.Num_Orden || "");
@@ -111,44 +157,18 @@ const generateAttendanceListPDF = async (attendanceData) => {
         setFieldText(form, `Correo_Electrónico${i}`, attendanceData[`Correo_Electrónico${i}`] || "");
     }
 
-    for (let day = 1; day <= 3; day++) {
-        for (let attendee = 1; attendee <= 7; attendee++) {
-            const fieldName = `Dia_${day}_${attendee}`;
+    for (let day = 1; day <= 3; day += 1) {
+        for (let attendee = 1; attendee <= MAX_TEMPLATE_ATTENDEES; attendee += 1) {
+            const fieldName = resolveTemplateDayFieldName(day, attendee);
             const value = attendanceData[fieldName];
-            // Set attendance mark (typically "?" for present, "" for absent)
             setFieldText(form, fieldName, value || "");
         }
     }
 
-    // 4. FIRMA DEL ESPECIALISTA
-    // Set signature in image field
-    if (signatureBuffer) {
-        try {
-            console.log("[Attendance PDF] Attempting to embed attendance specialist signature, buffer size:", signatureBuffer.length);
-            let signatureImage = await pdfDoc.embedPng(signatureBuffer);
-            console.log("[Attendance PDF] Attendance specialist signature image embedded in PDF document");
-
-            const signatureField = form.getField("Firma_Especialista");
-            console.log("[Attendance PDF] Retrieved attendance specialist signature field:", !!signatureField);
-
-            if (signatureField) {
-                console.log("[Attendance PDF] Attendance specialist signature field type:", signatureField.constructor.name);
-                console.log("[Attendance PDF] Field has setImage method:", typeof signatureField.setImage === "function");
-
-                if (typeof signatureField.setImage === "function") {
-                    signatureField.setImage(signatureImage);
-                    console.log("[Attendance PDF] Attendance specialist signature embedded successfully in image field");
-                } else {
-                    console.log("[Attendance PDF] Field does not have setImage method, signature not embedded");
-                }
-            } else {
-                console.log("[Attendance PDF] Attendance specialist signature field not found");
-            }
-        } catch (sigErr) {
-            console.error({ sigErr }, "[Attendance PDF] Error embedding attendance specialist signature image");
-        }
-    } else {
-        console.log("[Attendance PDF] No attendance specialist signature buffer available");
+    if (attendanceData.Firma_Especialista) {
+        logger.info(
+            "F.ST-05 no contiene campo nativo de firma especialista; la firma se gestiona por FamSign y metadata de workflow",
+        );
     }
 
 
@@ -239,7 +259,7 @@ const saveAttendanceToDrive = async (pdfBuffer, attendanceData, user = null) => 
  */
 const generateAttendanceListPDFEndpoint = async (req, res) => {
     try {
-        const attendanceData = req.body;
+        const attendanceData = req.body || {};
 
         // Validation rules - Num_Orden obligatorio
         if (!attendanceData.Num_Orden) {
@@ -265,48 +285,36 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             });
         }
 
-        // At least one attendee required
-        let hasAttendees = false;
-        for (let i = 1; i <= 7; i++) {
-            if (attendanceData[`Nombres_Apellidos${i}`] && attendanceData[`Nombres_Apellidos${i}`].trim()) {
-                hasAttendees = true;
-
-                // If attendee name exists, cargo and email are required
-                if (!attendanceData[`Cargo${i}`] || !attendanceData[`Correo_Electrónico${i}`]) {
-                    return res.status(400).json({
-                        ok: false,
-                        message: `Para el asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}), el cargo y correo electrónico son obligatorios`,
-                    });
-                }
-
-                // Check if attendee has at least one attendance mark
-                let hasAttendance = false;
-                for (let day = 1; day <= 3; day++) {
-                    if (attendanceData[`Dia_${day}_${i}`] && attendanceData[`Dia_${day}_${i}`].trim()) {
-                        hasAttendance = true;
-                        break;
-                    }
-                }
-
-                if (!hasAttendance) {
-                    return res.status(400).json({
-                        ok: false,
-                        message: `El asistente ${i} (${attendanceData[`Nombres_Apellidos${i}`]}) debe tener al menos una marca de asistencia`,
-                    });
-                }
-            }
-        }
-
-        if (!hasAttendees) {
+        const attendees = normalizeIncomingAttendees(attendanceData);
+        if (!attendees.length) {
             return res.status(400).json({
                 ok: false,
                 message: "Debe registrar al menos un asistente",
             });
         }
 
-        // La firma dibujada deja de ser obligatoria; se firmarÐ“ÐŽ con flujo avanzado posteriormente
+        for (const attendee of attendees) {
+            if (!attendee.cargo || !attendee.email) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `El asistente ${attendee.nombre} debe incluir cargo y correo electrónico`,
+                });
+            }
+            const hasAttendance = Boolean(
+                attendee.asistencia?.dia1 || attendee.asistencia?.dia2 || attendee.asistencia?.dia3,
+            );
+            if (!hasAttendance) {
+                return res.status(400).json({
+                    ok: false,
+                    message: `El asistente ${attendee.nombre} debe tener al menos una marca de asistencia`,
+                });
+            }
+        }
 
-        const pdfBuffer = await generateAttendanceListPDF(attendanceData);
+        const overflowAttendees = attendees.slice(MAX_TEMPLATE_ATTENDEES);
+        const templateAttendanceData = buildTemplateAttendanceData(attendanceData, attendees);
+
+        const pdfBuffer = await generateAttendanceListPDF(templateAttendanceData);
 
         // Check if buffer is valid
         if (!pdfBuffer || pdfBuffer.length === 0) {
@@ -320,7 +328,7 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
         logger.info(`PDF de lista de asistencia generado correctamente, tamaño: ${pdfBuffer.length} bytes`);
 
         // Save to Google Drive (required - if this fails, return error)
-        const driveResult = await saveAttendanceToDrive(pdfBuffer, attendanceData, req.userInfo);
+        const driveResult = await saveAttendanceToDrive(pdfBuffer, templateAttendanceData, req.userInfo);
 
         if (!driveResult) {
             logger.error("Error guardando archivos de asistencia en Google Drive");
@@ -351,6 +359,45 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             logger.warn({ docErr }, "No se pudo registrar el documento para FamSign");
         }
 
+        const fst05Strategy = {
+            template_day_fields: "Dia_1|Dia_2|Dia_3 para asistente 1, Dia_*_2..7 para asistentes 2-7",
+            specialist_signature_strategy: "famsign_external_signature",
+            attendee_capacity_strategy: overflowAttendees.length
+                ? "template_limit_with_workflow_overflow"
+                : "template_native_capacity",
+            template_capacity: MAX_TEMPLATE_ATTENDEES,
+            total_attendees: attendees.length,
+            overflow_count: overflowAttendees.length,
+        };
+
+        let workflowDetail = null;
+        try {
+            workflowDetail = await registerFst05TrainingDocument({
+                payload: {
+                    ...attendanceData,
+                    attendees: attendees.map((attendee) => ({
+                        full_name: attendee.nombre,
+                        role_title: attendee.cargo,
+                        email: attendee.email,
+                        attendance: {
+                            day1: Boolean(attendee.asistencia?.dia1),
+                            day2: Boolean(attendee.asistencia?.dia2),
+                            day3: Boolean(attendee.asistencia?.dia3),
+                        },
+                    })),
+                },
+                document: {
+                    file_id: driveResult.pdfFile?.id || null,
+                    folder_id: driveResult.folderId || null,
+                    link: driveResult.pdfFile?.webViewLink || null,
+                },
+                user: req.userInfo || req.user || null,
+                strategy: fst05Strategy,
+            });
+        } catch (workflowError) {
+            logger.warn({ workflowError }, "No se pudo sincronizar workflow de entrenamiento para F.ST-05");
+        }
+
         // Return success without downloading PDF
         res.json({
             ok: true,
@@ -360,7 +407,10 @@ const generateAttendanceListPDFEndpoint = async (req, res) => {
             ordenNumero: attendanceData.Num_Orden,
             cliente: attendanceData.ORDCliente,
             documentId: documentRecord?.id || null,
-            documentBase64: pdfBuffer.toString("base64")
+            documentBase64: pdfBuffer.toString("base64"),
+            workflow: workflowDetail,
+            fst05Strategy,
+            overflowAttendees: overflowAttendees.length,
         });
     } catch (err) {
         logger.error({ err }, "Error en endpoint de PDF de lista de asistencia");

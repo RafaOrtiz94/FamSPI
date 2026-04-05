@@ -55,6 +55,7 @@ import {
  formatProviderOutcome,
 } from "./EquipmentPurchaseWidget.utils";
 import { formatDateTimeEC } from "../../../core/utils/dateUtils";
+import { formatDateOnlyEs, normalizeDateOnly } from "../../../core/utils/workflowUi";
 import {
  FiPackage,
  FiMail,
@@ -117,28 +118,6 @@ const toIsoDate = (dateObj) => {
  const month = String(dateObj.getMonth() + 1).padStart(2, "0");
  const day = String(dateObj.getDate()).padStart(2, "0");
  return `${year}-${month}-${day}`;
-};
-
-const normalizeDateOnly = (value) => {
- const raw = String(value || "").trim();
- if (!raw) return "";
- const isoDateMatch = raw.match(/^(\d{4}-\d{2}-\d{2})/);
- if (isoDateMatch) return isoDateMatch[1];
- const esDateMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
- if (esDateMatch) {
- const [, dd, mm, yyyy] = esDateMatch;
- return `${yyyy}-${mm}-${dd}`;
- }
- const parsed = new Date(raw);
- if (!Number.isNaN(parsed.getTime())) return toIsoDate(parsed);
- return "";
-};
-
-const formatDateToEsLabel = (value) => {
- const normalized = normalizeDateOnly(value);
- if (!normalized) return "Pendiente";
- const [yyyy, mm, dd] = normalized.split("-");
- return `${dd}/${mm}/${yyyy}`;
 };
 
 const startOfMonth = (value) => {
@@ -1285,19 +1264,19 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  <p className="text-xs text-slate-700">
  Ventana acordada:{" "}
  <span className="font-medium">
- {inspectionMinDate ? formatDateToEsLabel(inspectionMinDate) : "Sin mínimo"} - {inspectionMaxDate ? formatDateToEsLabel(inspectionMaxDate) : "Sin máximo"}
+ {inspectionMinDate ? formatDateOnlyEs(inspectionMinDate, "Sin mínimo") : "Sin mínimo"} - {inspectionMaxDate ? formatDateOnlyEs(inspectionMaxDate, "Sin máximo") : "Sin máximo"}
  </span>
  </p>
  <p className="text-xs text-slate-700">
  Fecha propuesta:{" "}
  <span className="font-semibold">
- {formatDateToEsLabel(req.inspection_proposed_date)}
+ {formatDateOnlyEs(req.inspection_proposed_date)}
  </span>
  </p>
  <p className="text-xs text-slate-700">
  Fecha exacta coordinada:{" "}
  <span className="font-semibold">
- {formatDateToEsLabel(req.inspection_scheduled_date)}
+ {formatDateOnlyEs(req.inspection_scheduled_date)}
  </span>
  </p>
  <p className="text-xs text-slate-700">
@@ -1326,7 +1305,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  <p className="text-xs text-slate-700">
  Fecha límite contrato (110 días):{" "}
  <span className="font-semibold">
- {formatDateToEsLabel(req.contract_deadline_date)}
+ {formatDateOnlyEs(req.contract_deadline_date)}
  </span>
  {Number.isFinite(Number(req.contract_deadline_days_remaining)) && (
  <span
@@ -1345,7 +1324,7 @@ const EquipmentPurchaseWidget = ({ showCreation = true, compactList = false }) =
  )}
  {req.contract_reminder_date && (
  <p className="text-[11px] text-slate-500">
- Recordatorio ACP (15 días antes): {formatDateToEsLabel(req.contract_reminder_date)}
+ Recordatorio ACP (15 días antes): {formatDateOnlyEs(req.contract_reminder_date)}
  </p>
  )}
  {req.inspection_request_id && canAccessTechnicalProcedureForms && (

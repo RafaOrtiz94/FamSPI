@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiMessageSquare, FiRefreshCw, FiUserCheck } from "react-icons/fi";
+import { useNavigate } from "react-router-dom";
 import {
  addSupportTicketComment,
  assignSupportTicketToMe,
@@ -10,6 +11,9 @@ import {
  updateSupportTicketStatus,
 } from "../../../core/api/supportTicketsApi";
 import { useUI } from "../../../core/ui/UIContext";
+import Button from "../../../core/ui/components/Button";
+import Card from "../../../core/ui/components/Card";
+import { formatDurationMinutes, toStatusLabel } from "../../../core/utils/workflowUi";
 
 const STATUS_OPTIONS = [
  { value: "abierto", label: "Abierto" },
@@ -38,17 +42,8 @@ const TYPE_OPTIONS = [
  { value: "problema", label: "Problemas" },
 ];
 
-const toLabel = (text) => String(text || "").replace("_", " ");
-const formatMinutes = (minutes) => {
- const value = Number(minutes);
- if (!Number.isFinite(value)) return "-";
- if (value < 60) return `${Math.round(value)} min`;
- const hours = Math.floor(value / 60);
- const mins = Math.round(value % 60);
- return `${hours}h ${mins}m`;
-};
-
 const TicketsWorkspace = () => {
+ const navigate = useNavigate();
  const { showToast } = useUI();
  const [tickets, setTickets] = useState([]);
  const [kpi, setKpi] = useState({
@@ -255,8 +250,20 @@ const TicketsWorkspace = () => {
  <h1 className="text-2xl font-bold text-slate-900">Workspace TI: Tickets</h1>
  <p className="text-sm text-slate-600">Mesa de soporte madura con SLA, estados operativos y trazabilidad.</p>
  </div>
- <button
+ <div className="flex flex-wrap items-center gap-2">
+ <Button
  type="button"
+ size="sm"
+ variant="outline"
+ onClick={() => navigate("/dashboard/ti/casos-externos")}
+ >
+ Casos externos ST-01-04
+ </Button>
+ <Button
+ type="button"
+ size="sm"
+ variant="secondary"
+ icon={FiRefreshCw}
  onClick={() =>
  loadTickets({
  status: filters.status || undefined,
@@ -264,11 +271,10 @@ const TicketsWorkspace = () => {
  q: filters.q || undefined,
  })
  }
- className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
  >
- <FiRefreshCw />
  Recargar
- </button>
+ </Button>
+ </div>
  </div>
 
  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
@@ -282,25 +288,25 @@ const TicketsWorkspace = () => {
  <div className="rounded-xl border border-slate-200 bg-white p-3"><p className="text-xs uppercase text-slate-500">Total</p><p className="text-xl font-bold text-slate-900">{kpi.total || 0}</p></div>
  </div>
 
- <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-3">
+ <Card className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-none sm:grid-cols-3">
  <div>
  <p className="text-xs uppercase text-slate-500">KPI respuesta inicial</p>
- <p className="text-lg font-semibold text-slate-900">{formatMinutes(kpi.avg_response_minutes)}</p>
+ <p className="text-lg font-semibold text-slate-900">{formatDurationMinutes(kpi.avg_response_minutes)}</p>
  <p className="text-xs text-slate-500">Creacion a primera respuesta TI</p>
  </div>
  <div>
  <p className="text-xs uppercase text-slate-500">KPI ciclo total</p>
- <p className="text-lg font-semibold text-slate-900">{formatMinutes(kpi.avg_cycle_minutes)}</p>
+ <p className="text-lg font-semibold text-slate-900">{formatDurationMinutes(kpi.avg_cycle_minutes)}</p>
  <p className="text-xs text-slate-500">Creacion a terminado</p>
  </div>
  <div>
  <p className="text-xs uppercase text-slate-500">KPI entrega TI</p>
- <p className="text-lg font-semibold text-slate-900">{formatMinutes(kpi.avg_delivery_minutes)}</p>
+ <p className="text-lg font-semibold text-slate-900">{formatDurationMinutes(kpi.avg_delivery_minutes)}</p>
  <p className="text-xs text-slate-500">En progreso a terminado</p>
  </div>
- </div>
+ </Card>
 
- <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-3">
+ <Card className="grid grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-none sm:grid-cols-3">
  <label className="text-sm text-slate-700">
  Estado
  <select
@@ -337,7 +343,7 @@ const TicketsWorkspace = () => {
  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
  />
  </label>
- </div>
+ </Card>
 
  <div className="space-y-3">
  {loading ? (
@@ -356,19 +362,19 @@ const TicketsWorkspace = () => {
  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{ticket.code}</p>
  <h3 className="text-base font-semibold text-slate-900">{ticket.title}</h3>
  <p className="text-xs capitalize text-slate-500">
- {toLabel(ticket.ticket_type)} · prioridad {ticket.priority} · impacto {ticket.impact || "medio"} · urgencia {ticket.urgency || "medio"}
+ {toStatusLabel(ticket.ticket_type, "Sin tipo")} · prioridad {ticket.priority} · impacto {ticket.impact || "medio"} · urgencia {ticket.urgency || "medio"}
  </p>
  </div>
  <div className="flex flex-wrap items-center gap-2">
- <button
- type="button"
+ <Button
+ size="sm"
+ variant="secondary"
+ icon={FiUserCheck}
  onClick={() => handleAssignToMe(ticket.id)}
  disabled={busyId === ticket.id}
- className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-60"
  >
- <FiUserCheck size={14} />
  Asignarme
- </button>
+ </Button>
  <select
  value={ticket.status}
  disabled={busyId === ticket.id}
@@ -387,13 +393,13 @@ const TicketsWorkspace = () => {
  <div className="mt-3 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-3">
  <p><span className="font-semibold">Solicitante:</span> {ticket.requester_name || ticket.requester_email}</p>
  <p><span className="font-semibold">Asignado TI:</span> {ticket.assigned_ti_name || "Sin asignar"}</p>
- <p><span className="font-semibold">Estado:</span> {toLabel(ticket.status)}</p>
+ <p><span className="font-semibold">Estado:</span> {toStatusLabel(ticket.status)}</p>
  </div>
 
  <div className="mt-2 grid grid-cols-1 gap-2 text-xs text-slate-600 sm:grid-cols-3">
- <p><span className="font-semibold">Tiempo respuesta:</span> {formatMinutes(ticket.response_minutes)}</p>
- <p><span className="font-semibold">Ciclo total:</span> {formatMinutes(ticket.cycle_minutes)}</p>
- <p><span className="font-semibold">Entrega TI:</span> {formatMinutes(ticket.delivery_minutes)}</p>
+ <p><span className="font-semibold">Tiempo respuesta:</span> {formatDurationMinutes(ticket.response_minutes)}</p>
+ <p><span className="font-semibold">Ciclo total:</span> {formatDurationMinutes(ticket.cycle_minutes)}</p>
+ <p><span className="font-semibold">Entrega TI:</span> {formatDurationMinutes(ticket.delivery_minutes)}</p>
  </div>
 
  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
@@ -409,24 +415,24 @@ const TicketsWorkspace = () => {
  </div>
 
  <div className="mt-3 flex flex-wrap items-center gap-3">
- <button
- type="button"
+ <Button
+ size="sm"
+ variant="ghost"
  onClick={() => handleToggleEvents(ticket.id)}
  disabled={busyId === ticket.id}
- className="text-xs font-semibold text-blue-600 hover:text-blue-700"
  >
  {eventsByTicket[ticket.id] ? "Ocultar historial" : "Ver historial"}
- </button>
+ </Button>
 
- <button
- type="button"
+ <Button
+ size="sm"
+ variant="ghost"
+ icon={FiMessageSquare}
  onClick={() => handleToggleComments(ticket.id)}
  disabled={busyId === ticket.id}
- className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 hover:text-indigo-700"
  >
- <FiMessageSquare size={14} />
  {commentsByTicket[ticket.id] ? "Ocultar comentarios" : "Ver comentarios"}
- </button>
+ </Button>
  </div>
 
  {eventsByTicket[ticket.id] && (
@@ -438,7 +444,7 @@ const TicketsWorkspace = () => {
  <p key={event.id} className="text-xs text-slate-600">
  <span className="font-semibold">{event.event_type}</span>
  {event.old_status || event.new_status
- ? ` (${toLabel(event.old_status)} -> ${toLabel(event.new_status)})`
+ ? ` (${toStatusLabel(event.old_status)} -> ${toStatusLabel(event.new_status)})`
  : ""}
  {" · "}
  {event.actor_name || "Sistema"}
@@ -481,14 +487,14 @@ const TicketsWorkspace = () => {
  placeholder="Agregar comentario..."
  className="rounded-md border border-slate-300 px-2 py-1 text-xs sm:col-span-3"
  />
- <button
- type="button"
+ <Button
+ size="sm"
+ variant="primary"
  disabled={busyId === ticket.id}
  onClick={() => handleSubmitComment(ticket.id)}
- className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-60"
  >
  Publicar
- </button>
+ </Button>
  </div>
  </div>
  )}

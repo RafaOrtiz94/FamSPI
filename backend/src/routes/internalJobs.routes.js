@@ -10,6 +10,7 @@ const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/bu
 const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
 const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
+const { runOnce: runExternalCaseSyncQueue } = require('../jobs/externalCaseSyncScheduler');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -169,6 +170,26 @@ router.post('/database/backup', async (_req, res) => {
         console.error('Error en job de respaldo de base de datos:', error);
         res.status(500).json({
             error: 'Fallo el respaldo de base de datos',
+            details: error.message
+        });
+    }
+});
+
+router.post('/external-cases/sync', async (req, res) => {
+    try {
+        const rawLimit = req.body?.limit ?? req.query?.limit;
+        const parsedLimit = Number(rawLimit);
+        const limit = Number.isFinite(parsedLimit) ? parsedLimit : undefined;
+        const result = await runExternalCaseSyncQueue(limit ? { limit } : {});
+        res.json({
+            success: true,
+            message: 'Cola de sincronización de casos externos procesada',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de sincronización de casos externos:', error);
+        res.status(500).json({
+            error: 'Falló el procesamiento de cola de casos externos',
             details: error.message
         });
     }

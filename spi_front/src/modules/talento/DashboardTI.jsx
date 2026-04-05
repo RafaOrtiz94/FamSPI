@@ -7,6 +7,7 @@ import {
  FiActivity,
  FiShield,
  FiArrowRight,
+ FiLink,
 } from "react-icons/fi";
 import toast from "react-hot-toast";
 import api from "../../core/api";
@@ -157,6 +158,13 @@ const DashboardTI = () => {
  path: "/dashboard/auditoria",
  gradient: "from-purple-600 via-fuchsia-500 to-pink-500",
  icon: <FiShield size={24} />,
+ },
+ {
+ title: "Casos Externos ST-01-04",
+ desc: "Monitorea salud de Navify/REXIS/GoApp, errores y reintentos de sincronización.",
+ path: "/dashboard/ti/casos-externos",
+ gradient: "from-cyan-600 via-sky-500 to-blue-500",
+ icon: <FiLink size={24} />,
  },
  canSeeAudit
  ? {

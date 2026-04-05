@@ -27,7 +27,15 @@ const availabilityLabel = (status) => {
  return "No disponible";
 };
 
-const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], onRefresh, onOpenPublicPurchases }) => {
+const JefeTecnicoView = ({
+ stats,
+ maintenances,
+ approvals,
+ availability = [],
+ onRefresh,
+ onOpenPublicPurchases,
+ onOpenWithdrawals,
+}) => {
  return (
  <>
  <DashboardHeader
@@ -87,6 +95,7 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
  Ejecuta el procedimiento ST-01-01 por proceso (público y privado) en una sola vista.
  </p>
  </div>
+ <div className="flex flex-wrap gap-2">
  <button
  onClick={onOpenPublicPurchases}
  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
@@ -94,6 +103,13 @@ const JefeTecnicoView = ({ stats, maintenances, approvals, availability = [], on
  <FiShoppingCart size={16} />
  Abrir workspace técnico
  </button>
+ <button
+ onClick={onOpenWithdrawals}
+ className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-100"
+ >
+ Retiros F.ST-11
+ </button>
+ </div>
  </div>
  </Card>
 

@@ -73,7 +73,9 @@ const ServicioDesinfeccion = lazy(() => import("../modules/servicio/pages/Desinf
 const ServicioAsistencia = lazy(() => import("../modules/servicio/pages/Asistencia"));
 const ServicioVerificacionEquipos = lazy(() => import("../modules/servicio/pages/VerificacionEquipos"));
 const ServicioTechnicalProcedureWorkspace = lazy(() => import("../modules/servicio/pages/TechnicalProcedureWorkspace"));
+const ServicioExternalCasesWorkspace = lazy(() => import("../modules/servicio/pages/ExternalCasesWorkspace"));
 const ServicioPrivatePurchaseDeliveries = lazy(() => import("../modules/servicio/pages/PrivatePurchaseDeliveries"));
+const ServicioRetiroEquipos = lazy(() => import("../modules/servicio/pages/RetiroEquipos"));
 const TecnicoPrivatePurchases = lazy(() => import("../modules/servicio/pages/TecnicoPrivatePurchases"));
 const DashboardTalento = lazy(() => import("../modules/talento/Dashboard"));
 const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
@@ -292,6 +294,27 @@ const AppRoutes = () => {
             element={<ProtectedRoute allowedRoles={["servicio_tecnico", "jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}
           >
             <Route path="/dashboard/servicio-tecnico/workspace-procedimiento" element={<ServicioTechnicalProcedureWorkspace />} />
+            <Route path="/dashboard/servicio-tecnico/retiros" element={<ServicioRetiroEquipos />} />
+          </Route>
+          <Route
+            element={
+              <ProtectedRoute
+                allowedRoles={[
+                  "servicio_tecnico",
+                  "tecnico",
+                  "jefe_tecnico",
+                  "jefe_servicio_tecnico",
+                  "ti",
+                  "jefe_ti",
+                  "admin_ti",
+                  "gerencia",
+                  "gerencia_general",
+                ]}
+              />
+            }
+          >
+            <Route path="/dashboard/servicio-tecnico/casos-externos" element={<ServicioExternalCasesWorkspace />} />
+            <Route path="/dashboard/ti/casos-externos" element={<ServicioExternalCasesWorkspace />} />
           </Route>
           <Route
             element={<ProtectedRoute allowedRoles={["jefe_tecnico", "jefe_servicio_tecnico", "tecnico"]} />}

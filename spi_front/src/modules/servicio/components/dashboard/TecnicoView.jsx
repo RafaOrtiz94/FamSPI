@@ -6,6 +6,7 @@ import {
  FiCheckCircle,
  FiShield,
  FiShoppingCart,
+ FiTruck,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -169,10 +170,10 @@ const TecnicoView = ({
  </div>
  </Card>
 
- <Card
- className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-purple-500"
- onClick={() => navigate("/dashboard/servicio-tecnico/desinfeccion")}
- >
+  <Card
+  className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-purple-500"
+  onClick={() => navigate("/dashboard/servicio-tecnico/desinfeccion")}
+  >
  <div className="flex items-center gap-4">
  <div className="p-3 bg-purple-100 rounded-full text-purple-600">
  <FiShield size={24} />
@@ -182,7 +183,22 @@ const TecnicoView = ({
  <p className="text-sm text-gray-500">Registro F.ST-02</p>
  </div>
  </div>
- </Card>
+  </Card>
+
+  <Card
+  className="p-6 cursor-pointer hover:shadow-md transition-shadow border-l-4 border-amber-500"
+  onClick={() => navigate("/dashboard/servicio-tecnico/retiros")}
+  >
+  <div className="flex items-center gap-4">
+  <div className="p-3 bg-amber-100 rounded-full text-amber-600">
+  <FiTruck size={24} />
+  </div>
+  <div>
+  <h3 className="font-semibold text-gray-900">Retiros y desinstalación</h3>
+  <p className="text-sm text-gray-500">Workflow F.ST-11 y logística</p>
+  </div>
+  </div>
+  </Card>
  </div>
 
  <Card className="p-5">

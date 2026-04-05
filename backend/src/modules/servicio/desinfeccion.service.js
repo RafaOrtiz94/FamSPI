@@ -204,10 +204,16 @@ const generateDisinfectionPDF = async (disinfectionData, providedSignatureBuffer
   if (disinfectionData.chk_tras) setFieldText(form, "chk_tras", "x");
   if (disinfectionData.chk_tras_peo) setFieldText(form, "chk_tras_peo", "x");
   if (disinfectionData.chk_tras_op) setFieldText(form, "chk_tras_op", "x");
-  if (disinfectionData.chk_CVITE) setFieldText(form, "chk_CVTE", "x");
+  if (disinfectionData.chk_CVITE || disinfectionData.chk_CVTE) {
+    setFieldText(form, "chk_CVTE", "x");
+    setFieldText(form, "chk_CVITE", "x");
+  }
   if (disinfectionData.chk_DFD) setFieldText(form, "chk_DFD", "x");
   if (disinfectionData.chk_DFD_peo) setFieldText(form, "chk_DFD_peo", "x");
-  if (disinfectionData.chk_DFD_o) setFieldText(form, "chk_DFD_o", "x");
+  if (disinfectionData.chk_DFD_o || disinfectionData.chk_DFD_op) {
+    setFieldText(form, "chk_DFD_o", "x");
+    setFieldText(form, "chk_DFD_op", "x");
+  }
   if (disinfectionData.chk_CD) setFieldText(form, "chk_CD", "x");
   if (disinfectionData.chk_CD_peo) setFieldText(form, "chk_CD_peo", "x");
   if (disinfectionData.chk_CD_op) setFieldText(form, "chk_CD_op", "x");

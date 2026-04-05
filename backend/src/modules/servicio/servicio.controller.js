@@ -4,6 +4,58 @@ const { google } = require("googleapis");
 const { Readable } = require("stream");
 const { generatePDF } = require("./desinfeccion.service");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
+const {
+  SUPPORTED_WORKFLOW_SOURCE_TYPES,
+  upsertWorkflow,
+  getWorkflow,
+  validateSourceType,
+} = require("./workflowRegistry.service");
+const {
+  appendWorkflowAuditEvent,
+  listWorkflowTimeline,
+} = require("./workflowAudit.service");
+const {
+  listDocumentTemplateCatalog,
+} = require("./documentTemplateRegistry.service");
+const {
+  getDocumentCompatibility,
+  listCatalogCompatibility,
+} = require("./documentCompatibility.service");
+const {
+  getStateMachineCatalog,
+  getStateMachine,
+  resolveStageFromDocumentCode,
+} = require("./workflowStateMachine.service");
+const {
+  getTrainingWorkflowDetail,
+  updateTrainingWorkflowAction,
+} = require("./trainingWorkflow.service");
+const { generateFst06PDFEndpoint } = require("./fst06.service");
+const { generateFst08PDFEndpoint } = require("./fst08.service");
+const { generateFst12PDFEndpoint } = require("./fst12.service");
+const {
+  issueTrainingCertificateEndpoint,
+  deliverTrainingCertificateEndpoint,
+} = require("./trainingCertificates.service");
+const {
+  getWithdrawalWorkflowDetail,
+  listWithdrawalWorkflows,
+  updateWithdrawalWorkflowAction,
+  attachFst11DocumentToWorkflow,
+} = require("./withdrawalWorkflow.service");
+const { issueFst11Document } = require("./fst11.service");
+const {
+  createCorrectiveCase,
+  listCorrectiveCasesWorkspace,
+  getCorrectiveCasesWorkspaceKpis,
+  getCorrectiveCaseDetail,
+  listCorrectiveCaseTimeline,
+  listCorrectiveCaseEvents,
+  listCorrectiveCaseComments,
+  addCorrectiveCaseComment,
+  listCorrectiveCaseEvidences,
+  updateCorrectiveCaseAction,
+} = require("./correctiveCases.service");
 
 // ===============================================================
 // 🔐 CONFIGURACIÓN GOOGLE DRIVE / DOCS
@@ -17,7 +69,8 @@ const auth = new google.auth.GoogleAuth({
 });
 const drive = google.drive({ version: "v3", auth });
 const docs = google.docs({ version: "v1", auth });
-const WORKFLOW_SOURCE_TYPES = new Set(["public_purchase", "private_purchase"]);
+const WORKFLOW_SOURCE_TYPES = new Set(Array.from(SUPPORTED_WORKFLOW_SOURCE_TYPES));
+const STRICT_TEMPLATE_VALIDATION = String(process.env.STRICT_TEMPLATE_VALIDATION || "").trim().toLowerCase() === "true";
 
 const normalizeWorkflowSourceType = (value) => String(value || "").trim().toLowerCase();
 const normalizeWorkflowSourceId = (value) => String(value || "").trim();
@@ -75,12 +128,55 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
     if (!sourceType || !sourceId || !isValidWorkflowSourceType(sourceType)) return;
 
     await ensureWorkflowDocumentsTable();
+    const procedureCode = String(defaults.procedure_code || "ST-01-01").trim().toUpperCase();
+    const documentCode = String(defaults.document_code || "DOC").trim().toUpperCase();
+    const stageKey = defaults.stage_key || resolveStageFromDocumentCode(documentCode) || "document_generated";
+    const payloadSummary = {
+      orden: req.body?.ORDNumero || req.body?.Num_Orden || null,
+      cliente: req.body?.ORDCliente || req.body?.Cliente || req.body?.cliente || null,
+      equipo: req.body?.ORDEquipo || req.body?.Equipo || req.body?.equipo || null,
+    };
+    const templateValidation = req.workflow_template_validation || null;
+    const templateMode =
+      body?.template_mode ||
+      body?.templateMode ||
+      req.body?.template_mode ||
+      req.body?.templateMode ||
+      null;
+    const templateVersion =
+      body?.template_version ||
+      body?.templateVersion ||
+      req.body?.template_version ||
+      req.body?.templateVersion ||
+      templateValidation?.compatibility?.version ||
+      null;
     const metadata = JSON.stringify({
       message: body?.message || null,
-      payload_summary: {
-        orden: req.body?.ORDNumero || req.body?.Num_Orden || null,
-        cliente: req.body?.ORDCliente || req.body?.Cliente || req.body?.cliente || null,
-        equipo: req.body?.ORDEquipo || req.body?.Equipo || req.body?.equipo || null,
+      payload_summary: payloadSummary,
+      emission: {
+        emitted_at: new Date().toISOString(),
+        emitted_by: {
+          user_id: req.user?.id || null,
+          email: req.user?.email || null,
+        },
+        origin: {
+          source_type: sourceType,
+          source_id: sourceId,
+          request_id: Number.isFinite(Number(req.body?.request_id)) ? Number(req.body?.request_id) : null,
+          procedure_code: procedureCode,
+          stage_key: stageKey,
+          document_code: documentCode,
+        },
+      },
+      template: {
+        mode: templateMode || null,
+        version: templateVersion || null,
+        compatibility_status: templateValidation?.compatibility?.status || null,
+        compatibility_checked_at: templateValidation?.validated_at || null,
+      },
+      drive: {
+        file_id: driveFileId || null,
+        folder_id: driveFolderId || null,
       },
       tracked_at: new Date().toISOString(),
     });
@@ -106,7 +202,7 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
                 metadata = $4::jsonb,
                 updated_at = now()
           WHERE id = $5`,
-        [defaults.stage_key || null, driveFolderId, requestId, metadata, existing[0].id],
+        [stageKey, driveFolderId, requestId, metadata, existing[0].id],
       );
     } else {
       const { rows: inserted } = await db.query(
@@ -119,8 +215,8 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
         [
           sourceType,
           sourceId,
-          defaults.document_code || "DOC",
-          defaults.stage_key || null,
+          documentCode,
+          stageKey,
           driveFileId,
           driveFolderId,
           requestId,
@@ -145,6 +241,37 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
           .catch((err) => logger.warn({ err }, "Error asíncrono resolviendo integridad de workflow de servicio"));
       }
     }
+
+    await upsertWorkflow({
+      sourceType,
+      sourceId,
+      requestId,
+      clientName: payloadSummary.cliente || null,
+      equipmentName: payloadSummary.equipo || null,
+      procedureCode,
+      globalStatus: "in_progress",
+      currentStage: stageKey,
+      metadata: {
+        last_document_code: documentCode,
+        last_document_at: new Date().toISOString(),
+      },
+      user: req.user,
+    });
+
+    await appendWorkflowAuditEvent({
+      sourceType,
+      sourceId,
+      procedureCode,
+      eventType: "document_generated",
+      stageKey,
+      actor: req.user,
+      payload: {
+        document_code: documentCode,
+        drive_file_id: driveFileId,
+        drive_folder_id: driveFolderId,
+        request_id: requestId,
+      },
+    });
   } catch (error) {
     console.warn("⚠️ No se pudo registrar documento de workflow ST-01-01:", error?.message || error);
   }
@@ -153,10 +280,59 @@ const trackWorkflowDocument = async (req, body, defaults = {}) => {
 const withWorkflowTracking = (handler, defaults = {}) => async (req, res) => {
   const originalJson = res.json.bind(res);
   res.json = (body) => {
-    trackWorkflowDocument(req, body, defaults);
-    return originalJson(body);
+    const bodyWithValidation =
+      body && typeof body === "object" && req.workflow_template_validation
+        ? { ...body, workflow_template_validation: req.workflow_template_validation }
+        : body;
+    trackWorkflowDocument(req, bodyWithValidation, defaults);
+    return originalJson(bodyWithValidation);
   };
   return handler(req, res);
+};
+
+const runTemplateCompatibilityGate = async (req, res, documentCode, options = {}) => {
+  try {
+    const compatibility = await getDocumentCompatibility(documentCode);
+    req.workflow_template_validation = compatibility;
+    if (compatibility?.is_compatible) {
+      return { ok: true, compatibility };
+    }
+
+    await appendWorkflowAuditEvent({
+      sourceType: req.body?.source_type || req.body?.sourceType || "manual",
+      sourceId: req.body?.source_id || req.body?.sourceId || String(req.body?.request_id || "template-validation"),
+      procedureCode: "ST-01-01",
+      eventType: "template_incompatibility_detected",
+      stageKey: resolveStageFromDocumentCode(documentCode) || "template_validation",
+      actor: req.user,
+      payload: {
+        document_code: documentCode,
+        issues: compatibility?.issues || [],
+      },
+    });
+
+    const strictValidation = Boolean(options?.strict) || STRICT_TEMPLATE_VALIDATION;
+    if (strictValidation) {
+      res.status(422).json({
+        ok: false,
+        code: "DOCUMENT_TEMPLATE_INCOMPATIBLE",
+        message: `La plantilla ${documentCode} es incompatible con el contrato de campos`,
+        compatibility,
+      });
+      return { ok: false, compatibility };
+    }
+
+    return { ok: true, compatibility };
+  } catch (error) {
+    logger.warn({ error, documentCode }, "No se pudo ejecutar validacion de compatibilidad documental");
+    req.workflow_template_validation = {
+      ok: false,
+      document_code: documentCode,
+      is_compatible: false,
+      issues: [{ code: "VALIDATION_ERROR", message: "Error ejecutando validacion de plantilla" }],
+    };
+    return { ok: true, compatibility: req.workflow_template_validation };
+  }
 };
 
 // ===============================================================
@@ -580,6 +756,9 @@ const createMantenimientoAnual = async (req, res) => {
 // ===============================================================
 const generateDisinfectionPDF = withWorkflowTracking(async (req, res) => {
   try {
+    const gate = await runTemplateCompatibilityGate(req, res, "F.ST-02");
+    if (!gate.ok) return;
+
     console.log("🎯 Controller: Received disinfection PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
       hasBody: !!req.body,
@@ -605,6 +784,9 @@ const generateDisinfectionPDF = withWorkflowTracking(async (req, res) => {
 // ===============================================================
 const generateTrainingCoordinationPDF = withWorkflowTracking(async (req, res) => {
   try {
+    const gate = await runTemplateCompatibilityGate(req, res, "F.ST-04");
+    if (!gate.ok) return;
+
     console.log("🎯 Controller: Received training coordination PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
       hasBody: !!req.body,
@@ -634,6 +816,9 @@ const generateTrainingCoordinationPDF = withWorkflowTracking(async (req, res) =>
 // ===============================================================
 const generateAttendanceListPDF = withWorkflowTracking(async (req, res) => {
   try {
+    const gate = await runTemplateCompatibilityGate(req, res, "F.ST-05");
+    if (!gate.ok) return;
+
     console.log("📝 Controller: Received training attendance list PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
       hasBody: !!req.body,
@@ -658,11 +843,302 @@ const generateAttendanceListPDF = withWorkflowTracking(async (req, res) => {
   }
 }, { document_code: "F.ST-05", stage_key: "entrenamiento_asistencia" });
 
+const getTrainingWorkflowStatus = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type || req.query?.sourceType);
+    const sourceId = normalizeWorkflowSourceId(req.query?.source_id || req.query?.sourceId);
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!validateSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type invalido" });
+    }
+
+    const detail = await getTrainingWorkflowDetail({
+      source_type: sourceType,
+      source_id: sourceId,
+    });
+    if (!detail) {
+      return res.status(404).json({
+        ok: false,
+        error: "No existe workflow de entrenamiento para la fuente indicada",
+      });
+    }
+
+    return res.json({
+      ok: true,
+      source_type: sourceType,
+      source_id: sourceId,
+      workflow: detail,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error consultando workflow de entrenamiento");
+    return res.status(500).json({ ok: false, error: "Error consultando workflow de entrenamiento" });
+  }
+};
+
+const postTrainingWorkflowAction = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.body?.source_type || req.body?.sourceType);
+    const sourceId = normalizeWorkflowSourceId(req.body?.source_id || req.body?.sourceId);
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!validateSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type invalido" });
+    }
+    const action = String(req.body?.action || "").trim();
+    if (!action) {
+      return res.status(400).json({ ok: false, error: "action es obligatoria" });
+    }
+
+    const detail = await updateTrainingWorkflowAction({
+      action,
+      payload: req.body,
+      user: req.user,
+    });
+
+    return res.json({
+      ok: true,
+      source_type: sourceType,
+      source_id: sourceId,
+      action,
+      workflow: detail,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error ejecutando accion de workflow de entrenamiento");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error ejecutando accion de workflow",
+      code: error?.code || "TRAINING_WORKFLOW_ACTION_ERROR",
+    });
+  }
+};
+
+const generateTrainingEvaluationPDF = async (req, res) =>
+  generateFst06PDFEndpoint(req, res);
+
+const generateTrainingSpecialistEvaluationPDF = async (req, res) =>
+  generateFst08PDFEndpoint(req, res);
+
+const generateTrainingConformityPDF = async (req, res) =>
+  generateFst12PDFEndpoint(req, res);
+
+const issueTrainingCertificate = async (req, res) =>
+  issueTrainingCertificateEndpoint(req, res);
+
+const deliverTrainingCertificate = async (req, res) =>
+  deliverTrainingCertificateEndpoint(req, res);
+
+const listWithdrawalWorkflowStatus = async (req, res) => {
+  try {
+    const rows = await listWithdrawalWorkflows({
+      q: req.query?.q || null,
+      status: req.query?.status || null,
+      sourceType: req.query?.source_type || null,
+      limit: req.query?.limit || 100,
+    });
+    return res.json({
+      ok: true,
+      count: rows.length,
+      rows,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando workflows de retiro");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando workflows de retiro",
+      code: error?.code || "WITHDRAWAL_WORKFLOW_LIST_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const getWithdrawalWorkflowStatus = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type || req.query?.sourceType);
+    const sourceId = normalizeWorkflowSourceId(req.query?.source_id || req.query?.sourceId);
+    const requestId = Number.isFinite(Number(req.query?.request_id || req.query?.requestId))
+      ? Number(req.query.request_id || req.query.requestId)
+      : null;
+
+    if ((!sourceType || !sourceId) && !requestId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debe enviar source_type + source_id o request_id",
+      });
+    }
+
+    const detail = await getWithdrawalWorkflowDetail({
+      sourceType: sourceType || null,
+      sourceId: sourceId || null,
+      requestId,
+      createIfMissing: false,
+    });
+    if (!detail) {
+      return res.status(404).json({
+        ok: false,
+        error: "No existe workflow de retiro para la referencia indicada",
+      });
+    }
+    return res.json({
+      ok: true,
+      source_type: detail.source_type,
+      source_id: detail.source_id,
+      request_id: detail.request_id || null,
+      workflow: detail,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error consultando workflow de retiro");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error consultando workflow de retiro",
+      code: error?.code || "WITHDRAWAL_WORKFLOW_GET_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const postWithdrawalWorkflowAction = async (req, res) => {
+  try {
+    const action = String(req.body?.action || "").trim();
+    if (!action) {
+      return res.status(400).json({ ok: false, error: "action es obligatoria" });
+    }
+    const detail = await updateWithdrawalWorkflowAction({
+      action,
+      payload: req.body || {},
+      user: req.user,
+    });
+    return res.json({
+      ok: true,
+      action,
+      source_type: detail.source_type,
+      source_id: detail.source_id,
+      request_id: detail.request_id || null,
+      workflow: detail,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error ejecutando accion en workflow de retiro");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error ejecutando acción en workflow de retiro",
+      code: error?.code || "WITHDRAWAL_WORKFLOW_ACTION_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const generateWithdrawalActPDF = async (req, res) => {
+  try {
+    const gate = await runTemplateCompatibilityGate(req, res, "F.ST-11");
+    if (!gate.ok) return;
+
+    const sourceType = normalizeWorkflowSourceType(req.body?.source_type || req.body?.sourceType);
+    const sourceId = normalizeWorkflowSourceId(req.body?.source_id || req.body?.sourceId);
+    const requestId = Number.isFinite(Number(req.body?.request_id || req.body?.requestId))
+      ? Number(req.body.request_id || req.body.requestId)
+      : null;
+
+    if ((!sourceType || !sourceId) && !requestId) {
+      return res.status(400).json({
+        ok: false,
+        error: "Debe enviar source_type + source_id o request_id para emitir F.ST-11",
+      });
+    }
+
+    const workflow = await getWithdrawalWorkflowDetail({
+      sourceType: sourceType || null,
+      sourceId: sourceId || null,
+      requestId,
+      createIfMissing: true,
+    });
+    if (!workflow) {
+      return res.status(404).json({
+        ok: false,
+        error: "No se encontró workflow para emitir F.ST-11",
+      });
+    }
+    const disinfectionStatus = workflow?.workflow_state?.disinfection?.status || "pending";
+    const packagingStatus = workflow?.workflow_state?.packaging?.status || "pending";
+    const pickedUpAt = workflow?.workflow_state?.logistics?.picked_up_at || null;
+    if (disinfectionStatus !== "completed" || packagingStatus !== "completed" || !pickedUpAt) {
+      return res.status(409).json({
+        ok: false,
+        error: "No se puede emitir F.ST-11 sin desinfección, embalaje y retiro ejecutado",
+        code: "FST11_PRECONDITIONS_NOT_MET",
+        details: {
+          disinfection_status: disinfectionStatus,
+          packaging_status: packagingStatus,
+          picked_up_at: pickedUpAt,
+        },
+      });
+    }
+
+    const issued = await issueFst11Document({
+      sourceType: workflow.source_type,
+      sourceId: workflow.source_id,
+      requestId: workflow.request_id || null,
+      clientName: workflow.client_name || null,
+      equipmentName: workflow.equipment_name || null,
+      workflowStatus: workflow.workflow_status,
+      workflowState: workflow.workflow_state,
+      notes: req.body?.notes || null,
+      user: req.user,
+    });
+
+    const detail = await attachFst11DocumentToWorkflow({
+      sourceType: workflow.source_type,
+      sourceId: workflow.source_id,
+      requestId: workflow.request_id || null,
+      fileId: issued.file_id,
+      link: issued.link,
+      folderId: issued.folder_id,
+      generatedAt: issued.generated_at,
+      templateMode: issued.template_mode,
+      signedClient: req.body?.signed_client || false,
+      signedTechnical: req.body?.signed_technical || false,
+      notes: req.body?.notes || null,
+      user: req.user,
+    });
+
+    return res.json({
+      ok: true,
+      message: "F.ST-11 emitido y registrado correctamente",
+      source_type: detail.source_type,
+      source_id: detail.source_id,
+      request_id: detail.request_id || null,
+      driveFolderId: issued.folder_id,
+      pdfId: issued.file_id,
+      pdfLink: issued.link,
+      template_mode: issued.template_mode,
+      workflow: detail,
+      workflow_template_validation: req.workflow_template_validation || null,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error emitiendo F.ST-11");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error emitiendo F.ST-11",
+      code: error?.code || "WITHDRAWAL_FST11_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
 // ===============================================================
 // 🔧 VERIFICACIÓN DE EQUIPOS NUEVOS
 // ===============================================================
 const generateEquipmentVerificationPDF = withWorkflowTracking(async (req, res) => {
   try {
+    const gate = await runTemplateCompatibilityGate(req, res, "F.ST-09", { strict: true });
+    if (!gate.ok) return;
+
     console.log("🔧 Controller: Received equipment verification PDF request", {
       user: req.user?.email || req.user?.name || 'Unknown',
       hasBody: !!req.body,
@@ -771,6 +1247,483 @@ const listWorkflowDocumentsSummary = async (req, res) => {
   }
 };
 
+const getWorkflowReportingSummary = async (_req, res) => {
+  const warnings = [];
+  const safeCount = async ({ key, sql, values = [], column = "total" }) => {
+    try {
+      const { rows } = await db.query(sql, values);
+      return Number(rows?.[0]?.[column] || 0);
+    } catch (error) {
+      warnings.push({
+        metric: key,
+        message: error?.message || "query_failed",
+      });
+      return 0;
+    }
+  };
+
+  try {
+    const [
+      workflowsTotal,
+      workflowsWithoutDocuments,
+      openReinspectionsPublic,
+      openReinspectionsPrivate,
+      sparePartsPending,
+      overdueReprogrammings,
+      overdueCertificates,
+    ] = await Promise.all([
+      safeCount({
+        key: "workflows_total",
+        sql: `SELECT COUNT(*)::int AS total FROM servicio.workflows`,
+      }),
+      safeCount({
+        key: "workflows_without_documents",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM servicio.workflows w
+          LEFT JOIN (
+            SELECT source_type, source_id, procedure_code, COUNT(*)::int AS total_docs
+            FROM servicio.workflow_documents
+            GROUP BY source_type, source_id, procedure_code
+          ) d
+            ON d.source_type = w.source_type
+           AND d.source_id = w.source_id
+           AND d.procedure_code = w.procedure_code
+          WHERE COALESCE(d.total_docs, 0) = 0
+        `,
+      }),
+      safeCount({
+        key: "open_reinspections_public",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM equipment_purchase_requests
+          WHERE inspection_site_status = 'non_compliant_reinspection_pending'
+        `,
+      }),
+      safeCount({
+        key: "open_reinspections_private",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM private_purchase_requests
+          WHERE site_inspection_status = 'non_compliant_reinspection_pending'
+        `,
+      }),
+      safeCount({
+        key: "spare_parts_pending_quote",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM servicio.corrective_cases
+          WHERE status IN ('parts_pending_quote', 'parts_pending_client_approval')
+        `,
+      }),
+      safeCount({
+        key: "overdue_reprogrammings",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM servicio.preventive_plan_items
+          WHERE status = 'reprogrammed'
+            AND COALESCE(reprogrammed_to_date, planned_date) < CURRENT_DATE
+        `,
+      }),
+      safeCount({
+        key: "overdue_certificates",
+        sql: `
+          SELECT COUNT(*)::int AS total
+          FROM servicio.training_event_certificates
+          WHERE delivery_deadline_at IS NOT NULL
+            AND delivered_at IS NULL
+            AND delivery_deadline_at < now()
+        `,
+      }),
+    ]);
+
+    return res.json({
+      ok: true,
+      data: {
+        generated_at: new Date().toISOString(),
+        metrics: {
+          workflows_total: workflowsTotal,
+          workflows_without_documents: workflowsWithoutDocuments,
+          open_reinspections: openReinspectionsPublic + openReinspectionsPrivate,
+          open_reinspections_public: openReinspectionsPublic,
+          open_reinspections_private: openReinspectionsPrivate,
+          spare_parts_pending_quote: sparePartsPending,
+          overdue_reprogrammings: overdueReprogrammings,
+          overdue_certificates_delivery: overdueCertificates,
+        },
+        warnings,
+      },
+    });
+  } catch (err) {
+    console.error("❌ Error construyendo resumen operativo ST:", err);
+    return res.status(500).json({ ok: false, error: "Error al construir resumen operativo ST" });
+  }
+};
+
+const getWorkflowCatalog = async (req, res) => {
+  try {
+    const withCompatibility = String(req.query?.with_compatibility || "true").toLowerCase() !== "false";
+    const includeInactive = String(req.query?.include_inactive || "false").toLowerCase() === "true";
+    const catalogRows = await listDocumentTemplateCatalog({ includeInactive });
+    if (!withCompatibility) {
+      return res.json({ ok: true, count: catalogRows.length, rows: catalogRows });
+    }
+
+    const compatibilityRows = await listCatalogCompatibility({ includeInactive });
+    const compatibilityMap = new Map(compatibilityRows.map((row) => [row.document_code, row]));
+    const rows = catalogRows.map((item) => ({
+      ...item,
+      compatibility: compatibilityMap.get(item.document_code) || null,
+    }));
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    logger.error({ error }, "Error listando catalogo documental de workflow");
+    return res.status(500).json({ ok: false, error: "Error al listar catalogo documental de workflow" });
+  }
+};
+
+const getWorkflowStateMachines = async (_req, res) => {
+  try {
+    const rows = getStateMachineCatalog();
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    logger.error({ error }, "Error listando maquinas de estado de workflow");
+    return res.status(500).json({ ok: false, error: "Error al listar maquinas de estado" });
+  }
+};
+
+const getWorkflowRegistryStatus = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type);
+    const sourceId = normalizeWorkflowSourceId(req.query?.source_id);
+    const procedureCode = String(req.query?.procedure_code || "ST-01-01").trim().toUpperCase();
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!validateSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type invalido" });
+    }
+
+    const workflow = await getWorkflow({ sourceType, sourceId, procedureCode });
+    const machine = getStateMachine(procedureCode);
+    return res.json({
+      ok: true,
+      source_type: sourceType,
+      source_id: sourceId,
+      procedure_code: procedureCode,
+      workflow: workflow || null,
+      state_machine: machine || null,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error consultando estado del workflow");
+    return res.status(500).json({ ok: false, error: "Error al consultar estado del workflow" });
+  }
+};
+
+const upsertWorkflowRegistryStatus = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.body?.source_type || req.body?.sourceType);
+    const sourceId = normalizeWorkflowSourceId(req.body?.source_id || req.body?.sourceId);
+    const procedureCode = String(req.body?.procedure_code || "ST-01-01").trim().toUpperCase();
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!validateSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type invalido" });
+    }
+
+    const row = await upsertWorkflow({
+      sourceType,
+      sourceId,
+      requestId: req.body?.request_id || req.body?.requestId || null,
+      clientName: req.body?.client_name || req.body?.clientName || null,
+      equipmentName: req.body?.equipment_name || req.body?.equipmentName || null,
+      procedureCode,
+      globalStatus: req.body?.global_status || req.body?.globalStatus || null,
+      currentStage: req.body?.current_stage || req.body?.currentStage || null,
+      metadata: req.body?.metadata || {},
+      user: req.user,
+    });
+
+    await appendWorkflowAuditEvent({
+      sourceType,
+      sourceId,
+      procedureCode,
+      eventType: "workflow_upserted",
+      stageKey: row?.current_stage || null,
+      actor: req.user,
+      payload: {
+        request_id: row?.request_id || null,
+        global_status: row?.global_status || null,
+        current_stage: row?.current_stage || null,
+      },
+    });
+
+    return res.status(201).json({ ok: true, row });
+  } catch (error) {
+    logger.error({ error }, "Error actualizando registro de workflow");
+    return res.status(500).json({ ok: false, error: "Error al actualizar registro de workflow" });
+  }
+};
+
+const getWorkflowTimelineEvents = async (req, res) => {
+  try {
+    const sourceType = normalizeWorkflowSourceType(req.query?.source_type);
+    const sourceId = normalizeWorkflowSourceId(req.query?.source_id);
+    const procedureCode = String(req.query?.procedure_code || "ST-01-01").trim().toUpperCase();
+    const limit = clampLimit(req.query?.limit, { fallback: 100, max: 200 });
+    if (!sourceType || !sourceId) {
+      return res.status(400).json({ ok: false, error: "source_type y source_id son obligatorios" });
+    }
+    if (!validateSourceType(sourceType)) {
+      return res.status(400).json({ ok: false, error: "source_type invalido" });
+    }
+
+    const rows = await listWorkflowTimeline({
+      sourceType,
+      sourceId,
+      procedureCode,
+      limit,
+    });
+    return res.json({
+      ok: true,
+      source_type: sourceType,
+      source_id: sourceId,
+      procedure_code: procedureCode,
+      count: rows.length,
+      rows,
+    });
+  } catch (error) {
+    logger.error({ error }, "Error listando timeline de workflow");
+    return res.status(500).json({ ok: false, error: "Error al listar timeline de workflow" });
+  }
+};
+
+// ===============================================================
+// 🔧 ST-01-03 CORRECTIVOS / CEAC
+// ===============================================================
+const createCorrectiveCaseController = async (req, res) => {
+  try {
+    const detail = await createCorrectiveCase({
+      actorUser: req.user,
+      payload: req.body || {},
+    });
+    return res.status(201).json({ ok: true, case: detail });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error creando caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error creando caso correctivo",
+      code: error?.code || "CORRECTIVE_CASE_CREATE_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const listCorrectiveCasesWorkspaceController = async (req, res) => {
+  try {
+    const rows = await listCorrectiveCasesWorkspace({
+      actorUser: req.user,
+      status: req.query?.status || null,
+      classification: req.query?.classification || null,
+      q: req.query?.q || null,
+      onlyMine: String(req.query?.only_mine || "").toLowerCase() === "true",
+      limit: req.query?.limit || 250,
+    });
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando workspace de casos correctivos");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando workspace correctivo",
+      code: error?.code || "CORRECTIVE_CASE_WORKSPACE_LIST_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const getCorrectiveCasesWorkspaceKpisController = async (req, res) => {
+  try {
+    const data = await getCorrectiveCasesWorkspaceKpis({
+      actorUser: req.user,
+      status: req.query?.status || null,
+      classification: req.query?.classification || null,
+      q: req.query?.q || null,
+      onlyMine: String(req.query?.only_mine || "").toLowerCase() === "true",
+    });
+    return res.json({ ok: true, data });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error calculando KPI de casos correctivos");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error calculando KPI correctivo",
+      code: error?.code || "CORRECTIVE_CASE_WORKSPACE_KPI_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const getCorrectiveCaseDetailController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const detail = await getCorrectiveCaseDetail(caseId, req.user);
+    return res.json({ ok: true, case: detail });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error consultando detalle de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error consultando caso correctivo",
+      code: error?.code || "CORRECTIVE_CASE_DETAIL_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const listCorrectiveCaseTimelineController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const rows = await listCorrectiveCaseTimeline(caseId, req.user);
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando timeline de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando timeline correctivo",
+      code: error?.code || "CORRECTIVE_CASE_TIMELINE_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const listCorrectiveCaseEventsController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const rows = await listCorrectiveCaseEvents(caseId, req.user);
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando eventos de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando eventos correctivos",
+      code: error?.code || "CORRECTIVE_CASE_EVENTS_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const listCorrectiveCaseCommentsController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const rows = await listCorrectiveCaseComments(caseId, req.user);
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando comentarios de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando comentarios correctivos",
+      code: error?.code || "CORRECTIVE_CASE_COMMENTS_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const addCorrectiveCaseCommentController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const comment = await addCorrectiveCaseComment({
+      caseId,
+      actorUser: req.user,
+      message: req.body?.message,
+      visibility: req.body?.visibility || "public",
+    });
+    return res.status(201).json({ ok: true, comment });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error agregando comentario a caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error agregando comentario",
+      code: error?.code || "CORRECTIVE_CASE_COMMENT_CREATE_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const listCorrectiveCaseEvidencesController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const rows = await listCorrectiveCaseEvidences(caseId, req.user);
+    return res.json({ ok: true, count: rows.length, rows });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error listando evidencias de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error listando evidencias",
+      code: error?.code || "CORRECTIVE_CASE_EVIDENCE_LIST_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
+const postCorrectiveCaseActionController = async (req, res) => {
+  try {
+    const caseId = Number(req.params.id);
+    if (!Number.isFinite(caseId)) {
+      return res.status(400).json({ ok: false, error: "id inválido" });
+    }
+    const action = String(req.body?.action || "").trim();
+    if (!action) {
+      return res.status(400).json({ ok: false, error: "action es obligatoria" });
+    }
+    const detail = await updateCorrectiveCaseAction({
+      caseId,
+      action,
+      payload: req.body || {},
+      actorUser: req.user,
+    });
+    return res.json({
+      ok: true,
+      action,
+      case: detail,
+    });
+  } catch (error) {
+    const status = Number.isFinite(Number(error?.status)) ? Number(error.status) : 500;
+    logger.error({ error }, "Error ejecutando acción de caso correctivo");
+    return res.status(status).json({
+      ok: false,
+      error: error?.message || "Error ejecutando acción correctiva",
+      code: error?.code || "CORRECTIVE_CASE_ACTION_ERROR",
+      details: error?.details || null,
+    });
+  }
+};
+
 // ===============================================================
 // ✅ EXPORTS
 // ===============================================================
@@ -791,7 +1744,34 @@ module.exports = {
   generateDisinfectionPDF,
   generateTrainingCoordinationPDF,
   generateAttendanceListPDF,
+  getTrainingWorkflowStatus,
+  postTrainingWorkflowAction,
+  generateTrainingEvaluationPDF,
+  generateTrainingSpecialistEvaluationPDF,
+  generateTrainingConformityPDF,
+  issueTrainingCertificate,
+  deliverTrainingCertificate,
+  listWithdrawalWorkflowStatus,
+  getWithdrawalWorkflowStatus,
+  postWithdrawalWorkflowAction,
+  generateWithdrawalActPDF,
   generateEquipmentVerificationPDF,
   listWorkflowDocuments,
   listWorkflowDocumentsSummary,
+  getWorkflowReportingSummary,
+  getWorkflowCatalog,
+  getWorkflowStateMachines,
+  getWorkflowRegistryStatus,
+  upsertWorkflowRegistryStatus,
+  getWorkflowTimelineEvents,
+  createCorrectiveCaseController,
+  listCorrectiveCasesWorkspaceController,
+  getCorrectiveCasesWorkspaceKpisController,
+  getCorrectiveCaseDetailController,
+  listCorrectiveCaseTimelineController,
+  listCorrectiveCaseEventsController,
+  listCorrectiveCaseCommentsController,
+  addCorrectiveCaseCommentController,
+  listCorrectiveCaseEvidencesController,
+  postCorrectiveCaseActionController,
 };

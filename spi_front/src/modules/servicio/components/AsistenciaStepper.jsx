@@ -1,4 +1,4 @@
-﻿import React, { useState } from "react";
+import React, { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useSearchParams } from "react-router-dom";
 import { FiChevronLeft, FiChevronRight, FiCheckCircle, FiUpload, FiPlus, FiTrash2 } from "react-icons/fi";
@@ -29,13 +29,16 @@ const STEPS = [
  description: "Firma digital del especialista",
  },
 ];
-const AsistenciaStepper = () => {
+const MAX_ATTENDEES = 30;
+
+const AsistenciaStepper = ({ workflowContext: workflowContextProp = null, onCompleted = null, hideHeader = false }) => {
  const [searchParams] = useSearchParams();
- const workflowContext = {
+ const queryWorkflowContext = {
  source_type: searchParams.get("source_type") || undefined,
  source_id: searchParams.get("source_id") || undefined,
  request_id: searchParams.get("request_id") || undefined,
  };
+ const workflowContext = workflowContextProp || queryWorkflowContext;
  const [currentStep, setCurrentStep] = useState(0);
  const [completedSteps, setCompletedSteps] = useState(new Set());
  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -75,7 +78,7 @@ const AsistenciaStepper = () => {
  }
  };
  const addAttendee = () => {
- if (attendees.length < 7) {
+ if (attendees.length < MAX_ATTENDEES) {
  const newAttendee = {
  id: attendees.length + 1,
  nombre: "",
@@ -146,6 +149,9 @@ const AsistenciaStepper = () => {
  setIsGeneratingPDF(false);
  return;
  }
+ const activeAttendees = attendees.filter((attendee) => attendee.nombre.trim());
+ const templateAttendees = activeAttendees.slice(0, 7);
+
  // Prepare data for PDF generation
  const attendanceData = {
  // 1. DATOS GENERALES DEL ENTRENAMIENTO
@@ -155,8 +161,18 @@ const AsistenciaStepper = () => {
  ORDEquipo: data.ORDEquipo,
  ORDSerie: data.ORDSerie,
  ORDResponsable: data.ORDResponsable,
- // 2. TABLA DE ASISTENCIA (Hasta 7 asistentes)
- ...attendees.reduce((acc, attendee, index) => {
+ attendees: activeAttendees.map((attendee) => ({
+ nombre: attendee.nombre,
+ cargo: attendee.cargo,
+ email: attendee.email,
+ asistencia: {
+ dia1: Boolean(attendee.asistencia?.dia1),
+ dia2: Boolean(attendee.asistencia?.dia2),
+ dia3: Boolean(attendee.asistencia?.dia3),
+ },
+ })),
+ // 2. TABLA DE ASISTENCIA (campos de plantilla reales: Dia_1, Dia_1_2..7)
+ ...templateAttendees.reduce((acc, attendee, index) => {
  const num = index + 1;
  acc[`Nombres_Apellidos${num}`] = attendee.nombre;
  acc[`Cargo${num}`] = attendee.cargo;
@@ -164,18 +180,22 @@ const AsistenciaStepper = () => {
  return acc;
  }, {}),
  // 3. ASISTENCIA POR DIA
- ...attendees.reduce((acc, attendee, index) => {
+ ...templateAttendees.reduce((acc, attendee, index) => {
  const num = index + 1;
- acc[`Dia_1_${num}`] = attendee.asistencia.dia1 ? "X" : "";
- acc[`Dia_2_${num}`] = attendee.asistencia.dia2 ? "X" : "";
- acc[`Dia_3_${num}`] = attendee.asistencia.dia3 ? "X" : "";
+ const day1Field = num === 1 ? "Dia_1" : `Dia_1_${num}`;
+ const day2Field = num === 1 ? "Dia_2" : `Dia_2_${num}`;
+ const day3Field = num === 1 ? "Dia_3" : `Dia_3_${num}`;
+ acc[day1Field] = attendee.asistencia.dia1 ? "X" : "";
+ acc[day2Field] = attendee.asistencia.dia2 ? "X" : "";
+ acc[day3Field] = attendee.asistencia.dia3 ? "X" : "";
  return acc;
  }, {}),
  };
  console.log("Submitting attendance data:", {
  ordenNumero: attendanceData.Num_Orden,
  cliente: attendanceData.ORDCliente,
- attendeesCount: attendees.filter(a => a.nombre.trim()).length
+ attendeesCount: activeAttendees.length,
+ overflowAttendees: Math.max(0, activeAttendees.length - 7),
  });
  const result = await generateAttendanceListPDF(attendanceData, workflowContext);
  console.log("API Response:", result);
@@ -191,6 +211,7 @@ const AsistenciaStepper = () => {
  } else {
  setIsCompleted(true);
  setCompletionData(result);
+ if (typeof onCompleted === "function") onCompleted(result);
  showToast(`Lista de asistencia registrada: ${result.ordenNumero} - ${result.cliente}`, "success");
  }
  } else {
@@ -208,6 +229,7 @@ const AsistenciaStepper = () => {
  setIsCompleted(true);
  setCompletionData(pendingResult || {});
  setSigningDoc(null);
+ if (typeof onCompleted === "function") onCompleted(pendingResult || {});
  showToast("Documento firmado digitalmente", "success");
  };
  const renderStepIndicator = () => (
@@ -354,13 +376,13 @@ const AsistenciaStepper = () => {
  </div>
  <Card className="p-4">
  <div className="flex justify-between items-center mb-4">
- <h4 className="font-medium text-gray-900">Asistentes Registrados ({attendees.length}/7)</h4>
+ <h4 className="font-medium text-gray-900">Asistentes Registrados ({attendees.length}/{MAX_ATTENDEES})</h4>
  <Button
  type="button"
  variant="secondary"
  size="sm"
  onClick={addAttendee}
- disabled={attendees.length >= 7}
+ disabled={attendees.length >= MAX_ATTENDEES}
  icon={FiPlus}
  >
  Agregar Asistente
@@ -429,6 +451,11 @@ const AsistenciaStepper = () => {
  </div>
  ))}
  </div>
+ {attendees.filter((attendee) => attendee.nombre.trim()).length > 7 && (
+ <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+ La plantilla F.ST-05 permite 7 asistentes visibles. Los adicionales se registrarán en el workflow para trazabilidad y reglas de aprobación.
+ </div>
+ )}
  </Card>
  </div>
  );
@@ -609,7 +636,7 @@ const AsistenciaStepper = () => {
  if (isCompleted && completionData) {
  return (
  <div className="max-w-4xl mx-auto p-6">
- <div className="mb-8">
+ {!hideHeader && <div className="mb-8">
  <div className="text-center">
  <div className="mx-auto w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
  <FiCheckCircle className="w-8 h-8 text-green-600" />
@@ -621,7 +648,7 @@ const AsistenciaStepper = () => {
  La lista de asistencia ha sido registrada correctamente
  </p>
  </div>
- </div>
+ </div>}
  <Card className="p-6 mb-6">
  <div className="space-y-4">
  <h3 className="text-lg font-semibold text-gray-900 mb-4">Resumen de la Lista de Asistencia</h3>
@@ -707,14 +734,14 @@ const AsistenciaStepper = () => {
  }
  return (
  <div className="max-w-6xl mx-auto p-6">
- <div className="mb-8">
+ {!hideHeader && <div className="mb-8">
  <h1 className="text-2xl font-bold text-gray-900 text-center">
  Lista de Asistencia de Entrenamiento
  </h1>
  <p className="text-sm text-gray-500 text-center mt-2">
  Formulario F.ST-05 - V03 - Control de asistencia a entrenamientos
  </p>
- </div>
+ </div>}
  {renderStepIndicator()}
  <form onSubmit={handleSubmit(onSubmit)}>
  <Card className="p-6 mb-6">
@@ -767,4 +794,3 @@ const AsistenciaStepper = () => {
  );
 };
 export default AsistenciaStepper;
-

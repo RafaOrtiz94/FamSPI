@@ -41,6 +41,8 @@ const dashboardRoutes = require("../modules/dashboard/dashboard.routes");
 const supportTicketsRoutes = require("../modules/support-tickets/supportTickets.routes");
 const viaticosRoutes = require("../modules/viaticos/viaticos.routes");
 const mantenimientosRoutes = require("../modules/mantenimientos/mantenimientos.routes");
+const integrationsRoutes = require("../modules/integrations/integrations.routes");
+const externalCasesRoutes = require("../modules/servicio/externalCases.routes");
 const internalJobsRouter = require("./internalJobs.routes");
 
 function mountPublicRoutes(app) {
@@ -67,6 +69,8 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/determinations-catalog", determinationsCatalogRoutes);
   app.use("/api/v1/calculation-templates", calculationTemplatesRoutes);
   app.use("/api/v1/mantenimientos", mantenimientosRoutes);
+  app.use("/api/v1/integrations", integrationsRoutes);
+  app.use("/api/v1/servicio/external-cases", externalCasesRoutes);
   app.use("/api/v1/users", usersRoutes);
   app.use("/api/v1/collaborators", collaboratorsRoutes);
   app.use("/api/v1/offboarding", offboardingRoutes);

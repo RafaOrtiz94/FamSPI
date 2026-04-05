@@ -27,6 +27,7 @@ const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/busines
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
+const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
 
 const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
@@ -48,6 +49,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     startBusinessCaseSheetGenerationQueueJob();
     startPermisosRecoveryCoordinationExpiryJob();
     startDatabaseBackupJob();
+    startExternalCaseSyncJob();
   } else {
     logger.info("Jobs internos deshabilitados; usar scheduler externo");
   }

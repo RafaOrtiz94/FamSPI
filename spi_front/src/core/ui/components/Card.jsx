@@ -6,7 +6,7 @@ const Card = ({ title, children, className, ...rest }) => {
     <div
       {...rest}
       className={clsx(
-        "rounded-3xl border border-white/10 bg-white/70 p-5 text-slate-800 shadow-[0_15px_35px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:bg-slate-900/70 dark:text-slate-100",
+        "rounded-2xl border border-white/10 bg-white/70 p-5 text-slate-800 shadow-[0_15px_35px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:bg-slate-900/70 dark:text-slate-100",
         className
       )}
     >

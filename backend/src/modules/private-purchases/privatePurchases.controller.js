@@ -416,6 +416,54 @@ exports.reviewInspectionDate = async (req, res, next) => {
   }
 };
 
+exports.registerSiteInspection = async (req, res, next) => {
+  try {
+    const {
+      result,
+      checklist,
+      observations,
+      recommendations,
+      follow_up_date,
+      is_reinspection,
+      client_signer_name,
+      expected_updated_at,
+    } = req.body || {};
+
+    const updated = await service.registerSiteInspection(
+      req.params.id,
+      {
+        result,
+        checklist,
+        observations,
+        recommendations,
+        follow_up_date,
+        is_reinspection,
+        client_signer_name,
+        expected_updated_at,
+      },
+      req.user,
+    );
+
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
+exports.updateInstallationWorkflow = async (req, res, next) => {
+  try {
+    const { action, payload, expected_updated_at } = req.body || {};
+    const updated = await service.updateInstallationWorkflow(
+      req.params.id,
+      { action, payload, expected_updated_at },
+      req.user,
+    );
+    res.json({ ok: true, data: updated });
+  } catch (error) {
+    next(error);
+  }
+};
+
 /**
  * Operaciones solicita fecha de entrega
  */
@@ -875,6 +923,44 @@ exports.getTimeline = async (req, res, next) => {
         metadata: {
           inspection_date: purchaseData.inspection_scheduled_date || null,
           reason: 'Fecha de inspección coordinada',
+        },
+      });
+    }
+
+    const siteInspectionStatus = purchaseData.inspection_site_status || purchaseData.site_inspection_status || null;
+    const siteInspectionResult = purchaseData.inspection_site_result || purchaseData.site_inspection_result || null;
+    const siteInspectionUpdatedAt =
+      purchaseData.inspection_site_inspected_at ||
+      purchaseData.site_inspection_updated_at ||
+      purchaseData.site_inspection_report_generated_at ||
+      null;
+    if (siteInspectionStatus || siteInspectionUpdatedAt) {
+      businessEvents.push({
+        type: 'SITE_INSPECTION_RECORDED',
+        eventType: 'SITE_INSPECTION_RECORDED',
+        timestamp: siteInspectionUpdatedAt || purchaseData.updated_at,
+        actorName:
+          purchaseData.inspection_site_responsible_name ||
+          purchaseData.site_inspection_updated_by_email ||
+          'Técnico',
+        actorRole: 'tecnico',
+        actorUserId: purchaseData.site_inspection_updated_by || null,
+        metadata: {
+          status: siteInspectionStatus,
+          result: siteInspectionResult,
+          follow_up_date:
+            purchaseData.inspection_site_follow_up_date ||
+            purchaseData.site_inspection_follow_up_date ||
+            null,
+          docType: 'F.ST-07',
+          fileId:
+            purchaseData.inspection_site_report_file_id ||
+            purchaseData.site_inspection_report_document_id ||
+            null,
+          link:
+            purchaseData.inspection_site_report_link ||
+            purchaseData.site_inspection_report_link ||
+            null,
         },
       });
     }
