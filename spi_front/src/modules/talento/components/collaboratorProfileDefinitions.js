@@ -541,6 +541,7 @@ export const documentTypes = [
   },
   { key: "ACTA_BIENES", label: "Acta de bienes asignados" },
   { key: "CONVENIO_CONFIDENCIALIDAD", label: "Convenio de confidencialidad" },
+  { key: "ALCANCE_LOPDP", label: "Alcance LOPDP" },
   {
     key: "COMPROMISO_NO_DISCRIMINACION",
     label: "Compromiso de erradicacion de discriminacion",
@@ -610,6 +611,11 @@ export const checklistSections = [
         label: "Historial laboral obtenido del IESS",
         type: "doc",
         docType: "HISTORIAL_IESS",
+      },
+      {
+        label: "Alcance LOPDP",
+        type: "doc",
+        docType: "ALCANCE_LOPDP",
       },
       { label: "Firma digital", type: "flag", flagKey: "firma_digital" },
       {

@@ -30,9 +30,22 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
  useEffect(() => {
  if (!visible) return undefined;
  const previousOverflow = document.body.style.overflow;
+ const previousPosition = document.body.style.position;
+ const previousTop = document.body.style.top;
+ const previousWidth = document.body.style.width;
+ const scrollY = window.scrollY || window.pageYOffset || 0;
+
  document.body.style.overflow = "hidden";
+ document.body.style.position = "fixed";
+ document.body.style.top = `-${scrollY}px`;
+ document.body.style.width = "100%";
+
  return () => {
  document.body.style.overflow = previousOverflow;
+ document.body.style.position = previousPosition;
+ document.body.style.top = previousTop;
+ document.body.style.width = previousWidth;
+ window.scrollTo(0, scrollY);
  };
  }, [visible]);
 
@@ -102,12 +115,12 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
  };
 
  return (
- <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/70 backdrop-blur">
- <div className="flex min-h-full items-center justify-center p-4 text-center sm:p-6">
+ <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur">
+ <div className="flex h-full items-center justify-center p-3 text-center sm:p-6">
  <motion.div
  initial={{ opacity: 0, scale: 0.95 }}
  animate={{ opacity: 1, scale: 1 }}
- className="w-full max-w-sm sm:max-w-lg md:max-w-2xl lg:max-w-4xl rounded-2xl bg-white p-5 text-left shadow-2xl dark:bg-slate-900 sm:p-8"
+ className="w-full max-w-sm sm:max-w-lg md:max-w-2xl lg:max-w-4xl max-h-[96dvh] overflow-hidden rounded-2xl bg-white p-4 text-left shadow-2xl dark:bg-slate-900 sm:p-8"
  >
  <div className="flex items-center gap-3 mb-4">
  <FiShield className="h-6 w-6 text-blue-600" />
@@ -119,14 +132,16 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
  </div>
  </div>
 
- <div className="flex flex-col sm:grid sm:gap-6 lg:grid-cols-2 break-words">
- <div className="space-y-3 text-sm text-slate-700 dark:text-slate-200">
+ <div className="grid min-h-0 grid-cols-1 gap-4 break-words sm:gap-6 lg:grid-cols-2">
+ <div className="min-h-0 space-y-3 text-sm text-slate-700 dark:text-slate-200">
+ <div className="max-h-[30dvh] overflow-y-auto pr-1 sm:max-h-[36dvh]">
  {lopdpNoticeParagraphs.map((p, idx) => (
- <div key={idx} className="flex gap-2">
- <FiAlertTriangle className="mt-1 h-4 w-4 text-amber-500" />
+ <div key={idx} className="mb-3 flex gap-2">
+ <FiAlertTriangle className="mt-1 h-4 w-4 shrink-0 text-amber-500" />
  <p>{p}</p>
  </div>
  ))}
+ </div>
  <div className="rounded-lg border border-blue-100 bg-blue-50 p-3 text-blue-800 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-100">
  <p className="text-xs">
  Al firmar, autorizas a FamSPI a conservar esta evidencia.
@@ -139,7 +154,7 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
  </div>
  <textarea
  className="w-full rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-700 dark:bg-slate-800"
- rows={4}
+ rows={3}
  placeholder="Notas u observaciones (opcional)"
  value={notes}
  onChange={(e) => setNotes(e.target.value)}
@@ -157,7 +172,7 @@ const InternalLopdpConsentModal = ({ forceOpen = false }) => {
  </label>
  </div>
 
- <div className="space-y-4">
+ <div className="min-h-0 space-y-4">
  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800">
  <div className="mb-3 flex items-center justify-between text-sm font-semibold text-slate-800 dark:text-slate-100">
  <span>Firma requerida</span>

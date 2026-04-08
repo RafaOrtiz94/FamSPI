@@ -3260,36 +3260,41 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
 async function listarResumenColaboradores() {
   await ensureTable();
   const usersResult = await db.query(
-    `SELECT u.id, u.email, u.fullname, u.name,
+    `SELECT u.id, u.email, u.fullname, u.name, u.department_id,
+            d.name AS department_name,
             cp.profile->'laboral'->>'fecha_ingreso' as fecha_ingreso,
             cp.profile->'extra'->>'applicant_source' as applicant_source
        FROM users u
+       LEFT JOIN departments d ON d.id = u.department_id
        LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
       ORDER BY COALESCE(NULLIF(u.fullname, ''), NULLIF(u.name, ''), u.email, CONCAT('Usuario #', u.id)) ASC`
   );
   const { rows } = await db.query(
     `SELECT
-        id,
-        user_id,
-        user_email,
-        user_fullname,
-        tipo_solicitud,
-        tipo_permiso,
-        status,
-        duracion_dias,
-        duracion_horas,
-        charged_to_vacation,
-        charged_vacation_hours,
-        charged_vacation_days,
-        justificacion_requerida,
-        justificantes_urls,
-        fecha_inicio,
-        fecha_fin,
-        aprobacion_parcial_at,
-        aprobacion_final_at,
-        created_at
-      FROM permisos_vacaciones
-      ORDER BY created_at DESC`
+        p.id,
+        p.user_id,
+        p.user_email,
+        p.user_fullname,
+        p.department_id,
+        d.name AS department_name,
+        p.tipo_solicitud,
+        p.tipo_permiso,
+        p.status,
+        p.duracion_dias,
+        p.duracion_horas,
+        p.charged_to_vacation,
+        p.charged_vacation_hours,
+        p.charged_vacation_days,
+        p.justificacion_requerida,
+        p.justificantes_urls,
+        p.fecha_inicio,
+        p.fecha_fin,
+        p.aprobacion_parcial_at,
+        p.aprobacion_final_at,
+        p.created_at
+      FROM permisos_vacaciones p
+      LEFT JOIN departments d ON d.id = p.department_id
+      ORDER BY p.created_at DESC`
   );
   const vacationRequestsResult = await db.query(
     `SELECT
@@ -3297,6 +3302,8 @@ async function listarResumenColaboradores() {
         v.requester_id,
         u.email AS requester_email,
         COALESCE(u.fullname, u.name, u.email, CONCAT('Usuario #', v.requester_id)) AS requester_name,
+        u.department_id,
+        d.name AS department_name,
         v.status,
         v.start_date,
         v.end_date,
@@ -3304,16 +3311,44 @@ async function listarResumenColaboradores() {
         v.created_at
       FROM vacaciones_solicitudes v
       LEFT JOIN users u ON u.id = v.requester_id
+      LEFT JOIN departments d ON d.id = u.department_id
       ORDER BY v.created_at DESC`
   );
 
   const collaborators = new Map();
-  const ensureCollaboratorRecord = ({ key, userId = null, userEmail = null, userFullname = null }) => {
-    if (collaborators.has(key)) return collaborators.get(key);
+  const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+  const buildKey = ({ userEmail = null, userId = null, fallbackId = null }) => {
+    const normalizedEmail = normalizeEmail(userEmail);
+    if (normalizedEmail) return `email-${normalizedEmail}`;
+    if (userId) return `user-${userId}`;
+    return `unknown-${fallbackId || "sin-id"}`;
+  };
+  const ensureCollaboratorRecord = ({
+    key,
+    userId = null,
+    userEmail = null,
+    userFullname = null,
+    departmentId = null,
+    departmentName = null,
+  }) => {
+    if (collaborators.has(key)) {
+      const existing = collaborators.get(key);
+      if (!existing.user_id && userId) existing.user_id = userId;
+      if (!existing.user_email && userEmail) existing.user_email = userEmail;
+      if ((!existing.user_fullname || existing.user_fullname.startsWith("Usuario #")) && userFullname) {
+        existing.user_fullname = userFullname;
+      }
+      if (!existing.department_id && departmentId) existing.department_id = departmentId;
+      if (!existing.department_name && departmentName) existing.department_name = departmentName;
+      return existing;
+    }
+
     collaborators.set(key, {
       user_id: userId,
       user_email: userEmail,
       user_fullname: userFullname || userEmail || `Usuario #${userId || "sin-correo"}`,
+      department_id: departmentId,
+      department_name: departmentName || null,
       permisos: {
         total: 0,
         aprobacion_completa: 0,
@@ -3344,7 +3379,7 @@ async function listarResumenColaboradores() {
       continue;
     }
     const userEmail = user.email || null;
-    const key = userEmail || `user-${user.id}`;
+    const key = buildKey({ userEmail, userId: user.id });
     if (collaborators.has(key)) continue;
     const allowanceInfo = computeVacationAllowance(user.fecha_ingreso, new Date());
     const year = new Date().getFullYear();
@@ -3358,6 +3393,8 @@ async function listarResumenColaboradores() {
       user_id: user.id,
       user_email: userEmail,
       user_fullname: user.fullname || user.name || userEmail || `Usuario #${user.id}`,
+      department_id: user.department_id || null,
+      department_name: user.department_name || null,
       permisos: {
         total: 0,
         aprobacion_completa: 0,
@@ -3385,12 +3422,18 @@ async function listarResumenColaboradores() {
   const settledRows = await settleExpiredRecoveryCoordinationRows(rows);
 
   settledRows.forEach((row) => {
-    const key = row.user_email || `user-${row.user_id || row.id}`;
+    const key = buildKey({
+      userEmail: row.user_email,
+      userId: row.user_id,
+      fallbackId: row.id,
+    });
     const record = ensureCollaboratorRecord({
       key,
       userId: row.user_id || null,
       userEmail: row.user_email || null,
       userFullname: row.user_fullname || null,
+      departmentId: row.department_id || null,
+      departmentName: row.department_name || null,
     });
     const status = row.status || "pending";
 
@@ -3447,12 +3490,18 @@ async function listarResumenColaboradores() {
   });
 
   vacationRequestsResult.rows.forEach((row) => {
-    const key = row.requester_email || `user-${row.requester_id || row.id}`;
+    const key = buildKey({
+      userEmail: row.requester_email,
+      userId: row.requester_id,
+      fallbackId: row.id,
+    });
     const record = ensureCollaboratorRecord({
       key,
       userId: row.requester_id || null,
       userEmail: row.requester_email || null,
       userFullname: row.requester_name || null,
+      departmentId: row.department_id || null,
+      departmentName: row.department_name || null,
     });
     const status = String(row.status || "").toLowerCase();
     const days = Number(row.days || 0);
@@ -3479,7 +3528,11 @@ async function listarResumenColaboradores() {
       record.vacaciones.dias_aprobados -
       record.vacaciones.dias_pendientes;
     record.vacaciones.dias_restantes = saldo;
-    return record;
+    return {
+      ...record,
+      fullname: record.user_fullname || null,
+      email: record.user_email || null,
+    };
   });
 }
 

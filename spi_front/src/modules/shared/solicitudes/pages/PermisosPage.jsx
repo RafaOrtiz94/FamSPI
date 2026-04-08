@@ -1,6 +1,6 @@
 import React, { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
-import { FiCalendar, FiCheckSquare, FiGlobe, FiUsers } from "react-icons/fi";
+import { FiCalendar, FiCheckSquare, FiFileText, FiGlobe, FiUsers } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
 import PermisoVacacionModal from "../modals/PermisoVacacionModal";
@@ -16,6 +16,7 @@ const PermisosColaboradoresWidget = lazy(() => import("../components/PermisosCol
 const PermisosGlobalRequestsWidget = lazy(() => import("../components/PermisosGlobalRequestsWidget"));
 const PermisosColaboradoresAlbum = lazy(() => import("../components/PermisosColaboradoresAlbum"));
 const AprobacionPermisosView = lazy(() => import("../components/AprobacionPermisosView"));
+const PermisosReportsView = lazy(() => import("../components/PermisosReportsView"));
 
 const SECTION_META = {
   mine: {
@@ -52,6 +53,13 @@ const SECTION_META = {
     description: "Revisa y gestiona las solicitudes de tu equipo y el historial de aprobados.",
     icon: FiCheckSquare,
     tone: "blue",
+  },
+  reports: {
+    title: "Informes",
+    subtitle: "Consolidado",
+    description: "Visualiza y exporta el estado actual de permisos y vacaciones de toda la empresa.",
+    icon: FiFileText,
+    tone: "rose",
   },
 };
 
@@ -239,7 +247,10 @@ const PermisosPage = () => {
 
     if (isGerenciaGeneral) return ["gerencia_album", "gerencia_approvals"];
 
-    if (isTalentRole) sections.push("collaborators");
+    if (isTalentRole) {
+      sections.push("collaborators");
+      sections.push("reports");
+    }
     if (canViewGlobalRequestsWidget) sections.push("global");
     
     // Si es jefe o gerencia, permitir ver el widget de aprobaciones
@@ -301,6 +312,12 @@ const PermisosPage = () => {
         return (
           <Suspense fallback={<SectionLoader label="aprobaciones" />}>
             <AprobacionPermisosView compact={isGerenciaGeneral} />
+          </Suspense>
+        );
+      case "reports":
+        return (
+          <Suspense fallback={<SectionLoader label="informes" />}>
+            <PermisosReportsView />
           </Suspense>
         );
       default:

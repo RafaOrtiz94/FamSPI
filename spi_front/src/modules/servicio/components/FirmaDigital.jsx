@@ -2,122 +2,186 @@ import React, { useEffect, useRef } from "react";
 
 /**
  * FirmaDigital
- * - Dibuja con mouse/touch sobre un <canvas>.
- * - getBase64(): devuelve el PNG en base64 **sin prefijo** (solo la cadena).
+ * - Dibuja sobre canvas con pointer/touch/mouse.
+ * - getBase64(): devuelve PNG base64 sin prefijo.
  * - clear(): limpia el canvas.
  */
-const FirmaDigital = React.forwardRef(({ height = 160, strokeWidth = 2, onSignatureCapture }, ref) => {
-  console.log("🔏 FirmaDigital: Component initialized", { height, strokeWidth, hasCallback: !!onSignatureCapture });
+const FirmaDigital = React.forwardRef(
+  ({ height = 160, strokeWidth = 2, onSignatureCapture }, ref) => {
+    const canvasRef = useRef(null);
+    const ctxRef = useRef(null);
+    const drawingRef = useRef(false);
+    const hasStrokeRef = useRef(false);
+    const pointerIdRef = useRef(null);
+    const lastPointRef = useRef({ x: 0, y: 0 });
 
-  const canvasRef = useRef(null);
-  const ctxRef = useRef(null);
-  const drawing = useRef(false);
-  const last = useRef({ x: 0, y: 0 });
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
 
-  useEffect(() => {
-    console.log("🔏 FirmaDigital: Setting up canvas");
-    const canvas = canvasRef.current;
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = canvas.offsetWidth * dpr;
-    canvas.height = height * dpr;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-    ctx.lineCap = "round";
-    ctx.lineJoin = "round";
-    ctx.lineWidth = strokeWidth;
-    ctx.strokeStyle = "#111827";
-    ctxRef.current = ctx;
-    console.log("🔏 FirmaDigital: Canvas setup complete", { width: canvas.width, height: canvas.height });
-  }, [height, strokeWidth]);
+      const dpr = window.devicePixelRatio || 1;
+      const width = canvas.offsetWidth || 1;
+      canvas.width = width * dpr;
+      canvas.height = height * dpr;
 
-  const getPos = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    if (e.touches) {
-      const t = e.touches[0];
-      return { x: t.clientX - rect.left, y: t.clientY - rect.top };
-    }
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
-  };
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = strokeWidth;
+      ctx.strokeStyle = "#111827";
+      ctxRef.current = ctx;
+    }, [height, strokeWidth]);
 
-  const start = (e) => {
-    e.preventDefault(); // Prevent any form submission
-    drawing.current = true;
-    last.current = getPos(e);
-  };
-  const move = (e) => {
-    if (!drawing.current) return;
-    e.preventDefault(); // Prevent any form submission
-    const { x, y } = getPos(e);
-    const ctx = ctxRef.current;
-    ctx.beginPath();
-    ctx.moveTo(last.current.x, last.current.y);
-    ctx.lineTo(x, y);
-    ctx.stroke();
-    last.current = { x, y };
-  };
-  const getBase64Data = () => {
-    const dataUrl = canvasRef.current.toDataURL("image/png");
-    // quitar prefijo "data:image/png;base64,"
-    return dataUrl.split(",")[1] || "";
-  };
+    const getPoint = (clientX, clientY) => {
+      const canvas = canvasRef.current;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+      };
+    };
 
-  const end = (e) => {
-    e.preventDefault(); // Prevent any form submission
-    e.stopPropagation(); // Stop event bubbling
-    drawing.current = false;
+    const startStroke = (clientX, clientY) => {
+      drawingRef.current = true;
+      lastPointRef.current = getPoint(clientX, clientY);
+    };
 
-    // Call onSignatureCapture callback when drawing ends
-    if (onSignatureCapture) {
-      const signatureData = getBase64Data();
-      console.log("Signature data length:", signatureData.length);
-      if (signatureData && signatureData.length > 10) { // Lower threshold for testing
-        console.log("Calling onSignatureCapture with signature data");
-        onSignatureCapture(signatureData);
-      } else {
-        console.log("Signature data too small or empty");
-      }
-    } else {
-      console.log("onSignatureCapture callback not provided");
-    }
-  };
+    const moveStroke = (clientX, clientY) => {
+      if (!drawingRef.current || !ctxRef.current) return;
+      const point = getPoint(clientX, clientY);
+      const ctx = ctxRef.current;
+      ctx.beginPath();
+      ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
+      ctx.lineTo(point.x, point.y);
+      ctx.stroke();
+      lastPointRef.current = point;
+      hasStrokeRef.current = true;
+    };
 
-
-
-  React.useImperativeHandle(ref, () => ({
-    clear: () => {
-      const c = canvasRef.current;
-      ctxRef.current.clearRect(0, 0, c.width, c.height);
-    },
-    getBase64: () => {
-      const dataUrl = canvasRef.current.toDataURL("image/png");
-      // quitar prefijo "data:image/png;base64,"
+    const getBase64Data = () => {
+      const canvas = canvasRef.current;
+      if (!canvas) return "";
+      const dataUrl = canvas.toDataURL("image/png");
       return dataUrl.split(",")[1] || "";
-    },
-  }));
+    };
 
-  return (
-    <div className="w-full">
-      <div
-        className="border rounded-lg bg-white dark:bg-gray-900"
-        style={{ height }}
-        onClick={(e) => e.stopPropagation()} // Prevent event bubbling
-      >
-        <canvas
-          ref={canvasRef}
-          className="w-full h-full"
-          onMouseDown={start}
-          onMouseMove={move}
-          onMouseUp={end}
-          onMouseLeave={end}
-          onTouchStart={start}
-          onTouchMove={move}
-          onTouchEnd={end}
-          onClick={(e) => e.stopPropagation()} // Prevent event bubbling
-        />
+    const endStroke = () => {
+      drawingRef.current = false;
+      pointerIdRef.current = null;
+
+      if (onSignatureCapture && hasStrokeRef.current) {
+        const signatureData = getBase64Data();
+        if (signatureData) onSignatureCapture(signatureData);
+      }
+    };
+
+    const handlePointerDown = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pointerIdRef.current = e.pointerId;
+      if (e.currentTarget.setPointerCapture) {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      }
+      startStroke(e.clientX, e.clientY);
+    };
+
+    const handlePointerMove = (e) => {
+      if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
+      e.preventDefault();
+      moveStroke(e.clientX, e.clientY);
+    };
+
+    const handlePointerEnd = (e) => {
+      if (pointerIdRef.current !== null && e.pointerId !== pointerIdRef.current) return;
+      e.preventDefault();
+      e.stopPropagation();
+      endStroke();
+    };
+
+    const handleMouseDown = (e) => {
+      if (window.PointerEvent) return;
+      e.preventDefault();
+      startStroke(e.clientX, e.clientY);
+    };
+
+    const handleMouseMove = (e) => {
+      if (window.PointerEvent) return;
+      e.preventDefault();
+      moveStroke(e.clientX, e.clientY);
+    };
+
+    const handleMouseEnd = (e) => {
+      if (window.PointerEvent) return;
+      e.preventDefault();
+      endStroke();
+    };
+
+    const handleTouchStart = (e) => {
+      if (window.PointerEvent) return;
+      if (!e.touches || !e.touches.length) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const t = e.touches[0];
+      startStroke(t.clientX, t.clientY);
+    };
+
+    const handleTouchMove = (e) => {
+      if (window.PointerEvent) return;
+      if (!e.touches || !e.touches.length) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      moveStroke(t.clientX, t.clientY);
+    };
+
+    const handleTouchEnd = (e) => {
+      if (window.PointerEvent) return;
+      e.preventDefault();
+      e.stopPropagation();
+      endStroke();
+    };
+
+    React.useImperativeHandle(ref, () => ({
+      clear: () => {
+        const canvas = canvasRef.current;
+        const ctx = ctxRef.current;
+        if (!canvas || !ctx) return;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        hasStrokeRef.current = false;
+      },
+      getBase64: getBase64Data,
+    }));
+
+    return (
+      <div className="w-full">
+        <div
+          className="border rounded-lg bg-white dark:bg-gray-900"
+          style={{ height, touchAction: "none", overscrollBehavior: "contain" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <canvas
+            ref={canvasRef}
+            className="w-full h-full"
+            style={{ touchAction: "none" }}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerEnd}
+            onPointerCancel={handlePointerEnd}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseEnd}
+            onMouseLeave={handleMouseEnd}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchEnd}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+        <p className="text-xs text-gray-500 mt-1">Firma aqui (usa mouse o tactil)</p>
       </div>
-      <p className="text-xs text-gray-500 mt-1">Firma aquí (usa mouse o táctil)</p>
-    </div>
-  );
-});
+    );
+  }
+);
 
 export default FirmaDigital;
