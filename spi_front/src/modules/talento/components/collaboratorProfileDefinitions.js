@@ -1,3 +1,53 @@
+import { COUNTRY_LOCATIONS } from "../../comercial/constants/locationOptions";
+
+const dedupeByNormalizedValue = (values = []) => {
+  const map = new Map();
+  values.forEach((value) => {
+    const label = String(value || "").trim();
+    if (!label) return;
+    const key = label
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+    if (!map.has(key)) map.set(key, label);
+  });
+  return Array.from(map.values()).sort((a, b) => a.localeCompare(b, "es"));
+};
+
+const buildEcuadorCityOptions = () => {
+  const provinces = COUNTRY_LOCATIONS?.Ecuador?.provinces || {};
+  const allCities = Object.values(provinces).flatMap((cities) =>
+    Array.isArray(cities) ? cities : [],
+  );
+  return dedupeByNormalizedValue(allCities);
+};
+
+export const ECUADOR_CITY_OPTIONS = buildEcuadorCityOptions();
+
+export const GENDER_OPTIONS = ["MASCULINO", "FEMENINO"];
+export const EMPLOYEE_STATUS_OPTIONS = ["ACTIVO", "PASIVO"];
+export const EDUCATION_LEVEL_OPTIONS = [
+  "BASICA",
+  "BACHILLERATO",
+  "TECNICO",
+  "TECNOLOGICO",
+  "TERCER NIVEL",
+  "CUARTO NIVEL",
+  "POSTGRADO",
+  "DOCTORADO",
+];
+export const MOBILIZATION_OPTIONS = [
+  "AUTO PROPIO",
+  "AUTO COMPARTIDO",
+  "MOTOCICLETA",
+  "BUS",
+  "TAXI",
+  "APLICACION MOVIL",
+  "BICICLETA",
+  "CAMINANDO",
+  "OTRO",
+];
+
 export const defaultProfile = {
   personal: {
     nombres: "",
@@ -43,16 +93,20 @@ export const defaultProfile = {
     nombre_segundo_hijo: "",
     cedula_segundo_hijo: "",
     fecha_nacimiento_segundo_hijo: "",
+    hijos: [],
   },
   domicilio: {
     ciudad_domicilio: "",
     direccion_domicilio: "",
     ruta_trabajo: "",
+    movilizacion: "",
     telefono_fijo: "",
   },
   emergencia: {
     persona_contacto: "",
+    parentesco_contacto: "",
     telefono_contacto: "",
+    contactos: [],
   },
   estudios: {
     nivel_instruccion: "",
@@ -80,6 +134,19 @@ export const defaultProfile = {
     salida_cuentas: false,
     salida_sri: false,
     liquidacion: false,
+    notificar_salida_equipo_fam: false,
+    entrevista_salida: false,
+    carta_despido: false,
+    acta_descargo_herramientas: false,
+    acta_entrega_equipos_comunicacion: false,
+    aviso_salida_iess: false,
+    liquidacion_mdt_finiquito: false,
+    eliminacion_accesos_sistemas: false,
+    revision_medica_salida: false,
+    acta_descargo_uniformes: false,
+    cambio_estado_activo_pasivo: false,
+    documentacion_personal_desvinculado: false,
+    firma_roles_pago_pendientes: false,
     offboarding_requested: false,
     offboarding_request_code: "",
     offboarding_request_reason: "",
@@ -117,7 +184,13 @@ export const profileSections = [
         maxLength: 13,
       },
       { key: "tipo_sangre", label: "TIPO DE SANGRE" },
-      { key: "genero", label: "GENERO" },
+      {
+        key: "genero",
+        label: "GENERO",
+        type: "select",
+        options: GENDER_OPTIONS,
+        placeholder: "Selecciona genero",
+      },
       { key: "cuenta_bancaria", label: "CUENTA BANCARIA" },
       { key: "lugar_nacimiento", label: "LUGAR DE NACIMIENTO" },
       {
@@ -150,8 +223,20 @@ export const profileSections = [
     key: "laboral",
     title: "Datos laborales",
     fields: [
-      { key: "estatus_empleado", label: "ESTATUS EMPLEADO" },
-      { key: "residencia", label: "RESIDENCIA" },
+      {
+        key: "estatus_empleado",
+        label: "ESTATUS EMPLEADO",
+        type: "select",
+        options: EMPLOYEE_STATUS_OPTIONS,
+        placeholder: "Selecciona estatus",
+      },
+      {
+        key: "residencia",
+        label: "RESIDENCIA",
+        type: "select",
+        options: ECUADOR_CITY_OPTIONS,
+        placeholder: "Selecciona ciudad de residencia",
+      },
       { key: "fecha_ingreso", label: "FECHA DE INGRESO", type: "date" },
       {
         key: "fecha_ingreso_iess",
@@ -235,52 +320,19 @@ export const profileSections = [
         allowNA: true,
         placeholder: "N/A",
       },
-      { key: "nombre_primer_hijo", label: "NOMBRE PRIMER HIJO/A" },
-      {
-        key: "cedula_primer_hijo",
-        label: "C.C. PRIMER HIJO/A",
-        mask: "cedula",
-        inputMode: "numeric",
-        pattern: "[0-9]*",
-        maxLength: 10,
-      },
-      {
-        key: "fecha_nacimiento_primer_hijo",
-        label: "FECHA DE NACIMIENTO PRIMER HIJO/A",
-        type: "date",
-        allowNA: true,
-        placeholder: "dd/mm/aaaa o N/A",
-      },
-      {
-        key: "nombre_segundo_hijo",
-        label: "NOMBRE SEGUNDO HIJO/A",
-        allowNA: true,
-        placeholder: "N/A",
-      },
-      {
-        key: "cedula_segundo_hijo",
-        label: "C.C. SEGUNDO HIJO/A",
-        mask: "cedula",
-        inputMode: "numeric",
-        pattern: "[0-9]*",
-        maxLength: 10,
-        allowNA: true,
-        placeholder: "N/A",
-      },
-      {
-        key: "fecha_nacimiento_segundo_hijo",
-        label: "FECHA DE NACIMIENTO SEGUNDO HIJO/A",
-        type: "date",
-        allowNA: true,
-        placeholder: "dd/mm/aaaa o N/A",
-      },
     ],
   },
   {
     key: "domicilio",
     title: "Datos de domicilio",
     fields: [
-      { key: "ciudad_domicilio", label: "CIUDAD DOMICILIO" },
+      {
+        key: "ciudad_domicilio",
+        label: "CIUDAD DOMICILIO",
+        type: "select",
+        options: ECUADOR_CITY_OPTIONS,
+        placeholder: "Selecciona ciudad de domicilio",
+      },
       {
         key: "direccion_domicilio",
         label: "DIRECCION DOMICILIO",
@@ -294,6 +346,13 @@ export const profileSections = [
         multiline: true,
         rows: 3,
         fullWidth: true,
+      },
+      {
+        key: "movilizacion",
+        label: "MOVILIZACION",
+        type: "select",
+        options: MOBILIZATION_OPTIONS,
+        placeholder: "Selecciona tipo de movilizacion",
       },
       {
         key: "telefono_fijo",
@@ -312,6 +371,7 @@ export const profileSections = [
     title: "Contacto de emergencia",
     fields: [
       { key: "persona_contacto", label: "PERSONA DE CONTACTO" },
+      { key: "parentesco_contacto", label: "PARENTESCO" },
       {
         key: "telefono_contacto",
         label: "NUMERO DE TELEFONO",
@@ -326,7 +386,13 @@ export const profileSections = [
     key: "estudios",
     title: "Estudios",
     fields: [
-      { key: "nivel_instruccion", label: "NIVEL DE INSTRUCCION" },
+      {
+        key: "nivel_instruccion",
+        label: "NIVEL DE INSTRUCCION",
+        type: "select",
+        options: EDUCATION_LEVEL_OPTIONS,
+        placeholder: "Selecciona nivel de instruccion",
+      },
       { key: "titulo_tercer_nivel", label: "TITULO DE TERCER NIVEL" },
       { key: "universidad_tercer_nivel", label: "UNIVERSIDAD (TERCER NIVEL)" },
       { key: "titulo_cuarto_nivel", label: "TITULO DE CUARTO NIVEL" },
@@ -360,7 +426,13 @@ export const applicantProfileSections = [
         maxLength: 13,
       },
       { key: "tipo_sangre", label: "TIPO DE SANGRE" },
-      { key: "genero", label: "GENERO" },
+      {
+        key: "genero",
+        label: "GENERO",
+        type: "select",
+        options: GENDER_OPTIONS,
+        placeholder: "Selecciona genero",
+      },
       { key: "lugar_nacimiento", label: "LUGAR DE NACIMIENTO" },
       {
         key: "fecha_nacimiento",
@@ -391,7 +463,13 @@ export const applicantProfileSections = [
     title: "Datos laborales",
     fields: [
       { key: "cargo", label: "CARGO" },
-      { key: "residencia", label: "RESIDENCIA" },
+      {
+        key: "residencia",
+        label: "RESIDENCIA",
+        type: "select",
+        options: ECUADOR_CITY_OPTIONS,
+        placeholder: "Selecciona ciudad de residencia",
+      },
     ],
   },
   {
@@ -414,58 +492,32 @@ export const applicantProfileSections = [
         allowNA: true,
         placeholder: "N/A",
       },
-      { key: "nombre_primer_hijo", label: "NOMBRE PRIMER HIJO/A" },
-      {
-        key: "cedula_primer_hijo",
-        label: "C.C. PRIMER HIJO/A",
-        mask: "cedula",
-        inputMode: "numeric",
-        pattern: "[0-9]*",
-        maxLength: 10,
-      },
-      {
-        key: "fecha_nacimiento_primer_hijo",
-        label: "FECHA DE NACIMIENTO PRIMER HIJO/A",
-        type: "date",
-        allowNA: true,
-        placeholder: "dd/mm/aaaa o N/A",
-      },
-      {
-        key: "nombre_segundo_hijo",
-        label: "NOMBRE SEGUNDO HIJO/A",
-        allowNA: true,
-        placeholder: "N/A",
-      },
-      {
-        key: "cedula_segundo_hijo",
-        label: "C.C. SEGUNDO HIJO/A",
-        mask: "cedula",
-        inputMode: "numeric",
-        pattern: "[0-9]*",
-        maxLength: 10,
-        allowNA: true,
-        placeholder: "N/A",
-      },
-      {
-        key: "fecha_nacimiento_segundo_hijo",
-        label: "FECHA DE NACIMIENTO SEGUNDO HIJO/A",
-        type: "date",
-        allowNA: true,
-        placeholder: "dd/mm/aaaa o N/A",
-      },
     ],
   },
   {
     key: "domicilio",
     title: "Datos de domicilio",
     fields: [
-      { key: "ciudad_domicilio", label: "CIUDAD DOMICILIO" },
+      {
+        key: "ciudad_domicilio",
+        label: "CIUDAD DOMICILIO",
+        type: "select",
+        options: ECUADOR_CITY_OPTIONS,
+        placeholder: "Selecciona ciudad de domicilio",
+      },
       {
         key: "direccion_domicilio",
         label: "DIRECCION DOMICILIO",
         multiline: true,
         rows: 3,
         fullWidth: true,
+      },
+      {
+        key: "movilizacion",
+        label: "MOVILIZACION",
+        type: "select",
+        options: MOBILIZATION_OPTIONS,
+        placeholder: "Selecciona tipo de movilizacion",
       },
       {
         key: "telefono_fijo",
@@ -484,6 +536,7 @@ export const applicantProfileSections = [
     title: "Contacto de emergencia",
     fields: [
       { key: "persona_contacto", label: "PERSONA DE CONTACTO" },
+      { key: "parentesco_contacto", label: "PARENTESCO" },
       {
         key: "telefono_contacto",
         label: "NUMERO DE TELEFONO",
@@ -498,7 +551,13 @@ export const applicantProfileSections = [
     key: "estudios",
     title: "Estudios",
     fields: [
-      { key: "nivel_instruccion", label: "NIVEL DE INSTRUCCION" },
+      {
+        key: "nivel_instruccion",
+        label: "NIVEL DE INSTRUCCION",
+        type: "select",
+        options: EDUCATION_LEVEL_OPTIONS,
+        placeholder: "Selecciona nivel de instruccion",
+      },
       { key: "titulo_tercer_nivel", label: "TITULO DE TERCER NIVEL" },
       { key: "universidad_tercer_nivel", label: "UNIVERSIDAD (TERCER NIVEL)" },
       { key: "titulo_cuarto_nivel", label: "TITULO DE CUARTO NIVEL" },
@@ -546,9 +605,12 @@ export const documentTypes = [
     key: "COMPROMISO_NO_DISCRIMINACION",
     label: "Compromiso de erradicacion de discriminacion",
   },
-  { key: "INGRESO_IESS", label: "Firmar ingreso en el IESS" },
-  { key: "FORMATO_DECIMOS", label: "Formato de acumulacion de decimos" },
-  { key: "OFERTA_SALARIO", label: "Oferta de salario" },
+  { key: "INGRESO_IESS", label: "Aviso de Entrada IESS" },
+  {
+    key: "FORMATO_DECIMOS",
+    label: "Acumulacion/ Mensualizacion decimos y fondos de reserva",
+  },
+  { key: "OFERTA_SALARIO", label: "Oferta de salario firmada" },
   { key: "HOJA_VIDA", label: "Hoja de vida" },
   { key: "CARTA_MOTIVACION", label: "Carta de motivacion" },
 ];
@@ -612,11 +674,6 @@ export const checklistSections = [
         type: "doc",
         docType: "HISTORIAL_IESS",
       },
-      {
-        label: "Alcance LOPDP",
-        type: "doc",
-        docType: "ALCANCE_LOPDP",
-      },
       { label: "Firma digital", type: "flag", flagKey: "firma_digital" },
       {
         label: "Apertura de cuenta de ahorros (Banco Internacional)",
@@ -654,17 +711,22 @@ export const checklistSections = [
         docType: "CONVENIO_CONFIDENCIALIDAD",
       },
       {
+        label: "Alcance LOPDP",
+        type: "doc",
+        docType: "ALCANCE_LOPDP",
+      },
+      {
         label: "Compromiso de no discriminacion, violencia y acoso",
         type: "doc",
         docType: "COMPROMISO_NO_DISCRIMINACION",
       },
       {
-        label: "Firmar ingreso en el IESS",
+        label: "Aviso de Entrada IESS",
         type: "doc",
         docType: "INGRESO_IESS",
       },
       {
-        label: "Formato de acumulacion de decimos",
+        label: "Acumulacion/ Mensualizacion decimos y fondos de reserva",
         type: "doc",
         docType: "FORMATO_DECIMOS",
       },
@@ -678,7 +740,11 @@ export const checklistSections = [
         type: "flag",
         flagKey: "credencial_entregada",
       },
-      { label: "Oferta de salario", type: "doc", docType: "OFERTA_SALARIO" },
+      {
+        label: "Oferta de salario firmada",
+        type: "doc",
+        docType: "OFERTA_SALARIO",
+      },
     ],
   },
   {
@@ -744,18 +810,72 @@ export const checklistSections = [
   {
     title: "Salida / Desvinculacion",
     items: [
-      { label: "Entrega de equipos", type: "flag", flagKey: "salida_equipos" },
       {
-        label: "Cierre de cuentas y accesos",
+        label: "Notificar la salida por correo al equipo FAM",
         type: "flag",
-        flagKey: "salida_cuentas",
+        flagKey: "notificar_salida_equipo_fam",
       },
       {
-        label: "Registro de salida en SRI",
+        label: "Realizar entrevista de salida",
         type: "flag",
-        flagKey: "salida_sri",
+        flagKey: "entrevista_salida",
       },
-      { label: "Liquidacion realizada", type: "flag", flagKey: "liquidacion" },
+      {
+        label: "Entregar carta de despido",
+        type: "flag",
+        flagKey: "carta_despido",
+      },
+      {
+        label: "Firmar actas de descargo de herramientas de trabajo",
+        type: "flag",
+        flagKey: "acta_descargo_herramientas",
+      },
+      {
+        label: "Firmar actas de entrega de equipos de comunicacion",
+        type: "flag",
+        flagKey: "acta_entrega_equipos_comunicacion",
+      },
+      {
+        label: "Realizar y firmar aviso de salida de IESS",
+        type: "flag",
+        flagKey: "aviso_salida_iess",
+      },
+      {
+        label: "Calcular liquidacion en MDT y firmar acta de finiquito",
+        type: "flag",
+        flagKey: "liquidacion_mdt_finiquito",
+      },
+      {
+        label:
+          "Gestionar eliminacion de usuario CRM, SPI, ERP (si aplica) y Workspace de Google",
+        type: "flag",
+        flagKey: "eliminacion_accesos_sistemas",
+      },
+      {
+        label: "Gestionar revision medica de salida",
+        type: "flag",
+        flagKey: "revision_medica_salida",
+      },
+      {
+        label: "Firmar acta de descargo de uniformes",
+        type: "flag",
+        flagKey: "acta_descargo_uniformes",
+      },
+      {
+        label: "Cambiar estado de ACTIVO a PASIVO",
+        type: "flag",
+        flagKey: "cambio_estado_activo_pasivo",
+      },
+      {
+        label: "Colocar documentacion en carpeta personal desvinculado",
+        type: "flag",
+        flagKey: "documentacion_personal_desvinculado",
+      },
+      {
+        label: "Gestionar la firma de roles de pago pendientes",
+        type: "flag",
+        flagKey: "firma_roles_pago_pendientes",
+      },
     ],
   },
 ];

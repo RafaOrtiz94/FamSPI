@@ -6,6 +6,7 @@ import { Spinner } from "../../../../core/ui/components/Spinner";
 const VIEW_OPTIONS = [
   { key: "requests", label: "Contratación" },
   { key: "collaborators", label: "Colaboradores" },
+  { key: "offboarding", label: "Desvinculación" },
 ];
 
 const REQUEST_STATUS_META = {
@@ -163,13 +164,34 @@ const ApplicantCard = ({ applicant, selected, onSelect }) => {
   );
 };
 
-const CollaboratorCard = ({ collaborator, selected, onSelect }) => {
+const CollaboratorCard = ({
+  collaborator,
+  selected,
+  onSelect,
+  canStartOffboarding = false,
+  onStartOffboarding,
+  starting = false,
+}) => {
   const handleKeyDown = (event) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onSelect?.(collaborator);
     }
   };
+  const normalizedStatus = String(
+    collaborator?.estatus_empleado || collaborator?.status || "",
+  )
+    .trim()
+    .toLowerCase();
+  const isPassive =
+    collaborator?.active === false ||
+    normalizedStatus === "pasivo" ||
+    normalizedStatus === "desvinculado" ||
+    normalizedStatus === "inactivo";
+  const isOffboardingInProgress =
+    !isPassive &&
+    (collaborator?.offboarding_requested === true ||
+      collaborator?.profile?.onboarding?.offboarding_requested === true);
 
   return (
     <div
@@ -200,12 +222,33 @@ const CollaboratorCard = ({ collaborator, selected, onSelect }) => {
             {collaborator.department_name}
           </p>
         )}
+        {canStartOffboarding && (
+          <div className="mt-2">
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onStartOffboarding?.(collaborator);
+              }}
+              disabled={starting}
+              className="rounded-full border border-blue-300 px-3 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {starting ? "Iniciando..." : "Iniciar desvinculación"}
+            </button>
+          </div>
+        )}
       </div>
-      {collaborator?.status && (
-        <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">
-          {collaborator.status}
-        </span>
-      )}
+      <span
+        className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+          isPassive
+            ? "bg-slate-200 text-slate-700"
+            : isOffboardingInProgress
+              ? "bg-blue-100 text-blue-700"
+              : "bg-emerald-100 text-emerald-700"
+        }`}
+      >
+        {isPassive ? "Pasivo" : isOffboardingInProgress ? "En desvinculación" : "Activo"}
+      </span>
     </div>
   );
 };
@@ -224,9 +267,12 @@ const CommandCenterEntityBrowser = ({
   selectedApplicantId,
   onSelectApplicant,
   collaborators = [],
+  offboardingCollaborators = [],
   loadingCollaborators = false,
   selectedCollaboratorId,
   onSelectCollaborator,
+  onStartOffboarding,
+  startingOffboardingId = null,
   canRequestPersonnel = false,
   canApprovePersonnel = false,
   onCreateRequest,
@@ -288,25 +334,53 @@ const CommandCenterEntityBrowser = ({
     );
   };
 
-  const renderCollaborators = () => {
+  const renderCollaborators = ({
+    items = [],
+    loadingLabel = "colaboradores",
+    emptyMessage = "No hay colaboradores listados.",
+  } = {}) => {
     if (loadingCollaborators) {
-      return <LoadingArea label="colaboradores" />;
+      return <LoadingArea label={loadingLabel} />;
     }
 
-    if (!collaborators.length) {
-      return <EmptyArea message="No hay colaboradores listados." />;
+    if (!items.length) {
+      return <EmptyArea message={emptyMessage} />;
     }
 
     return (
       <div className="space-y-3">
-        {collaborators.map((collaborator, index) => (
-          <CollaboratorCard
-            key={`collaborator-${collaborator?.id ?? collaborator?.email ?? index}`}
-            collaborator={collaborator}
-            selected={String(collaborator?.id) === String(selectedCollaboratorId)}
-            onSelect={onSelectCollaborator}
-          />
-        ))}
+        {items.map((collaborator, index) => {
+          const normalizedStatus = String(
+            collaborator?.estatus_empleado || collaborator?.status || "",
+          )
+            .trim()
+            .toLowerCase();
+          const isPassive =
+            collaborator?.active === false ||
+            normalizedStatus === "pasivo" ||
+            normalizedStatus === "desvinculado" ||
+            normalizedStatus === "inactivo";
+          const isInProgress =
+            !isPassive &&
+            (collaborator?.offboarding_requested === true ||
+              collaborator?.profile?.onboarding?.offboarding_requested === true);
+          const canStart =
+            activeView === "collaborators" &&
+            !isPassive &&
+            !isInProgress &&
+            typeof onStartOffboarding === "function";
+          return (
+            <CollaboratorCard
+              key={`collaborator-${collaborator?.id ?? collaborator?.email ?? index}`}
+              collaborator={collaborator}
+              selected={String(collaborator?.id) === String(selectedCollaboratorId)}
+              onSelect={onSelectCollaborator}
+              canStartOffboarding={canStart}
+              onStartOffboarding={onStartOffboarding}
+              starting={String(startingOffboardingId || "") === String(collaborator?.id || "")}
+            />
+          );
+        })}
       </div>
     );
   };
@@ -316,7 +390,17 @@ const CommandCenterEntityBrowser = ({
       case "applicants":
         return renderApplicants();
       case "collaborators":
-        return renderCollaborators();
+        return renderCollaborators({
+          items: collaborators,
+          loadingLabel: "colaboradores",
+          emptyMessage: "No hay colaboradores listados.",
+        });
+      case "offboarding":
+        return renderCollaborators({
+          items: offboardingCollaborators,
+          loadingLabel: "desvinculación",
+          emptyMessage: "No hay colaboradores en desvinculación.",
+        });
       default:
         return renderRequests();
     }
@@ -371,6 +455,7 @@ const CommandCenterEntityBrowser = ({
                 {activeView === "requests" && `${requests.length ?? 0} resultados`}
                 {activeView === "applicants" && `${applicants.length ?? 0} resultados`}
                 {activeView === "collaborators" && `${collaborators.length ?? 0} resultados`}
+                {activeView === "offboarding" && `${offboardingCollaborators.length ?? 0} resultados`}
               </span>
             )}
           </div>

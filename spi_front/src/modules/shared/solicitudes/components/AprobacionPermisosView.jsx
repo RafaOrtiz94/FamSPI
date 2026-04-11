@@ -145,6 +145,18 @@ const canCancelByDateRule = (solicitud = {}) => {
   return getTodayLocalDate() <= startDate;
 };
 
+const isSameEmail = (a, b) =>
+  String(a || "").trim().toLowerCase() !== "" &&
+  String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+const APPROVED_CANCEL_FLOW_STATUSES = new Set(["approved", "aprobado"]);
+const DIRECT_CANCELABLE_STATUSES = new Set([
+  "pending",
+  "pendiente",
+  "partially_approved",
+  "pending_final",
+]);
+
 const getRecoveryCoordinationLabel = (solicitud = {}) => {
   const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
   if (coordinationStatus === "finalized_by_approver" && solicitud?.charged_to_vacation) {
@@ -658,7 +670,9 @@ const AprobacionPermisosView = ({ compact = false }) => {
 
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const vacationShift = isVacation ? getVacationShiftLabel(solicitud) : null;
-    const isRequesterOfSolicitud = Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id));
+    const isRequesterOfSolicitud =
+      Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+      isSameEmail(userEmail, solicitud?.user_email);
     const isApproverOfSolicitud = canCurrentUserActAsAssignedApprover(solicitud);
 
     const canEditRecovery =
@@ -681,11 +695,15 @@ const AprobacionPermisosView = ({ compact = false }) => {
 
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
+    const isApprovedCancellationFlowStatus = APPROVED_CANCEL_FLOW_STATUSES.has(normalizedStatus);
+    const isDirectCancelableStatus = DIRECT_CANCELABLE_STATUSES.has(normalizedStatus);
     const canCancelThis =
-      ["approved", "aprobado"].includes(normalizedStatus) &&
       cancellationStatus !== "pending" &&
-      canCancelByDateRule(solicitud) &&
-      (isRequesterOfSolicitud || isApproverOfSolicitud);
+      (isRequesterOfSolicitud || isApproverOfSolicitud) &&
+      (isDirectCancelableStatus ||
+        (isApprovedCancellationFlowStatus && canCancelByDateRule(solicitud)));
+    const requiresCancellationRequestFlow =
+      isApprovedCancellationFlowStatus && isRequesterOfSolicitud && !isApproverOfSolicitud;
 
     const isRejectedStatus = ["rejected", "rechazado"].includes(normalizedStatus);
     const isCancelledStatus = ["cancelled", "cancelado"].includes(normalizedStatus);
@@ -1051,7 +1069,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
             </Button>
           </div>
         )}
-        {stage === "approved" && canCancelThis && (
+        {["pending", "pending_final", "approved"].includes(stage) && canCancelThis && (
           <div className="mt-3">
             <Button
               variant="secondary"
@@ -1059,7 +1077,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
               disabled={!!actionLoading}
               className="w-full bg-rose-50 text-rose-700 hover:bg-rose-100 text-xs py-1.5"
             >
-              Cancelar solicitud
+              {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
             </Button>
           </div>
         )}
@@ -1211,6 +1229,19 @@ const AprobacionPermisosView = ({ compact = false }) => {
     emerald: "bg-emerald-600",
     rose: "bg-rose-600",
   };
+  const selectedCancellationStatus = String(selectedSolicitud?.cancellation_status || "").toLowerCase();
+  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
+  const selectedIsRequester =
+    Boolean(selectedSolicitud) &&
+    ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
+      isSameEmail(userEmail, selectedSolicitud?.user_email));
+  const selectedIsApprover =
+    Boolean(selectedSolicitud) &&
+    canCurrentUserActAsAssignedApprover(selectedSolicitud);
+  const selectedRequiresCancellationRequestFlow =
+    APPROVED_CANCEL_FLOW_STATUSES.has(selectedStatus) &&
+    selectedIsRequester &&
+    !selectedIsApprover;
 
   const renderContent = () => {
     if (loading) {
@@ -1383,14 +1414,18 @@ const AprobacionPermisosView = ({ compact = false }) => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <Card className="w-full max-w-md p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-4">
-              {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+              {selectedCancellationStatus === "pending"
                 ? "Revisar solicitud de cancelacion"
-                : "Cancelar solicitud aprobada"}
+                : selectedRequiresCancellationRequestFlow
+                  ? "Solicitar cancelacion"
+                  : "Cancelar solicitud"}
             </h3>
             <p className="text-sm text-gray-600 mb-4">
-              {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+              {selectedCancellationStatus === "pending"
                 ? "Registra la decision sobre la cancelacion solicitada por el colaborador."
-                : "Registra el motivo de cancelacion para trazabilidad del flujo."}
+                : selectedRequiresCancellationRequestFlow
+                  ? "Registra el motivo de cancelacion. El jefe inmediato revisara la solicitud."
+                  : "Registra el motivo de cancelacion para trazabilidad del flujo."}
             </p>
             <textarea
               value={cancelReason}
@@ -1398,7 +1433,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
               rows={4}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-rose-500 mb-4"
               placeholder={
-                String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending"
+                selectedCancellationStatus === "pending"
                   ? "Motivo de revision (obligatorio para rechazo)..."
                   : "Motivo de cancelacion..."
               }
@@ -1417,7 +1452,7 @@ const AprobacionPermisosView = ({ compact = false }) => {
               >
                 Cerrar
               </Button>
-              {String(selectedSolicitud?.cancellation_status || "").toLowerCase() === "pending" ? (
+              {selectedCancellationStatus === "pending" ? (
                 <>
                   <Button
                     variant="secondary"
@@ -1443,7 +1478,9 @@ const AprobacionPermisosView = ({ compact = false }) => {
                   className="flex-1 bg-rose-600 hover:bg-rose-700"
                   disabled={!cancelReason.trim() || !!actionLoading}
                 >
-                  Confirmar cancelacion
+                  {selectedRequiresCancellationRequestFlow
+                    ? "Confirmar solicitud"
+                    : "Confirmar cancelacion"}
                 </Button>
               )}
             </div>

@@ -38,21 +38,57 @@ const LEGAL_VERIFICATION_BASE_URL = resolveLegalVerificationBaseUrl();
 
 const ROLE_APPROVER = {
   comercial: "jefe_comercial",
+  asesor_comercial: "jefe_comercial",
   acp_comercial: "jefe_comercial",
   marketing: "jefe_comercial",
   backoffice_comercial: "jefe_comercial",
+  analista_comercial: "jefe_comercial",
   financiero: "jefe_financiero",
   finanzas: "jefe_financiero",
+  contador: "jefe_financiero",
   tecnico: "jefe_tecnico",
+  servicio_tecnico: "jefe_tecnico",
   tecnico_servicio: "jefe_tecnico",
+  operaciones: "jefe_operaciones",
+  analista_operaciones: "jefe_operaciones",
+  calidad: "jefe_calidad",
+  logistica: "jefe_logistica",
   ti: "jefe_ti",
   admin_ti: "jefe_ti",
-  logistica: "jefe_logistica",
-  operaciones: "jefe_operaciones",
-  calidad: "jefe_calidad",
+  desarrollador: "jefe_ti",
+  soporte: "jefe_ti",
+  talento_humano: "jefe_talento_humano",
+  rrhh: "jefe_talento_humano",
+  rh: "jefe_talento_humano",
 };
 
-const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+const ROLE_CANONICAL_ALIASES = {
+  jefe_de_ti: "jefe_ti",
+  jefe_finanzas: "jefe_financiero",
+  jefe_de_finanzas: "jefe_financiero",
+  jefe_servicio_tecnico: "jefe_tecnico",
+  jefe_de_servicio_tecnico: "jefe_tecnico",
+  jefe_de_tecnico: "jefe_tecnico",
+  jefe_de_operaciones: "jefe_operaciones",
+  jefe_de_comercial: "jefe_comercial",
+  jefe_de_calidad: "jefe_calidad",
+  jefe_de_talento_humano: "jefe_talento_humano",
+  finanzas: "financiero",
+  tecnico_servicio: "servicio_tecnico",
+};
+
+const APPROVER_ROLE_ALIASES = {
+  gerencia_general: ["gerencia_general", "gerente_general", "gerencia", "gerente", "director"],
+  jefe_ti: ["jefe_ti", "jefe_de_ti"],
+  jefe_tecnico: ["jefe_tecnico", "jefe_de_tecnico", "jefe_servicio_tecnico", "jefe_de_servicio_tecnico"],
+  jefe_operaciones: ["jefe_operaciones", "jefe_de_operaciones"],
+  jefe_calidad: ["jefe_calidad", "jefe_de_calidad"],
+  jefe_financiero: ["jefe_financiero", "jefe_finanzas", "jefe_de_finanzas"],
+  jefe_comercial: ["jefe_comercial", "jefe_de_comercial"],
+  jefe_talento_humano: ["jefe_talento_humano", "jefe_de_talento_humano"],
+};
+
+const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general", "gerencia", "gerente", "director"]);
 const AUTO_FINAL_PERMISO_TYPES = new Set(["estudios", "personal"]);
 const GENERAL_UNAVAILABILITY_EMAILS = String(
   process.env.TIMEOFF_GENERAL_NOTIFY_EMAILS || "general@fam-project.com"
@@ -64,46 +100,152 @@ const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS |
   .split(",")
   .map((value) => String(value || "").trim().toLowerCase())
   .filter(Boolean);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
+const PASSIVE_EMPLOYMENT_STATUS_VALUES = Array.from(PASSIVE_EMPLOYMENT_STATUSES);
+
+function normalizeRoleName(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
+function canonicalizeRole(value = "") {
+  const normalized = normalizeRoleName(value);
+  if (!normalized) return "";
+  return ROLE_CANONICAL_ALIASES[normalized] || normalized;
+}
 
 function resolveApproverRole(requesterRole = "") {
-  const normalized = String(requesterRole || "").trim().toLowerCase();
+  const normalized = canonicalizeRole(requesterRole);
+  if (!normalized) return "gerencia_general";
+  if (GERENCIA_GENERAL_ROLES.has(normalized)) return "gerencia_general";
+
   const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
   if (isJefe) return "gerencia_general";
-  return ROLE_APPROVER[normalized] || "gerencia_general";
+
+  const mapped = ROLE_APPROVER[normalized];
+  if (mapped) return canonicalizeRole(mapped);
+
+  // Fallback genérico por jerarquía: rol base -> jefe_<rol>.
+  return `jefe_${normalized}`;
+}
+
+function getActorRoleCandidates(actor = {}) {
+  const roles = new Set();
+  [actor?.role, actor?.scope, actor?.role_name, actor?.rol, actor?.department]
+    .map(canonicalizeRole)
+    .filter(Boolean)
+    .forEach((role) => roles.add(role));
+  return Array.from(roles);
+}
+
+function buildPreferredApproverRoles(actor = {}) {
+  const preferred = [];
+  const requesterRoles = getActorRoleCandidates(actor);
+  requesterRoles.forEach((role) => {
+    const approverRole = resolveApproverRole(role);
+    if (approverRole) preferred.push(canonicalizeRole(approverRole));
+  });
+  if (!preferred.length) preferred.push("gerencia_general");
+  if (!preferred.some((role) => GERENCIA_GENERAL_ROLES.has(role))) {
+    preferred.push("gerencia_general");
+  }
+  return Array.from(new Set(preferred.filter(Boolean)));
 }
 
 function getApproverRoleCandidates(approver = {}) {
-  const candidates = new Set(
-    [approver?.role, approver?.scope, approver?.role_name, approver?.rol]
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean)
-  );
-  if (candidates.has("jefe_finanzas")) candidates.add("jefe_financiero");
-  if (candidates.has("jefe_financiero")) candidates.add("jefe_finanzas");
-  if (candidates.has("finanzas")) candidates.add("financiero");
-  if (candidates.has("financiero")) candidates.add("finanzas");
-  if (candidates.has("gerencia_general")) candidates.add("gerente_general");
-  if (candidates.has("gerente_general")) candidates.add("gerencia_general");
+  const candidates = new Set();
+  getActorRoleCandidates(approver).forEach((role) => {
+    expandApproverLookupRoles(role).forEach((candidateRole) => candidates.add(candidateRole));
+  });
   return Array.from(candidates);
+}
+
+function expandApproverLookupRoles(role) {
+  const normalized = canonicalizeRole(role);
+  if (!normalized) return [];
+
+  const roles = new Set([normalized]);
+  const aliases = APPROVER_ROLE_ALIASES[normalized] || [];
+  aliases.forEach((alias) => roles.add(normalizeRoleName(alias)));
+
+  if (normalized.startsWith("jefe_")) {
+    roles.add(normalized.replace(/^jefe_/, "jefe_de_"));
+  } else if (normalized.startsWith("jefe_de_")) {
+    roles.add(normalized.replace(/^jefe_de_/, "jefe_"));
+  }
+
+  if (GERENCIA_GENERAL_ROLES.has(normalized)) {
+    APPROVER_ROLE_ALIASES.gerencia_general.forEach((alias) => roles.add(normalizeRoleName(alias)));
+  }
+
+  return Array.from(roles).filter(Boolean);
 }
 
 async function findApproverByRole(role) {
   if (!role) return null;
+  const roleCandidates = expandApproverLookupRoles(role);
+  if (!roleCandidates.length) return null;
   const { rows } = await db.query(
-    `SELECT id, email, fullname
-       FROM users
-      WHERE LOWER(role) = LOWER($1) AND active = true
+    `SELECT u.id, u.email, u.fullname
+       FROM users u
+       LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      WHERE LOWER(COALESCE(u.role, '')) = ANY($1::text[])
+        AND u.active = true
+        AND NOT (
+          LOWER(COALESCE(cp.profile->'laboral'->>'estatus_empleado', '')) = ANY($3::text[])
+        )
       ORDER BY
         CASE
-          WHEN LOWER(COALESCE(email, '')) = ANY($2) THEN 0
-          WHEN LOWER(COALESCE(email, '')) LIKE 'administrador@%' THEN 2
+          WHEN LOWER(COALESCE(u.email, '')) = ANY($2) THEN 0
+          WHEN LOWER(COALESCE(u.email, '')) LIKE 'administrador@%' THEN 2
           ELSE 1
         END,
-        id ASC
+        u.id ASC
       LIMIT 1`,
-    [role, PREFERRED_APPROVER_EMAILS]
+    [roleCandidates, PREFERRED_APPROVER_EMAILS, PASSIVE_EMPLOYMENT_STATUS_VALUES]
   );
   return rows[0] || null;
+}
+
+async function resolveApproverWithFallback(preferredRoles) {
+  const preferredList = Array.isArray(preferredRoles) ? preferredRoles : [preferredRoles];
+  const normalizedPreferredRoles = Array.from(
+    new Set(preferredList.map(canonicalizeRole).filter(Boolean))
+  );
+
+  const orderedRoles = normalizedPreferredRoles.length
+    ? normalizedPreferredRoles
+    : ["gerencia_general"];
+
+  for (let idx = 0; idx < orderedRoles.length; idx += 1) {
+    const role = orderedRoles[idx];
+    const user = await findApproverByRole(role);
+    if (user?.id) {
+      return {
+        approverRole: role,
+        approverUser: user,
+        fallbackApplied: idx > 0,
+      };
+    }
+  }
+
+  const fallbackRole = "gerencia_general";
+  const fallbackUser = await findApproverByRole(fallbackRole);
+  if (!fallbackUser?.id) {
+    return {
+      approverRole: fallbackRole,
+      approverUser: null,
+      fallbackApplied: true,
+    };
+  }
+
+  return {
+    approverRole: fallbackRole,
+    approverUser: fallbackUser,
+    fallbackApplied: true,
+  };
 }
 
 function getDisplayName(user = {}) {
@@ -417,8 +559,47 @@ function stableStringify(input) {
 function normalizeDateOnly(value) {
   if (!value) return null;
   if (typeof value === "string") {
-    const direct = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    const trimmed = value.trim();
+    const direct = trimmed.match(/^(\d{4}-\d{2}-\d{2})/);
     if (direct) return direct[1];
+
+    // Formatos legacy/locales: dd/MM/yyyy o dd-MM-yyyy (Ecuador/LATAM)
+    const dmy = trimmed.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:\D|$)/);
+    if (dmy) {
+      const day = Number(dmy[1]);
+      const month = Number(dmy[2]);
+      const year = Number(dmy[3]);
+      if (
+        Number.isFinite(day) &&
+        Number.isFinite(month) &&
+        Number.isFinite(year) &&
+        day >= 1 &&
+        day <= 31 &&
+        month >= 1 &&
+        month <= 12
+      ) {
+        return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
+
+    // Formato yyyy/MM/dd
+    const ymdSlash = trimmed.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})(?:\D|$)/);
+    if (ymdSlash) {
+      const year = Number(ymdSlash[1]);
+      const month = Number(ymdSlash[2]);
+      const day = Number(ymdSlash[3]);
+      if (
+        Number.isFinite(day) &&
+        Number.isFinite(month) &&
+        Number.isFinite(year) &&
+        day >= 1 &&
+        day <= 31 &&
+        month >= 1 &&
+        month <= 12
+      ) {
+        return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      }
+    }
   }
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
@@ -441,8 +622,26 @@ function getCurrentDateInAppTimezone() {
 }
 
 function canCancelByDateRule(solicitud = {}) {
-  const startDate = normalizeDateOnly(solicitud?.fecha_inicio || solicitud?.fecha_inicio_hora);
-  if (!startDate) return false;
+  const dateCandidates = [
+    solicitud?.fecha_inicio,
+    solicitud?.fecha_inicio_hora,
+    solicitud?.fecha_fin,
+    solicitud?.fecha_fin_hora,
+    solicitud?.periodo_vacaciones,
+  ];
+  const startDate = dateCandidates.map(normalizeDateOnly).find(Boolean);
+  if (!startDate) {
+    logger.warn(
+      {
+        solicitudId: solicitud?.id || null,
+        fecha_inicio: solicitud?.fecha_inicio || null,
+        fecha_inicio_hora: solicitud?.fecha_inicio_hora || null,
+        periodo_vacaciones: solicitud?.periodo_vacaciones || null,
+      },
+      "No se pudo resolver fecha de inicio para regla de cancelacion; se permite continuar para evitar bloqueo operativo"
+    );
+    return true;
+  }
   const today = getCurrentDateInAppTimezone();
   return today <= startDate;
 }
@@ -618,6 +817,13 @@ function buildGeneralUnavailabilityMailContent(solicitud = {}) {
 
 async function sendGeneralUnavailabilityNotification(solicitud = {}) {
   if (!GENERAL_UNAVAILABILITY_EMAILS.length) return;
+  if (isEmergencySolicitud(solicitud)) {
+    logger.info(
+      { solicitudId: solicitud?.id, userEmail: solicitud?.user_email },
+      "Se omite aviso general de no disponibilidad por tratarse de una solicitud de emergencia"
+    );
+    return;
+  }
   const { subject, text, html } = buildGeneralUnavailabilityMailContent(solicitud);
   await sendMail({
     to: GENERAL_UNAVAILABILITY_EMAILS,
@@ -631,10 +837,10 @@ async function sendGeneralUnavailabilityNotification(solicitud = {}) {
 function buildSolicitudCalendarEventInput(solicitud = {}) {
   const isVacation = solicitud?.tipo_solicitud === "vacaciones";
   const startDateTime = isVacation
-    ? buildWorkdayDateTime(solicitud?.fecha_inicio, "09:00") || solicitud?.fecha_inicio_hora || null
+    ? solicitud?.fecha_inicio_hora || buildWorkdayDateTime(solicitud?.fecha_inicio, "09:00") || null
     : solicitud?.fecha_inicio_hora || null;
   const endDateTime = isVacation
-    ? buildWorkdayDateTime(solicitud?.fecha_fin, "18:00") || solicitud?.fecha_fin_hora || null
+    ? solicitud?.fecha_fin_hora || buildWorkdayDateTime(solicitud?.fecha_fin, "18:00") || null
     : solicitud?.fecha_fin_hora || null;
 
   return {
@@ -677,12 +883,150 @@ async function createSolicitudCalendarEvent(solicitud, warningMessage) {
   }
 }
 
+async function assertRequesterCanCreateTimeOff(userId) {
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("No se pudo resolver el solicitante de la solicitud.");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT
+        u.id,
+        u.active,
+        cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
+      FROM users u
+      LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [targetUserId]
+  );
+  const row = rows[0];
+  if (!row) {
+    const err = new Error("No se encontró información del solicitante.");
+    err.status = 404;
+    throw err;
+  }
+
+  const employmentStatus = String(row.estatus_empleado || "").trim().toLowerCase();
+  const inactive =
+    row.active === false ||
+    PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
+
+  if (inactive) {
+    const err = new Error(
+      "Tu usuario se encuentra en estado pasivo/inactivo y no puede crear solicitudes de permisos o vacaciones."
+    );
+    err.status = 403;
+    err.code = "COLLABORATOR_INACTIVE";
+    throw err;
+  }
+}
+
+async function recreateCalendarEventForSolicitud({ solicitudId, includeGeneralNotice = true } = {}) {
+  await ensureTable();
+  const id = Number(solicitudId);
+  if (!Number.isInteger(id) || id <= 0) {
+    const err = new Error("solicitudId invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const solicitud = rows[0];
+  if (!solicitud) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  const status = normalizeStatusText(solicitud?.status);
+  if (!["approved", "aprobado"].includes(status)) {
+    const err = new Error("Solo se pueden re-agendar solicitudes con estado aprobado");
+    err.status = 409;
+    throw err;
+  }
+
+  const calendarEvent = await createTimeOffEvent(buildSolicitudCalendarEventInput(solicitud));
+
+  let generalNotice = { attempted: false, sent: false, skipped: false };
+  if (includeGeneralNotice) {
+    generalNotice.attempted = true;
+    try {
+      await sendGeneralUnavailabilityNotification(solicitud);
+      generalNotice.sent = true;
+      generalNotice.skipped = false;
+    } catch (mailError) {
+      generalNotice.sent = false;
+      generalNotice.error = String(mailError?.message || mailError);
+      logger.warn(
+        { mailError, solicitudId: solicitud.id },
+        "No se pudo enviar aviso general durante re-agendado manual de calendario"
+      );
+    }
+  }
+
+  try {
+    await logAction({
+      usuario_id: null,
+      usuario_email: "system_calendar_recreate",
+      modulo: "permisos",
+      accion: "recrear_evento_calendario",
+      descripcion: "Evento de calendario recreado manualmente para solicitud aprobada.",
+      datos_nuevos: {
+        solicitud_id: solicitud.id,
+        status: solicitud.status,
+        calendar_event_id: calendarEvent?.id || null,
+      },
+      contexto: { auto: true },
+    });
+  } catch (auditError) {
+    logger.warn(
+      { auditError, solicitudId: solicitud.id },
+      "No se pudo registrar auditoria de re-agendado manual de calendario"
+    );
+  }
+
+  return {
+    solicitud_id: solicitud.id,
+    user_email: solicitud.user_email,
+    status: solicitud.status,
+    calendar_event: {
+      id: calendarEvent?.id || null,
+      html_link: calendarEvent?.htmlLink || null,
+      calendar_id: calendarEvent?.calendarId || null,
+      delegated_user: calendarEvent?.delegatedUser || null,
+    },
+    general_notice: generalNotice,
+  };
+}
+
 function isAutoFinalPermisoType(tipoPermiso) {
   return AUTO_FINAL_PERMISO_TYPES.has(String(tipoPermiso || "").trim().toLowerCase());
 }
 
 function normalizeStatusText(value) {
   return String(value || "").trim().toLowerCase();
+}
+
+function normalizeBooleanFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  const normalized = String(value || "").trim().toLowerCase();
+  return ["1", "true", "si", "sí", "yes", "on"].includes(normalized);
+}
+
+function isHealthPermiso(row = {}) {
+  return String(row?.tipo_permiso || "").trim().toLowerCase() === "salud";
+}
+
+function isEmergencySolicitud(row = {}) {
+  return normalizeBooleanFlag(row?.es_emergencia);
+}
+
+function isAutoCancellationExempt(row = {}) {
+  return isHealthPermiso(row) || isEmergencySolicitud(row);
 }
 
 function buildTimeRangeLabel(startValue, endValue) {
@@ -790,6 +1134,159 @@ function isRecoveryCoordinationPending(status) {
   return ["pending_approver_proposal", "pending_requester_acceptance"].includes(
     normalizeRecoveryCoordinationStatus(status)
   );
+}
+
+function isPendingApprovalStatus(status) {
+  return ["pending", "pendiente"].includes(normalizeStatusText(status));
+}
+
+function hasApprovalTimestamps(row = {}) {
+  return Boolean(row?.aprobacion_parcial_at || row?.aprobacion_final_at);
+}
+
+function getSolicitudExpiryValues(row = {}) {
+  return {
+    dateOnly: normalizeDateOnly(row?.fecha_inicio || row?.fecha_inicio_hora),
+    dateTime: normalizeDateTime(row?.fecha_inicio_hora),
+  };
+}
+
+function isExpiredWithoutApproval(row = {}) {
+  if (!isPendingApprovalStatus(row?.status)) return false;
+  if (hasApprovalTimestamps(row)) return false;
+  if (isAutoCancellationExempt(row)) return false;
+
+  const { dateOnly, dateTime } = getSolicitudExpiryValues(row);
+  if (dateTime) return new Date().toISOString() >= dateTime;
+  if (!dateOnly) return false;
+
+  const today = getCurrentDateInAppTimezone();
+  return Boolean(today && today >= dateOnly);
+}
+
+async function settleExpiredPendingSolicitud(row = {}) {
+  if (!row?.id) return row;
+  if (!isExpiredWithoutApproval(row)) return row;
+
+  const { rows } = await db.query(
+    `UPDATE permisos_vacaciones
+        SET status = 'cancelled',
+            cancelled_at = COALESCE(cancelled_at, NOW()),
+            cancelled_by_email = COALESCE(cancelled_by_email, 'system_auto_expiry'),
+            cancellation_reason = COALESCE(cancellation_reason, 'auto_expired_without_approval'),
+            cancellation_status = 'approved',
+            cancellation_reviewed_at = COALESCE(cancellation_reviewed_at, NOW()),
+            cancellation_reviewed_by_email = COALESCE(cancellation_reviewed_by_email, 'system_auto_expiry'),
+            cancellation_review_reason = COALESCE(cancellation_review_reason, 'auto_expired_without_approval'),
+            updated_at = NOW()
+      WHERE id = $1
+        AND LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
+        AND COALESCE(es_emergencia, false) = false
+        AND LOWER(COALESCE(tipo_permiso, '')) <> 'salud'
+        AND aprobacion_parcial_at IS NULL
+        AND aprobacion_final_at IS NULL
+      RETURNING *`,
+    [row.id]
+  );
+  const settled = rows[0] || row;
+  if (rows[0]) {
+    try {
+      await logAction({
+        usuario_id: null,
+        usuario_email: "system_auto_expiry",
+        modulo: "permisos",
+        accion: "cancelacion_automatica_vencimiento",
+        descripcion: "Solicitud cancelada automáticamente por vencimiento sin aprobación.",
+        datos_nuevos: {
+          solicitud_id: settled.id,
+          status: settled.status,
+          cancellation_reason: settled.cancellation_reason,
+        },
+        contexto: { auto: true },
+      });
+    } catch (auditError) {
+      logger.warn(
+        { auditError, solicitudId: settled.id },
+        "No se pudo registrar auditoría de cancelación automática por vencimiento"
+      );
+    }
+
+    try {
+      if (settled?.user_id) {
+        await notificationManager.sendNotification({
+          userId: settled.user_id,
+          customTitle: "Solicitud cancelada automaticamente",
+          customMessage: `Tu solicitud #${settled.id} fue cancelada automaticamente porque no tuvo aprobacion del jefe inmediato antes del inicio del permiso.`,
+          type: "warning",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: true,
+          meta: {
+            solicitud_id: settled.id,
+            tipo_solicitud: settled.tipo_solicitud || null,
+            tipo_permiso: settled.tipo_permiso || null,
+            status: "cancelled",
+            cancellation_reason: settled.cancellation_reason || "auto_expired_without_approval",
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${settled.id}`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn(
+        { notifyError, solicitudId: settled.id },
+        "No se pudo notificar cancelacion automatica por vencimiento"
+      );
+    }
+  }
+  return settled;
+}
+
+async function settleExpiredPendingSolicitudRows(rows = []) {
+  if (!Array.isArray(rows) || rows.length === 0) return rows;
+  const settled = [];
+  for (const row of rows) {
+    settled.push(await settleExpiredPendingSolicitud(row));
+  }
+  return settled;
+}
+
+async function processExpiredPendingSolicitudes({ solicitudIds = null } = {}) {
+  await ensureTable();
+
+  const ids = Array.isArray(solicitudIds)
+    ? solicitudIds
+      .map((value) => Number(value))
+      .filter((value) => Number.isInteger(value) && value > 0)
+    : [];
+
+  let query = `SELECT *
+                 FROM permisos_vacaciones
+                WHERE LOWER(COALESCE(status, '')) IN ('pending', 'pendiente')
+                  AND COALESCE(es_emergencia, false) = false
+                  AND LOWER(COALESCE(tipo_permiso, '')) <> 'salud'
+                  AND aprobacion_parcial_at IS NULL
+                  AND aprobacion_final_at IS NULL`;
+  const values = [];
+  if (ids.length > 0) {
+    query += " AND id = ANY($1::int[])";
+    values.push(ids);
+  }
+
+  const { rows } = await db.query(query, values);
+  if (!rows.length) {
+    return { scanned: 0, cancelled: 0 };
+  }
+
+  const settledRows = await settleExpiredPendingSolicitudRows(rows);
+  const cancelled = settledRows.reduce(
+    (acc, row) => acc + (normalizeStatusText(row?.status) === "cancelled" ? 1 : 0),
+    0
+  );
+
+  return {
+    scanned: rows.length,
+    cancelled,
+  };
 }
 
 async function settleExpiredRecoveryCoordination(row = {}) {
@@ -1087,6 +1584,7 @@ async function ensureTable() {
       fecha_inicio_hora TIMESTAMPTZ,
       fecha_fin_hora TIMESTAMPTZ,
       es_recuperable BOOLEAN DEFAULT false,
+      es_emergencia BOOLEAN NOT NULL DEFAULT false,
       periodo_vacaciones TEXT,
       justificacion_requerida TEXT[],
       recovery_plan JSONB,
@@ -1124,6 +1622,7 @@ async function ensureTable() {
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_fin DATE");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_inicio_hora TIMESTAMPTZ");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS fecha_fin_hora TIMESTAMPTZ");
+    await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS es_emergencia BOOLEAN NOT NULL DEFAULT false");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS justificacion_requerida TEXT[]");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_plan JSONB");
     await db.query("ALTER TABLE permisos_vacaciones ADD COLUMN IF NOT EXISTS recovery_plan_total_hours DECIMAL(8,2)");
@@ -1409,10 +1908,24 @@ async function registerStudyEnrollment({ actor, payload, file }) {
     throw err;
   }
 
-  const approverRole = resolveApproverRole(actor?.role || actor?.rol || "");
-  const approverUser = await findApproverByRole(approverRole);
+  const preferredApproverRoles = buildPreferredApproverRoles(actor);
+  const approverResolution = await resolveApproverWithFallback(preferredApproverRoles);
+  const approverRole = approverResolution.approverRole;
+  const approverUser = approverResolution.approverUser;
+  logger.info(
+    {
+      actorRoles: getActorRoleCandidates(actor),
+      preferredApproverRoles,
+      resolvedApproverRole: approverRole,
+      resolvedApproverEmail: approverUser?.email || null,
+      fallbackApplied: approverResolution.fallbackApplied,
+    },
+    "Resolucion de aprobador para matricula de estudios"
+  );
   if (!approverUser?.id) {
-    const err = new Error("No se encontró jefe inmediato para validar la matrícula");
+    const err = new Error(
+      "No se encontró un aprobador activo (jefe inmediato o gerencia general) para validar la matrícula"
+    );
     err.status = 400;
     throw err;
   }
@@ -1587,6 +2100,7 @@ async function createSolicitud({ body, user, meta }) {
   await ensureTable();
   let requesterIdentity = null;
   const requesterUserId = resolveActorId(user);
+  await assertRequesterCanCreateTimeOff(requesterUserId);
   if (requesterUserId) {
     try {
       requesterIdentity = await getUserIdentity(requesterUserId);
@@ -1600,6 +2114,8 @@ async function createSolicitud({ body, user, meta }) {
   payload.user_fullname = requesterIdentity?.fullname || getDisplayName(user);
   payload.user_id = requesterUserId;
   payload.allow_negative = Boolean(payload.allow_negative);
+  payload.es_emergencia =
+    payload.tipo_solicitud === "permiso" ? normalizeBooleanFlag(payload.es_emergencia) : false;
   payload.projected_remaining_days = null;
   payload.recovery_date = null;
   payload.monetary_debt = null;
@@ -1608,13 +2124,26 @@ async function createSolicitud({ body, user, meta }) {
   const famSignConsentText =
     consentTextFromUi ||
     `Acepto el uso de FamSign para firma y validacion del workflow de esta solicitud (${consentVersion}).`;
-  const approverRole = resolveApproverRole(user?.role || user?.rol || "");
-  const approverUser = await findApproverByRole(approverRole);
-  payload.approver_role = approverRole;
+  const preferredApproverRoles = buildPreferredApproverRoles(user);
+  const approverResolution = await resolveApproverWithFallback(preferredApproverRoles);
+  payload.approver_role = approverResolution.approverRole;
+  const approverUser = approverResolution.approverUser;
   payload.approver_user_id = approverUser?.id || null;
   payload.approver_email = approverUser?.email || null;
+  logger.info(
+    {
+      requesterRoles: getActorRoleCandidates(user),
+      preferredApproverRoles,
+      resolvedApproverRole: payload.approver_role,
+      resolvedApproverEmail: payload.approver_email,
+      fallbackApplied: approverResolution.fallbackApplied,
+    },
+    "Resolucion de aprobador para solicitud de permiso/vacaciones"
+  );
   if (!payload.approver_user_id) {
-    const err = new Error("No se encontro un jefe aprobador para tu rol. Contacta a Talento Humano.");
+    const err = new Error(
+      "No se encontró un aprobador activo para tu solicitud (jefe inmediato o gerencia general)."
+    );
     err.status = 400;
     throw err;
   }
@@ -1871,9 +2400,9 @@ async function createSolicitud({ body, user, meta }) {
       es_recuperable, periodo_vacaciones, justificacion_requerida, study_enrollment_id,
       recovery_plan, recovery_plan_total_hours, recovery_plan_updated_at, recovery_plan_updated_by_user_id, recovery_coordination_status,
       drive_doc_id, drive_pdf_id, drive_doc_link, drive_pdf_link, drive_folder_id,
-      allow_negative, projected_remaining_days, recovery_date, monetary_debt,
+      allow_negative, projected_remaining_days, recovery_date, monetary_debt, es_emergencia,
       status
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,'pending') RETURNING *`,
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,'pending') RETURNING *`,
     [
       payload.user_email,
       payload.user_fullname,
@@ -1911,17 +2440,21 @@ async function createSolicitud({ body, user, meta }) {
       payload.projected_remaining_days,
       payload.recovery_date,
       payload.monetary_debt,
+      payload.es_emergencia,
     ]
   );
 
   await logAction({ usuario_email: user?.email, modulo: "permisos", accion: "crear" });
+  const approverLabel = GERENCIA_GENERAL_ROLES.has(String(payload.approver_role || "").toLowerCase())
+    ? "gerencia general"
+    : "jefe inmediato";
 
   try {
     if (payload.user_id) {
       await notificationManager.sendNotification({
         userId: payload.user_id,
         customTitle: "Solicitud enviada",
-        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue enviada para aprobacion del jefe inmediato.`,
+        customMessage: `Tu solicitud de ${payload.tipo_solicitud} fue enviada para aprobacion de ${approverLabel}.`,
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,
@@ -2174,6 +2707,27 @@ async function aprobarParcial({ id, approver, meta }) {
 
 async function subirJustificantes({ id, urls, user }) {
   await ensureTable();
+  const { rows: existingRows } = await db.query(`SELECT * FROM permisos_vacaciones WHERE id = $1 LIMIT 1`, [id]);
+  const solicitud = existingRows[0];
+  if (!solicitud) {
+    const err = new Error("Solicitud no encontrada");
+    err.status = 404;
+    throw err;
+  }
+
+  const normalizedStatus = normalizeStatusText(solicitud?.status);
+  const normalizedTipoPermiso = String(solicitud?.tipo_permiso || "").trim().toLowerCase();
+  const canUploadByDefaultFlow = ["partially_approved", "pending_final"].includes(normalizedStatus);
+  const canUploadHealthEmergency =
+    ["pending", "pendiente"].includes(normalizedStatus) && normalizedTipoPermiso === "salud";
+  if (!canUploadByDefaultFlow && !canUploadHealthEmergency) {
+    const err = new Error(
+      "Solo se pueden subir justificantes en solicitudes parcialmente aprobadas, pendientes finales o permisos de salud pendientes."
+    );
+    err.status = 409;
+    throw err;
+  }
+
   const safeUrls = Array.isArray(urls) ? urls : [];
   const { rows } = await db.query(
     `UPDATE permisos_vacaciones
@@ -2192,7 +2746,7 @@ async function subirJustificantes({ id, urls, user }) {
       await notificationManager.sendNotification({
         userId: solicitud.approver_user_id,
         customTitle: "Justificantes subidos",
-        customMessage: `${solicitud.user_fullname || solicitud.user_email} subir los justificantes. La solicitud está lista para aprobación final.`,
+        customMessage: `${solicitud.user_fullname || solicitud.user_email} subió los justificantes. La solicitud está lista para aprobación final.`,
         type: "info",
         source: "permisos_vacaciones",
         priority: 1,
@@ -2577,20 +3131,29 @@ async function cancelarSolicitud({ id, actor, reason }) {
   }
 
   const isApprovedStatus = ["approved", "aprobado"].includes(status);
-  if (!isApprovedStatus) {
-    const err = new Error("Solo solicitudes aprobadas pueden entrar en flujo de cancelación");
+  const isDirectCancelableStatus = [
+    "pending",
+    "pendiente",
+    "partially_approved",
+    "pending_final",
+  ].includes(status);
+  if (!isApprovedStatus && !isDirectCancelableStatus) {
+    const err = new Error(
+      "Solo solicitudes en estado pendiente, aprobacion parcial, aprobacion final o aprobada pueden cancelarse"
+    );
     err.status = 409;
     throw err;
   }
 
-  if (!canCancelByDateRule(solicitud)) {
+  if (isApprovedStatus && !canCancelByDateRule(solicitud)) {
     const err = new Error("La solicitud solo puede cancelarse hasta el día del permiso o antes.");
     err.status = 409;
     throw err;
   }
 
+  const requiresCancellationRequest = isApprovedStatus && isRequester && !isApprover;
   let updated = null;
-  if (isRequester && !isApprover) {
+  if (requiresCancellationRequest) {
     if (String(solicitud.cancellation_status || "none").toLowerCase() === "pending") {
       const err = new Error("Ya existe una solicitud de cancelación pendiente de revisión");
       err.status = 409;
@@ -2643,6 +3206,10 @@ async function cancelarSolicitud({ id, actor, reason }) {
               cancelled_by_email = $3,
               cancellation_reason = $4,
               cancellation_status = 'approved',
+              cancellation_requested_at = COALESCE(cancellation_requested_at, NOW()),
+              cancellation_requested_by_user_id = COALESCE(cancellation_requested_by_user_id, $2),
+              cancellation_requested_by_email = COALESCE(cancellation_requested_by_email, $3),
+              cancellation_request_reason = COALESCE(cancellation_request_reason, $4),
               cancellation_reviewed_at = NOW(),
               cancellation_reviewed_by_user_id = $2,
               cancellation_reviewed_by_email = $3,
@@ -2659,6 +3226,30 @@ async function cancelarSolicitud({ id, actor, reason }) {
       logger.warn(
         { legalRefreshError, solicitudId: updated?.id },
         "No se pudo regenerar evidencia legal al cancelar la solicitud"
+      );
+    }
+    try {
+      if (isRequester && !isApprover && updated?.approver_user_id) {
+        await notificationManager.sendNotification({
+          userId: updated.approver_user_id,
+          customTitle: "Solicitud cancelada por colaborador",
+          customMessage: `El colaborador canceló la solicitud #${updated.id}.`,
+          type: "info",
+          source: "permisos_vacaciones",
+          priority: 1,
+          email: true,
+          meta: {
+            solicitud_id: updated.id,
+            reason: trimmedReason,
+            status: "cancelled",
+            target_path: `/dashboard/talento-humano/permisos?tab=mine&solicitudId=${updated.id}`,
+          },
+        });
+      }
+    } catch (notifyError) {
+      logger.warn(
+        { notifyError, solicitudId: updated?.id },
+        "No se pudo notificar cancelación directa al aprobador"
       );
     }
     try {
@@ -2687,7 +3278,7 @@ async function cancelarSolicitud({ id, actor, reason }) {
   await logAction({
     usuario_email: actor?.email,
     modulo: "permisos",
-    accion: isRequester && !isApprover ? "solicitar_cancelacion" : "cancelar",
+    accion: requiresCancellationRequest ? "solicitar_cancelacion" : "cancelar",
   });
 
   const enriched = await attachWorkflowSignatures([updated]);
@@ -3021,6 +3612,7 @@ async function updateRecoveryPlan({ id, actor, recoveryPlan, action }) {
 
 async function listarPendientes({ stage, approver }) {
   await ensureTable();
+  await processExpiredPendingSolicitudes();
   let statusFilter = "pending";
   if (stage === "final" || stage === "pending_final") statusFilter = "pending_final";
   if (stage === "parcial") statusFilter = "pending";
@@ -3065,6 +3657,7 @@ async function listarPendientes({ stage, approver }) {
 
 async function listarPorUsuario({ user }) {
   await ensureTable();
+  await processExpiredPendingSolicitudes();
   const email = user?.email;
   if (!email) return { data: [], summary: {} };
 
@@ -3160,6 +3753,7 @@ async function listarPorUsuario({ user }) {
 
 async function getSolicitudById(id) {
   await ensureTable();
+  await processExpiredPendingSolicitudes({ solicitudIds: [id] });
   const { rows } = await db.query(
     `SELECT * FROM permisos_vacaciones WHERE id = $1`,
     [id]
@@ -3259,6 +3853,7 @@ const computeVacationAllowance = (hireDateValue, asOfValue = new Date()) => {
 
 async function listarResumenColaboradores() {
   await ensureTable();
+  await processExpiredPendingSolicitudes();
   const usersResult = await db.query(
     `SELECT u.id, u.email, u.fullname, u.name, u.department_id,
             d.name AS department_name,
@@ -3287,6 +3882,7 @@ async function listarResumenColaboradores() {
         p.charged_vacation_days,
         p.justificacion_requerida,
         p.justificantes_urls,
+        p.es_emergencia,
         p.fecha_inicio,
         p.fecha_fin,
         p.aprobacion_parcial_at,
@@ -3483,6 +4079,7 @@ async function listarResumenColaboradores() {
       charged_vacation_days: row.charged_vacation_days,
       justificacion_requerida: row.justificacion_requerida,
       justificantes_urls: row.justificantes_urls,
+      es_emergencia: Boolean(row.es_emergencia),
       created_at: row.created_at,
       aprobacion_parcial_at: row.aprobacion_parcial_at,
       aprobacion_final_at: row.aprobacion_final_at,
@@ -3555,6 +4152,8 @@ module.exports = {
   listMyStudyEnrollments,
   listPendingStudyEnrollments,
   reviewStudyEnrollment,
+  recreateCalendarEventForSolicitud,
+  processExpiredPendingSolicitudes,
   processExpiredRecoveryCoordinations,
   getLegalVerificationByToken,
   getLegalCoverage,

@@ -127,24 +127,34 @@ const DocumentCard = ({
 
       <div className="mt-4">
         {existingDoc ? (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-stretch gap-2">
             <button
               type="button"
               onClick={() => handleDocumentPreview?.({ ...existingDoc, displayLabel: definition.label })}
               aria-label={`Previsualizar documento ${definition.label}`}
-              className="inline-flex flex-1 items-center justify-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-medium text-brand-hr-primary transition hover:bg-brand-hr-primary-soft"
+              title="Previsualizar"
+              className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-medium text-brand-hr-primary transition hover:bg-brand-hr-primary-soft"
             >
-              <FiEye title="Icono de previsualización" />
-              Previsualizar
+              <FiEye className="h-4 w-4 shrink-0" title="Icono de previsualizacion" />
+              <span className="min-w-0 truncate max-[430px]:hidden">
+                Previsualizar
+              </span>
             </button>
             {!disabled ? (
               <button
                 type="button"
                 onClick={open}
                 aria-label={`Reemplazar documento ${definition.label}`}
-                className="inline-flex items-center justify-center rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-medium text-brand-hr-primary-muted transition hover:bg-brand-hr-primary-soft"
+                title="Reemplazar"
+                className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-md border border-brand-hr-primary/20 bg-brand-hr-primary-contrast px-3 py-1.5 text-xs font-medium text-brand-hr-primary-muted transition hover:bg-brand-hr-primary-soft"
               >
-                Reemplazar
+                <FiUploadCloud
+                  className="h-4 w-4 shrink-0"
+                  title="Icono de reemplazo de documento"
+                />
+                <span className="min-w-0 truncate max-[430px]:hidden">
+                  Reemplazar
+                </span>
               </button>
             ) : null}
           </div>

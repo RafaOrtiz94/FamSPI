@@ -6,6 +6,7 @@ const listCollaborators = async (req, res) => {
       search: req.query.search || null,
       department_id: req.query.department_id || null,
       cargo: req.query.cargo || null,
+      employment_status: req.query.employment_status || null,
       page: req.query.page ? Number(req.query.page) : 1,
       pageSize: req.query.pageSize ? Number(req.query.pageSize) : 20,
     };

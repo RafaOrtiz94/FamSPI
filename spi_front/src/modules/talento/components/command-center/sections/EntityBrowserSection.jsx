@@ -6,6 +6,7 @@ import { FiChevronDown, FiChevronUp, FiSearch } from "react-icons/fi";
 const VIEW_OPTIONS = [
   { key: "requests", label: "Contratacion" },
   { key: "collaborators", label: "Colaboradores" },
+  { key: "offboarding", label: "Desvinculacion" },
 ];
 
 const REQUEST_STATUS_META = {
@@ -35,6 +36,16 @@ const resolveListState = (activeView, browserProps = {}) => {
       emptyMessage: "No hay colaboradores listados.",
     };
   }
+  if (activeView === "offboarding") {
+    return {
+      key: "offboarding",
+      loading: Boolean(browserProps.loadingCollaborators),
+      items: Array.isArray(browserProps.offboardingCollaborators)
+        ? browserProps.offboardingCollaborators
+        : [],
+      emptyMessage: "No hay colaboradores en desvinculacion.",
+    };
+  }
 
   return {
     key: "requests",
@@ -53,7 +64,10 @@ const EntityBrowserSection = ({
   onSearchChange,
   browserProps = {},
 }) => {
-  const operationalView = activeView === "collaborators" ? "collaborators" : "requests";
+  const operationalView =
+    activeView === "collaborators" || activeView === "offboarding"
+      ? activeView
+      : "requests";
   const listRef = useRef(null);
   const [listContainerNode, setListContainerNode] = useState(null);
   const [listWidth, setListWidth] = useState(0);
@@ -102,7 +116,7 @@ const EntityBrowserSection = ({
       if (listState.key === "requests") {
         if (item?.workflow?.current_stage_label) extra += 24;
         if (item?.workflow?.elapsed_label) extra += 20;
-      } else if (listState.key === "collaborators") {
+      } else if (listState.key === "collaborators" || listState.key === "offboarding") {
         if (item?.department_name) extra += 12;
       }
 
@@ -139,7 +153,8 @@ const EntityBrowserSection = ({
   const Row = ({ index, style, data }) => {
     const item = data.items[index];
     const isRequest = data.activeView === "requests";
-    const isCollaborator = data.activeView === "collaborators";
+    const isCollaborator =
+      data.activeView === "collaborators" || data.activeView === "offboarding";
 
     const isSelected = isRequest
       ? String(item?.id) === String(data.browserProps.selectedRequestId)
@@ -163,6 +178,27 @@ const EntityBrowserSection = ({
       isRequest &&
       Boolean(data.browserProps.canApprovePersonnel) &&
       ACTIONABLE_REQUEST_STATUSES.has(requestStatus);
+    const normalizedEmploymentStatus = String(
+      item?.estatus_empleado || item?.status || "",
+    )
+      .trim()
+      .toLowerCase();
+    const isPassive =
+      item?.active === false ||
+      normalizedEmploymentStatus === "pasivo" ||
+      normalizedEmploymentStatus === "desvinculado" ||
+      normalizedEmploymentStatus === "inactivo";
+    const isOffboardingInProgress =
+      !isPassive &&
+      (item?.offboarding_requested === true ||
+        item?.profile?.onboarding?.offboarding_requested === true);
+    const startingThisCollaborator =
+      String(data.browserProps.startingOffboardingId || "") === String(item?.id || "");
+    const canStartOffboarding =
+      data.activeView === "collaborators" &&
+      !isPassive &&
+      !isOffboardingInProgress &&
+      typeof data.browserProps.onStartOffboarding === "function";
 
     return (
       <div style={style} className="px-1 pb-3">
@@ -219,14 +255,50 @@ const EntityBrowserSection = ({
 
           {isCollaborator && (
             <>
-              <p className="truncate text-sm font-semibold text-slate-900">
-                {item?.fullname || item?.email || "Colaborador sin nombre"}
-              </p>
-              <p className="truncate text-xs text-slate-500">
-                {item?.email || "Sin correo"}
-              </p>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-semibold text-slate-900">
+                    {item?.fullname || item?.email || "Colaborador sin nombre"}
+                  </p>
+                  <p className="truncate text-xs text-slate-500">
+                    {item?.email || "Sin correo"}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                    isPassive
+                      ? "bg-slate-200 text-slate-700"
+                      : isOffboardingInProgress
+                        ? "bg-blue-100 text-blue-700"
+                        : "bg-emerald-100 text-emerald-700"
+                  }`}
+                >
+                  {isPassive
+                    ? "Pasivo"
+                    : isOffboardingInProgress
+                      ? "En desvinculacion"
+                      : "Activo"}
+                </span>
+              </div>
               {item?.department_name ? (
                 <p className="mt-2 text-[11px] text-slate-500">{item.department_name}</p>
+              ) : null}
+              {canStartOffboarding ? (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      data.browserProps.onStartOffboarding?.(item);
+                    }}
+                    disabled={startingThisCollaborator}
+                    className="rounded-full border border-blue-300 px-3 py-1 text-[11px] font-semibold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {startingThisCollaborator
+                      ? "Iniciando..."
+                      : "Iniciar desvinculacion"}
+                  </button>
+                </div>
               ) : null}
             </>
           )}

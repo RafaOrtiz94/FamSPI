@@ -1,0 +1,12 @@
+{
+  "generated_at": "2026-03-31T21:22:51",
+  "connection": "SYSTEM/***@//localhost:1521/XEPDB1",
+  "output_dir": "C:\\AuditERP\\business_dictionary_xepdb1_20260331_212250",
+  "business_schemas_found": 1,
+  "active_business_schemas": [],
+  "files": [
+    "BUSINESS_DATA_DICTIONARY_XEPDB1.md",
+    "01_business_schemas.csv"
+  ],
+  "warnings": []
+}

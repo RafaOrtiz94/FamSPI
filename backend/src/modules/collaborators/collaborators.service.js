@@ -47,8 +47,10 @@ const REQUIRED_PROFILE_FIELDS = [
   'domicilio.ciudad_domicilio',
   'domicilio.direccion_domicilio',
   'domicilio.ruta_trabajo',
+  'domicilio.movilizacion',
   'domicilio.telefono_fijo',
   'emergencia.persona_contacto',
+  'emergencia.parentesco_contacto',
   'emergencia.telefono_contacto',
   'estudios.nivel_instruccion',
   'estudios.titulo_tercer_nivel',
@@ -85,6 +87,7 @@ const REQUIRED_DOC_TYPES = [
 ];
 
 const PROFILE_PATHS = REQUIRED_PROFILE_FIELDS.map((field) => field.split('.'));
+const PASSIVE_EMPLOYMENT_STATUSES = ["pasivo", "desvinculado", "inactivo"];
 
 const getProfileValue = (profile, path) => {
   return path.reduce((acc, key) => (acc && acc[key] !== undefined ? acc[key] : undefined), profile);
@@ -193,13 +196,14 @@ const resolveCollaboratorFolder = async (identity) => {
 const listCollaborators = async (filters = {}) => {
   await ensureCollaboratorTables();
 
-  const { search, department_id, cargo, page = 1, pageSize = 20 } = filters;
+  const { search, department_id, cargo, employment_status, page = 1, pageSize = 20 } = filters;
 
   const where = [
     `(COALESCE(cp.profile->'extra'->>'applicant_source','') <> 'google_forms' AND COALESCE((cp.profile->'extra' ? 'preguntas_adicionales'), false) = false)`,
   ];
   const params = [];
   let paramIndex = 1;
+  const normalizedEmploymentStatus = String(employment_status || "all").trim().toLowerCase();
 
   if (search) {
     where.push(`(LOWER(u.fullname) LIKE $${paramIndex} OR LOWER(u.email) LIKE $${paramIndex})`);
@@ -219,6 +223,21 @@ const listCollaborators = async (filters = {}) => {
     paramIndex += 1;
   }
 
+  if (normalizedEmploymentStatus === "active") {
+    where.push(`u.active = true`);
+    where.push(
+      `LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'))) <> ALL($${paramIndex}::text[])`
+    );
+    params.push(PASSIVE_EMPLOYMENT_STATUSES);
+    paramIndex += 1;
+  } else if (normalizedEmploymentStatus === "passive" || normalizedEmploymentStatus === "offboarded") {
+    where.push(
+      `(u.active = false OR LOWER(TRIM(COALESCE(cp.profile->'laboral'->>'estatus_empleado', ''))) = ANY($${paramIndex}::text[]))`
+    );
+    params.push(PASSIVE_EMPLOYMENT_STATUSES);
+    paramIndex += 1;
+  }
+
   const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
   const offset = (page - 1) * pageSize;
 
@@ -228,10 +247,12 @@ const listCollaborators = async (filters = {}) => {
       u.email,
       COALESCE(NULLIF(u.fullname, ''), CONCAT('Usuario #', u.id)) AS fullname,
       u.role,
+      u.active,
       u.department_id,
       u.created_at,
       u.updated_at,
       d.name AS department_name,
+      cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado,
       cp.profile,
       cp.updated_at AS profile_updated_at,
       up.metadata->>'profile_last_reviewed_at' AS profile_last_reviewed_at,
@@ -320,9 +341,18 @@ const getCollaboratorProfile = async (userId) => {
   await ensureCollaboratorTables();
 
   const userQuery = await db.query(
-    `SELECT u.id, u.email, u.fullname, u.role, u.department_id, d.name AS department_name
+    `SELECT
+        u.id,
+        u.email,
+        u.fullname,
+        u.role,
+        u.active,
+        u.department_id,
+        d.name AS department_name,
+        cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
      FROM users u
      LEFT JOIN departments d ON u.department_id = d.id
+     LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
      WHERE u.id = $1`,
     [userId]
   );

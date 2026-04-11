@@ -69,6 +69,7 @@ const PREFERRED_APPROVER_EMAILS = String(process.env.PREFERRED_APPROVER_EMAILS |
   .split(",")
   .map((value) => String(value || "").trim().toLowerCase())
   .filter(Boolean);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
 
 function resolveDbExecutor(executor) {
   if (executor && typeof executor.query === "function") return executor;
@@ -101,6 +102,20 @@ function getApproverRoleCandidates(user = {}) {
   if (candidates.has("gerencia_general")) candidates.add("gerente_general");
   if (candidates.has("gerente_general")) candidates.add("gerencia_general");
   return Array.from(candidates);
+}
+
+function expandApproverLookupRoles(role) {
+  const normalized = String(role || "").trim().toLowerCase();
+  const roles = new Set([normalized]);
+  if (normalized === "gerencia_general" || normalized === "gerente_general") {
+    roles.add("gerencia_general");
+    roles.add("gerente_general");
+  }
+  if (normalized === "jefe_financiero" || normalized === "jefe_finanzas") {
+    roles.add("jefe_financiero");
+    roles.add("jefe_finanzas");
+  }
+  return Array.from(roles).filter(Boolean);
 }
 
 function diffDaysInclusive(start, end) {
@@ -147,6 +162,47 @@ async function loadUser(userId) {
     [userId]
   );
   return rows[0];
+}
+
+async function assertRequesterCanCreateTimeOff(userId) {
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("No se pudo resolver el solicitante de vacaciones.");
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows } = await db.query(
+    `SELECT
+        u.id,
+        u.active,
+        cp.profile->'laboral'->>'estatus_empleado' AS estatus_empleado
+      FROM users u
+      LEFT JOIN collaborator_profiles cp ON cp.user_id = u.id
+      WHERE u.id = $1
+      LIMIT 1`,
+    [targetUserId]
+  );
+  const row = rows[0];
+  if (!row) {
+    const err = new Error("No se encontró información del solicitante.");
+    err.status = 404;
+    throw err;
+  }
+
+  const employmentStatus = String(row.estatus_empleado || "").trim().toLowerCase();
+  const inactive =
+    row.active === false ||
+    PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
+
+  if (inactive) {
+    const err = new Error(
+      "Tu usuario se encuentra en estado pasivo/inactivo y no puede crear solicitudes de permisos o vacaciones."
+    );
+    err.status = 403;
+    err.code = "COLLABORATOR_INACTIVE";
+    throw err;
+  }
 }
 
 async function getHireDate(userId, executor = db) {
@@ -263,10 +319,12 @@ async function getHistoricVacationBalance({ userId, userEmail, year }, executor 
 
 async function findApprover(targetRole) {
   if (!targetRole) return null;
+  const roleCandidates = expandApproverLookupRoles(targetRole);
+  if (!roleCandidates.length) return null;
   const { rows } = await db.query(
     `SELECT id
        FROM users
-      WHERE LOWER(role) = LOWER($1) AND active = true
+      WHERE LOWER(COALESCE(role, '')) = ANY($1::text[]) AND active = true
       ORDER BY
         CASE
           WHEN LOWER(COALESCE(email, '')) = ANY($2) THEN 0
@@ -275,9 +333,37 @@ async function findApprover(targetRole) {
         END,
         id ASC
       LIMIT 1`,
-    [targetRole, PREFERRED_APPROVER_EMAILS]
+    [roleCandidates, PREFERRED_APPROVER_EMAILS]
   );
   return rows[0]?.id || null;
+}
+
+async function resolveApproverAssignment(preferredRole) {
+  const normalizedPreferredRole = String(preferredRole || "").trim().toLowerCase();
+  const primaryApproverId = await findApprover(normalizedPreferredRole);
+  if (primaryApproverId) {
+    return {
+      approverId: primaryApproverId,
+      approverRole: normalizedPreferredRole,
+      fallbackApplied: false,
+    };
+  }
+
+  if (GERENCIA_GENERAL_ROLES.has(normalizedPreferredRole)) {
+    return {
+      approverId: null,
+      approverRole: normalizedPreferredRole,
+      fallbackApplied: false,
+    };
+  }
+
+  const fallbackRole = "gerencia_general";
+  const fallbackApproverId = await findApprover(fallbackRole);
+  return {
+    approverId: fallbackApproverId || null,
+    approverRole: fallbackRole,
+    fallbackApplied: true,
+  };
 }
 
 async function computeTakenDays(userId, year, options = {}, executor = db) {
@@ -622,6 +708,7 @@ async function createDriveDocument({ user, start_date, end_date, return_date, pe
 
 async function createVacationRequest(payload, userId) {
   await ensureTable();
+  await assertRequesterCanCreateTimeOff(userId);
   const user = await loadUser(userId);
   if (!user) throw new Error("Usuario no encontrado");
 
@@ -651,8 +738,18 @@ async function createVacationRequest(payload, userId) {
   }
   const year = balanceValidation.year;
 
-  const approverRole = resolveApproverRole(user.role || "");
-  const approverId = await findApprover(approverRole) || null;
+  const approverResolution = await resolveApproverAssignment(
+    resolveApproverRole(user.role || "")
+  );
+  const approverRole = approverResolution.approverRole;
+  const approverId = approverResolution.approverId || null;
+  if (!approverId) {
+    const err = new Error(
+      "No se encontró un aprobador activo para tu solicitud (jefe inmediato o gerencia general)."
+    );
+    err.status = 400;
+    throw err;
+  }
 
   let driveMeta = { drive_doc_id: null, drive_doc_link: null, drive_pdf_id: null, drive_pdf_link: null, folderId: null };
   try {

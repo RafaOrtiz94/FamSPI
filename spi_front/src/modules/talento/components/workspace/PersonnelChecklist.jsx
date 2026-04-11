@@ -22,6 +22,9 @@ const CHECKLIST_ROLE_RULES = {
   salida_cuentas: ["ti", "jefe_ti"],
   salida_sri: ["talento_humano", "jefe_talento_humano"],
   liquidacion: ["jefe_financiero", "jefe_talento_humano"],
+  eliminacion_accesos_sistemas: ["ti", "jefe_ti"],
+  liquidacion_mdt_finiquito: ["jefe_financiero", "jefe_talento_humano"],
+  cambio_estado_activo_pasivo: ["talento_humano", "jefe_talento_humano"],
 };
 
 const formatRoleRuleLabel = (roles = []) =>

@@ -15,6 +15,9 @@ const UploadJustificantesModal = ({ open, onClose, solicitud, onSuccess }) => {
  const [uploading, setUploading] = useState(false);
 
  const justificantesRequeridos = solicitud?.justificacion_requerida || [];
+ const normalizedStatus = String(solicitud?.status || "").toLowerCase();
+ const normalizedTipoPermiso = String(solicitud?.tipo_permiso || "").toLowerCase();
+ const isPendingHealth = normalizedTipoPermiso === "salud" && ["pending", "pendiente"].includes(normalizedStatus);
 
  const getJustificanteLabel = (tipo) => {
  const labels = {
@@ -115,8 +118,10 @@ const UploadJustificantesModal = ({ open, onClose, solicitud, onSuccess }) => {
  <div className="p-6 space-y-4">
  <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg">
  <p className="text-sm text-amber-800">
- <strong>Importante:</strong> Debes subir los siguientes documentos para que tu solicitud
- pueda ser aprobada definitivamente.
+ <strong>Importante:</strong>{" "}
+ {isPendingHealth
+ ? "En permisos de salud en estado pendiente, la carga de justificantes es opcional en esta etapa. Si los subes ahora, tu jefe inmediato podrá gestionar la aprobación definitiva apenas corresponda."
+ : "Debes subir los siguientes documentos para que tu solicitud pueda ser aprobada definitivamente."}
  </p>
  </div>
 

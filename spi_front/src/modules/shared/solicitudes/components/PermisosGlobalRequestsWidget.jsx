@@ -10,6 +10,7 @@ const normalizeStatus = (status = "") => {
  const value = String(status || "").toLowerCase();
  if (["approved", "aprobado"].includes(value)) return "approved";
  if (["rejected", "rechazado"].includes(value)) return "rejected";
+ if (["cancelled", "cancelado", "canceled"].includes(value)) return "cancelled";
  if (value === "partially_approved") return "partially_approved";
  if (value === "pending_final") return "pending_final";
  return "pending";
@@ -18,6 +19,7 @@ const normalizeStatus = (status = "") => {
 const STATUS_META = {
  approved: { label: "Aprobado", className: "bg-emerald-50 text-emerald-700 border-emerald-200" },
  rejected: { label: "Rechazado", className: "bg-rose-50 text-rose-700 border-rose-200" },
+ cancelled: { label: "Cancelado", className: "bg-slate-100 text-slate-700 border-slate-300" },
  partially_approved: { label: "Parcial", className: "bg-blue-50 text-blue-700 border-blue-200" },
  pending_final: { label: "Pendiente final", className: "bg-purple-50 text-purple-700 border-purple-200" },
  pending: { label: "Pendiente", className: "bg-amber-50 text-amber-700 border-amber-200" },
@@ -138,11 +140,13 @@ const PermisosGlobalRequestsWidget = () => {
  total: filteredRows.length,
  approved: 0,
  rejected: 0,
+ cancelled: 0,
  pending: 0,
  };
  filteredRows.forEach((row) => {
  if (row.status === "approved") base.approved += 1;
  else if (row.status === "rejected") base.rejected += 1;
+ else if (row.status === "cancelled") base.cancelled += 1;
  else base.pending += 1;
  });
  return base;
@@ -161,7 +165,7 @@ const PermisosGlobalRequestsWidget = () => {
  </Button>
  </div>
 
- <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+ <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
  <p className="text-xs text-slate-500 uppercase font-semibold">Total</p>
  <p className="text-xl font-bold text-slate-800">{metrics.total}</p>
@@ -173,6 +177,10 @@ const PermisosGlobalRequestsWidget = () => {
  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
  <p className="text-xs text-rose-600 uppercase font-semibold">Rechazadas</p>
  <p className="text-xl font-bold text-rose-800">{metrics.rejected}</p>
+ </div>
+ <div className="rounded-lg border border-slate-300 bg-slate-100 p-3">
+ <p className="text-xs text-slate-600 uppercase font-semibold">Canceladas</p>
+ <p className="text-xl font-bold text-slate-800">{metrics.cancelled}</p>
  </div>
  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
  <p className="text-xs text-amber-600 uppercase font-semibold">Pendientes</p>
@@ -196,6 +204,7 @@ const PermisosGlobalRequestsWidget = () => {
  <option value="all">Todos los estados</option>
  <option value="approved">Aprobado</option>
  <option value="rejected">Rechazado</option>
+ <option value="cancelled">Cancelado</option>
  <option value="pending">Pendiente</option>
  <option value="partially_approved">Parcial</option>
  <option value="pending_final">Pendiente final</option>

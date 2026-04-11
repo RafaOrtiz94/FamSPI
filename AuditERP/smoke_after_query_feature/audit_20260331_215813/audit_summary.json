@@ -1,0 +1,46 @@
+{
+  "generated_at": "2026-03-31T21:58:23",
+  "output_dir": "C:\\AuditERP\\smoke_after_query_feature\\audit_20260331_215813",
+  "connection": "SYSTEM/***@XE",
+  "schemas": [
+    "SYSTEM"
+  ],
+  "patterns": [
+    "%"
+  ],
+  "target_tables": [
+    "ADM_DETAUTOR",
+    "AFJ_AFDETMOV"
+  ],
+  "counts": {
+    "tables": 2,
+    "columns": 32,
+    "pk_columns": 2,
+    "fk_map": 11,
+    "invalid_objects": 310,
+    "dba_errors": 1050,
+    "target_tables_loaded": 2,
+    "factura_pedido_tables": 2,
+    "factura_pedido_fk": 11,
+    "row_counts": 0
+  },
+  "warnings": [
+    "ERROR:",
+    "ORA-01031: privilegios insuficientes",
+    "ORA-04045: errores durante la recompilaci�n/revalidaci�n de SYSTEM.TRGSALE"
+  ],
+  "files": [
+    "01_db_context.csv",
+    "02_non_oracle_users.csv",
+    "03_target_schemas.csv",
+    "03_target_tables.csv",
+    "04_tables.csv",
+    "05_columns.csv",
+    "06_pk_columns.csv",
+    "07_fk_map.csv",
+    "08_invalid_objects.csv",
+    "09_dba_errors.csv",
+    "10_target_pattern_tables.csv",
+    "11_target_pattern_fk.csv"
+  ]
+}

@@ -86,6 +86,18 @@ const canCancelByDateRule = (solicitud = {}) => {
   return getTodayLocalDate() <= startDate;
 };
 
+const isSameEmail = (a, b) =>
+  String(a || "").trim().toLowerCase() !== "" &&
+  String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+const APPROVED_CANCEL_FLOW_STATUSES = new Set(["approved", "aprobado"]);
+const DIRECT_CANCELABLE_STATUSES = new Set([
+  "pending",
+  "pendiente",
+  "partially_approved",
+  "pending_final",
+]);
+
 const RECOVERY_COORDINATION_LABELS = {
   not_required: "No requiere coordinación",
   pending_approver_proposal: "Pendiente propuesta del jefe inmediato",
@@ -391,23 +403,44 @@ const PermisosStatusWidget = () => {
     ) / 100;
   const isRecoveryPlanComplete = requestedRecoveryHours > 0 && plannedRecoveryHours >= requestedRecoveryHours;
   const selectedRecoveryStatus = String(selectedSolicitud?.recovery_coordination_status || "").toLowerCase();
+  const isSelectedRequester =
+    Boolean(selectedSolicitud) &&
+    ((userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id)) ||
+      isSameEmail(userEmail, selectedSolicitud?.user_email));
+
   const canSelectedUserApproveRecovery =
     Boolean(selectedSolicitud) &&
     ["pending_requester_acceptance", "pending_approver_proposal"].includes(selectedRecoveryStatus) &&
-    userId && selectedSolicitud?.user_id && Number(userId) === Number(selectedSolicitud.user_id);
+    isSelectedRequester;
   const canSelectedRequesterCounterPropose =
     selectedRecoveryStatus === "pending_requester_acceptance" &&
-    userId &&
-    selectedSolicitud?.user_id &&
-    Number(userId) === Number(selectedSolicitud.user_id);
+    isSelectedRequester;
+  const selectedStatus = String(selectedSolicitud?.status || "").toLowerCase();
+  const selectedIsApprover =
+    Boolean(selectedSolicitud) &&
+    ((userId &&
+      selectedSolicitud?.approver_user_id &&
+      Number(userId) === Number(selectedSolicitud.approver_user_id)) ||
+      isSameEmail(userEmail, selectedSolicitud?.approver_email));
+  const selectedRequiresCancellationRequestFlow =
+    APPROVED_CANCEL_FLOW_STATUSES.has(selectedStatus) &&
+    isSelectedRequester &&
+    !selectedIsApprover;
 
   const pendientesDeJustificante = useMemo(
     () =>
       misSolicitudes.filter(
-        (sol) =>
-          sol.status === "partially_approved" &&
-          Array.isArray(sol.justificacion_requerida) &&
-          sol.justificacion_requerida.length > 0
+        (sol) => {
+          const status = String(sol?.status || "").toLowerCase();
+          const tipoPermiso = String(sol?.tipo_permiso || "").toLowerCase();
+          const hasRequiredDocs =
+            Array.isArray(sol?.justificacion_requerida) && sol.justificacion_requerida.length > 0;
+          if (!hasRequiredDocs) return false;
+
+          if (status === "partially_approved" || status === "pending_final") return true;
+          if (["pending", "pendiente"].includes(status) && tipoPermiso === "salud") return true;
+          return false;
+        }
       ),
     [misSolicitudes]
   );
@@ -564,7 +597,12 @@ const PermisosStatusWidget = () => {
     const coordinationStatus = String(solicitud?.recovery_coordination_status || "not_required").toLowerCase();
     const isCoordinationEnabled = canCoordinateRecoveryByStatus(solicitud);
     const recoveryCoordinationDeadline = getRecoveryCoordinationDeadline(solicitud);
-    const isRequesterOfSolicitud = Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id));
+    const isRequesterOfSolicitud =
+      Boolean(userId && solicitud?.user_id && Number(userId) === Number(solicitud.user_id)) ||
+      isSameEmail(userEmail, solicitud?.user_email);
+    const isApproverOfSolicitud =
+      (userId && solicitud?.approver_user_id && Number(userId) === Number(solicitud.approver_user_id)) ||
+      isSameEmail(userEmail, solicitud?.approver_email);
     const normalizedStatus = String(solicitud?.status || "").toLowerCase();
 
     const canEditRecovery =
@@ -581,11 +619,15 @@ const PermisosStatusWidget = () => {
 
     const cancellationStatus = String(solicitud?.cancellation_status || "none").toLowerCase();
     const hasPendingCancellation = cancellationStatus === "pending";
+    const isApprovedCancellationFlowStatus = APPROVED_CANCEL_FLOW_STATUSES.has(normalizedStatus);
+    const isDirectCancelableStatus = DIRECT_CANCELABLE_STATUSES.has(normalizedStatus);
     const canCancelThis =
-      ["approved", "aprobado"].includes(normalizedStatus) &&
       cancellationStatus !== "pending" &&
-      canCancelByDateRule(solicitud) &&
-      isRequesterOfSolicitud;
+      isRequesterOfSolicitud &&
+      (isDirectCancelableStatus ||
+        (isApprovedCancellationFlowStatus && canCancelByDateRule(solicitud)));
+    const requiresCancellationRequestFlow =
+      isApprovedCancellationFlowStatus && isRequesterOfSolicitud && !isApproverOfSolicitud;
 
     const signatureSummary = solicitud.firma_avanzada_resumen || null;
     const isVacation = solicitud.tipo_solicitud === "vacaciones";
@@ -834,7 +876,7 @@ const PermisosStatusWidget = () => {
               }}
               className="flex-1 text-[10px] py-1.5 text-rose-600 border-rose-100 hover:bg-rose-50"
             >
-              Solicitar cancelación
+              {requiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
             </Button>
           )}
         </div>
@@ -956,7 +998,7 @@ const PermisosStatusWidget = () => {
 
       {/* Modales */}
       <UploadJustificantesModal
-        isOpen={showUploadModal}
+        open={showUploadModal}
         onClose={() => {
           setShowUploadModal(false);
           setSelectedSolicitud(null);
@@ -972,10 +1014,14 @@ const PermisosStatusWidget = () => {
               <div className="p-2 bg-rose-50 rounded-lg">
                 <FiAlertCircle className="w-6 h-6" />
               </div>
-              <h3 className="text-lg font-bold">Solicitar cancelación</h3>
+              <h3 className="text-lg font-bold">
+                {selectedRequiresCancellationRequestFlow ? "Solicitar cancelacion" : "Cancelar solicitud"}
+              </h3>
             </div>
             <p className="text-sm text-gray-600 mb-4 leading-relaxed">
-              Explica brevemente el motivo de la cancelación. Tu jefe inmediato revisará esta solicitud.
+              {selectedRequiresCancellationRequestFlow
+                ? "Explica brevemente el motivo de la cancelacion. Tu jefe inmediato revisara esta solicitud."
+                : "Registra el motivo de cancelacion para trazabilidad del flujo."}
             </p>
             <textarea
               value={cancelReason}
@@ -1002,7 +1048,7 @@ const PermisosStatusWidget = () => {
                 className="flex-1 bg-rose-600 hover:bg-rose-700 rounded-xl"
                 disabled={!cancelReason.trim() || !!actionLoading}
               >
-                Confirmar envío
+                {selectedRequiresCancellationRequestFlow ? "Confirmar envio" : "Confirmar cancelacion"}
               </Button>
             </div>
           </Card>

@@ -9,8 +9,10 @@ const { runOnce: runBusinessCasePreflowExpiry } = require('../jobs/businessCaseP
 const { runOnce: runBusinessCaseDeterminationsGateExpiry } = require('../jobs/businessCaseDeterminationsGateExpiryScheduler');
 const { runOnce: runBusinessCaseSheetQueue } = require('../jobs/businessCaseSheetGenerationQueueScheduler');
 const { runOnce: runDatabaseBackupToDrive } = require('../jobs/databaseBackupToDrive');
+const { runOnce: runPermisosPendingExpiry } = require('../jobs/permisosPendingExpiryScheduler');
 const { runOnce: runPermisosRecoveryCoordinationExpiry } = require('../jobs/permisosRecoveryCoordinationExpiryScheduler');
 const { runOnce: runExternalCaseSyncQueue } = require('../jobs/externalCaseSyncScheduler');
+const permisosService = require('../modules/permisos/permisos.service');
 
 const jobsAuth = require('../middlewares/jobsAuth');
 
@@ -133,6 +135,64 @@ router.post('/permisos/recovery/expiry', async (_req, res) => {
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion de coordinacion de recuperacion',
             details: error.message
+        });
+    }
+});
+
+router.post('/permisos/pending/expiry', async (_req, res) => {
+    try {
+        const result = await runPermisosPendingExpiry();
+        res.json({
+            success: true,
+            message: 'Expiraciones de solicitudes pendientes procesadas',
+            data: result
+        });
+    } catch (error) {
+        console.error('Error en job de expiracion de solicitudes pendientes:', error);
+        res.status(500).json({
+            error: 'Fallo el procesamiento de expiracion de solicitudes pendientes',
+            details: error.message
+        });
+    }
+});
+
+router.post('/permisos/calendar/recreate', async (req, res) => {
+    try {
+        const rawSolicitudId =
+            req.body?.solicitudId ??
+            req.body?.id ??
+            req.query?.solicitudId ??
+            req.query?.id;
+        const solicitudId = Number(rawSolicitudId);
+        if (!Number.isInteger(solicitudId) || solicitudId <= 0) {
+            return res.status(400).json({
+                error: 'Solicitud invalida',
+                message: 'Debes enviar solicitudId numerico en body o query',
+            });
+        }
+
+        const rawIncludeGeneralNotice =
+            req.body?.includeGeneralNotice ??
+            req.query?.includeGeneralNotice;
+        const includeGeneralNotice = rawIncludeGeneralNotice === undefined
+            ? true
+            : !['false', '0', 'no', 'off'].includes(String(rawIncludeGeneralNotice).trim().toLowerCase());
+
+        const result = await permisosService.recreateCalendarEventForSolicitud({
+            solicitudId,
+            includeGeneralNotice,
+        });
+
+        res.json({
+            success: true,
+            message: 'Evento de calendario recreado para solicitud aprobada',
+            data: result,
+        });
+    } catch (error) {
+        console.error('Error recreando evento de calendario de permisos:', error);
+        res.status(error.status || 500).json({
+            error: 'Fallo el re-agendado de calendario',
+            details: error.message,
         });
     }
 });

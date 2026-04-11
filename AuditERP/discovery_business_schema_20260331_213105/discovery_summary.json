@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-03-31T21:33:54",
+  "output_dir": "C:\\AuditERP\\discovery_business_schema_20260331_213105",
+  "root_connection": "SYSTEM/***@XE",
+  "pdb_connection": "SYSTEM/***@//localhost:1521/XEPDB1",
+  "root_only_system_tables": 618,
+  "pdb_only_system_tables": 0,
+  "active_business_schemas_in_pdb": [],
+  "root_warnings": [
+    "ERROR:",
+    "ORA-01031: privilegios insuficientes",
+    "ORA-04045: errores durante la recompilaci�n/revalidaci�n de SYSTEM.TRGSALE"
+  ],
+  "pdb_warnings": []
+}

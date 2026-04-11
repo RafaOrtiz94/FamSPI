@@ -1,0 +1,12 @@
+LINE,TEXT
+1,"TRIGGER ""SYSTEM"".trgSale"
+2,before LOGOFF ON DATABASE
+3,declare
+4,PRAGMA AUTONOMOUS_TRANSACTION;
+5,BEGIN
+6,update prd.seg_sesiones s
+7,set  s.fechsale = systimestamp
+8,where  s.idsesion=dbms_session.unique_session_id;
+9,commit;
+10,END;
+11,

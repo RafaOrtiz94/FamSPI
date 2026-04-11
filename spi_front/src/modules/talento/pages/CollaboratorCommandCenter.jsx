@@ -40,9 +40,12 @@ import commandCenterProfileSchema from "../schemas/commandCenterProfileSchema";
 const READY_REQUEST_STATUSES = new Set(["aprobada", "en_proceso", "completada"]);
 const REVIEWABLE_REQUEST_STATUSES = new Set(["pendiente", "en_revision"]);
 const OFFBOARDING_ALLOWED_ROLES = new Set([
+  "talento_humano",
   "jefe_financiero",
   "jefe_finanzas",
+  "jefe_ti",
   "jefe_talento_humano",
+  "gerencia_general",
   "admin",
   "administrador",
 ]);
@@ -51,15 +54,18 @@ const BROWSER_VIEW_MAP = {
   solicitudes: "requests",
   aspirantes: "applicants",
   colaboradores: "collaborators",
+  desvinculacion: "offboarding",
   requests: "requests",
   applicants: "applicants",
   collaborators: "collaborators",
+  offboarding: "offboarding",
 };
 
 const WORKSPACE_VIEW_MAP = {
   requests: "solicitudes",
   applicants: "aspirantes",
   collaborators: "colaboradores",
+  offboarding: "desvinculacion",
 };
 
 const toBrowserView = (value) => BROWSER_VIEW_MAP[value] || "requests";
@@ -74,6 +80,18 @@ const STATUS_LABELS = {
   completada: "Completada",
   rechazada: "Rechazada",
   cancelada: "Cancelada",
+};
+const PASSIVE_STATUS_VALUES = new Set(["pasivo", "desvinculado", "inactivo"]);
+
+const resolveCollaboratorStatusLabel = (collaborator = {}) => {
+  const normalized = String(collaborator.estatus_empleado || "").trim().toLowerCase();
+  const passive = collaborator.active === false || PASSIVE_STATUS_VALUES.has(normalized);
+  const inOffboarding =
+    collaborator?.offboarding_requested === true ||
+    collaborator?.profile?.onboarding?.offboarding_requested === true;
+  if (passive) return "Pasivo";
+  if (inOffboarding) return "En desvinculación";
+  return "Activo";
 };
 
 const percentFromProgress = (progress) => {
@@ -140,6 +158,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     applicantsLoading,
     applicantsInitialLoading,
     collaborators,
+    offboardingCollaborators,
     loadingCollaborators,
     collaboratorsInitialLoading,
     selectedRequest,
@@ -182,6 +201,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     filteredRequests,
     filteredApplicants,
     filteredCollaborators,
+    filteredOffboardingCollaborators,
     profileCompletion,
     checklistCompletion,
     hasContract,
@@ -196,6 +216,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     handleSelectRequest,
     handleSelectApplicant,
     handleSelectCollaborator,
+    handleStartOffboarding,
     handleSaveProfile,
     handleUploadDocument,
     handleChecklistToggle,
@@ -209,6 +230,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     handleCloseReview,
     handleRequestReviewed,
     handleHireApplicant,
+    startingOffboardingId,
   } = state;
 
   const requestWorkspaceReady =
@@ -310,10 +332,11 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
       }
     }
     if (selectedCollaborator) {
+      const statusLabel = resolveCollaboratorStatusLabel(selectedCollaborator);
       badges.push({
         label: "Colaborador",
-        value: selectedCollaborator.department_name || "Activo",
-        variant: "green",
+        value: selectedCollaborator.department_name || statusLabel,
+        variant: statusLabel === "Activo" ? "green" : statusLabel === "En desvinculación" ? "blue" : "yellow",
       });
     }
     if ((profileCompletion?.total || 0) > 0) {
@@ -359,7 +382,7 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
     }
     if (selectedCollaborator) {
       return {
-        status: "Activo",
+        status: resolveCollaboratorStatusLabel(selectedCollaborator),
         owner: selectedCollaborator.fullname || selectedCollaborator.email || "Sin asignar",
         nextAction: "Mantener expediente y documentos al dia",
       };
@@ -826,12 +849,16 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
       setBrowserOpen(false);
     },
     collaborators: filteredCollaborators || collaborators,
+    offboardingCollaborators:
+      filteredOffboardingCollaborators || offboardingCollaborators,
     loadingCollaborators,
     selectedCollaboratorId,
     onSelectCollaborator: (collaborator) => {
       handleSelectCollaborator(collaborator);
       setBrowserOpen(false);
     },
+    onStartOffboarding: (collaborator) => handleStartOffboarding(collaborator),
+    startingOffboardingId,
     canRequestPersonnel,
     canApprovePersonnel,
     onCreateRequest: handleCreateRequest,
@@ -844,7 +871,8 @@ const CollaboratorCommandCenter = ({ initialView = "requests" }) => {
   const hasInitialData =
     asArray(requests).length > 0 ||
     asArray(applicants).length > 0 ||
-    asArray(collaborators).length > 0;
+    asArray(collaborators).length > 0 ||
+    asArray(offboardingCollaborators).length > 0;
   const showLoadingSkeleton =
     !currentEntity &&
     !focusMode &&

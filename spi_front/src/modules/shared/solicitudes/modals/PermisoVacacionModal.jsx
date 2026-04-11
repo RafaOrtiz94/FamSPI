@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { FiX, FiCalendar, FiClock, FiFileText, FiChevronDown, FiChevronUp } from "react-icons/fi";
+import { FiX, FiCalendar, FiClock, FiFileText, FiChevronDown, FiChevronUp, FiUpload } from "react-icons/fi";
 import { motion, AnimatePresence } from "framer-motion";
 import { Dialog } from "@headlessui/react";
 import Button from "../../../../core/ui/components/Button";
@@ -9,6 +9,7 @@ import {
  getMisSolicitudes,
  registerStudyEnrollment,
  getMyStudyEnrollments,
+ subirJustificantes,
 } from "../../../../core/api/permisosApi";
 import api from "../../../../core/api";
 import LoadingOverlay from "../../../../core/ui/components/LoadingOverlay";
@@ -23,6 +24,8 @@ import { formatVacationDaysHours } from "../utils/vacationDisplay";
  */
 const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const { showToast, showLoader, hideLoader } = useUI();
+ const MAX_SALUD_JUSTIFICANTES = 5;
+ const MAX_SALUD_JUSTIFICANTE_SIZE_BYTES = 10 * 1024 * 1024;
  const [step, setStep] = useState(1);
  const [loading, setLoading] = useState(false);
  const [tipoSolicitud, setTipoSolicitud] = useState(""); // 'permiso' o 'vacaciones'
@@ -39,12 +42,14 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const [saludDuracionTipo, setSaludDuracionTipo] = useState("dias"); // 'horas' o 'dias'
  const [calamidadDuracionTipo, setCalamidadDuracionTipo] = useState("dias"); // 'horas' o 'dias'
  const [subtipoSalud, setSubtipoSalud] = useState(""); // 'enfermedad_certificada' | 'atencion_medica_familiar'
+ const [esEmergencia, setEsEmergencia] = useState(false);
  const [vacacionMedioDia, setVacacionMedioDia] = useState(false);
  const [studyEnrollments, setStudyEnrollments] = useState([]);
  const [selectedStudyEnrollmentId, setSelectedStudyEnrollmentId] = useState("");
  const [loadingStudyEnrollment, setLoadingStudyEnrollment] = useState(false);
  const [submittingStudyEnrollment, setSubmittingStudyEnrollment] = useState(false);
  const [studySectionOpen, setStudySectionOpen] = useState(true);
+ const [saludJustificantesFiles, setSaludJustificantesFiles] = useState([]);
  const [studyForm, setStudyForm] = useState({
  institution_name: "",
  program_name: "",
@@ -261,6 +266,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  if (tipoPermiso !== "salud") {
  setSaludDuracionTipo("dias");
  setSubtipoSalud("");
+ setSaludJustificantesFiles([]);
  }
  }, [tipoPermiso]);
 
@@ -270,6 +276,12 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setSubtipoCalamidad("");
  }
  }, [tipoPermiso]);
+
+ useEffect(() => {
+ if (tipoSolicitud !== "permiso") {
+ setEsEmergencia(false);
+ }
+ }, [tipoSolicitud]);
 
  useEffect(() => {
  const loadEnrollment = async () => {
@@ -456,6 +468,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setTipoPermiso("");
  setSubtipoCalamidad("");
  setSubtipoSalud("");
+ setEsEmergencia(false);
  setSaludDuracionTipo("dias");
  setVacacionMedioDia(false);
  setVacationSummary(null);
@@ -466,6 +479,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  setPendingVacationDays(0);
  setRejectedVacationDays(0);
  setCancelledVacationDays(0);
+ setSaludJustificantesFiles([]);
  setFormData({
  fecha_inicio: "",
  fecha_fin: "",
@@ -536,6 +550,44 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  }
  };
 
+ const handleSelectSaludJustificantes = (event) => {
+ const selectedFiles = Array.from(event?.target?.files || []);
+ if (event?.target) event.target.value = "";
+ if (!selectedFiles.length) return;
+
+ const validBySize = selectedFiles.filter((file) => {
+ if (!file) return false;
+ if (file.size > MAX_SALUD_JUSTIFICANTE_SIZE_BYTES) {
+ showToast(`El archivo "${file.name}" supera el límite de 10MB.`, "warning");
+ return false;
+ }
+ return true;
+ });
+ if (!validBySize.length) return;
+
+ setSaludJustificantesFiles((current) => {
+ const merged = [...current];
+ validBySize.forEach((file) => {
+ const exists = merged.some(
+ (existing) =>
+ existing.name === file.name &&
+ existing.size === file.size &&
+ existing.lastModified === file.lastModified
+ );
+ if (!exists) merged.push(file);
+ });
+ if (merged.length > MAX_SALUD_JUSTIFICANTES) {
+ showToast(`Solo puedes adjuntar hasta ${MAX_SALUD_JUSTIFICANTES} archivos.`, "warning");
+ return merged.slice(0, MAX_SALUD_JUSTIFICANTES);
+ }
+ return merged;
+ });
+ };
+
+ const removeSaludJustificante = (index) => {
+ setSaludJustificantesFiles((current) => current.filter((_, idx) => idx !== index));
+ };
+
  const handleSubmit = async () => {
  setLoading(true);
  showLoader();
@@ -551,6 +603,7 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
 
  if (tipoSolicitud === "permiso") {
  payload.tipo_permiso = tipoPermiso;
+ payload.es_emergencia = Boolean(esEmergencia);
  const rawRequestedHours = Number(formData.duracion_horas || 0);
  const uiHourLimit = getPermisoHourLimit(tipoPermiso);
  if (Number.isFinite(rawRequestedHours) && rawRequestedHours > 0 && uiHourLimit !== null && rawRequestedHours > uiHourLimit) {
@@ -658,12 +711,50 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  const response = await createSolicitud(payload);
 
  if (response.ok) {
+ let uploadWarning = "";
+ let uploadCompleted = false;
+ const createdSolicitudId = Number(response?.data?.id || 0);
+ const shouldUploadSaludJustificantes =
+ tipoSolicitud === "permiso" &&
+ tipoPermiso === "salud" &&
+ createdSolicitudId > 0 &&
+ saludJustificantesFiles.length > 0;
+
+ if (shouldUploadSaludJustificantes) {
+ try {
+ const uploadResponse = await subirJustificantes(createdSolicitudId, saludJustificantesFiles);
+ if (uploadResponse?.ok) {
+ uploadCompleted = true;
+ } else {
+ uploadWarning = uploadResponse?.message || "No se pudieron subir los justificantes.";
+ }
+ } catch (uploadError) {
+ console.error("Error uploading optional salud justificantes:", uploadError);
+ uploadWarning =
+ uploadError?.response?.data?.message ||
+ uploadError?.message ||
+ "No se pudieron subir los justificantes.";
+ }
+ }
+
+ if (uploadWarning) {
+ showToast(
+ `Solicitud enviada. ${uploadWarning} Puedes subir los documentos luego desde tus solicitudes pendientes.`,
+ "warning"
+ );
+ } else if (uploadCompleted) {
+ showToast(
+ "Solicitud de salud enviada y justificantes cargados. El jefe inmediato ya puede revisar la aprobación definitiva.",
+ "success"
+ );
+ } else {
  showToast(
  tipoSolicitud === "vacaciones"
  ? "Solicitud de vacaciones enviada para aprobacion del jefe inmediato"
  : "Solicitud de permiso enviada para aprobacion del jefe inmediato",
  "success"
  );
+ }
  onSuccess?.();
  handleClose();
  } else {
@@ -878,6 +969,27 @@ const PermisoVacacionModal = ({ open, onClose, onSuccess }) => {
  <p className="text-xs text-gray-500 mt-1">Emergencia familiar</p>
  </button>
  </div>
+
+ {tipoPermiso && (
+ <div className="rounded-lg border border-orange-200 bg-orange-50 p-3">
+ <label className="flex items-start gap-3 cursor-pointer">
+ <input
+ type="checkbox"
+ checked={esEmergencia}
+ onChange={(e) => setEsEmergencia(e.target.checked)}
+ className="mt-1 h-4 w-4 rounded border-orange-300 text-orange-600 focus:ring-orange-500"
+ />
+ <span>
+ <span className="block text-sm font-semibold text-orange-900">
+ Marcar como emergencia
+ </span>
+ <span className="block text-xs text-orange-800 mt-0.5">
+ Si se marca esta opción, la solicitud no se cancelará automáticamente por vencimiento sin aprobación.
+ </span>
+ </span>
+ </label>
+ </div>
+ )}
 
  {tipoPermiso === "calamidad" && (
  <div className="space-y-3">
@@ -1660,6 +1772,14 @@ Saldo resultante:{" "}
  : `${formData.duracion_dias} días`}
  </span>
  </div>
+ {tipoSolicitud === "permiso" && (
+ <div className="flex justify-between">
+ <span className="text-sm text-gray-600">Emergencia:</span>
+ <span className={`text-sm font-semibold ${esEmergencia ? "text-orange-700" : "text-gray-900"}`}>
+ {esEmergencia ? "Sí" : "No"}
+ </span>
+ </div>
+ )}
  {tipoPermiso === "calamidad" && formData.observaciones && (
  <div className="mt-2 pt-2 border-t border-gray-200">
  <p className="text-[11px] text-gray-500 uppercase font-bold tracking-wider mb-1">Observaciones:</p>
@@ -1678,6 +1798,44 @@ Saldo resultante:{" "}
  (evento de firma, sello temporal e integridad criptografica).
  </p>
  </div>
+
+ {tipoSolicitud === "permiso" && tipoPermiso === "salud" && (
+ <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg space-y-3">
+ <div className="flex items-start gap-2">
+ <FiUpload className="w-4 h-4 text-blue-700 mt-0.5" />
+ <p className="text-xs text-blue-800">
+ <strong>Justificantes opcionales:</strong> Puedes subir documentos ahora o más tarde mientras la solicitud
+ esté en estado pendiente.
+ </p>
+ </div>
+ <input
+ type="file"
+ accept=".pdf,.jpg,.jpeg,.png"
+ multiple
+ onChange={handleSelectSaludJustificantes}
+ className="block w-full text-xs text-gray-700 file:mr-3 file:rounded-md file:border-0 file:bg-blue-600 file:px-3 file:py-2 file:text-xs file:font-medium file:text-white hover:file:bg-blue-700"
+ />
+ <p className="text-[11px] text-blue-700">
+ Formatos permitidos: PDF, JPG, PNG. Máximo 10MB por archivo. Máximo {MAX_SALUD_JUSTIFICANTES} archivos.
+ </p>
+ {saludJustificantesFiles.length > 0 && (
+ <div className="space-y-2">
+ {saludJustificantesFiles.map((file, idx) => (
+ <div key={`${file.name}-${file.lastModified}-${idx}`} className="flex items-center justify-between rounded-md bg-white border border-blue-100 px-2.5 py-2">
+ <span className="text-xs text-gray-700 truncate pr-3">{file.name}</span>
+ <button
+ type="button"
+ onClick={() => removeSaludJustificante(idx)}
+ className="text-xs font-medium text-rose-600 hover:text-rose-700"
+ >
+ Quitar
+ </button>
+ </div>
+ ))}
+ </div>
+ )}
+ </div>
+ )}
 
  <div className="flex gap-3 pt-4">
  <Button type="button" variant="secondary" onClick={() => setStep(2)} className="flex-1">

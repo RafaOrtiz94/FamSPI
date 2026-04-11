@@ -57,6 +57,23 @@ async function runLiquidation(req, res) {
   }
 }
 
+async function startOffboarding(req, res) {
+  try {
+    const data = await service.startOffboarding({
+      userId: req.params.userId,
+      actor: req.user,
+      reason: req.body?.reason || "",
+    });
+    res.json({ ok: true, data });
+  } catch (err) {
+    logger.error({ err }, "Error iniciando offboarding");
+    res.status(getErrorStatus(err, 400)).json({
+      ok: false,
+      message: err?.message || "No se pudo iniciar el offboarding",
+    });
+  }
+}
+
 async function closeOffboarding(req, res) {
   try {
     const data = await service.closeOffboarding({
@@ -77,5 +94,6 @@ module.exports = {
   getWorkspace,
   updateTask,
   runLiquidation,
+  startOffboarding,
   closeOffboarding,
 };

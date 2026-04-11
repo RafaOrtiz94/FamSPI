@@ -1,0 +1,22 @@
+{
+  "generated_at": "2026-03-31T21:35:01",
+  "connection": "SYSTEM/***@XE",
+  "output_dir": "C:\\AuditERP\\business_dictionary_root_system_20260331_213455",
+  "candidate_tables": 91,
+  "files": [
+    "DICCIONARIO_NEGOCIO_ROOT_SYSTEM.md",
+    "01_tables.csv",
+    "02_columns.csv",
+    "03_constraints.csv",
+    "04_constraint_columns.csv",
+    "05_fk_map.csv",
+    "06_indexes.csv",
+    "07_index_columns.csv",
+    "08_table_comments.csv",
+    "09_column_comments.csv",
+    "10_table_summary.csv"
+  ],
+  "warnings": [
+    "ERROR:"
+  ]
+}

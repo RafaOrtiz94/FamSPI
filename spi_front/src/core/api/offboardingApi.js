@@ -17,14 +17,22 @@ export const runOffboardingLiquidation = async (userId, payload) => {
   return data?.data || data;
 };
 
+export const startOffboardingProcess = async (userId, payload = {}) => {
+  const { data } = await api.post(`/offboarding/${userId}/start`, payload);
+  return data?.data || data;
+};
+
 export const closeOffboardingProcess = async (userId) => {
   const { data } = await api.post(`/offboarding/${userId}/close`);
   return data?.data || data;
 };
 
-export default {
+const offboardingApi = {
   getOffboardingWorkspace,
   updateOffboardingTask,
   runOffboardingLiquidation,
+  startOffboardingProcess,
   closeOffboardingProcess,
 };
+
+export default offboardingApi;

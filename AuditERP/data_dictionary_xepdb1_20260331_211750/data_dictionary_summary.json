@@ -1,0 +1,26 @@
+{
+  "generated_at": "2026-03-31T21:18:04",
+  "connection": "SYSTEM/***@//localhost:1521/XEPDB1",
+  "output_dir": "C:\\AuditERP\\data_dictionary_xepdb1_20260331_211750",
+  "csv_files": [
+    "01_db_context.csv",
+    "02_schemas.csv",
+    "03_tables.csv",
+    "04_columns.csv",
+    "05_constraints.csv",
+    "06_constraint_columns.csv",
+    "07_fk_map.csv",
+    "08_indexes.csv",
+    "09_index_columns.csv",
+    "10_views.csv",
+    "11_sequences.csv",
+    "12_triggers.csv",
+    "13_tab_comments.csv",
+    "14_col_comments.csv",
+    "15_synonyms.csv",
+    "16_invalid_objects.csv",
+    "17_dba_errors.csv",
+    "18_table_patterns.csv"
+  ],
+  "warnings": []
+}

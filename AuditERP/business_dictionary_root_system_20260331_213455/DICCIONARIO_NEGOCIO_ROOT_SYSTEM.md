@@ -1,0 +1,126 @@
+# Diccionario Preliminar de Negocio (SYSTEM en CDB$ROOT)
+
+- Generado: `2026-03-31T21:35:01`
+- Conexion: `SYSTEM/***@XE`
+- Criterio: tablas `SYSTEM` que existen solo en ROOT y tienen nombre funcional (ventas/clientes/detalle/producto/etc).
+
+## Resumen
+- Tablas candidatas: **91**
+- Columnas: **2238**
+- Constraints: **1108**
+- FK mapeadas: **318**
+- ?ndices: **289**
+- Comentarios tabla: **91**
+- Comentarios columna: **2238**
+
+## Cobertura de claves
+- Tablas con PK: **76**
+- Tablas con FK: **60**
+
+## Tablas candidatas
+- `ADM_DETAUTOR`
+- `AFJ_AFDETMOV`
+- `AFJ_DETALLE`
+- `ALM_DETABASC`
+- `ALM_DETADESP`
+- `ALM_DETALOTE`
+- `ALM_DETAMOVI`
+- `ALM_DETAMOVI_BK`
+- `ALM_DETAPLAN`
+- `ALM_DETAPROY`
+- `ALM_DETAREQU`
+- `ALM_DETARTLL`
+- `ALM_DETATOFI`
+- `ALM_PROYPROD`
+- `ALM_TMPDETALOTE`
+- `ALM_TMPDETAMOVI`
+- `AUX_CLIENTE`
+- `AUX_INVENTARIO`
+- `AUX_INVENTARIO_OB`
+- `AUX_SALDO_CLIENTE`
+- `AUX_VENTAS`
+- `AUX_VENTASFAMP`
+- `BAK_ALM_DETALOTEJUL2023`
+- `BAK_ALM_DETALOTE_2182023_951AM`
+- `BAK_ALM_DETAMOVI_16112022`
+- `BAK_ALM_DETAMOVI_2182023_951AM`
+- `BAK_ALM_TMPDETALOTE21082023`
+- `BAK_AUX_VENTASFAMP`
+- `CLIENTE_AUX`
+- `CLI_ACTIVCLIEN`
+- `CLI_DETAINGEGR`
+- `CLI_DETALINE`
+- `CLI_DETAVISITA`
+- `CLI_PROPICLIEN`
+- `CNT_DETASIENTO`
+- `CNT_DETIPIMP`
+- `COB_DETACHEQ`
+- `COB_DETACOBRO`
+- `COB_DETADEBI`
+- `COM_DETACOMP`
+- `COM_DETASOLI`
+- `COM_DETORDCP`
+- `COM_PLANPAGO`
+- `COM_TMPCOMPRAS`
+- `CST_DETARECT`
+- `CST_DETCENCS`
+- `CST_ORDEPROD`
+- `CST_PRODUCCN`
+- `CST_SIMUDETA`
+- `CST_VARIPROD`
+- `DWH_VENTAS`
+- `DWH_VENTAS_081124`
+- `ECL_DETAFORMU`
+- `ECT_DETADECLA`
+- `GEN_FORMPAGO`
+- `GEN_PERIPAGO`
+- `GEN_PRODUCTOS`
+- `GEN_TIPOPAGO`
+- `IMP_DENOTAPEDI`
+- `IMP_NOTAPEDI`
+- `INF_DETAEQUI`
+- `PAG_DETAPAGO`
+- `PRT_DETASIENTO`
+- `PRT_DETASOLI`
+- `PRT_DETIPCAU`
+- `PRT_SIMUDETA`
+- `RHH_DETAPRES`
+- `RHH_DETAVENC`
+- `RHH_PAGOVACA`
+- `RHH_PRODUCTOS`
+- `SEG_PRODUCTO`
+- `SEG_PRODUSUA`
+- `SRI_DETALOGF`
+- `SRI_LOGFACTU`
+- `SRV_INDETEOB`
+- `SRV_SEPRVDET`
+- `TLL_DETAORDEN`
+- `TLL_DETAREQUI`
+- `TLL_ORDENTRC`
+- `TLL_ORDETRAB`
+- `TMP_DETAREQU`
+- `VEN_DETAFACT`
+- `VEN_DETAFLET`
+- `VEN_DETAPROD`
+- `VEN_DETAPROF`
+- `VEN_DETARTPR`
+- `VEN_GRPOVENT`
+- `VEN_PLANPAGO`
+- `VEN_TMPRETDETA`
+- `VEN_VENTAS`
+- `VEN_VENTPERD`
+
+## Archivos generados
+- `01_tables.csv`
+- `02_columns.csv`
+- `03_constraints.csv`
+- `04_constraint_columns.csv`
+- `05_fk_map.csv`
+- `06_indexes.csv`
+- `07_index_columns.csv`
+- `08_table_comments.csv`
+- `09_column_comments.csv`
+- `10_table_summary.csv`
+
+## Advertencias de sesi?n
+- `ERROR:`

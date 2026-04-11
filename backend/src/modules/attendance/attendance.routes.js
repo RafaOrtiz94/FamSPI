@@ -46,4 +46,7 @@ router.get("/range", verifyToken, requireAttendanceReportAccess("query", { allow
 // PDF generation
 router.get("/pdf/:userId", verifyToken, requireAttendanceReportAccess("param", { allowAll: true }), controller.generatePDF);
 
+router.get("/validate-balance", verifyToken, controller.validateBalance);
+router.post("/validate-balance", verifyToken, controller.validateBa)
+router.put("/validate-balance", verifyToken, controller.validate
 module.exports = router;

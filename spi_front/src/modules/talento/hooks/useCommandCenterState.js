@@ -22,6 +22,7 @@ import {
   updateCollaboratorProfile,
   uploadCollaboratorDocument,
 } from "../../../core/api/collaboratorsApi";
+import { startOffboardingProcess } from "../../../core/api/offboardingApi";
 import {
   applicantProfileSections as applicantProfileSectionsTemplate,
   checklistSections as checklistSectionsTemplate,
@@ -34,9 +35,10 @@ import {
   mapRequestToHeaderEntity,
 } from "../utils/commandCenterMappers";
 
-const WORKSPACE_VIEWS = new Set(["solicitudes", "aspirantes", "colaboradores"]);
+const WORKSPACE_VIEWS = new Set(["solicitudes", "aspirantes", "colaboradores", "desvinculacion"]);
 const WORKSPACE_READY_STATUSES = new Set(["aprobada", "en_proceso", "completada"]);
 const REQUEST_LIST_VISIBLE_STATUSES = new Set(["pendiente", "en_revision", "aprobada", "en_proceso", "completada", "rechazada", "cancelada"]);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
 const COMMAND_CENTER_SEGMENT = "command-center";
 const LEGACY_PERSONAL_SEGMENT = "workspace-personal";
 const LEGACY_COLLABORATORS_SEGMENT = "colaboradores";
@@ -47,6 +49,21 @@ const normalizeWorkspaceView = (value) => {
 };
 
 const normalizeRequestStatus = (value) => String(value || "").trim().toLowerCase();
+const normalizeEmploymentStatus = (value) => String(value || "").trim().toLowerCase();
+const isPassiveCollaborator = (collaborator = {}) => {
+  const statusValue =
+    collaborator?.estatus_empleado ||
+    collaborator?.profile?.laboral?.estatus_empleado ||
+    (collaborator?.active === false ? "pasivo" : "");
+  const normalizedStatus = normalizeEmploymentStatus(statusValue);
+  return collaborator?.active === false || PASSIVE_EMPLOYMENT_STATUSES.has(normalizedStatus);
+};
+const isOffboardingInProgressCollaborator = (collaborator = {}) => {
+  const requested =
+    collaborator?.offboarding_requested === true ||
+    collaborator?.profile?.onboarding?.offboarding_requested === true;
+  return Boolean(requested) && !isPassiveCollaborator(collaborator);
+};
 
 const useDebouncedValue = (value, delay = 350) => {
   const [debounced, setDebounced] = useState(value);
@@ -200,6 +217,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const [profileErrors, setProfileErrors] = useState({});
   const [docUploading, setDocUploading] = useState(null);
   const [docUploadProgress, setDocUploadProgress] = useState({});
+  const [startingOffboardingId, setStartingOffboardingId] = useState(null);
 
   const normalizedInitialView = useMemo(() => normalizeWorkspaceView(initialView), [initialView]);
   const [activeView, setActiveView] = useState(normalizedInitialView);
@@ -217,7 +235,9 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const resolvedPathView = normalizedCommandCenterView || (pathSegments.includes(LEGACY_COLLABORATORS_SEGMENT) ? "colaboradores" : pathSegments.includes(LEGACY_PERSONAL_SEGMENT) ? "solicitudes" : normalizedInitialView);
   const isCommandCenterRoute = commandCenterIndex >= 0;
   const shouldLoadAsRequest = pathSegments.includes(LEGACY_PERSONAL_SEGMENT) || (isCommandCenterRoute && ["solicitudes", "aspirantes"].includes(resolvedPathView));
-  const shouldLoadAsCollaborator = pathSegments.includes(LEGACY_COLLABORATORS_SEGMENT) || (isCommandCenterRoute && resolvedPathView === "colaboradores");
+  const isCollaboratorPathView =
+    resolvedPathView === "colaboradores" || resolvedPathView === "desvinculacion";
+  const shouldLoadAsCollaborator = pathSegments.includes(LEGACY_COLLABORATORS_SEGMENT) || (isCommandCenterRoute && isCollaboratorPathView);
   const resolvedCollaboratorId = shouldLoadAsCollaborator ? String(id || "") : String(selectedCollaboratorId || "");
 
   const mergeProfile = useCallback((incoming = {}) => {
@@ -231,6 +251,10 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const getRouteForEntity = (view, entityId) => {
     const segment = view === "aspirantes" ? "aspirantes" : WORKSPACE_VIEWS.has(view) ? view : "solicitudes";
     if (isCommandCenterRoute) {
+      const base = `/dashboard/talento-humano/${COMMAND_CENTER_SEGMENT}/${segment}`;
+      return entityId ? `${base}/${entityId}` : base;
+    }
+    if (segment === "desvinculacion") {
       const base = `/dashboard/talento-humano/${COMMAND_CENTER_SEGMENT}/${segment}`;
       return entityId ? `${base}/${entityId}` : base;
     }
@@ -271,10 +295,18 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const collaboratorsQuery = useQuery({
     queryKey: ["talento", "collaborators", debouncedSearch],
-    enabled: activeView === "colaboradores" || canReassignPersonnel || Boolean(resolvedCollaboratorId),
+    enabled:
+      activeView === "colaboradores" ||
+      activeView === "desvinculacion" ||
+      canReassignPersonnel ||
+      Boolean(resolvedCollaboratorId),
     staleTime: COMMAND_CENTER_STALE_TIME,
     queryFn: async () => {
-      const response = await listCollaborators({ page: 1, pageSize: 80, search: debouncedSearch || undefined });
+      const response = await listCollaborators({
+        page: 1,
+        pageSize: 120,
+        search: debouncedSearch || undefined,
+      });
       return Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : [];
     },
   });
@@ -292,13 +324,30 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     if (Array.isArray(requestWorkspaceQuery.data?.applicants?.data)) return requestWorkspaceQuery.data.applicants.data;
     return requestApplicantsQuery.data || [];
   }, [requestWorkspaceQuery.data?.applicants?.data, requestApplicantsQuery.data]);
-  const collaborators = useMemo(() => collaboratorsQuery.data || [], [collaboratorsQuery.data]);
+  const allCollaborators = useMemo(() => collaboratorsQuery.data || [], [collaboratorsQuery.data]);
+  const collaboratorBuckets = useMemo(() => {
+    return allCollaborators.reduce(
+      (acc, item) => {
+        const passive = isPassiveCollaborator(item);
+        const inOffboarding = isOffboardingInProgressCollaborator(item);
+        if (passive || inOffboarding) acc.offboarding.push(item);
+        else acc.active.push(item);
+        return acc;
+      },
+      { active: [], offboarding: [] },
+    );
+  }, [allCollaborators]);
+  const collaborators = useMemo(() => collaboratorBuckets.active, [collaboratorBuckets.active]);
+  const offboardingCollaborators = useMemo(
+    () => collaboratorBuckets.offboarding,
+    [collaboratorBuckets.offboarding],
+  );
   const selectedCollaborator = useMemo(() => {
     const userFromProfile = collaboratorProfileQuery.data?.data?.user || collaboratorProfileQuery.data?.user;
     if (userFromProfile) return userFromProfile;
     if (!resolvedCollaboratorId) return null;
-    return collaborators.find((item) => String(item.id) === String(resolvedCollaboratorId)) || null;
-  }, [collaboratorProfileQuery.data, collaborators, resolvedCollaboratorId]);
+    return allCollaborators.find((item) => String(item.id) === String(resolvedCollaboratorId)) || null;
+  }, [allCollaborators, collaboratorProfileQuery.data, resolvedCollaboratorId]);
 
   const activeProfileSections = useMemo(() => (resolvedCollaboratorId ? profileSections : applicantProfileSections), [resolvedCollaboratorId, profileSections, applicantProfileSections]);
   const lastHydratedRef = useRef("");
@@ -447,6 +496,20 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     },
   });
 
+  const startOffboardingMutation = useMutation({
+    mutationFn: async ({ collaboratorId, reason }) =>
+      startOffboardingProcess(collaboratorId, { reason: reason || "" }),
+    onSuccess: async (_, variables) => {
+      await queryClient.invalidateQueries({ queryKey: ["talento", "collaborators"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["talento", "collaborator-profile", String(variables.collaboratorId)],
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["talento", "offboarding", String(variables.collaboratorId)],
+      });
+    },
+  });
+
   const handleSaveProfile = async (payloadOverride = null) => saveProfileMutation.mutateAsync(payloadOverride || profileData);
   const handleUploadDocument = async (docType, file) => {
     if (!file) return;
@@ -503,6 +566,10 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
   const filteredRequests = useMemo(() => requests, [requests]);
   const filteredApplicants = useMemo(() => applicants, [applicants]);
   const filteredCollaborators = useMemo(() => collaborators, [collaborators]);
+  const filteredOffboardingCollaborators = useMemo(
+    () => offboardingCollaborators,
+    [offboardingCollaborators],
+  );
 
   const currentEntity = useMemo(() => {
     if (isCollaboratorContext && selectedCollaborator) return mapCollaboratorToHeaderEntity(selectedCollaborator);
@@ -520,9 +587,16 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
 
   const handleSelectCollaborator = (collaborator) => {
     if (!collaborator?.id) return;
+    const targetView =
+      isPassiveCollaborator(collaborator) || isOffboardingInProgressCollaborator(collaborator)
+        ? "desvinculacion"
+        : "colaboradores";
     setSelectedCollaboratorId(String(collaborator.id));
-    setActiveView("colaboradores");
-    navigate(getRouteForEntity("colaboradores", collaborator.id));
+    setActiveView(targetView);
+    if (targetView === "desvinculacion") {
+      setActiveTab("offboarding");
+    }
+    navigate(getRouteForEntity(targetView, collaborator.id));
   };
 
   const handleSelectApplicant = async (applicant) => {
@@ -559,6 +633,34 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
       return;
     }
     await hireMutation.mutateAsync(selectedRequest.id);
+  };
+
+  const handleStartOffboarding = async (collaborator, reason = "") => {
+    if (!collaborator?.id) return;
+    const collaboratorId = String(collaborator.id);
+    try {
+      setStartingOffboardingId(collaboratorId);
+      const response = await startOffboardingMutation.mutateAsync({
+        collaboratorId,
+        reason,
+      });
+      const alreadyStarted = Boolean(response?.already_started);
+      toast.success(
+        alreadyStarted
+          ? "El proceso de desvinculación ya estaba iniciado."
+          : "Proceso de desvinculación iniciado."
+      );
+      setSelectedCollaboratorId(collaboratorId);
+      setActiveView("desvinculacion");
+      setActiveTab("offboarding");
+      navigate(getRouteForEntity("desvinculacion", collaborator.id));
+    } catch (error) {
+      toast.error(
+        error?.response?.data?.message || "No se pudo iniciar el proceso de desvinculación."
+      );
+    } finally {
+      setStartingOffboardingId(null);
+    }
   };
 
   const handleCreateRequest = () => setCreateDrawerOpen(true);
@@ -616,6 +718,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     applicantsInitialLoading,
     applicantsSyncing,
     collaborators,
+    offboardingCollaborators,
     loadingCollaborators: collaboratorsInitialLoading || collaboratorsSyncing,
     collaboratorsInitialLoading,
     collaboratorsSyncing,
@@ -663,6 +766,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     filteredRequests,
     filteredApplicants,
     filteredCollaborators,
+    filteredOffboardingCollaborators,
     profileCompletion,
     checklistCompletion,
     hasContract,
@@ -679,6 +783,7 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     handleSelectRequest,
     handleSelectApplicant,
     handleSelectCollaborator,
+    handleStartOffboarding,
     handleSaveProfile,
     handleUploadDocument,
     handleChecklistToggle,
@@ -692,5 +797,6 @@ export default function useCommandCenterState({ initialView = "solicitudes" } = 
     handleCloseReview,
     handleRequestReviewed,
     handleHireApplicant,
+    startingOffboardingId,
   };
 }

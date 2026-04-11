@@ -322,8 +322,8 @@ const CollaboratorWorkspace = () => {
       .trim()
       .toLowerCase();
     if (employeeStatus) {
-      if (employeeStatus === "desvinculado")
-        return { label: "Desvinculado", tone: "red" };
+      if (employeeStatus === "desvinculado" || employeeStatus === "pasivo")
+        return { label: "Pasivo", tone: "red" };
       return {
         label: employeeStatus.charAt(0).toUpperCase() + employeeStatus.slice(1),
         tone: "emerald",
@@ -339,6 +339,8 @@ const CollaboratorWorkspace = () => {
       Boolean(profileData?.laboral?.fecha_salida) ||
       String(profileData?.laboral?.estatus_empleado || "").toLowerCase() ===
         "desvinculado" ||
+      String(profileData?.laboral?.estatus_empleado || "").toLowerCase() ===
+        "pasivo" ||
       offboardingFlow.requested,
     [offboardingFlow.requested, profileData],
   );
@@ -689,7 +691,7 @@ const CollaboratorWorkspace = () => {
     if (!profileData) return;
     if (!isOffboardingComplete())
       return toast.error(
-        "Completa la salida: equipos, cuentas, SRI y liquidacion.",
+        "Completa todas las tareas del checklist de salida antes de finalizar.",
       );
     if (!profileData?.laboral?.fecha_salida)
       return toast.error("Registra la fecha de salida antes de finalizar.");
@@ -700,7 +702,7 @@ const CollaboratorWorkspace = () => {
         ...profileData,
         laboral: {
           ...(profileData?.laboral || {}),
-          estatus_empleado: "desvinculado",
+          estatus_empleado: "pasivo",
         },
       };
       await updateCollaboratorProfile(id, nextProfile);
@@ -1418,7 +1420,7 @@ const CollaboratorWorkspace = () => {
                     {sectionLockedByFlow && (
                       <div className="mb-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
                         Esta seccion se habilita cuando existe un requerimiento
-                        de salida activo o el colaborador ya esta desvinculado.
+                        de salida activo o el colaborador ya esta en estado pasivo.
                       </div>
                     )}
                     <div className="space-y-2">

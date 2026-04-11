@@ -8,6 +8,7 @@ const { logAction } = require("../../utils/audit");
 const { ensureFolder, copyTemplate, replaceTags, exportPdf } = require("../../utils/drive");
 const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { computeOffboardingLiquidation } = require("../vacaciones/vacaciones.service");
+const notificationManager = require("../notifications/notificationManager");
 
 const OFFBOARDING_STAGES = {
   OPERATIONAL: "OPERATIONAL",
@@ -49,10 +50,30 @@ const TASK_MAP = OFFBOARDING_TASKS.reduce((acc, task) => {
 
 const DRIVE_ROOT_FOLDER_ID = process.env.DRIVE_ROOT_FOLDER_ID || null;
 const OFFBOARDING_TEMPLATE_FILE_ID = process.env.OFFBOARDING_FINIQUITO_TEMPLATE_ID || null;
+const OFFBOARDING_PASSIVE_ROLE = String(process.env.OFFBOARDING_PASSIVE_ROLE || "pasivo")
+  .trim()
+  .toLowerCase();
 const OFFBOARDING_TEMPLATE_PATH = path.join(
   __dirname,
   "../../data/plantillas/Acta_Finiquito_Template.docx"
 );
+const GERENCIA_GENERAL_ROLES = new Set(["gerencia_general", "gerente_general"]);
+const IMMEDIATE_ROLE_MAP = {
+  comercial: "jefe_comercial",
+  acp_comercial: "jefe_comercial",
+  marketing: "jefe_comercial",
+  backoffice_comercial: "jefe_comercial",
+  financiero: "jefe_financiero",
+  finanzas: "jefe_financiero",
+  tecnico: "jefe_tecnico",
+  tecnico_servicio: "jefe_tecnico",
+  servicio_tecnico: "jefe_tecnico",
+  ti: "jefe_ti",
+  admin_ti: "jefe_ti",
+  logistica: "jefe_logistica",
+  operaciones: "jefe_operaciones",
+  calidad: "jefe_calidad",
+};
 
 const roundToTwo = (value) => {
   const numeric = Number(value || 0);
@@ -77,6 +98,161 @@ const toBoolean = (value) =>
   value === 1 ||
   value === "1" ||
   String(value || "").trim().toLowerCase() === "t";
+
+const normalizeRoleName = (value) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+
+function resolveImmediateApproverRole(requesterRole = "") {
+  const normalized = normalizeRoleName(requesterRole);
+  const isJefe = normalized.startsWith("jefe_") || normalized.startsWith("jefe");
+  if (isJefe) return "gerencia_general";
+  return IMMEDIATE_ROLE_MAP[normalized] || "gerencia_general";
+}
+
+function expandRoleCandidates(role) {
+  const normalized = normalizeRoleName(role);
+  const candidates = new Set([normalized]);
+  if (normalized === "gerencia_general" || normalized === "gerente_general") {
+    candidates.add("gerencia_general");
+    candidates.add("gerente_general");
+  }
+  if (normalized === "jefe_financiero" || normalized === "jefe_finanzas") {
+    candidates.add("jefe_financiero");
+    candidates.add("jefe_finanzas");
+  }
+  return Array.from(candidates).filter(Boolean);
+}
+
+function getDisplayName(user = {}) {
+  return user?.fullname || user?.name || user?.email || "";
+}
+
+function buildOffboardingRequestCode(userId) {
+  const suffix = Date.now().toString(36).toUpperCase();
+  return `OFF-${String(userId)}-${suffix}`;
+}
+
+async function getOffboardingRequestState(client, userId) {
+  const { rows } = await client.query(
+    `SELECT profile
+       FROM collaborator_profiles
+      WHERE user_id = $1
+      LIMIT 1`,
+    [userId]
+  );
+  const profile = rows[0]?.profile || {};
+  const onboarding = profile?.onboarding || {};
+  return {
+    requested: toBoolean(onboarding?.offboarding_requested),
+    requestCode: String(onboarding?.offboarding_request_code || "").trim(),
+  };
+}
+
+async function findActiveUsersByRoles(client, roles = []) {
+  const normalizedRoles = Array.from(
+    new Set(
+      (roles || [])
+        .flatMap((role) => expandRoleCandidates(role))
+        .map(normalizeRoleName)
+        .filter(Boolean)
+    )
+  );
+  if (!normalizedRoles.length) return [];
+  const { rows } = await client.query(
+    `SELECT id, email, fullname, name, role
+       FROM users
+      WHERE active = true
+        AND LOWER(COALESCE(role, '')) = ANY($1::text[])`,
+    [normalizedRoles]
+  );
+  return rows || [];
+}
+
+async function notifyOffboardingStarted({
+  targetUser,
+  actor,
+  immediateRole,
+  reason,
+  requestCode,
+}) {
+  const roleTargets = new Set([
+    "jefe_financiero",
+    "jefe_ti",
+    "gerencia_general",
+    immediateRole,
+  ]);
+
+  const recipients = await findActiveUsersByRoles(db, Array.from(roleTargets));
+  const seenUserIds = new Set();
+  const filteredRecipients = recipients.filter((recipient) => {
+    const id = Number(recipient?.id);
+    if (!Number.isFinite(id) || id <= 0) return false;
+    if (seenUserIds.has(id)) return false;
+    seenUserIds.add(id);
+    return true;
+  });
+
+  if (!filteredRecipients.length) return { recipients: 0 };
+
+  const collaboratorName = getDisplayName(targetUser) || `Colaborador #${targetUser?.id || "N/A"}`;
+  const actorName = getDisplayName(actor) || "Sistema";
+  const message = [
+    `Se inició el proceso de desvinculación de ${collaboratorName}.`,
+    targetUser?.email ? `Correo: ${targetUser.email}.` : null,
+    targetUser?.role ? `Rol actual: ${targetUser.role}.` : null,
+    targetUser?.department_name ? `Área: ${targetUser.department_name}.` : null,
+    `Iniciado por: ${actorName}.`,
+    reason ? `Motivo: ${reason}.` : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const results = await Promise.allSettled(
+    filteredRecipients.map((recipient) =>
+      notificationManager.sendNotification({
+        userId: recipient.id,
+        customTitle: "Proceso de desvinculación iniciado",
+        customMessage: message,
+        type: "task",
+        source: "offboarding",
+        priority: 1,
+        email: true,
+        meta: {
+          collaborator_user_id: targetUser?.id || null,
+          collaborator_email: targetUser?.email || null,
+          collaborator_role: targetUser?.role || null,
+          collaborator_department: targetUser?.department_name || null,
+          immediate_role: immediateRole || null,
+          offboarding_request_code: requestCode || null,
+          offboarding_request_reason: reason || null,
+          initiated_by_user_id: actor?.id || null,
+          initiated_by_email: actor?.email || null,
+          target_path: `/dashboard/talento-humano/command-center/desvinculacion/${targetUser?.id || ""}`,
+        },
+      })
+    )
+  );
+
+  results.forEach((result, index) => {
+    if (result.status === "fulfilled") return;
+    logger.warn(
+      {
+        notifyError: result.reason,
+        targetUserId: targetUser?.id || null,
+        recipient: filteredRecipients[index]?.email || null,
+      },
+      "No se pudo notificar inicio de offboarding"
+    );
+  });
+
+  return {
+    recipients: filteredRecipients.length,
+    delivered: results.filter((item) => item.status === "fulfilled").length,
+  };
+}
 
 async function ensureOffboardingTables(client = db) {
   await client.query(`
@@ -264,9 +440,18 @@ function assertFinancialStageCompleted(stages) {
 
 async function loadUser(client, userId) {
   const { rows } = await client.query(
-    `SELECT id, email, fullname, name, role, active
-       FROM users
-      WHERE id = $1
+    `SELECT
+        u.id,
+        u.email,
+        u.fullname,
+        u.name,
+        u.role,
+        u.active,
+        u.department_id,
+        d.name AS department_name
+       FROM users u
+      LEFT JOIN departments d ON d.id = u.department_id
+      WHERE u.id = $1
       LIMIT 1`,
     [userId]
   );
@@ -662,6 +847,162 @@ async function runLiquidation({
   }
 }
 
+async function startOffboarding({
+  userId,
+  actor,
+  reason,
+}) {
+  const targetUserId = Number(userId);
+  if (!Number.isFinite(targetUserId) || targetUserId <= 0) {
+    const err = new Error("Usuario invalido");
+    err.status = 400;
+    throw err;
+  }
+
+  const requestReason = String(reason || "").trim();
+  const requestedAtIso = new Date().toISOString();
+  const requestedBy = getDisplayName(actor) || "Sistema";
+
+  const client = await db.getClient();
+  let user = null;
+  let immediateRole = "gerencia_general";
+  let alreadyStarted = false;
+  let requestCode = "";
+  try {
+    await client.query("BEGIN");
+    await ensureOffboardingTables(client);
+    await ensureProcessAndTasks(client, targetUserId);
+
+    user = await loadUser(client, targetUserId);
+    if (!user) {
+      const err = new Error("Colaborador no encontrado");
+      err.status = 404;
+      throw err;
+    }
+
+    const process = await loadProcess(client, targetUserId);
+    const isPassiveUser =
+      user.active === false ||
+      normalizeRoleName(user.role) === OFFBOARDING_PASSIVE_ROLE;
+    if (process?.is_closed || isPassiveUser) {
+      const err = new Error("El colaborador ya está desvinculado o con proceso cerrado.");
+      err.status = 409;
+      throw err;
+    }
+
+    const requestState = await getOffboardingRequestState(client, targetUserId);
+    alreadyStarted = requestState.requested;
+    requestCode = requestState.requestCode || buildOffboardingRequestCode(targetUserId);
+    immediateRole = resolveImmediateApproverRole(user.role || "");
+
+    if (!alreadyStarted) {
+      await client.query(
+        `INSERT INTO collaborator_profiles (user_id, profile, updated_by)
+         VALUES (
+           $1,
+           jsonb_build_object(
+             'onboarding',
+             jsonb_build_object(
+               'offboarding_requested', true,
+               'offboarding_request_code', $2::text,
+               'offboarding_request_reason', $3::text,
+               'offboarding_requested_at', $4::text,
+               'offboarding_requested_by', $5::text,
+               'offboarding_cancelled_at', NULL,
+               'offboarding_cancelled_by', NULL
+             )
+           ),
+           $6
+         )
+         ON CONFLICT (user_id) DO UPDATE
+         SET profile = jsonb_set(
+               COALESCE(collaborator_profiles.profile, '{}'::jsonb),
+               ARRAY['onboarding'],
+               COALESCE(
+                 COALESCE(collaborator_profiles.profile, '{}'::jsonb)->'onboarding',
+                 '{}'::jsonb
+               ) || jsonb_build_object(
+                 'offboarding_requested', true,
+                 'offboarding_request_code', $2::text,
+                 'offboarding_request_reason', $3::text,
+                 'offboarding_requested_at', $4::text,
+                 'offboarding_requested_by', $5::text,
+                 'offboarding_cancelled_at', NULL,
+                 'offboarding_cancelled_by', NULL
+               ),
+               true
+             ),
+             updated_by = COALESCE($6, collaborator_profiles.updated_by),
+             updated_at = now()`,
+        [
+          targetUserId,
+          requestCode,
+          requestReason || null,
+          requestedAtIso,
+          requestedBy,
+          actor?.id || null,
+        ]
+      );
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  let notifySummary = { recipients: 0, delivered: 0 };
+  if (!alreadyStarted) {
+    try {
+      notifySummary = await notifyOffboardingStarted({
+        targetUser: user,
+        actor,
+        immediateRole,
+        reason: requestReason || null,
+        requestCode,
+      });
+    } catch (notifyError) {
+      logger.warn(
+        { notifyError, userId: targetUserId },
+        "No se pudo completar la notificación inicial de offboarding"
+      );
+    }
+  }
+
+  try {
+    await logAction({
+      user_id: actor?.id || null,
+      user_email: actor?.email || "system",
+      role: actor?.role || null,
+      module: "offboarding",
+      action: "start_offboarding",
+      details: {
+        user_id: targetUserId,
+        request_code: requestCode,
+        request_reason: requestReason || null,
+        requested_by: requestedBy,
+        immediate_role: immediateRole,
+        already_started: alreadyStarted,
+        notified_recipients: notifySummary?.delivered || 0,
+      },
+    });
+  } catch (auditError) {
+    logger.warn({ auditError, userId: targetUserId }, "No se pudo registrar auditoria de inicio offboarding");
+  }
+
+  const workspace = await buildWorkspace(db, targetUserId);
+  return {
+    workspace,
+    started: !alreadyStarted,
+    already_started: alreadyStarted,
+    request_code: requestCode,
+    immediate_role: immediateRole,
+    notified_recipients: notifySummary?.delivered || 0,
+  };
+}
+
 async function closeOffboarding({
   userId,
   actor,
@@ -695,12 +1036,14 @@ async function closeOffboarding({
     const process = await loadProcess(client, targetUserId);
     const departureDate =
       normalizeDateOnly(process?.departure_date) || normalizeDateOnly(new Date());
+    const closedAtIso = new Date().toISOString();
 
     await client.query(
       `UPDATE users
-          SET active = false
+          SET active = false,
+              role = COALESCE(NULLIF($2::text, ''), role)
         WHERE id = $1`,
-      [targetUserId]
+      [targetUserId, OFFBOARDING_PASSIVE_ROLE]
     );
 
     await client.query(
@@ -712,6 +1055,13 @@ async function closeOffboarding({
         WHERE user_id = $1
           AND task_key = $2`,
       [targetUserId, "cierre_usuario", actor?.id || null]
+    );
+    await updateOnboardingFlag(
+      client,
+      targetUserId,
+      "cambio_estado_activo_pasivo",
+      true,
+      actor?.id || null
     );
 
     await client.query(
@@ -731,8 +1081,23 @@ async function closeOffboarding({
          jsonb_build_object(
            'laboral',
            jsonb_build_object(
-             'estatus_empleado', 'inactivo',
+             'estatus_empleado', 'pasivo',
              'fecha_salida', $2
+           ),
+           'onboarding',
+           jsonb_build_object(
+             'cambio_estado_activo_pasivo', true
+           ),
+           'extra',
+           jsonb_build_object(
+             'offboarding',
+             jsonb_build_object(
+               'previous_role', $4::text,
+               'previous_active', $5::boolean,
+               'final_role', $6::text,
+               'closed_at', $7::text,
+               'closed_by_user_id', $8::int
+             )
            )
          ),
          $3
@@ -740,18 +1105,51 @@ async function closeOffboarding({
        ON CONFLICT (user_id) DO UPDATE
        SET profile = jsonb_set(
             jsonb_set(
-              COALESCE(collaborator_profiles.profile, '{}'::jsonb),
-              ARRAY['laboral', 'estatus_empleado'],
-              to_jsonb('inactivo'::text),
+              jsonb_set(
+                jsonb_set(
+                  jsonb_set(
+                    COALESCE(collaborator_profiles.profile, '{}'::jsonb),
+                    ARRAY['laboral', 'estatus_empleado'],
+                    to_jsonb('pasivo'::text),
+                    true
+                  ),
+                  ARRAY['laboral', 'fecha_salida'],
+                  to_jsonb($2::text),
+                  true
+                ),
+                ARRAY['onboarding', 'cambio_estado_activo_pasivo'],
+                to_jsonb(true),
+                true
+              ),
+              ARRAY['extra', 'offboarding'],
+              COALESCE(
+                COALESCE(collaborator_profiles.profile, '{}'::jsonb)->'extra'->'offboarding',
+                '{}'::jsonb
+              ) || jsonb_build_object(
+                'previous_role', $4::text,
+                'previous_active', $5::boolean,
+                'final_role', $6::text,
+                'closed_at', $7::text,
+                'closed_by_user_id', $8::int
+              ),
               true
             ),
-            ARRAY['laboral', 'fecha_salida'],
-            to_jsonb($2::text),
+            ARRAY['extra', 'offboarding_last_closed_at'],
+            to_jsonb($7::text),
             true
           ),
           updated_by = COALESCE($3, collaborator_profiles.updated_by),
           updated_at = now()`,
-      [targetUserId, departureDate, actor?.id || null]
+      [
+        targetUserId,
+        departureDate,
+        actor?.id || null,
+        user.role || null,
+        user.active !== false,
+        OFFBOARDING_PASSIVE_ROLE,
+        closedAtIso,
+        actor?.id || null,
+      ]
     );
 
     await client.query("COMMIT");
@@ -767,6 +1165,10 @@ async function closeOffboarding({
           user_id: targetUserId,
           departure_date: departureDate,
           user_deactivated: true,
+          previous_role: user.role || null,
+          final_role: OFFBOARDING_PASSIVE_ROLE,
+          previous_active: user.active !== false,
+          onboarding_flag_updated: "cambio_estado_activo_pasivo",
         },
       });
     } catch (auditError) {
@@ -800,5 +1202,6 @@ module.exports = {
   getWorkspace,
   updateTask,
   runLiquidation,
+  startOffboarding,
   closeOffboarding,
 };

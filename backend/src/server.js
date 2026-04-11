@@ -26,6 +26,7 @@ const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflo
 const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
+const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
 const { startExternalCaseSyncJob } = require("./jobs/externalCaseSyncScheduler");
 
@@ -47,6 +48,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
     startBusinessCasePreflowExpiryJob();
     startBusinessCaseDeterminationsGateExpiryJob();
     startBusinessCaseSheetGenerationQueueJob();
+    startPermisosPendingExpiryJob();
     startPermisosRecoveryCoordinationExpiryJob();
     startDatabaseBackupJob();
     startExternalCaseSyncJob();

@@ -72,6 +72,8 @@ const mapCollaboratorToBrowserItem = (collaborator = {}) => {
   const statusValue =
     collaborator.estatus_empleado ||
     (collaborator.active === false ? "inactivo" : "activo");
+  const normalizedStatus = normalizeStatus(statusValue);
+  const isPassive = normalizedStatus === "pasivo" || normalizedStatus === "desvinculado";
   return {
     id: collaborator.id,
     title:
@@ -82,7 +84,7 @@ const mapCollaboratorToBrowserItem = (collaborator = {}) => {
     subtitle: collaborator.email,
     detail: collaborator.department_name || collaborator.department,
     status: statusValue,
-    statusLabel: String(statusValue || "Activo"),
+    statusLabel: isPassive ? "Pasivo" : String(statusValue || "Activo"),
     updatedAt: collaborator.updated_at || collaborator.last_login,
   };
 };
@@ -192,8 +194,10 @@ const buildRequestSummaryItems = (request = {}, options = {}) => {
 };
 
 const buildCollaboratorSummaryItems = (collaborator = {}) => {
+  const normalizedStatus = String(collaborator.estatus_empleado || "").toLowerCase();
   const activeStatus =
-    String(collaborator.estatus_empleado || "").toLowerCase() !== "desvinculado" &&
+    normalizedStatus !== "desvinculado" &&
+    normalizedStatus !== "pasivo" &&
     collaborator.active !== false;
   return [
     {
