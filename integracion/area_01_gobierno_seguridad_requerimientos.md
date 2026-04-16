@@ -1,0 +1,928 @@
+﻿# Requerimientos de Integracion - Gobierno, Seguridad y Cumplimiento
+
+- Codigo de area: A01
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_01_gobierno_seguridad.md
+- Modulos SPI del inventario: auth, security, auditoria, audit-prep, approvals, management, signature
+- Modulos/modelos Odoo objetivo: base, auditlog, approvals, documents, sign, mail.activity, res.users
+- Prioridad del area: CRITICO
+- Total de requerimientos del documento: 900
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A01-0001 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `auth` hacia Odoo `approvals` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0002 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0003 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0004 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0005 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0006 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0007 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de signature incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0008 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0009 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0010 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0011 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `audit-prep` no confirma precondiciones de negocio.
+- REQ-INT-A01-0012 [SEC][CRITICO] El intercambio de datos de approvals debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.users`.
+- REQ-INT-A01-0013 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0014 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0015 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0016 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0017 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `auditoria` y Odoo `sign` preservando historial de cambios y control de version.
+- REQ-INT-A01-0018 [INT][CRITICO] La integracion de audit-prep con `mail.activity` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0019 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `validez de firma` antes de completarse.
+- REQ-INT-A01-0020 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0021 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0022 [NFR][CRITICO] El proceso de integracion del modulo `auth` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0023 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0024 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0025 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0026 [INT][CRITICO] Ante evento de reasignacion en SPI `approvals`, la integracion debe publicar mensaje y actualizar Odoo `res.users` con trazabilidad completa.
+- REQ-INT-A01-0027 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `management` y Odoo `base` sin saltos de estado.
+- REQ-INT-A01-0028 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0029 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0030 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0031 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0032 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `audit-prep` y Odoo `mail.activity` con version bloqueada.
+- REQ-INT-A01-0033 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.users`.
+- REQ-INT-A01-0034 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0035 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0036 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0037 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0038 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0039 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0040 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0041 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `management` hacia Odoo `base` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0042 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0043 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0044 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0045 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0046 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0047 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de approvals incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0048 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0049 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0050 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0051 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `security` no confirma precondiciones de negocio.
+- REQ-INT-A01-0052 [SEC][CRITICO] El intercambio de datos de auditoria debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sign`.
+- REQ-INT-A01-0053 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0054 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0055 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0056 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0057 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `auth` y Odoo `approvals` preservando historial de cambios y control de version.
+- REQ-INT-A01-0058 [INT][CRITICO] La integracion de security con `documents` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0059 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `segregacion de funciones` antes de completarse.
+- REQ-INT-A01-0060 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0061 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0062 [NFR][CRITICO] El proceso de integracion del modulo `management` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0063 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0064 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0065 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0066 [INT][CRITICO] Ante evento de actualizacion en SPI `auditoria`, la integracion debe publicar mensaje y actualizar Odoo `sign` con trazabilidad completa.
+- REQ-INT-A01-0067 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `audit-prep` y Odoo `mail.activity` sin saltos de estado.
+- REQ-INT-A01-0068 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0069 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0070 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0071 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0072 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `security` y Odoo `documents` con version bloqueada.
+- REQ-INT-A01-0073 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sign`.
+- REQ-INT-A01-0074 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0075 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0076 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0077 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0078 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0079 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0080 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+- REQ-INT-A01-0081 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `audit-prep` hacia Odoo `mail.activity` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0082 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0083 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0084 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0085 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0086 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0087 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auditoria incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0088 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0089 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0090 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0091 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `signature` no confirma precondiciones de negocio.
+- REQ-INT-A01-0092 [SEC][CRITICO] El intercambio de datos de auth debe cifrarse en transito y registrar controles de acceso por rol en Odoo `approvals`.
+- REQ-INT-A01-0093 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0094 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0095 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0096 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0097 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `management` y Odoo `base` preservando historial de cambios y control de version.
+- REQ-INT-A01-0098 [INT][CRITICO] La integracion de signature con `auditlog` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0099 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `cumplimiento de politicas` antes de completarse.
+- REQ-INT-A01-0100 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A01-0101 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0102 [NFR][CRITICO] El proceso de integracion del modulo `audit-prep` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0103 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0104 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0105 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0106 [INT][CRITICO] Ante evento de firma en SPI `auth`, la integracion debe publicar mensaje y actualizar Odoo `approvals` con trazabilidad completa.
+- REQ-INT-A01-0107 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `security` y Odoo `documents` sin saltos de estado.
+- REQ-INT-A01-0108 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0109 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0110 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0111 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0112 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `signature` y Odoo `auditlog` con version bloqueada.
+- REQ-INT-A01-0113 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `approvals`.
+- REQ-INT-A01-0114 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0115 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0116 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0117 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0118 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0119 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0120 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0121 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `security` hacia Odoo `documents` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0122 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0123 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0124 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0125 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0126 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0127 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auth incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0128 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0129 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0130 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0131 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `approvals` no confirma precondiciones de negocio.
+- REQ-INT-A01-0132 [SEC][CRITICO] El intercambio de datos de management debe cifrarse en transito y registrar controles de acceso por rol en Odoo `base`.
+- REQ-INT-A01-0133 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0134 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0135 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0136 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0137 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `audit-prep` y Odoo `mail.activity` preservando historial de cambios y control de version.
+- REQ-INT-A01-0138 [INT][CRITICO] La integracion de approvals con `res.users` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0139 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `completitud de evidencia` antes de completarse.
+- REQ-INT-A01-0140 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0141 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0142 [NFR][CRITICO] El proceso de integracion del modulo `security` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0143 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0144 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0145 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0146 [INT][CRITICO] Ante evento de reasignacion en SPI `management`, la integracion debe publicar mensaje y actualizar Odoo `base` con trazabilidad completa.
+- REQ-INT-A01-0147 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `signature` y Odoo `auditlog` sin saltos de estado.
+- REQ-INT-A01-0148 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0149 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0150 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0151 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0152 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `approvals` y Odoo `res.users` con version bloqueada.
+- REQ-INT-A01-0153 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `base`.
+- REQ-INT-A01-0154 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0155 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0156 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0157 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0158 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0159 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0160 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0161 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `signature` hacia Odoo `auditlog` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0162 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0163 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0164 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0165 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0166 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0167 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de management incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0168 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0169 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0170 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0171 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auditoria` no confirma precondiciones de negocio.
+- REQ-INT-A01-0172 [SEC][CRITICO] El intercambio de datos de audit-prep debe cifrarse en transito y registrar controles de acceso por rol en Odoo `mail.activity`.
+- REQ-INT-A01-0173 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0174 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0175 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0176 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0177 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `security` y Odoo `documents` preservando historial de cambios y control de version.
+- REQ-INT-A01-0178 [INT][CRITICO] La integracion de auditoria con `sign` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0179 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `doble aprobacion` antes de completarse.
+- REQ-INT-A01-0180 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0181 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0182 [NFR][CRITICO] El proceso de integracion del modulo `signature` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0183 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0184 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0185 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0186 [INT][CRITICO] Ante evento de actualizacion en SPI `audit-prep`, la integracion debe publicar mensaje y actualizar Odoo `mail.activity` con trazabilidad completa.
+- REQ-INT-A01-0187 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `approvals` y Odoo `res.users` sin saltos de estado.
+- REQ-INT-A01-0188 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0189 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0190 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0191 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0192 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auditoria` y Odoo `sign` con version bloqueada.
+- REQ-INT-A01-0193 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `mail.activity`.
+- REQ-INT-A01-0194 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0195 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0196 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0197 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0198 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0199 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0200 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+
+### Bloque 201-300
+- REQ-INT-A01-0201 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `approvals` hacia Odoo `res.users` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0202 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0203 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0204 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0205 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0206 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0207 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de audit-prep incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0208 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0209 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0210 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0211 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auth` no confirma precondiciones de negocio.
+- REQ-INT-A01-0212 [SEC][CRITICO] El intercambio de datos de security debe cifrarse en transito y registrar controles de acceso por rol en Odoo `documents`.
+- REQ-INT-A01-0213 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0214 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0215 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0216 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0217 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `signature` y Odoo `auditlog` preservando historial de cambios y control de version.
+- REQ-INT-A01-0218 [INT][CRITICO] La integracion de auth con `approvals` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0219 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `integridad de hash` antes de completarse.
+- REQ-INT-A01-0220 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0221 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0222 [NFR][CRITICO] El proceso de integracion del modulo `approvals` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0223 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0224 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0225 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0226 [INT][CRITICO] Ante evento de firma en SPI `security`, la integracion debe publicar mensaje y actualizar Odoo `documents` con trazabilidad completa.
+- REQ-INT-A01-0227 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auditoria` y Odoo `sign` sin saltos de estado.
+- REQ-INT-A01-0228 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0229 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0230 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0231 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0232 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auth` y Odoo `approvals` con version bloqueada.
+- REQ-INT-A01-0233 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `documents`.
+- REQ-INT-A01-0234 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0235 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0236 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0237 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0238 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0239 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0240 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0241 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `auditoria` hacia Odoo `sign` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0242 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0243 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0244 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0245 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0246 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0247 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de security incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0248 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0249 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0250 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0251 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `management` no confirma precondiciones de negocio.
+- REQ-INT-A01-0252 [SEC][CRITICO] El intercambio de datos de signature debe cifrarse en transito y registrar controles de acceso por rol en Odoo `auditlog`.
+- REQ-INT-A01-0253 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0254 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0255 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0256 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0257 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `approvals` y Odoo `res.users` preservando historial de cambios y control de version.
+- REQ-INT-A01-0258 [INT][CRITICO] La integracion de management con `base` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0259 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `consistencia de estado` antes de completarse.
+- REQ-INT-A01-0260 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0261 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0262 [NFR][CRITICO] El proceso de integracion del modulo `auditoria` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0263 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0264 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0265 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0266 [INT][CRITICO] Ante evento de reasignacion en SPI `signature`, la integracion debe publicar mensaje y actualizar Odoo `auditlog` con trazabilidad completa.
+- REQ-INT-A01-0267 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auth` y Odoo `approvals` sin saltos de estado.
+- REQ-INT-A01-0268 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0269 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0270 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0271 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0272 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `management` y Odoo `base` con version bloqueada.
+- REQ-INT-A01-0273 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `auditlog`.
+- REQ-INT-A01-0274 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0275 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0276 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0277 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0278 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0279 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0280 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0281 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `auth` hacia Odoo `approvals` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0282 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0283 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0284 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0285 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0286 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0287 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de signature incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0288 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0289 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0290 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0291 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `audit-prep` no confirma precondiciones de negocio.
+- REQ-INT-A01-0292 [SEC][CRITICO] El intercambio de datos de approvals debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.users`.
+- REQ-INT-A01-0293 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0294 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0295 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0296 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0297 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `auditoria` y Odoo `sign` preservando historial de cambios y control de version.
+- REQ-INT-A01-0298 [INT][CRITICO] La integracion de audit-prep con `mail.activity` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0299 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `validez de firma` antes de completarse.
+- REQ-INT-A01-0300 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A01-0301 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0302 [NFR][CRITICO] El proceso de integracion del modulo `auth` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0303 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0304 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0305 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0306 [INT][CRITICO] Ante evento de actualizacion en SPI `approvals`, la integracion debe publicar mensaje y actualizar Odoo `res.users` con trazabilidad completa.
+- REQ-INT-A01-0307 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `management` y Odoo `base` sin saltos de estado.
+- REQ-INT-A01-0308 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0309 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0310 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0311 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0312 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `audit-prep` y Odoo `mail.activity` con version bloqueada.
+- REQ-INT-A01-0313 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.users`.
+- REQ-INT-A01-0314 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0315 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0316 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0317 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0318 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0319 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0320 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+- REQ-INT-A01-0321 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `management` hacia Odoo `base` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0322 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0323 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0324 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0325 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0326 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0327 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de approvals incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0328 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0329 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0330 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0331 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `security` no confirma precondiciones de negocio.
+- REQ-INT-A01-0332 [SEC][CRITICO] El intercambio de datos de auditoria debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sign`.
+- REQ-INT-A01-0333 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0334 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0335 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0336 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0337 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `auth` y Odoo `approvals` preservando historial de cambios y control de version.
+- REQ-INT-A01-0338 [INT][CRITICO] La integracion de security con `documents` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0339 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `segregacion de funciones` antes de completarse.
+- REQ-INT-A01-0340 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0341 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0342 [NFR][CRITICO] El proceso de integracion del modulo `management` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0343 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0344 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0345 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0346 [INT][CRITICO] Ante evento de firma en SPI `auditoria`, la integracion debe publicar mensaje y actualizar Odoo `sign` con trazabilidad completa.
+- REQ-INT-A01-0347 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `audit-prep` y Odoo `mail.activity` sin saltos de estado.
+- REQ-INT-A01-0348 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0349 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0350 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0351 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0352 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `security` y Odoo `documents` con version bloqueada.
+- REQ-INT-A01-0353 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sign`.
+- REQ-INT-A01-0354 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0355 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0356 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0357 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0358 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0359 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0360 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0361 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `audit-prep` hacia Odoo `mail.activity` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0362 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0363 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0364 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0365 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0366 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0367 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auditoria incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0368 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0369 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0370 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0371 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `signature` no confirma precondiciones de negocio.
+- REQ-INT-A01-0372 [SEC][CRITICO] El intercambio de datos de auth debe cifrarse en transito y registrar controles de acceso por rol en Odoo `approvals`.
+- REQ-INT-A01-0373 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0374 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0375 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0376 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0377 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `management` y Odoo `base` preservando historial de cambios y control de version.
+- REQ-INT-A01-0378 [INT][CRITICO] La integracion de signature con `auditlog` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0379 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `cumplimiento de politicas` antes de completarse.
+- REQ-INT-A01-0380 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0381 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0382 [NFR][CRITICO] El proceso de integracion del modulo `audit-prep` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0383 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0384 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0385 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0386 [INT][CRITICO] Ante evento de reasignacion en SPI `auth`, la integracion debe publicar mensaje y actualizar Odoo `approvals` con trazabilidad completa.
+- REQ-INT-A01-0387 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `security` y Odoo `documents` sin saltos de estado.
+- REQ-INT-A01-0388 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0389 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0390 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0391 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0392 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `signature` y Odoo `auditlog` con version bloqueada.
+- REQ-INT-A01-0393 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `approvals`.
+- REQ-INT-A01-0394 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0395 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0396 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0397 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0398 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0399 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0400 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+
+### Bloque 401-500
+- REQ-INT-A01-0401 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `security` hacia Odoo `documents` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0402 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0403 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0404 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0405 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0406 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0407 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auth incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0408 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0409 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0410 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0411 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `approvals` no confirma precondiciones de negocio.
+- REQ-INT-A01-0412 [SEC][CRITICO] El intercambio de datos de management debe cifrarse en transito y registrar controles de acceso por rol en Odoo `base`.
+- REQ-INT-A01-0413 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0414 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0415 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0416 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0417 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `audit-prep` y Odoo `mail.activity` preservando historial de cambios y control de version.
+- REQ-INT-A01-0418 [INT][CRITICO] La integracion de approvals con `res.users` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0419 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `completitud de evidencia` antes de completarse.
+- REQ-INT-A01-0420 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0421 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0422 [NFR][CRITICO] El proceso de integracion del modulo `security` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0423 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0424 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0425 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0426 [INT][CRITICO] Ante evento de actualizacion en SPI `management`, la integracion debe publicar mensaje y actualizar Odoo `base` con trazabilidad completa.
+- REQ-INT-A01-0427 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `signature` y Odoo `auditlog` sin saltos de estado.
+- REQ-INT-A01-0428 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0429 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0430 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0431 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0432 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `approvals` y Odoo `res.users` con version bloqueada.
+- REQ-INT-A01-0433 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `base`.
+- REQ-INT-A01-0434 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0435 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0436 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0437 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0438 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0439 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0440 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+- REQ-INT-A01-0441 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `signature` hacia Odoo `auditlog` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0442 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0443 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0444 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0445 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0446 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0447 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de management incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0448 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0449 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0450 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0451 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auditoria` no confirma precondiciones de negocio.
+- REQ-INT-A01-0452 [SEC][CRITICO] El intercambio de datos de audit-prep debe cifrarse en transito y registrar controles de acceso por rol en Odoo `mail.activity`.
+- REQ-INT-A01-0453 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0454 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0455 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0456 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0457 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `security` y Odoo `documents` preservando historial de cambios y control de version.
+- REQ-INT-A01-0458 [INT][CRITICO] La integracion de auditoria con `sign` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0459 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `doble aprobacion` antes de completarse.
+- REQ-INT-A01-0460 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0461 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0462 [NFR][CRITICO] El proceso de integracion del modulo `signature` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0463 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0464 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0465 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0466 [INT][CRITICO] Ante evento de firma en SPI `audit-prep`, la integracion debe publicar mensaje y actualizar Odoo `mail.activity` con trazabilidad completa.
+- REQ-INT-A01-0467 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `approvals` y Odoo `res.users` sin saltos de estado.
+- REQ-INT-A01-0468 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0469 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0470 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0471 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0472 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auditoria` y Odoo `sign` con version bloqueada.
+- REQ-INT-A01-0473 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `mail.activity`.
+- REQ-INT-A01-0474 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0475 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0476 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0477 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0478 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0479 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0480 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0481 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `approvals` hacia Odoo `res.users` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0482 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0483 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0484 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0485 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0486 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0487 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de audit-prep incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0488 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0489 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0490 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0491 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auth` no confirma precondiciones de negocio.
+- REQ-INT-A01-0492 [SEC][CRITICO] El intercambio de datos de security debe cifrarse en transito y registrar controles de acceso por rol en Odoo `documents`.
+- REQ-INT-A01-0493 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0494 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0495 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0496 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0497 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `signature` y Odoo `auditlog` preservando historial de cambios y control de version.
+- REQ-INT-A01-0498 [INT][CRITICO] La integracion de auth con `approvals` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0499 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `integridad de hash` antes de completarse.
+- REQ-INT-A01-0500 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 501-600
+- REQ-INT-A01-0501 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0502 [NFR][CRITICO] El proceso de integracion del modulo `approvals` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0503 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0504 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0505 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0506 [INT][CRITICO] Ante evento de reasignacion en SPI `security`, la integracion debe publicar mensaje y actualizar Odoo `documents` con trazabilidad completa.
+- REQ-INT-A01-0507 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auditoria` y Odoo `sign` sin saltos de estado.
+- REQ-INT-A01-0508 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0509 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0510 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0511 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0512 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auth` y Odoo `approvals` con version bloqueada.
+- REQ-INT-A01-0513 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `documents`.
+- REQ-INT-A01-0514 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0515 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0516 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0517 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0518 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0519 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0520 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0521 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `auditoria` hacia Odoo `sign` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0522 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0523 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0524 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0525 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0526 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0527 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de security incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0528 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0529 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0530 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0531 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `management` no confirma precondiciones de negocio.
+- REQ-INT-A01-0532 [SEC][CRITICO] El intercambio de datos de signature debe cifrarse en transito y registrar controles de acceso por rol en Odoo `auditlog`.
+- REQ-INT-A01-0533 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0534 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0535 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0536 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0537 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `approvals` y Odoo `res.users` preservando historial de cambios y control de version.
+- REQ-INT-A01-0538 [INT][CRITICO] La integracion de management con `base` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0539 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `consistencia de estado` antes de completarse.
+- REQ-INT-A01-0540 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0541 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0542 [NFR][CRITICO] El proceso de integracion del modulo `auditoria` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0543 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0544 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0545 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0546 [INT][CRITICO] Ante evento de actualizacion en SPI `signature`, la integracion debe publicar mensaje y actualizar Odoo `auditlog` con trazabilidad completa.
+- REQ-INT-A01-0547 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auth` y Odoo `approvals` sin saltos de estado.
+- REQ-INT-A01-0548 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0549 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0550 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0551 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0552 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `management` y Odoo `base` con version bloqueada.
+- REQ-INT-A01-0553 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `auditlog`.
+- REQ-INT-A01-0554 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0555 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0556 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0557 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0558 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0559 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0560 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+- REQ-INT-A01-0561 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `auth` hacia Odoo `approvals` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0562 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0563 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0564 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0565 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0566 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0567 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de signature incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0568 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0569 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0570 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0571 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `audit-prep` no confirma precondiciones de negocio.
+- REQ-INT-A01-0572 [SEC][CRITICO] El intercambio de datos de approvals debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.users`.
+- REQ-INT-A01-0573 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0574 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0575 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0576 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0577 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `auditoria` y Odoo `sign` preservando historial de cambios y control de version.
+- REQ-INT-A01-0578 [INT][CRITICO] La integracion de audit-prep con `mail.activity` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0579 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `validez de firma` antes de completarse.
+- REQ-INT-A01-0580 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0581 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0582 [NFR][CRITICO] El proceso de integracion del modulo `auth` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0583 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0584 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0585 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0586 [INT][CRITICO] Ante evento de firma en SPI `approvals`, la integracion debe publicar mensaje y actualizar Odoo `res.users` con trazabilidad completa.
+- REQ-INT-A01-0587 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `management` y Odoo `base` sin saltos de estado.
+- REQ-INT-A01-0588 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0589 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0590 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0591 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0592 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `audit-prep` y Odoo `mail.activity` con version bloqueada.
+- REQ-INT-A01-0593 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.users`.
+- REQ-INT-A01-0594 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0595 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0596 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0597 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0598 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0599 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0600 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+
+### Bloque 601-700
+- REQ-INT-A01-0601 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `management` hacia Odoo `base` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0602 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0603 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0604 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0605 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0606 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0607 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de approvals incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0608 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0609 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0610 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0611 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `security` no confirma precondiciones de negocio.
+- REQ-INT-A01-0612 [SEC][CRITICO] El intercambio de datos de auditoria debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sign`.
+- REQ-INT-A01-0613 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0614 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0615 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0616 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0617 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `auth` y Odoo `approvals` preservando historial de cambios y control de version.
+- REQ-INT-A01-0618 [INT][CRITICO] La integracion de security con `documents` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0619 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `segregacion de funciones` antes de completarse.
+- REQ-INT-A01-0620 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0621 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0622 [NFR][CRITICO] El proceso de integracion del modulo `management` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0623 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0624 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0625 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0626 [INT][CRITICO] Ante evento de reasignacion en SPI `auditoria`, la integracion debe publicar mensaje y actualizar Odoo `sign` con trazabilidad completa.
+- REQ-INT-A01-0627 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `audit-prep` y Odoo `mail.activity` sin saltos de estado.
+- REQ-INT-A01-0628 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0629 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0630 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0631 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0632 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `security` y Odoo `documents` con version bloqueada.
+- REQ-INT-A01-0633 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sign`.
+- REQ-INT-A01-0634 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0635 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0636 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0637 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0638 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0639 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0640 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0641 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `audit-prep` hacia Odoo `mail.activity` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0642 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0643 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0644 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0645 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0646 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0647 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auditoria incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0648 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0649 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0650 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0651 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `signature` no confirma precondiciones de negocio.
+- REQ-INT-A01-0652 [SEC][CRITICO] El intercambio de datos de auth debe cifrarse en transito y registrar controles de acceso por rol en Odoo `approvals`.
+- REQ-INT-A01-0653 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0654 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0655 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0656 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0657 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `management` y Odoo `base` preservando historial de cambios y control de version.
+- REQ-INT-A01-0658 [INT][CRITICO] La integracion de signature con `auditlog` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0659 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `cumplimiento de politicas` antes de completarse.
+- REQ-INT-A01-0660 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0661 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0662 [NFR][CRITICO] El proceso de integracion del modulo `audit-prep` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0663 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0664 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0665 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0666 [INT][CRITICO] Ante evento de actualizacion en SPI `auth`, la integracion debe publicar mensaje y actualizar Odoo `approvals` con trazabilidad completa.
+- REQ-INT-A01-0667 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `security` y Odoo `documents` sin saltos de estado.
+- REQ-INT-A01-0668 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0669 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0670 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0671 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0672 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `signature` y Odoo `auditlog` con version bloqueada.
+- REQ-INT-A01-0673 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `approvals`.
+- REQ-INT-A01-0674 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0675 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0676 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0677 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0678 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0679 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0680 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+- REQ-INT-A01-0681 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `security` hacia Odoo `documents` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0682 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0683 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0684 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0685 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0686 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0687 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de auth incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0688 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0689 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0690 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0691 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `approvals` no confirma precondiciones de negocio.
+- REQ-INT-A01-0692 [SEC][CRITICO] El intercambio de datos de management debe cifrarse en transito y registrar controles de acceso por rol en Odoo `base`.
+- REQ-INT-A01-0693 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0694 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0695 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0696 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0697 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `audit-prep` y Odoo `mail.activity` preservando historial de cambios y control de version.
+- REQ-INT-A01-0698 [INT][CRITICO] La integracion de approvals con `res.users` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0699 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `completitud de evidencia` antes de completarse.
+- REQ-INT-A01-0700 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 701-800
+- REQ-INT-A01-0701 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0702 [NFR][CRITICO] El proceso de integracion del modulo `security` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0703 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0704 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0705 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0706 [INT][CRITICO] Ante evento de firma en SPI `management`, la integracion debe publicar mensaje y actualizar Odoo `base` con trazabilidad completa.
+- REQ-INT-A01-0707 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `signature` y Odoo `auditlog` sin saltos de estado.
+- REQ-INT-A01-0708 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0709 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0710 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0711 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0712 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `approvals` y Odoo `res.users` con version bloqueada.
+- REQ-INT-A01-0713 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `base`.
+- REQ-INT-A01-0714 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0715 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0716 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0717 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0718 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0719 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0720 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0721 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `signature` hacia Odoo `auditlog` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0722 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0723 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0724 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0725 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0726 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0727 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de management incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0728 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0729 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0730 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0731 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auditoria` no confirma precondiciones de negocio.
+- REQ-INT-A01-0732 [SEC][CRITICO] El intercambio de datos de audit-prep debe cifrarse en transito y registrar controles de acceso por rol en Odoo `mail.activity`.
+- REQ-INT-A01-0733 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0734 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0735 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0736 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0737 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `security` y Odoo `documents` preservando historial de cambios y control de version.
+- REQ-INT-A01-0738 [INT][CRITICO] La integracion de auditoria con `sign` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0739 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `doble aprobacion` antes de completarse.
+- REQ-INT-A01-0740 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0741 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0742 [NFR][CRITICO] El proceso de integracion del modulo `signature` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0743 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0744 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0745 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0746 [INT][CRITICO] Ante evento de reasignacion en SPI `audit-prep`, la integracion debe publicar mensaje y actualizar Odoo `mail.activity` con trazabilidad completa.
+- REQ-INT-A01-0747 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `approvals` y Odoo `res.users` sin saltos de estado.
+- REQ-INT-A01-0748 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0749 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0750 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0751 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0752 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auditoria` y Odoo `sign` con version bloqueada.
+- REQ-INT-A01-0753 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `mail.activity`.
+- REQ-INT-A01-0754 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0755 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0756 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0757 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0758 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0759 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0760 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0761 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `approvals` hacia Odoo `res.users` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0762 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0763 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0764 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0765 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0766 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0767 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de audit-prep incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0768 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0769 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0770 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0771 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `auth` no confirma precondiciones de negocio.
+- REQ-INT-A01-0772 [SEC][CRITICO] El intercambio de datos de security debe cifrarse en transito y registrar controles de acceso por rol en Odoo `documents`.
+- REQ-INT-A01-0773 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0774 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0775 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0776 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0777 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `signature` y Odoo `auditlog` preservando historial de cambios y control de version.
+- REQ-INT-A01-0778 [INT][CRITICO] La integracion de auth con `approvals` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0779 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `integridad de hash` antes de completarse.
+- REQ-INT-A01-0780 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0781 [AUD][CRITICO] Cada evento de asignacion sobre roles debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0782 [NFR][CRITICO] El proceso de integracion del modulo `approvals` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0783 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de politicas de seguridad entre SPI y Odoo.
+- REQ-INT-A01-0784 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A01-0785 [DAT][CRITICO] El proceso de upsert para matriz de aprobaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0786 [INT][CRITICO] Ante evento de actualizacion en SPI `security`, la integracion debe publicar mensaje y actualizar Odoo `documents` con trazabilidad completa.
+- REQ-INT-A01-0787 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auditoria` y Odoo `sign` sin saltos de estado.
+- REQ-INT-A01-0788 [SEC][CRITICO] Las operaciones sensibles sobre hash documentales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0789 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de logs de acceso con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0790 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0791 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para sesiones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0792 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `auth` y Odoo `approvals` con version bloqueada.
+- REQ-INT-A01-0793 [DAT][CRITICO] La carga de roles debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `documents`.
+- REQ-INT-A01-0794 [INT][CRITICO] La sincronizacion de permisos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0795 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0796 [SEC][CRITICO] La integracion de eventos de auditoria debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0797 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0798 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de evidencias de control sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0799 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0800 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de hash documentales.
+
+### Bloque 801-900
+- REQ-INT-A01-0801 [DAT][CRITICO] El integrador debe sincronizar logs de acceso del modulo SPI `auditoria` hacia Odoo `sign` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0802 [INT][CRITICO] La interfaz SPI-Odoo para usuarios autenticados debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0803 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de sesiones.
+- REQ-INT-A01-0804 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0805 [AUD][CRITICO] La evidencia `acta firmada` asociada a roles debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0806 [NFR][CRITICO] La sincronizacion de permisos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0807 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de security incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0808 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0809 [DAT][CRITICO] Toda transferencia de matriz de aprobaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0810 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de evidencias de control con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0811 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `management` no confirma precondiciones de negocio.
+- REQ-INT-A01-0812 [SEC][CRITICO] El intercambio de datos de signature debe cifrarse en transito y registrar controles de acceso por rol en Odoo `auditlog`.
+- REQ-INT-A01-0813 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0814 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0815 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0816 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para tokens cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0817 [DAT][CRITICO] El sistema debe mapear campos obligatorios de roles entre SPI `approvals` y Odoo `res.users` preservando historial de cambios y control de version.
+- REQ-INT-A01-0818 [INT][CRITICO] La integracion de management con `base` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0819 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `bitacora de seguridad` y validacion de control `consistencia de estado` antes de completarse.
+- REQ-INT-A01-0820 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0821 [AUD][CRITICO] Cada evento de creacion sobre matriz de aprobaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0822 [NFR][CRITICO] El proceso de integracion del modulo `auditoria` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0823 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de firmas digitales entre SPI y Odoo.
+- REQ-INT-A01-0824 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A01-0825 [DAT][CRITICO] El proceso de upsert para logs de acceso debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0826 [INT][CRITICO] Ante evento de firma en SPI `signature`, la integracion debe publicar mensaje y actualizar Odoo `auditlog` con trazabilidad completa.
+- REQ-INT-A01-0827 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `auth` y Odoo `approvals` sin saltos de estado.
+- REQ-INT-A01-0828 [SEC][CRITICO] Las operaciones sensibles sobre tokens deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0829 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de roles con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0830 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0831 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para politicas de seguridad con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0832 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `management` y Odoo `base` con version bloqueada.
+- REQ-INT-A01-0833 [DAT][CRITICO] La carga de matriz de aprobaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `auditlog`.
+- REQ-INT-A01-0834 [INT][CRITICO] La sincronizacion de evidencias de control debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0835 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0836 [SEC][CRITICO] La integracion de hash documentales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0837 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0838 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de usuarios autenticados sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0839 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0840 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de tokens.
+- REQ-INT-A01-0841 [DAT][CRITICO] El integrador debe sincronizar roles del modulo SPI `auth` hacia Odoo `approvals` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0842 [INT][CRITICO] La interfaz SPI-Odoo para permisos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0843 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de politicas de seguridad.
+- REQ-INT-A01-0844 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0845 [AUD][CRITICO] La evidencia `registro de aprobacion` asociada a matriz de aprobaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0846 [NFR][CRITICO] La sincronizacion de evidencias de control debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0847 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de signature incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0848 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0849 [DAT][CRITICO] Toda transferencia de logs de acceso debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0850 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de usuarios autenticados con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0851 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `audit-prep` no confirma precondiciones de negocio.
+- REQ-INT-A01-0852 [SEC][CRITICO] El intercambio de datos de approvals debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.users`.
+- REQ-INT-A01-0853 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0854 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0855 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0856 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de auditoria cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0857 [DAT][CRITICO] El sistema debe mapear campos obligatorios de matriz de aprobaciones entre SPI `auditoria` y Odoo `sign` preservando historial de cambios y control de version.
+- REQ-INT-A01-0858 [INT][CRITICO] La integracion de audit-prep con `mail.activity` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0859 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `acta firmada` y validacion de control `validez de firma` antes de completarse.
+- REQ-INT-A01-0860 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A01-0861 [AUD][CRITICO] Cada evento de rechazo sobre logs de acceso debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A01-0862 [NFR][CRITICO] El proceso de integracion del modulo `auth` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A01-0863 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de sesiones entre SPI y Odoo.
+- REQ-INT-A01-0864 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A01-0865 [DAT][CRITICO] El proceso de upsert para roles debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A01-0866 [INT][CRITICO] Ante evento de reasignacion en SPI `approvals`, la integracion debe publicar mensaje y actualizar Odoo `res.users` con trazabilidad completa.
+- REQ-INT-A01-0867 [WF][CRITICO] Las aprobaciones del proceso segregacion de funciones deben mantenerse alineadas entre SPI `management` y Odoo `base` sin saltos de estado.
+- REQ-INT-A01-0868 [SEC][CRITICO] Las operaciones sensibles sobre eventos de auditoria deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A01-0869 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de matriz de aprobaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A01-0870 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A01-0871 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para firmas digitales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A01-0872 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `audit-prep` y Odoo `mail.activity` con version bloqueada.
+- REQ-INT-A01-0873 [DAT][CRITICO] La carga de logs de acceso debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.users`.
+- REQ-INT-A01-0874 [INT][CRITICO] La sincronizacion de usuarios autenticados debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A01-0875 [WF][CRITICO] Los cambios de responsable en segregacion de funciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A01-0876 [SEC][CRITICO] La integracion de tokens debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A01-0877 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A01-0878 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de permisos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A01-0879 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A01-0880 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de auditoria.
+- REQ-INT-A01-0881 [DAT][CRITICO] El integrador debe sincronizar matriz de aprobaciones del modulo SPI `management` hacia Odoo `base` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A01-0882 [INT][CRITICO] La interfaz SPI-Odoo para evidencias de control debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A01-0883 [WF][CRITICO] Toda reapertura del proceso segregacion de funciones debe generar evento compensatorio y revalidar datos integrados de firmas digitales.
+- REQ-INT-A01-0884 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A01-0885 [AUD][CRITICO] La evidencia `bitacora de seguridad` asociada a logs de acceso debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A01-0886 [NFR][CRITICO] La sincronizacion de usuarios autenticados debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A01-0887 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de approvals incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A01-0888 [TST][CRITICO] El area debe definir pruebas E2E de preparacion de auditoria con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A01-0889 [DAT][CRITICO] Toda transferencia de roles debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A01-0890 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de permisos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A01-0891 [WF][CRITICO] El workflow de segregacion de funciones debe impedir transiciones de estado en Odoo si SPI `security` no confirma precondiciones de negocio.
+- REQ-INT-A01-0892 [SEC][CRITICO] El intercambio de datos de auditoria debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sign`.
+- REQ-INT-A01-0893 [AUD][CRITICO] Los cambios criticos de autenticacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A01-0894 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A01-0895 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion multinivel.
+- REQ-INT-A01-0896 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para hash documentales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A01-0897 [DAT][CRITICO] El sistema debe mapear campos obligatorios de logs de acceso entre SPI `auth` y Odoo `approvals` preservando historial de cambios y control de version.
+- REQ-INT-A01-0898 [INT][CRITICO] La integracion de security con `documents` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A01-0899 [WF][CRITICO] El cierre de segregacion de funciones debe exigir evidencia documental `registro de aprobacion` y validacion de control `segregacion de funciones` antes de completarse.
+- REQ-INT-A01-0900 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.

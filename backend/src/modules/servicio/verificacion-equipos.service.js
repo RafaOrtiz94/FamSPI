@@ -147,7 +147,7 @@ const resolveAnnexBuffers = async (annexValues = []) => {
   const values = toSafeArray(annexValues);
   const buffers = [];
   for (const value of values) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const imageBuffer = await resolveImageBuffer(value);
     if (imageBuffer) buffers.push(imageBuffer);
   }

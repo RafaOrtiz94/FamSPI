@@ -1,0 +1,394 @@
+﻿openapi: 3.0.3
+info:
+  title: SPI -> Odoo Message Contract
+  version: 1.0.0
+  description: |
+    Contrato versionado v1 para mensajes salientes SPI hacia conector Odoo.
+    Incluye eventos de techo activado, request confirmado y sobre de error normalizado.
+servers:
+  - url: https://spi.internal.local
+    description: Placeholder interno para validacion de contrato.
+tags:
+  - name: integration-messages-v1
+    description: Mensajes salientes SPI para integracion Odoo.
+paths:
+  /events/ceiling-activated:
+    post:
+      tags: [integration-messages-v1]
+      summary: Publica evento de techo activo (v1)
+      operationId: publishCeilingActivatedV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CeilingActivatedV1'
+      responses:
+        '202':
+          description: Evento aceptado para procesamiento asíncrono.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, schemaVersion, correlationId]
+                properties:
+                  accepted:
+                    type: boolean
+                    example: true
+                  schemaVersion:
+                    type: string
+                    enum: ['1.0']
+                    example: '1.0'
+                  correlationId:
+                    type: string
+                    example: 2f6f4f9f-81b7-49f7-a2f4-4545e9f1e6a5
+        '400':
+          description: Error de validacion de contrato/mensaje.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationErrorEnvelopeV1'
+
+  /events/delivery-request-approved:
+    post:
+      tags: [integration-messages-v1]
+      summary: Publica evento de solicitud confirmada para reflejo ERP (v1)
+      operationId: publishDeliveryRequestApprovedV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeliveryRequestApprovedV1'
+      responses:
+        '202':
+          description: Evento aceptado para procesamiento asíncrono.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted, schemaVersion, correlationId]
+                properties:
+                  accepted:
+                    type: boolean
+                    example: true
+                  schemaVersion:
+                    type: string
+                    enum: ['1.0']
+                    example: '1.0'
+                  correlationId:
+                    type: string
+                    example: 6d7c191f-0fbf-44de-8f07-a06d62931cf4
+        '400':
+          description: Error de validacion de contrato/mensaje.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IntegrationErrorEnvelopeV1'
+
+  /events/integration-error:
+    post:
+      tags: [integration-messages-v1]
+      summary: Publica sobre de error normalizado (v1)
+      operationId: publishIntegrationErrorEnvelopeV1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IntegrationErrorEnvelopeV1'
+      responses:
+        '202':
+          description: Error envelope aceptado para auditoria.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [accepted]
+                properties:
+                  accepted:
+                    type: boolean
+                    example: true
+components:
+  schemas:
+    CeilingActivatedV1:
+      type: object
+      required:
+        - schemaVersion
+        - correlationId
+        - eventType
+        - occurredAt
+        - ceiling
+        - lines
+      properties:
+        schemaVersion:
+          type: string
+          enum: ['1.0']
+          example: '1.0'
+        correlationId:
+          type: string
+          minLength: 8
+          example: 2f6f4f9f-81b7-49f7-a2f4-4545e9f1e6a5
+        eventType:
+          type: string
+          enum: ['ceiling.activated.v1']
+          example: ceiling.activated.v1
+        occurredAt:
+          type: string
+          format: date-time
+          example: '2026-04-11T10:15:30Z'
+        ceiling:
+          type: object
+          required:
+            - ceilingId
+            - businessCaseId
+            - purchaseType
+            - status
+            - validFrom
+          properties:
+            ceilingId:
+              type: integer
+              example: 101
+            businessCaseId:
+              type: string
+              format: uuid
+              example: 8dc13b4f-e37f-49a0-b956-3b5d8cd28de7
+            purchaseType:
+              type: string
+              enum: [private, public]
+              example: private
+            status:
+              type: string
+              enum: [active]
+              example: active
+            validFrom:
+              type: string
+              format: date
+              example: '2026-04-01'
+            validTo:
+              type: string
+              format: date
+              nullable: true
+              example: null
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - ceilingLineId
+              - itemType
+              - maxQuantity
+              - deliveredQty
+              - remaining
+              - unit
+            properties:
+              ceilingLineId:
+                type: integer
+                example: 5001
+              itemType:
+                type: string
+                enum: [equipment, reagent, determination, calibrator, control, additional_investment, service]
+                example: equipment
+              maxQuantity:
+                type: number
+                format: double
+                example: 12
+              deliveredQty:
+                type: number
+                format: double
+                example: 2
+              remaining:
+                type: number
+                format: double
+                example: 10
+              unit:
+                type: string
+                example: kit
+              odooProductId:
+                type: integer
+                nullable: true
+                example: 3456
+      example:
+        schemaVersion: '1.0'
+        correlationId: 2f6f4f9f-81b7-49f7-a2f4-4545e9f1e6a5
+        eventType: ceiling.activated.v1
+        occurredAt: '2026-04-11T10:15:30Z'
+        ceiling:
+          ceilingId: 101
+          businessCaseId: 8dc13b4f-e37f-49a0-b956-3b5d8cd28de7
+          purchaseType: public
+          status: active
+          validFrom: '2026-04-01'
+          validTo: '2026-12-31'
+        lines:
+          - ceilingLineId: 5001
+            itemType: equipment
+            maxQuantity: 12
+            deliveredQty: 2
+            remaining: 10
+            unit: kit
+            odooProductId: 3456
+
+    DeliveryRequestApprovedV1:
+      type: object
+      required:
+        - schemaVersion
+        - correlationId
+        - eventType
+        - occurredAt
+        - request
+        - lines
+      properties:
+        schemaVersion:
+          type: string
+          enum: ['1.0']
+          example: '1.0'
+        correlationId:
+          type: string
+          minLength: 8
+          example: 6d7c191f-0fbf-44de-8f07-a06d62931cf4
+        eventType:
+          type: string
+          enum: ['delivery_request.approved.v1']
+          example: delivery_request.approved.v1
+        occurredAt:
+          type: string
+          format: date-time
+          example: '2026-04-11T12:00:00Z'
+        request:
+          type: object
+          required:
+            - deliveryRequestId
+            - ceilingId
+            - purchaseType
+            - approvedAt
+          properties:
+            deliveryRequestId:
+              type: integer
+              example: 8801
+            ceilingId:
+              type: integer
+              example: 101
+            purchaseType:
+              type: string
+              enum: [private, public]
+              example: public
+            approvedAt:
+              type: string
+              format: date-time
+              example: '2026-04-11T11:59:30Z'
+            confirmedByUserId:
+              type: integer
+              nullable: true
+              example: 27
+        lines:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - ceilingLineId
+              - requestedQty
+              - deliveredQtyAfter
+              - remainingAfter
+            properties:
+              ceilingLineId:
+                type: integer
+                example: 5001
+              requestedQty:
+                type: number
+                format: double
+                example: 3
+              deliveredQtyAfter:
+                type: number
+                format: double
+                example: 5
+              remainingAfter:
+                type: number
+                format: double
+                example: 7
+              odooProductId:
+                type: integer
+                nullable: true
+                example: 3456
+      example:
+        schemaVersion: '1.0'
+        correlationId: 6d7c191f-0fbf-44de-8f07-a06d62931cf4
+        eventType: delivery_request.approved.v1
+        occurredAt: '2026-04-11T12:00:00Z'
+        request:
+          deliveryRequestId: 8801
+          ceilingId: 101
+          purchaseType: public
+          approvedAt: '2026-04-11T11:59:30Z'
+          confirmedByUserId: 27
+        lines:
+          - ceilingLineId: 5001
+            requestedQty: 3
+            deliveredQtyAfter: 5
+            remainingAfter: 7
+            odooProductId: 3456
+
+    IntegrationErrorEnvelopeV1:
+      type: object
+      required:
+        - schemaVersion
+        - correlationId
+        - errorCode
+        - message
+        - source
+        - retryable
+        - happenedAt
+      properties:
+        schemaVersion:
+          type: string
+          enum: ['1.0']
+          example: '1.0'
+        correlationId:
+          type: string
+          minLength: 8
+          example: 6d7c191f-0fbf-44de-8f07-a06d62931cf4
+        errorCode:
+          type: string
+          example: MAX_EXCEEDED
+        message:
+          type: string
+          example: La cantidad solicitada excede el saldo disponible
+        source:
+          type: string
+          enum: [spi-api, spi-outbox-worker, odoo-connector]
+          example: spi-outbox-worker
+        eventType:
+          type: string
+          nullable: true
+          example: delivery_request.approved.v1
+        idempotencyKey:
+          type: string
+          nullable: true
+          example: delivery_request:8801:confirmed
+        retryable:
+          type: boolean
+          example: false
+        happenedAt:
+          type: string
+          format: date-time
+          example: '2026-04-11T12:01:00Z'
+        details:
+          type: object
+          additionalProperties: true
+          nullable: true
+      example:
+        schemaVersion: '1.0'
+        correlationId: 6d7c191f-0fbf-44de-8f07-a06d62931cf4
+        errorCode: TRANCHE_MAX_EXCEEDED
+        message: La cantidad solicitada excede el maximo permitido para el tramo vigente
+        source: spi-api
+        eventType: delivery_request.approved.v1
+        idempotencyKey: delivery_request:8801:confirmed
+        retryable: false
+        happenedAt: '2026-04-11T12:01:00Z'
+        details:
+          ceilingLineId: 5001
+          trancheMaxQty: 2
+          requestedQty: 3

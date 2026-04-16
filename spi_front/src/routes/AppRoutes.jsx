@@ -56,6 +56,7 @@ const SolicitudesPage = lazy(() => import("../modules/comercial/pages/Solicitude
 const ClientesPage = lazy(() => import("../modules/comercial/pages/Clientes"));
 const NewClientRequest = lazy(() => import("../modules/comercial/pages/NewClientRequest"));
 const EquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/EquipmentPurchases"));
+const DeliveryCeilingsPage = lazy(() => import("../modules/comercial/pages/DeliveryCeilings"));
 const ACPEquipmentPurchasesPage = lazy(() => import("../modules/comercial/pages/ACPEquipmentPurchases"));
 const BusinessCaseWorkspace = lazy(() => import("../modules/comercial/pages/BusinessCaseWorkspace"));
 const BusinessCaseObservabilityDashboard = lazy(() => import("../modules/comercial/pages/BusinessCaseObservabilityDashboard"));
@@ -82,6 +83,23 @@ const DashboardTI = lazy(() => import("../modules/talento/DashboardTI"));
 const TicketsWorkspace = lazy(() => import("../modules/ti/pages/TicketsWorkspace"));
 const DashboardOperaciones = lazy(() => import("../modules/operaciones/Dashboard"));
 const DashboardCalidad = lazy(() => import("../modules/calidad/Dashboard"));
+const CA0101Workspace = lazy(() => import("../modules/calidad/pages/CA0101Workspace"));
+const CA0102Workspace = lazy(() => import("../modules/calidad/pages/CA0102Workspace"));
+const CA0103Workspace = lazy(() => import("../modules/calidad/pages/CA0103Workspace"));
+const CA0104Workspace = lazy(() => import("../modules/calidad/pages/CA0104Workspace"));
+const CA0105Workspace = lazy(() => import("../modules/calidad/pages/CA0105Workspace"));
+const CA0106Workspace = lazy(() => import("../modules/calidad/pages/CA0106Workspace"));
+const CA0107Workspace = lazy(() => import("../modules/calidad/pages/CA0107Workspace"));
+const CA0108Workspace = lazy(() => import("../modules/calidad/pages/CA0108Workspace"));
+const CA0109Workspace = lazy(() => import("../modules/calidad/pages/CA0109Workspace"));
+const CA0110Workspace = lazy(() => import("../modules/calidad/pages/CA0110Workspace"));
+const CA0111Workspace = lazy(() => import("../modules/calidad/pages/CA0111Workspace"));
+const CA0112Workspace = lazy(() => import("../modules/calidad/pages/CA0112Workspace"));
+const CA0113Workspace = lazy(() => import("../modules/calidad/pages/CA0113Workspace"));
+const CA0114Workspace = lazy(() => import("../modules/calidad/pages/CA0114Workspace"));
+const CA0115Workspace = lazy(() => import("../modules/calidad/pages/CA0115Workspace"));
+const CA0116Workspace = lazy(() => import("../modules/calidad/pages/CA0116Workspace"));
+const CA0117Workspace = lazy(() => import("../modules/calidad/pages/CA0117Workspace"));
 const DashboardLogistica = lazy(() => import("../modules/logistica/Dashboard"));
 const ClientRequests = lazy(() => import("../modules/backoffice/pages/ClientRequests"));
 const ClientRequestReview = lazy(() => import("../modules/backoffice/pages/ClientRequestReview"));
@@ -224,6 +242,7 @@ const AppRoutes = () => {
             <Route path="/dashboard/comercial/clientes" element={<ClientesPage />} />
             <Route path="/dashboard/comercial/new-client-request" element={<NewClientRequest />} />
             <Route path="/dashboard/comercial/equipment-purchases" element={<EquipmentPurchasesPage />} />
+            <Route path="/dashboard/comercial/delivery-ceilings" element={<DeliveryCeilingsPage />} />
             <Route path="/dashboard/comercial/planificacion" element={<PlanificacionMensual />} />
           </Route>
 
@@ -339,6 +358,23 @@ const AppRoutes = () => {
           <Route path="/dashboard/operaciones" element={<DashboardOperaciones />} />
           <Route path="/dashboard/logistica" element={<DashboardLogistica />} />
           <Route path="/dashboard/calidad" element={<DashboardCalidad />} />
+          <Route path="/dashboard/calidad/temperatura" element={<CA0101Workspace />} />
+          <Route path="/dashboard/calidad/limpieza" element={<CA0102Workspace />} />
+          <Route path="/dashboard/calidad/buenas-practicas" element={<CA0103Workspace />} />
+          <Route path="/dashboard/calidad/plagas" element={<CA0104Workspace />} />
+          <Route path="/dashboard/calidad/documentos" element={<CA0105Workspace />} />
+          <Route path="/dashboard/calidad/recall" element={<CA0106Workspace />} />
+          <Route path="/dashboard/calidad/quejas" element={<CA0107Workspace />} />
+          <Route path="/dashboard/calidad/refrigerados" element={<CA0108Workspace />} />
+          <Route path="/dashboard/calidad/capa" element={<CA0109Workspace />} />
+          <Route path="/dashboard/calidad/riesgos" element={<CA0110Workspace />} />
+          <Route path="/dashboard/calidad/incidentes" element={<CA0111Workspace />} />
+          <Route path="/dashboard/calidad/higiene" element={<CA0112Workspace />} />
+          <Route path="/dashboard/calidad/comunicaciones" element={<CA0113Workspace />} />
+          <Route path="/dashboard/calidad/areas" element={<CA0114Workspace />} />
+          <Route path="/dashboard/calidad/auditorias" element={<CA0115Workspace />} />
+          <Route path="/dashboard/calidad/muestreo" element={<CA0116Workspace />} />
+          <Route path="/dashboard/calidad/tecnovigilancia" element={<CA0117Workspace />} />
           <Route path="/dashboard/clientes" element={<ClientesPage />} />
           <Route path="/dashboard/operaciones/determinaciones" element={<DeterminationsCatalog />} />
           <Route path="/dashboard/links-interes" element={<LinksInteres />} />

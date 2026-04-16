@@ -16,6 +16,7 @@ const { resolveExternalDriveIntegrity } = require("../../utils/documentHash");
 const { sendAndArchive } = require("../../utils/emailArchive");
 const { generateDeliveryActPdf } = require("./privatePurchases.acta");
 const businessCaseService = require('../business-case/businessCase.service');
+const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
 const {
   SITE_INSPECTION_RESULT,
   SITE_INSPECTION_STATUS,
@@ -1469,10 +1470,20 @@ class PrivatePurchasesService {
 
     logger.debug(`[FLOW_PRIVADA][BE][FASE6][ERROR_CONTRACT][FIXED] Contrato errores validado para transitionState`);
 
-    return await PrivatePurchaseStateMachine.transition(purchaseId, toState, user.id, reason, {
+    const transitionResult = await PrivatePurchaseStateMachine.transition(purchaseId, toState, user.id, reason, {
       user_role: user.role,
       user_name: user.fullname || user.name
     });
+
+    // REQ-SPI-013: no await externo en el request path.
+    enqueuePurchaseStatusChangedEvent({
+      purchaseType: "private_purchase",
+      id: purchaseId,
+      status: toState,
+      businessCaseId: null,
+    });
+
+    return transitionResult;
   }
 
 
@@ -4337,7 +4348,7 @@ class PrivatePurchasesService {
       const photoPayload = Array.isArray(payload.photos) ? payload.photos : [];
       const storedPhotos = [];
       for (let i = 0; i < photoPayload.length; i += 1) {
-        // eslint-disable-next-line no-await-in-loop
+         
         const stored = await this._storeInstallationEvidencePhoto(baseFolderId, photoPayload[i], i);
         if (stored) storedPhotos.push(stored);
       }

@@ -693,10 +693,10 @@ const insertPlanItems = async ({ planId, year, rawItems = [], anexo7Capacity = {
   for (const [index, raw] of normalizeArray(rawItems).entries()) {
     const item = normalizePlanItemInput({ item: raw, year, index, anexo7Capacity });
     if (!item.equipment_id) {
-      // eslint-disable-next-line no-continue
+       
       continue;
     }
-    // eslint-disable-next-line no-await-in-loop
+     
     const { rows } = await db.query(
       `
         INSERT INTO servicio.preventive_plan_items (
@@ -759,9 +759,9 @@ const insertPlanItems = async ({ planId, year, rawItems = [], anexo7Capacity = {
     const row = rows[0] || null;
     if (row) {
       inserted.push(row);
-      // eslint-disable-next-line no-await-in-loop
+       
       await syncPlanItemWorkflow(row, user);
-      // eslint-disable-next-line no-await-in-loop
+       
       await appendPreventiveEvent({
         annualPlanId: row.annual_plan_id,
         planItemId: row.id,

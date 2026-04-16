@@ -17,3 +17,4 @@ export * from "./permisosApi";
 export * from "./signatureApi";
 export * from "./externalCasesApi";
 export * from "./integrationsApi";
+export * from "./deliveryRequestsApi";

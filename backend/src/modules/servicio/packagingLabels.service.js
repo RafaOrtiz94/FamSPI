@@ -137,7 +137,7 @@ const upsertWithdrawalPackages = async ({
   }
 
   for (const pkg of normalizedPackages) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await db.query(
       `
         INSERT INTO servicio.withdrawal_packaging_labels (

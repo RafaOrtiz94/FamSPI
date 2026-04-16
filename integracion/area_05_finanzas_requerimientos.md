@@ -1,0 +1,470 @@
+﻿# Requerimientos de Integracion - Finanzas
+
+- Codigo de area: A05
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_05_finanzas.md
+- Modulos SPI del inventario: finanzas, viaticos
+- Modulos/modelos Odoo objetivo: account, account.move, account.payment, hr_expense, analytic.account, l10n_ec
+- Prioridad del area: CRITICO
+- Total de requerimientos del documento: 450
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A05-0001 [DAT][CRITICO] El integrador debe sincronizar pagos del modulo SPI `finanzas` hacia Odoo `account.payment` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0002 [INT][CRITICO] La interfaz SPI-Odoo para anticipos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0003 [WF][CRITICO] Toda reapertura del proceso gestion de cartera debe generar evento compensatorio y revalidar datos integrados de viaticos.
+- REQ-INT-A05-0004 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0005 [AUD][CRITICO] La evidencia `libro diario` asociada a centros de costo debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0006 [NFR][CRITICO] La sincronizacion de cuentas analiticas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0007 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0008 [TST][CRITICO] El area debe definir pruebas E2E de cierre mensual con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0009 [DAT][CRITICO] Toda transferencia de asientos contables debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0010 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de facturas de cliente con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0011 [WF][CRITICO] El workflow de registro contable debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0012 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `account.move`.
+- REQ-INT-A05-0013 [AUD][CRITICO] Los cambios criticos de liquidacion de viaticos deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0014 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0015 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre mensual.
+- REQ-INT-A05-0016 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para centros de costo cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0017 [DAT][CRITICO] El sistema debe mapear campos obligatorios de cuentas analiticas entre SPI `finanzas` y Odoo `account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0018 [INT][CRITICO] La integracion de viaticos con `account.move` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0019 [WF][CRITICO] El cierre de aprobacion financiera debe exigir evidencia documental `comprobante contable` y validacion de control `no duplicidad de comprobantes` antes de completarse.
+- REQ-INT-A05-0020 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0021 [AUD][CRITICO] Cada evento de rechazo sobre facturas de cliente debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0022 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0023 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de pagos entre SPI y Odoo.
+- REQ-INT-A05-0024 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A05-0025 [DAT][CRITICO] El proceso de upsert para viaticos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0026 [INT][CRITICO] Ante evento de reasignacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `hr_expense` con trazabilidad completa.
+- REQ-INT-A05-0027 [WF][CRITICO] Las aprobaciones del proceso liquidacion de viaticos deben mantenerse alineadas entre SPI `finanzas` y Odoo `analytic.account` sin saltos de estado.
+- REQ-INT-A05-0028 [SEC][CRITICO] Las operaciones sensibles sobre cuentas analiticas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0029 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de retenciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0030 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0031 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para asientos contables con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0032 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `hr_expense` con version bloqueada.
+- REQ-INT-A05-0033 [DAT][CRITICO] La carga de facturas de proveedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `analytic.account`.
+- REQ-INT-A05-0034 [INT][CRITICO] La sincronizacion de pagos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0035 [WF][CRITICO] Los cambios de responsable en conciliacion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0036 [SEC][CRITICO] La integracion de viaticos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0037 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0038 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de centros de costo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0039 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0040 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de retenciones.
+- REQ-INT-A05-0041 [DAT][CRITICO] El integrador debe sincronizar comprobantes del modulo SPI `finanzas` hacia Odoo `account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0042 [INT][CRITICO] La interfaz SPI-Odoo para asientos contables debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0043 [WF][CRITICO] Toda reapertura del proceso cierre mensual debe generar evento compensatorio y revalidar datos integrados de facturas de cliente.
+- REQ-INT-A05-0044 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0045 [AUD][CRITICO] La evidencia `soporte tributario` asociada a pagos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0046 [NFR][CRITICO] La sincronizacion de anticipos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0047 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0048 [TST][CRITICO] El area debe definir pruebas E2E de liquidacion de viaticos con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0049 [DAT][CRITICO] Toda transferencia de centros de costo debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0050 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de cuentas analiticas con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0051 [WF][CRITICO] El workflow de control presupuestario debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0052 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `l10n_ec`.
+- REQ-INT-A05-0053 [AUD][CRITICO] Los cambios criticos de registro contable deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0054 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0055 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso liquidacion de viaticos.
+- REQ-INT-A05-0056 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para pagos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0057 [DAT][CRITICO] El sistema debe mapear campos obligatorios de anticipos entre SPI `finanzas` y Odoo `analytic.account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0058 [INT][CRITICO] La integracion de viaticos con `l10n_ec` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0059 [WF][CRITICO] El cierre de gestion de cartera debe exigir evidencia documental `libro diario` y validacion de control `balance contable` antes de completarse.
+- REQ-INT-A05-0060 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0061 [AUD][CRITICO] Cada evento de asignacion sobre cuentas analiticas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0062 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0063 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de comprobantes entre SPI y Odoo.
+- REQ-INT-A05-0064 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A05-0065 [DAT][CRITICO] El proceso de upsert para facturas de cliente debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0066 [INT][CRITICO] Ante evento de actualizacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `account.move` con trazabilidad completa.
+- REQ-INT-A05-0067 [WF][CRITICO] Las aprobaciones del proceso registro contable deben mantenerse alineadas entre SPI `finanzas` y Odoo `account.payment` sin saltos de estado.
+- REQ-INT-A05-0068 [SEC][CRITICO] Las operaciones sensibles sobre anticipos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0069 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de viaticos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0070 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0071 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para centros de costo con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0072 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `account.move` con version bloqueada.
+- REQ-INT-A05-0073 [DAT][CRITICO] La carga de retenciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account.payment`.
+- REQ-INT-A05-0074 [INT][CRITICO] La sincronizacion de comprobantes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0075 [WF][CRITICO] Los cambios de responsable en aprobacion financiera deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0076 [SEC][CRITICO] La integracion de facturas de cliente debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0077 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0078 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de pagos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0079 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0080 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de viaticos.
+- REQ-INT-A05-0081 [DAT][CRITICO] El integrador debe sincronizar liquidaciones del modulo SPI `finanzas` hacia Odoo `analytic.account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0082 [INT][CRITICO] La interfaz SPI-Odoo para centros de costo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0083 [WF][CRITICO] Toda reapertura del proceso liquidacion de viaticos debe generar evento compensatorio y revalidar datos integrados de cuentas analiticas.
+- REQ-INT-A05-0084 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0085 [AUD][CRITICO] La evidencia `comprobante contable` asociada a comprobantes debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0086 [NFR][CRITICO] La sincronizacion de asientos contables debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0087 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0088 [TST][CRITICO] El area debe definir pruebas E2E de registro contable con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0089 [DAT][CRITICO] Toda transferencia de pagos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0090 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de anticipos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0091 [WF][CRITICO] El workflow de conciliacion debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0092 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_expense`.
+- REQ-INT-A05-0093 [AUD][CRITICO] Los cambios criticos de control presupuestario deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0094 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0095 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso registro contable.
+- REQ-INT-A05-0096 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para comprobantes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0097 [DAT][CRITICO] El sistema debe mapear campos obligatorios de asientos contables entre SPI `finanzas` y Odoo `account.payment` preservando historial de cambios y control de version.
+- REQ-INT-A05-0098 [INT][CRITICO] La integracion de viaticos con `hr_expense` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0099 [WF][CRITICO] El cierre de cierre mensual debe exigir evidencia documental `soporte tributario` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A05-0100 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A05-0101 [AUD][CRITICO] Cada evento de creacion sobre anticipos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0102 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0103 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de liquidaciones entre SPI y Odoo.
+- REQ-INT-A05-0104 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A05-0105 [DAT][CRITICO] El proceso de upsert para cuentas analiticas debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0106 [INT][CRITICO] Ante evento de firma en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `l10n_ec` con trazabilidad completa.
+- REQ-INT-A05-0107 [WF][CRITICO] Las aprobaciones del proceso control presupuestario deben mantenerse alineadas entre SPI `finanzas` y Odoo `account` sin saltos de estado.
+- REQ-INT-A05-0108 [SEC][CRITICO] Las operaciones sensibles sobre asientos contables deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0109 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de facturas de cliente con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0110 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0111 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para pagos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0112 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `l10n_ec` con version bloqueada.
+- REQ-INT-A05-0113 [DAT][CRITICO] La carga de viaticos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account`.
+- REQ-INT-A05-0114 [INT][CRITICO] La sincronizacion de liquidaciones debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0115 [WF][CRITICO] Los cambios de responsable en gestion de cartera deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0116 [SEC][CRITICO] La integracion de cuentas analiticas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0117 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0118 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de comprobantes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0119 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0120 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de facturas de cliente.
+- REQ-INT-A05-0121 [DAT][CRITICO] El integrador debe sincronizar facturas de proveedor del modulo SPI `finanzas` hacia Odoo `account.payment` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0122 [INT][CRITICO] La interfaz SPI-Odoo para pagos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0123 [WF][CRITICO] Toda reapertura del proceso registro contable debe generar evento compensatorio y revalidar datos integrados de anticipos.
+- REQ-INT-A05-0124 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0125 [AUD][CRITICO] La evidencia `libro diario` asociada a liquidaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0126 [NFR][CRITICO] La sincronizacion de centros de costo debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0127 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0128 [TST][CRITICO] El area debe definir pruebas E2E de control presupuestario con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0129 [DAT][CRITICO] Toda transferencia de comprobantes debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0130 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de asientos contables con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0131 [WF][CRITICO] El workflow de aprobacion financiera debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0132 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `account.move`.
+- REQ-INT-A05-0133 [AUD][CRITICO] Los cambios criticos de conciliacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0134 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0135 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso control presupuestario.
+- REQ-INT-A05-0136 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para liquidaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0137 [DAT][CRITICO] El sistema debe mapear campos obligatorios de centros de costo entre SPI `finanzas` y Odoo `account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0138 [INT][CRITICO] La integracion de viaticos con `account.move` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0139 [WF][CRITICO] El cierre de liquidacion de viaticos debe exigir evidencia documental `comprobante contable` y validacion de control `flujo de aprobacion` antes de completarse.
+- REQ-INT-A05-0140 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0141 [AUD][CRITICO] Cada evento de rechazo sobre asientos contables debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0142 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0143 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de facturas de proveedor entre SPI y Odoo.
+- REQ-INT-A05-0144 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A05-0145 [DAT][CRITICO] El proceso de upsert para anticipos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0146 [INT][CRITICO] Ante evento de reasignacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `hr_expense` con trazabilidad completa.
+- REQ-INT-A05-0147 [WF][CRITICO] Las aprobaciones del proceso conciliacion deben mantenerse alineadas entre SPI `finanzas` y Odoo `analytic.account` sin saltos de estado.
+- REQ-INT-A05-0148 [SEC][CRITICO] Las operaciones sensibles sobre centros de costo deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0149 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de cuentas analiticas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0150 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0151 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para comprobantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0152 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `hr_expense` con version bloqueada.
+- REQ-INT-A05-0153 [DAT][CRITICO] La carga de facturas de cliente debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `analytic.account`.
+- REQ-INT-A05-0154 [INT][CRITICO] La sincronizacion de facturas de proveedor debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0155 [WF][CRITICO] Los cambios de responsable en cierre mensual deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0156 [SEC][CRITICO] La integracion de anticipos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0157 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0158 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de liquidaciones sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0159 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0160 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de cuentas analiticas.
+- REQ-INT-A05-0161 [DAT][CRITICO] El integrador debe sincronizar retenciones del modulo SPI `finanzas` hacia Odoo `account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0162 [INT][CRITICO] La interfaz SPI-Odoo para comprobantes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0163 [WF][CRITICO] Toda reapertura del proceso control presupuestario debe generar evento compensatorio y revalidar datos integrados de asientos contables.
+- REQ-INT-A05-0164 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0165 [AUD][CRITICO] La evidencia `soporte tributario` asociada a facturas de proveedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0166 [NFR][CRITICO] La sincronizacion de pagos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0167 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0168 [TST][CRITICO] El area debe definir pruebas E2E de conciliacion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0169 [DAT][CRITICO] Toda transferencia de liquidaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0170 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de centros de costo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0171 [WF][CRITICO] El workflow de gestion de cartera debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0172 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `l10n_ec`.
+- REQ-INT-A05-0173 [AUD][CRITICO] Los cambios criticos de aprobacion financiera deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0174 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0175 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso conciliacion.
+- REQ-INT-A05-0176 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para facturas de proveedor cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0177 [DAT][CRITICO] El sistema debe mapear campos obligatorios de pagos entre SPI `finanzas` y Odoo `analytic.account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0178 [INT][CRITICO] La integracion de viaticos con `l10n_ec` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0179 [WF][CRITICO] El cierre de registro contable debe exigir evidencia documental `libro diario` y validacion de control `integridad tributaria` antes de completarse.
+- REQ-INT-A05-0180 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0181 [AUD][CRITICO] Cada evento de asignacion sobre centros de costo debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0182 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0183 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de retenciones entre SPI y Odoo.
+- REQ-INT-A05-0184 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A05-0185 [DAT][CRITICO] El proceso de upsert para asientos contables debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0186 [INT][CRITICO] Ante evento de actualizacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `account.move` con trazabilidad completa.
+- REQ-INT-A05-0187 [WF][CRITICO] Las aprobaciones del proceso aprobacion financiera deben mantenerse alineadas entre SPI `finanzas` y Odoo `account.payment` sin saltos de estado.
+- REQ-INT-A05-0188 [SEC][CRITICO] Las operaciones sensibles sobre pagos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0189 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de anticipos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0190 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0191 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para liquidaciones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0192 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `account.move` con version bloqueada.
+- REQ-INT-A05-0193 [DAT][CRITICO] La carga de cuentas analiticas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account.payment`.
+- REQ-INT-A05-0194 [INT][CRITICO] La sincronizacion de retenciones debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0195 [WF][CRITICO] Los cambios de responsable en liquidacion de viaticos deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0196 [SEC][CRITICO] La integracion de asientos contables debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0197 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0198 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de facturas de proveedor sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0199 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0200 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de anticipos.
+
+### Bloque 201-300
+- REQ-INT-A05-0201 [DAT][CRITICO] El integrador debe sincronizar viaticos del modulo SPI `finanzas` hacia Odoo `analytic.account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0202 [INT][CRITICO] La interfaz SPI-Odoo para liquidaciones debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0203 [WF][CRITICO] Toda reapertura del proceso conciliacion debe generar evento compensatorio y revalidar datos integrados de centros de costo.
+- REQ-INT-A05-0204 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0205 [AUD][CRITICO] La evidencia `comprobante contable` asociada a retenciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0206 [NFR][CRITICO] La sincronizacion de comprobantes debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0207 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0208 [TST][CRITICO] El area debe definir pruebas E2E de aprobacion financiera con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0209 [DAT][CRITICO] Toda transferencia de facturas de proveedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0210 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de pagos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0211 [WF][CRITICO] El workflow de cierre mensual debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0212 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_expense`.
+- REQ-INT-A05-0213 [AUD][CRITICO] Los cambios criticos de gestion de cartera deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0214 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0215 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion financiera.
+- REQ-INT-A05-0216 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para retenciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0217 [DAT][CRITICO] El sistema debe mapear campos obligatorios de comprobantes entre SPI `finanzas` y Odoo `account.payment` preservando historial de cambios y control de version.
+- REQ-INT-A05-0218 [INT][CRITICO] La integracion de viaticos con `hr_expense` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0219 [WF][CRITICO] El cierre de control presupuestario debe exigir evidencia documental `soporte tributario` y validacion de control `cuadre de saldos` antes de completarse.
+- REQ-INT-A05-0220 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0221 [AUD][CRITICO] Cada evento de creacion sobre pagos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0222 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0223 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de viaticos entre SPI y Odoo.
+- REQ-INT-A05-0224 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A05-0225 [DAT][CRITICO] El proceso de upsert para centros de costo debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0226 [INT][CRITICO] Ante evento de firma en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `l10n_ec` con trazabilidad completa.
+- REQ-INT-A05-0227 [WF][CRITICO] Las aprobaciones del proceso gestion de cartera deben mantenerse alineadas entre SPI `finanzas` y Odoo `account` sin saltos de estado.
+- REQ-INT-A05-0228 [SEC][CRITICO] Las operaciones sensibles sobre comprobantes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0229 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de asientos contables con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0230 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0231 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para facturas de proveedor con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0232 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `l10n_ec` con version bloqueada.
+- REQ-INT-A05-0233 [DAT][CRITICO] La carga de anticipos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account`.
+- REQ-INT-A05-0234 [INT][CRITICO] La sincronizacion de viaticos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0235 [WF][CRITICO] Los cambios de responsable en registro contable deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0236 [SEC][CRITICO] La integracion de centros de costo debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0237 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0238 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de retenciones sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0239 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0240 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de asientos contables.
+- REQ-INT-A05-0241 [DAT][CRITICO] El integrador debe sincronizar facturas de cliente del modulo SPI `finanzas` hacia Odoo `account.payment` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0242 [INT][CRITICO] La interfaz SPI-Odoo para facturas de proveedor debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0243 [WF][CRITICO] Toda reapertura del proceso aprobacion financiera debe generar evento compensatorio y revalidar datos integrados de pagos.
+- REQ-INT-A05-0244 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0245 [AUD][CRITICO] La evidencia `libro diario` asociada a viaticos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0246 [NFR][CRITICO] La sincronizacion de liquidaciones debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0247 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0248 [TST][CRITICO] El area debe definir pruebas E2E de gestion de cartera con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0249 [DAT][CRITICO] Toda transferencia de retenciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0250 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de comprobantes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0251 [WF][CRITICO] El workflow de liquidacion de viaticos debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0252 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `account.move`.
+- REQ-INT-A05-0253 [AUD][CRITICO] Los cambios criticos de cierre mensual deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0254 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0255 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso gestion de cartera.
+- REQ-INT-A05-0256 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para viaticos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0257 [DAT][CRITICO] El sistema debe mapear campos obligatorios de liquidaciones entre SPI `finanzas` y Odoo `account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0258 [INT][CRITICO] La integracion de viaticos con `account.move` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0259 [WF][CRITICO] El cierre de conciliacion debe exigir evidencia documental `comprobante contable` y validacion de control `consistencia de periodos` antes de completarse.
+- REQ-INT-A05-0260 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0261 [AUD][CRITICO] Cada evento de rechazo sobre comprobantes debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0262 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0263 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de facturas de cliente entre SPI y Odoo.
+- REQ-INT-A05-0264 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A05-0265 [DAT][CRITICO] El proceso de upsert para pagos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0266 [INT][CRITICO] Ante evento de reasignacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `hr_expense` con trazabilidad completa.
+- REQ-INT-A05-0267 [WF][CRITICO] Las aprobaciones del proceso cierre mensual deben mantenerse alineadas entre SPI `finanzas` y Odoo `analytic.account` sin saltos de estado.
+- REQ-INT-A05-0268 [SEC][CRITICO] Las operaciones sensibles sobre liquidaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0269 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de centros de costo con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0270 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0271 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para retenciones con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0272 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `hr_expense` con version bloqueada.
+- REQ-INT-A05-0273 [DAT][CRITICO] La carga de asientos contables debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `analytic.account`.
+- REQ-INT-A05-0274 [INT][CRITICO] La sincronizacion de facturas de cliente debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0275 [WF][CRITICO] Los cambios de responsable en control presupuestario deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0276 [SEC][CRITICO] La integracion de pagos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0277 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0278 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de viaticos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0279 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0280 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de centros de costo.
+- REQ-INT-A05-0281 [DAT][CRITICO] El integrador debe sincronizar cuentas analiticas del modulo SPI `finanzas` hacia Odoo `account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0282 [INT][CRITICO] La interfaz SPI-Odoo para retenciones debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0283 [WF][CRITICO] Toda reapertura del proceso gestion de cartera debe generar evento compensatorio y revalidar datos integrados de comprobantes.
+- REQ-INT-A05-0284 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0285 [AUD][CRITICO] La evidencia `soporte tributario` asociada a facturas de cliente debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0286 [NFR][CRITICO] La sincronizacion de facturas de proveedor debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0287 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0288 [TST][CRITICO] El area debe definir pruebas E2E de cierre mensual con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0289 [DAT][CRITICO] Toda transferencia de viaticos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0290 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de liquidaciones con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0291 [WF][CRITICO] El workflow de registro contable debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0292 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `l10n_ec`.
+- REQ-INT-A05-0293 [AUD][CRITICO] Los cambios criticos de liquidacion de viaticos deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0294 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0295 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre mensual.
+- REQ-INT-A05-0296 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para facturas de cliente cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0297 [DAT][CRITICO] El sistema debe mapear campos obligatorios de facturas de proveedor entre SPI `finanzas` y Odoo `analytic.account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0298 [INT][CRITICO] La integracion de viaticos con `l10n_ec` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0299 [WF][CRITICO] El cierre de aprobacion financiera debe exigir evidencia documental `libro diario` y validacion de control `no duplicidad de comprobantes` antes de completarse.
+- REQ-INT-A05-0300 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A05-0301 [AUD][CRITICO] Cada evento de asignacion sobre liquidaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0302 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0303 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de cuentas analiticas entre SPI y Odoo.
+- REQ-INT-A05-0304 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A05-0305 [DAT][CRITICO] El proceso de upsert para comprobantes debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0306 [INT][CRITICO] Ante evento de actualizacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `account.move` con trazabilidad completa.
+- REQ-INT-A05-0307 [WF][CRITICO] Las aprobaciones del proceso liquidacion de viaticos deben mantenerse alineadas entre SPI `finanzas` y Odoo `account.payment` sin saltos de estado.
+- REQ-INT-A05-0308 [SEC][CRITICO] Las operaciones sensibles sobre facturas de proveedor deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0309 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de pagos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0310 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0311 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para viaticos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0312 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `account.move` con version bloqueada.
+- REQ-INT-A05-0313 [DAT][CRITICO] La carga de centros de costo debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account.payment`.
+- REQ-INT-A05-0314 [INT][CRITICO] La sincronizacion de cuentas analiticas debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0315 [WF][CRITICO] Los cambios de responsable en conciliacion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0316 [SEC][CRITICO] La integracion de comprobantes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0317 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0318 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de facturas de cliente sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0319 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0320 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de pagos.
+- REQ-INT-A05-0321 [DAT][CRITICO] El integrador debe sincronizar anticipos del modulo SPI `finanzas` hacia Odoo `analytic.account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0322 [INT][CRITICO] La interfaz SPI-Odoo para viaticos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0323 [WF][CRITICO] Toda reapertura del proceso cierre mensual debe generar evento compensatorio y revalidar datos integrados de liquidaciones.
+- REQ-INT-A05-0324 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0325 [AUD][CRITICO] La evidencia `comprobante contable` asociada a cuentas analiticas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0326 [NFR][CRITICO] La sincronizacion de retenciones debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0327 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0328 [TST][CRITICO] El area debe definir pruebas E2E de liquidacion de viaticos con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0329 [DAT][CRITICO] Toda transferencia de facturas de cliente debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0330 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de facturas de proveedor con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0331 [WF][CRITICO] El workflow de control presupuestario debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0332 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_expense`.
+- REQ-INT-A05-0333 [AUD][CRITICO] Los cambios criticos de registro contable deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0334 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0335 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso liquidacion de viaticos.
+- REQ-INT-A05-0336 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para cuentas analiticas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0337 [DAT][CRITICO] El sistema debe mapear campos obligatorios de retenciones entre SPI `finanzas` y Odoo `account.payment` preservando historial de cambios y control de version.
+- REQ-INT-A05-0338 [INT][CRITICO] La integracion de viaticos con `hr_expense` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0339 [WF][CRITICO] El cierre de gestion de cartera debe exigir evidencia documental `soporte tributario` y validacion de control `balance contable` antes de completarse.
+- REQ-INT-A05-0340 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0341 [AUD][CRITICO] Cada evento de creacion sobre facturas de proveedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0342 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0343 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de anticipos entre SPI y Odoo.
+- REQ-INT-A05-0344 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A05-0345 [DAT][CRITICO] El proceso de upsert para liquidaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0346 [INT][CRITICO] Ante evento de firma en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `l10n_ec` con trazabilidad completa.
+- REQ-INT-A05-0347 [WF][CRITICO] Las aprobaciones del proceso registro contable deben mantenerse alineadas entre SPI `finanzas` y Odoo `account` sin saltos de estado.
+- REQ-INT-A05-0348 [SEC][CRITICO] Las operaciones sensibles sobre retenciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0349 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de comprobantes con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0350 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0351 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para facturas de cliente con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0352 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `l10n_ec` con version bloqueada.
+- REQ-INT-A05-0353 [DAT][CRITICO] La carga de pagos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account`.
+- REQ-INT-A05-0354 [INT][CRITICO] La sincronizacion de anticipos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0355 [WF][CRITICO] Los cambios de responsable en aprobacion financiera deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0356 [SEC][CRITICO] La integracion de liquidaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0357 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0358 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de cuentas analiticas sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0359 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0360 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de comprobantes.
+- REQ-INT-A05-0361 [DAT][CRITICO] El integrador debe sincronizar asientos contables del modulo SPI `finanzas` hacia Odoo `account.payment` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0362 [INT][CRITICO] La interfaz SPI-Odoo para facturas de cliente debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0363 [WF][CRITICO] Toda reapertura del proceso liquidacion de viaticos debe generar evento compensatorio y revalidar datos integrados de facturas de proveedor.
+- REQ-INT-A05-0364 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0365 [AUD][CRITICO] La evidencia `libro diario` asociada a anticipos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0366 [NFR][CRITICO] La sincronizacion de viaticos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0367 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0368 [TST][CRITICO] El area debe definir pruebas E2E de registro contable con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0369 [DAT][CRITICO] Toda transferencia de cuentas analiticas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0370 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de retenciones con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0371 [WF][CRITICO] El workflow de conciliacion debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0372 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `account.move`.
+- REQ-INT-A05-0373 [AUD][CRITICO] Los cambios criticos de control presupuestario deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0374 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0375 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso registro contable.
+- REQ-INT-A05-0376 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para anticipos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0377 [DAT][CRITICO] El sistema debe mapear campos obligatorios de viaticos entre SPI `finanzas` y Odoo `account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0378 [INT][CRITICO] La integracion de viaticos con `account.move` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0379 [WF][CRITICO] El cierre de cierre mensual debe exigir evidencia documental `comprobante contable` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A05-0380 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0381 [AUD][CRITICO] Cada evento de rechazo sobre retenciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0382 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0383 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de asientos contables entre SPI y Odoo.
+- REQ-INT-A05-0384 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A05-0385 [DAT][CRITICO] El proceso de upsert para facturas de proveedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0386 [INT][CRITICO] Ante evento de reasignacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `hr_expense` con trazabilidad completa.
+- REQ-INT-A05-0387 [WF][CRITICO] Las aprobaciones del proceso control presupuestario deben mantenerse alineadas entre SPI `finanzas` y Odoo `analytic.account` sin saltos de estado.
+- REQ-INT-A05-0388 [SEC][CRITICO] Las operaciones sensibles sobre viaticos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0389 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de liquidaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0390 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0391 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para cuentas analiticas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0392 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `hr_expense` con version bloqueada.
+- REQ-INT-A05-0393 [DAT][CRITICO] La carga de comprobantes debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `analytic.account`.
+- REQ-INT-A05-0394 [INT][CRITICO] La sincronizacion de asientos contables debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0395 [WF][CRITICO] Los cambios de responsable en gestion de cartera deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0396 [SEC][CRITICO] La integracion de facturas de proveedor debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0397 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0398 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de anticipos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0399 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0400 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de liquidaciones.
+
+### Bloque 401-450
+- REQ-INT-A05-0401 [DAT][CRITICO] El integrador debe sincronizar centros de costo del modulo SPI `finanzas` hacia Odoo `account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0402 [INT][CRITICO] La interfaz SPI-Odoo para cuentas analiticas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0403 [WF][CRITICO] Toda reapertura del proceso registro contable debe generar evento compensatorio y revalidar datos integrados de retenciones.
+- REQ-INT-A05-0404 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0405 [AUD][CRITICO] La evidencia `soporte tributario` asociada a asientos contables debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0406 [NFR][CRITICO] La sincronizacion de facturas de cliente debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0407 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0408 [TST][CRITICO] El area debe definir pruebas E2E de control presupuestario con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0409 [DAT][CRITICO] Toda transferencia de anticipos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0410 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de viaticos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A05-0411 [WF][CRITICO] El workflow de aprobacion financiera debe impedir transiciones de estado en Odoo si SPI `finanzas` no confirma precondiciones de negocio.
+- REQ-INT-A05-0412 [SEC][CRITICO] El intercambio de datos de viaticos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `l10n_ec`.
+- REQ-INT-A05-0413 [AUD][CRITICO] Los cambios criticos de conciliacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A05-0414 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A05-0415 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso control presupuestario.
+- REQ-INT-A05-0416 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para asientos contables cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A05-0417 [DAT][CRITICO] El sistema debe mapear campos obligatorios de facturas de cliente entre SPI `finanzas` y Odoo `analytic.account` preservando historial de cambios y control de version.
+- REQ-INT-A05-0418 [INT][CRITICO] La integracion de viaticos con `l10n_ec` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A05-0419 [WF][CRITICO] El cierre de liquidacion de viaticos debe exigir evidencia documental `libro diario` y validacion de control `flujo de aprobacion` antes de completarse.
+- REQ-INT-A05-0420 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A05-0421 [AUD][CRITICO] Cada evento de asignacion sobre viaticos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A05-0422 [NFR][CRITICO] El proceso de integracion del modulo `viaticos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A05-0423 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de centros de costo entre SPI y Odoo.
+- REQ-INT-A05-0424 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A05-0425 [DAT][CRITICO] El proceso de upsert para retenciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A05-0426 [INT][CRITICO] Ante evento de actualizacion en SPI `viaticos`, la integracion debe publicar mensaje y actualizar Odoo `account.move` con trazabilidad completa.
+- REQ-INT-A05-0427 [WF][CRITICO] Las aprobaciones del proceso conciliacion deben mantenerse alineadas entre SPI `finanzas` y Odoo `account.payment` sin saltos de estado.
+- REQ-INT-A05-0428 [SEC][CRITICO] Las operaciones sensibles sobre facturas de cliente deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A05-0429 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de facturas de proveedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A05-0430 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A05-0431 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para anticipos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A05-0432 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `viaticos` y Odoo `account.move` con version bloqueada.
+- REQ-INT-A05-0433 [DAT][CRITICO] La carga de liquidaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `account.payment`.
+- REQ-INT-A05-0434 [INT][CRITICO] La sincronizacion de centros de costo debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A05-0435 [WF][CRITICO] Los cambios de responsable en cierre mensual deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A05-0436 [SEC][CRITICO] La integracion de retenciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A05-0437 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A05-0438 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de asientos contables sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A05-0439 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A05-0440 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de facturas de proveedor.
+- REQ-INT-A05-0441 [DAT][CRITICO] El integrador debe sincronizar pagos del modulo SPI `finanzas` hacia Odoo `analytic.account` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A05-0442 [INT][CRITICO] La interfaz SPI-Odoo para anticipos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A05-0443 [WF][CRITICO] Toda reapertura del proceso control presupuestario debe generar evento compensatorio y revalidar datos integrados de viaticos.
+- REQ-INT-A05-0444 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A05-0445 [AUD][CRITICO] La evidencia `comprobante contable` asociada a centros de costo debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A05-0446 [NFR][CRITICO] La sincronizacion de cuentas analiticas debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A05-0447 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de finanzas incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A05-0448 [TST][CRITICO] El area debe definir pruebas E2E de conciliacion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A05-0449 [DAT][CRITICO] Toda transferencia de asientos contables debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A05-0450 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de facturas de cliente con metricas de latencia, throughput y tasa de error.

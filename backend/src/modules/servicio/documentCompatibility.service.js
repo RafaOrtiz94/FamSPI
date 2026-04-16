@@ -236,7 +236,7 @@ const listCatalogCompatibility = async ({ includeInactive = false, forceRefresh 
   const catalog = await listDocumentTemplateCatalog({ includeInactive });
   const checks = [];
   for (const item of catalog) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const compatibility = await getDocumentCompatibility(item.document_code, { forceRefresh });
     checks.push({
       document_code: item.document_code,

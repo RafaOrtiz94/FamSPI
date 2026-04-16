@@ -884,7 +884,7 @@ async function createCorrectiveCase({ actorUser, payload = {} }) {
     } catch (workflowError) {
       // No se revierte la creación del caso por fallas auxiliares de sincronización.
       // El workspace correctivo permanece operativo y trazable a nivel local.
-      // eslint-disable-next-line no-console
+       
       console.warn("No se pudo sincronizar workflow de caso correctivo recién creado:", workflowError?.message || workflowError);
     }
     const detail = await getCorrectiveCaseDetail(withCode.id, actorUser);
@@ -1761,7 +1761,7 @@ async function updateCorrectiveCaseAction({ caseId, action, payload = {}, actorU
       await syncWorkflowForCase({ caseRow: current, actorUser });
     } catch (workflowError) {
       // No se revierte la acción principal por fallas de sincronización de workflow.
-      // eslint-disable-next-line no-console
+       
       console.warn("No se pudo sincronizar workflow de caso correctivo:", workflowError?.message || workflowError);
     }
 

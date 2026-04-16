@@ -1304,7 +1304,7 @@ async function processPendingJobsBatch({ limit = 10 } = {}) {
   };
 
   for (const job of jobs) {
-    // eslint-disable-next-line no-await-in-loop
+     
     const result = await processSingleJob(job);
     if (result.ok) summary.completed += 1;
     else summary.failed += 1;

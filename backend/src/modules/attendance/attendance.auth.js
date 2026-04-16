@@ -44,6 +44,8 @@ const hasReportingAccess = (user = {}) => {
   return false;
 };
 
+const hasGlobalAttendanceReportingAccess = (user = {}) => hasReportingAccess(user);
+
 const parseTargetUserId = (value) => {
   if (value === undefined || value === null || value === "") return null;
   const normalized = String(value).trim().toLowerCase();
@@ -59,11 +61,10 @@ const canAccessAttendanceTarget = (requester, rawTargetUserId, { allowAll = fals
 
   const targetUserId = parseTargetUserId(rawTargetUserId);
   if (targetUserId === null) return true;
-  if (Number.isNaN(targetUserId)) {
-    return allowAll && hasReportingAccess(requester);
-  }
+  const hasGlobalAccess = hasGlobalAttendanceReportingAccess(requester);
+  if (Number.isNaN(targetUserId)) return allowAll && hasGlobalAccess;
   if (targetUserId === requesterId) return true;
-  return hasReportingAccess(requester);
+  return hasGlobalAccess;
 };
 
 const requireAttendanceReportAccess = (targetSelector, options = {}) => (req, res, next) => {
@@ -80,6 +81,7 @@ const requireAttendanceReportAccess = (targetSelector, options = {}) => (req, re
 
   return res.status(403).json({
     ok: false,
+    code: "ATTENDANCE_REPORTS_FORBIDDEN",
     message: "No tienes permisos para consultar registros de asistencia de otros usuarios",
   });
 };
@@ -87,6 +89,7 @@ const requireAttendanceReportAccess = (targetSelector, options = {}) => (req, re
 module.exports = {
   REPORTING_ROLES,
   hasReportingAccess,
+  hasGlobalAttendanceReportingAccess,
   canAccessAttendanceTarget,
   requireAttendanceReportAccess,
 };

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
-import { FiChevronDown, FiUsers } from "react-icons/fi";
+import { FiAlertCircle, FiChevronDown, FiUsers } from "react-icons/fi";
 import toast from "react-hot-toast";
 
 import { DashboardLayout } from "../../../core/ui/layouts/DashboardLayout";
@@ -40,6 +40,7 @@ import PersonnelDocuments from "../components/workspace/PersonnelDocuments";
 import ApplicantIntakeSummary from "../components/workspace/ApplicantIntakeSummary";
 import PersonnelRequestProgress from "../components/workspace/PersonnelRequestProgress";
 import PersonnelRequestComments from "../components/workspace/PersonnelRequestComments";
+import ApplicantList from "../components/workspace/ApplicantList";
 
 import PersonnelRequestReview from "../components/workspace/PersonnelRequestReview";
 import PersonnelRequestForm from "../../../core/ui/widgets/PersonnelRequestForm";
@@ -575,27 +576,6 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
  }
  };
 
-  const [uploadingDocKey, setUploadingDocKey] = useState(null);
-
-  const handleUploadDocument = async (docType, file) => {
-    if (!file) return;
-    setUploadingDocKey(docType);
-    try {
-      if (isRequestContext) {
-        await uploadPersonnelRequestDocument(selectedRequest.id, docType, file);
-      } else {
-        await uploadCollaboratorDocument(selectedCollaboratorId, docType, file);
-      }
-
-      showToast("Documento subido correctamente", "success");
-      await loadInitialData();
-    } catch (err) {
-      showToast(err.response?.data?.message || "Error al subir documento", "error");
-    } finally {
-      setUploadingDocKey(null);
-    }
-  };
-
   const handleHireApplicant = async () => {
  if (!selectedRequest) return;
  const profileCompletion = computeProfileCompletion();
@@ -1121,7 +1101,7 @@ const PersonnelWorkspace = ({ initialView = "solicitudes" }) => {
             documents={documents}
             onToggleFlag={handleChecklistToggle}
             onUpload={handleUploadDocument}
-            uploadingDocKey={uploadingDocKey}
+            uploadingDocKey={docUploading}
             lockedSections={getLockedSections()}
             readOnly={selectedRequest?.status === "completada"}
           />

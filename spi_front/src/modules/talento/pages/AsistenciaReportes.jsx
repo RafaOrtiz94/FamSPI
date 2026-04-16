@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { FiDownload, FiFilter, FiList, FiPieChart, FiCalendar, FiClock } from "react-icons/fi";
+import { FiDownload, FiFilter, FiPieChart } from "react-icons/fi";
 import toast from "react-hot-toast";
 
 import Card from "../../../core/ui/components/Card";
@@ -7,14 +7,13 @@ import Button from "../../../core/ui/components/Button";
 import Select from "../../../core/ui/components/Select";
 import { DashboardLayout, DashboardHeader } from "../../../core/ui/layouts/DashboardLayout";
 import { getUsers } from "../../../core/api/usersApi";
-import { downloadAttendancePDF, getAttendanceRange } from "../../../core/api/attendanceApi";
-import { getResumenColaboradores } from "../../../core/api/permisosApi";
-import { formatDateSafe, formatTimeSafe } from "../../../shared/utils/dateUtils";
-
-const REPORT_MODES = {
- official: "official",
- admin: "admin",
-};
+import { downloadAttendancePDF } from "../../../core/api/attendanceApi";
+import AttendanceReportsSummaryCards from "../components/attendance-reports/AttendanceReportsSummaryCards";
+import AttendanceReportsEmptyState from "../components/attendance-reports/AttendanceReportsEmptyState";
+import AttendanceReportsTableView from "../components/attendance-reports/AttendanceReportsTableView";
+import AttendanceReportsToolbar from "../components/attendance-reports/AttendanceReportsToolbar";
+import useAttendanceFilters, { ATTENDANCE_REPORT_MODES } from "../hooks/useAttendanceFilters";
+import useAttendanceReportsQuery from "../hooks/useAttendanceReportsQuery";
 
 const STATUS_OPTIONS = [
  { label: "Todos los estados", value: "" },
@@ -54,18 +53,58 @@ const ATTENDANCE_STATUS_LABELS = {
 };
 
 const TalentoAsistenciaReportes = () => {
- const [mode, setMode] = useState(REPORT_MODES.official);
+ const {
+  startDate,
+  endDate,
+  mode,
+  view,
+  status: selectedStatus,
+  userIds,
+  quickRange,
+  onlyDiscrepancies,
+  onlyWithGeo,
+  departmentId,
+  departmentOptions,
+  setStartDate,
+  setEndDate,
+  setMode,
+  setStatus: setSelectedStatus,
+  applyQuickRange,
+  setOnlyDiscrepancies,
+  setOnlyWithGeo,
+  setDepartmentId,
+  clearFilters,
+ } = useAttendanceFilters({
+  mode: ATTENDANCE_REPORT_MODES.OFFICIAL,
+  view: "table",
+ });
  const [loadingPdf, setLoadingPdf] = useState(false);
- const [loadingQuery, setLoadingQuery] = useState(false);
- const [startDate, setStartDate] = useState("");
- const [endDate, setEndDate] = useState("");
  const [selectedUserId, setSelectedUserId] = useState("");
- const [selectedStatus, setSelectedStatus] = useState("");
  const [officialPdfPeriod, setOfficialPdfPeriod] = useState("monthly");
  const [annualYear, setAnnualYear] = useState(String(new Date().getFullYear()));
  const [userOptions, setUserOptions] = useState([]);
  const [reportRows, setReportRows] = useState([]);
  const [reportSummary, setReportSummary] = useState(null);
+ const reportQueryFilters = useMemo(
+  () => ({
+   startDate,
+   endDate,
+   userId: selectedUserId === "all" ? "all" : selectedUserId,
+   userIds,
+   departmentId,
+   status: selectedStatus || "",
+   quickRange,
+   onlyDiscrepancies,
+   onlyWithGeo,
+   mode,
+   view,
+  }),
+  [departmentId, endDate, mode, onlyDiscrepancies, onlyWithGeo, quickRange, selectedStatus, selectedUserId, startDate, userIds, view]
+ );
+ const { refetch: refetchAttendanceReports, isFetching: loadingQuery } = useAttendanceReportsQuery({
+  filters: reportQueryFilters,
+  enabled: false,
+ });
 
  const loadUsers = useCallback(async () => {
  try {
@@ -86,20 +125,20 @@ const TalentoAsistenciaReportes = () => {
  loadUsers();
  setStartDate(getMonthStartInputDate());
  setEndDate(getTodayInputDate());
- }, [loadUsers]);
+ }, [loadUsers, setStartDate, setEndDate]);
 
  useEffect(() => {
- if (mode === REPORT_MODES.admin && !selectedUserId) {
+ if (mode === ATTENDANCE_REPORT_MODES.ADMIN && !selectedUserId) {
  setSelectedUserId("all");
  }
- if (mode === REPORT_MODES.official && selectedUserId === "all") {
+ if (mode === ATTENDANCE_REPORT_MODES.OFFICIAL && selectedUserId === "all") {
  setSelectedUserId("");
  }
  }, [mode, selectedUserId]);
 
  const userSelectOptions = useMemo(() => {
  const baseOptions = userOptions.map((u) => ({ label: u.nombre, value: String(u.id) }));
- if (mode === REPORT_MODES.admin) {
+ if (mode === ATTENDANCE_REPORT_MODES.ADMIN) {
  return [{ label: "Todos los usuarios", value: "all" }, ...baseOptions];
  }
  return [{ label: "Selecciona un usuario", value: "" }, ...baseOptions];
@@ -107,10 +146,25 @@ const TalentoAsistenciaReportes = () => {
 
  const statusSelectOptions = useMemo(() => STATUS_OPTIONS, []);
 
- const selectedStatusLabel = useMemo(() => {
+ const quickFilterItems = useMemo(
+  () => [
+   { key: "today", label: "Hoy", active: quickRange === "today" },
+   { key: "thisWeek", label: "Esta semana", active: quickRange === "thisWeek" },
+   { key: "thisMonth", label: "Este mes", active: quickRange === "thisMonth" },
+   { key: "thisYear", label: "Este anio", active: quickRange === "thisYear" },
+  ],
+  [quickRange]
+ );
+
+const selectedStatusLabel = useMemo(() => {
  if (!selectedStatus) return "Todos los estados";
  return ATTENDANCE_STATUS_LABELS[selectedStatus] || "Estado personalizado";
  }, [selectedStatus]);
+
+ const rangeWarningText = useMemo(() => {
+  if (!reportSummary?.meta?.exceedsRecommendedRange) return "";
+  return "El rango supera 31 dias. La consulta puede tardar mas de lo normal.";
+ }, [reportSummary]);
 
  const handleDownloadPDF = useCallback(async () => {
   if (officialPdfPeriod === "monthly" && (!startDate || !endDate)) {
@@ -145,7 +199,7 @@ const TalentoAsistenciaReportes = () => {
   } finally {
   setLoadingPdf(false);
   }
-  }, [selectedUserId, startDate, endDate, officialPdfPeriod, annualYear]);
+ }, [selectedUserId, startDate, endDate, officialPdfPeriod, annualYear]);
 
  const handleConsultRange = useCallback(async () => {
  if (!startDate || !endDate) {
@@ -156,10 +210,12 @@ const TalentoAsistenciaReportes = () => {
  return toast.error("Selecciona un usuario especifico.");
  }
 
- setLoadingQuery(true);
  try {
- const targetUserId = selectedUserId === "all" ? "all" : selectedUserId;
- const res = await getAttendanceRange(startDate, endDate, targetUserId, selectedStatus || null);
+ const response = await refetchAttendanceReports();
+ if (response?.error) {
+  throw response.error;
+ }
+ const res = response?.data || null;
  const rows = Array.isArray(res?.data) ? res.data : [];
  setReportRows(rows);
  setReportSummary(res?.summary || null);
@@ -167,10 +223,14 @@ const TalentoAsistenciaReportes = () => {
  } catch (err) {
  console.error("Error consultando asistencia:", err);
  toast.error(err.response?.data?.message || "No se pudo consultar el rango.");
- } finally {
- setLoadingQuery(false);
  }
- }, [endDate, selectedStatus, selectedUserId, startDate]);
+ }, [endDate, refetchAttendanceReports, selectedUserId, startDate]);
+
+ useEffect(() => {
+  if (mode === ATTENDANCE_REPORT_MODES.ADMIN && quickRange) {
+   handleConsultRange();
+  }
+ }, [handleConsultRange, mode, quickRange]);
 
 const statusCounters = useMemo(() => {
   const byStatus = reportSummary?.byStatus || {};
@@ -204,9 +264,9 @@ const statusCounters = useMemo(() => {
 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
   <button
   type="button"
-  onClick={() => setMode(REPORT_MODES.official)}
+  onClick={() => setMode(ATTENDANCE_REPORT_MODES.OFFICIAL)}
   className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
-   mode === REPORT_MODES.official
+   mode === ATTENDANCE_REPORT_MODES.OFFICIAL
    ? "border-blue-200 bg-blue-50 text-blue-900"
    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
   }`}
@@ -220,9 +280,9 @@ const statusCounters = useMemo(() => {
 
   <button
   type="button"
-  onClick={() => setMode(REPORT_MODES.admin)}
+  onClick={() => setMode(ATTENDANCE_REPORT_MODES.ADMIN)}
   className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
-   mode === REPORT_MODES.admin
+   mode === ATTENDANCE_REPORT_MODES.ADMIN
    ? "border-emerald-200 bg-emerald-50 text-emerald-900"
    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
   }`}
@@ -272,7 +332,7 @@ const statusCounters = useMemo(() => {
  />
  </div>
 
- {mode === REPORT_MODES.admin ? (
+ {mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
  <div>
  <label className="mb-2 block text-sm font-medium text-slate-700">
  Estado
@@ -299,7 +359,7 @@ const statusCounters = useMemo(() => {
  )}
  </div>
 
- {mode === REPORT_MODES.official ? (
+ {mode === ATTENDANCE_REPORT_MODES.OFFICIAL ? (
  <div className="grid grid-cols-1 gap-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4 md:grid-cols-2">
  <div>
  <label className="mb-2 block text-sm font-medium text-blue-900">
@@ -332,100 +392,49 @@ const statusCounters = useMemo(() => {
  </div>
  ) : null}
 
- <div className="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-6">
- {statusCounters.map((card) => (
- <div key={card.label} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
- <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
- {card.label}
- </div>
- <div className="mt-2 text-2xl font-bold text-slate-950">{card.value}</div>
- </div>
- ))}
- </div>
+ <AttendanceReportsSummaryCards items={statusCounters} />
 
  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
  <FiFilter className="text-slate-500" />
  <span className="font-semibold">Filtro activo:</span>
- <span>{mode === REPORT_MODES.admin ? selectedStatusLabel : "PDF oficial por usuario"}</span>
+ <span>{mode === ATTENDANCE_REPORT_MODES.ADMIN ? selectedStatusLabel : "PDF oficial por usuario"}</span>
  <span className="text-slate-400">|</span>
  <span>
- {mode === REPORT_MODES.official && officialPdfPeriod === "annual"
+ {mode === ATTENDANCE_REPORT_MODES.OFFICIAL && officialPdfPeriod === "annual"
  ? `Periodo anual: ${annualYear || "anio"}`
  : `Periodo: ${startDate || "fecha inicio"} a ${endDate || "fecha fin"}`}
  </span>
  </div>
  </div>
 
- {mode === REPORT_MODES.admin ? (
- <div className="space-y-4">
- <div className="flex items-center justify-between gap-3">
- <div>
- <h3 className="text-lg font-semibold text-slate-950">Consulta administrativa</h3>
- <p className="text-sm text-slate-600">
- Usa este bloque para revisar estados de jornada sin generar el PDF oficial.
- </p>
- </div>
- <Button
- variant="primary"
- icon={FiList}
- onClick={handleConsultRange}
- disabled={loadingQuery}
- >
- {loadingQuery ? "Consultando..." : "Consultar rango"}
- </Button>
- </div>
-
+ {mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
+ <AttendanceReportsToolbar
+  onAction={handleConsultRange}
+  disabled={loadingQuery}
+  actionLabel={loadingQuery ? "Consultando..." : "Consultar rango"}
+ onClear={clearFilters}
+ clearDisabled={loadingQuery}
+  quickFilters={quickFilterItems}
+  onQuickFilter={applyQuickRange}
+  warningText={rangeWarningText}
+  onlyDiscrepancies={onlyDiscrepancies}
+  onToggleDiscrepancies={setOnlyDiscrepancies}
+  onlyWithGeo={onlyWithGeo}
+  onToggleWithGeo={setOnlyWithGeo}
+  departmentId={departmentId}
+  departmentOptions={departmentOptions}
+  onChangeDepartment={setDepartmentId}
+  userOptions={mode === ATTENDANCE_REPORT_MODES.ADMIN ? userSelectOptions : []}
+  selectedUserId={selectedUserId}
+  onSelectUser={setSelectedUserId}
+  >
  {reportRows.length > 0 ? (
- <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
- <div className="overflow-x-auto">
- <table className="min-w-full divide-y divide-slate-200 text-sm">
- <thead className="bg-slate-900 text-white">
- <tr>
- <th className="px-4 py-3 text-left font-semibold">Fecha</th>
- <th className="px-4 py-3 text-left font-semibold">Colaborador</th>
- <th className="px-4 py-3 text-left font-semibold">Departamento</th>
- <th className="px-4 py-3 text-left font-semibold">Estado</th>
- <th className="px-4 py-3 text-left font-semibold">Marcas</th>
- <th className="px-4 py-3 text-right font-semibold">Horas</th>
- </tr>
- </thead>
- <tbody className="divide-y divide-slate-100">
- {reportRows.map((row) => (
- <tr key={`${row.id}-${row.date}`} className="bg-white">
- <td className="px-4 py-3 text-slate-700">{formatDateSafe(row.date, "dd/MM/yyyy")}</td>
- <td className="px-4 py-3">
- <div className="font-semibold text-slate-950">{row.fullname || row.email || "Usuario"}</div>
- <div className="text-xs text-slate-500">{row.email || "-"}</div>
- </td>
- <td className="px-4 py-3 text-slate-700">{row.department_name || "-"}</td>
- <td className="px-4 py-3">
- <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
- {row.attendance_status_label || "Sin estado"}
- </span>
- </td>
- <td className="px-4 py-3 text-slate-700">
- <div className="space-y-1 text-xs">
- <div>Entrada: {formatTimeSafe(row.entry_time) || "--"}</div>
- <div>Almuerzo: {formatTimeSafe(row.lunch_start_time) || "--"} / {formatTimeSafe(row.lunch_end_time) || "--"}</div>
- <div>Salida: {formatTimeSafe(row.exit_time) || "--"}</div>
- </div>
- </td>
- <td className="px-4 py-3 text-right font-semibold text-slate-900">
- {row.total_hours ? `${Number(row.total_hours).toFixed(1)}h` : "--"}
- </td>
- </tr>
- ))}
- </tbody>
- </table>
- </div>
- </div>
+ <AttendanceReportsTableView rows={reportRows} />
  ) : (
- <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm text-slate-500">
- Aun no hay resultados consultados. Ajusta el rango, usuario o estado y presiona <span className="font-semibold text-slate-700">Consultar rango</span>.
- </div>
+ <AttendanceReportsEmptyState onConsult={handleConsultRange} />
  )}
- </div>
+ </AttendanceReportsToolbar>
 ) : (
   <div className="space-y-4">
   <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-4">

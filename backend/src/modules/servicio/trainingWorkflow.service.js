@@ -637,7 +637,7 @@ const upsertTrainingSessions = async (eventId, sessions = []) => {
     }));
 
   for (const session of list) {
-    // eslint-disable-next-line no-await-in-loop
+     
     await db.query(
       `INSERT INTO servicio.training_event_sessions (
           training_event_id, session_no, session_date, start_time, end_time,
@@ -699,7 +699,7 @@ const upsertTrainingParticipants = async ({
     const evaluationPayload = safeJsonObject(participant.evaluation_payload, {});
     const specialistPayload = safeJsonObject(participant.specialist_evaluation_payload, {});
 
-    // eslint-disable-next-line no-await-in-loop
+     
     await db.query(
       `INSERT INTO servicio.training_event_participants (
           training_event_id, participant_key, full_name, role_title, email,

@@ -1,973 +1,0 @@
-PLANTILLA INSTITUCIONAL DE VALIDACION DE SISTEMAS
-FamProject Cia. Ltda.
-Documento: VALIDACION DEL AREA - Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental
-Area: Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental
-Sistema: SPI
-Codigo: VAL-SPI-GSCGD-PAQUETE
-Version: 1.0
-Fecha: 2026-03-18
-Estado: BORRADOR
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-ÍNDICE
-PLANTILLA INSTITUCIONAL DE VALIDACION DE SISTEMAS	1
-FamProject Cia. Ltda.	1
-VALIDACION DEL AREA	8
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	8
-Control documental	8
-Firmas y sumillas	8
-Introducción	8
-Objetivo	9
-Alcance	9
-Base de evaluacion	9
-Marco normativo y de referencia	9
-Documentos de soporte	10
-Módulos evaluados	10
-Metodologia de validación	10
-Definiciones	11
-Matriz de trazabilidad resumida	11
-URS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	12
-1. Introducción	12
-2. Objetivo	12
-3. Alcance	12
-4. Actores	12
-5. Justificacion general del área	12
-6. Justificacion por módulo	13
-7. Requerimientos funcionales del usuario	13
-8. Requerimientos no funcionales	14
-9. Conclusion	14
-FRS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	14
-1. Introducción	14
-2. Objetivo	15
-3. Alcance funcional	15
-4. Requerimientos funcionales detallados	15
-FR-GD-001 Autenticación federada	15
-FR-GD-002 Perfil, refresh y logout	15
-FR-GD-003 Aceptacion interna LOPDP	15
-FR-GD-004 Monitoreo de seguridad off-hours	15
-FR-GD-005 Consulta de auditoria	15
-FR-GD-006 Preparacion de auditoria	15
-FR-GD-007 Aprobaciones operativas soportadas	15
-FR-GD-008 Gestión gerencial	16
-FR-GD-009 Gestión documental desde plantilla	16
-FR-GD-010 Gestión de adjuntos	16
-FR-GD-011 Notificaciones operativas	16
-FR-GD-012 Dashboard operacional montado	16
-FR-GD-013 Autorización y envio mediante Gmail	16
-FR-GD-014 Firma avanzada y verificacion publica	16
-5. Flujos principales	17
-Flujo A - Login corporativo	17
-Flujo B - Revision off-hours	17
-Flujo C - Preparacion y custodia documental de auditoria	18
-Flujo D - Gestión documental y firma	18
-Flujo E - Notificacion y correo autenticado	19
-6. Conclusion	19
-DDS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	19
-1. Introducción	19
-2. Objetivo	19
-3. Arquitectura del área	19
-3.1 Capas	19
-3.2 Ruteo y seguridad global	20
-4. Integraciónes del área	20
-4.1 Delimitacion frente a respaldo de base de datos	20
-5. Diseño por módulo	20
-auth	20
-security	20
-auditoria	20
-audit-prep	20
-approvals	21
-management	21
-documents	21
-files	21
-notifications	21
-dashboard	21
-gmail	21
-signature	21
-6. Modelo técnico de datos	21
-Entidades principales	21
-7. API real del área	22
-8. Frontend consumidor relevante	22
-9. Conclusion	22
-DICCIONARIO DE DATOS	22
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	23
-1. Introducción	23
-2. Objetivo	23
-3. Fuente de verdad	23
-4. Criterio de inclusion	23
-5. Como leer este diccionario	23
-6. Tablas y vistas incluidas	23
-7. Cuando intervienen estas entidades	24
-8. Diccionario por entidad	24
-auditoria.logs	24
-public.audit_access_grants	25
-public.audit_documents	26
-public.audit_sections	27
-public.audit_settings	28
-public.departments	29
-public.document_hashes	29
-public.document_qr_codes	30
-public.document_seals	31
-public.document_signature_logs	32
-public.document_signatures_advanced	33
-public.document_verification_info	35
-public.documents	36
-public.notifications	37
-public.request_approvals	38
-public.request_attachments	39
-public.request_types	40
-public.request_versions	41
-public.requests	41
-public.user_attendance_records	43
-public.user_lopdp_consents	46
-public.user_profile	47
-public.user_sessions	47
-public.users	48
-5. Hallazgos de consistencia código vs base real	50
-IQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	50
-1. Introducción	50
-2. Objetivo	50
-3. Casos IQ	51
-4. Conclusiones de IQ	51
-OQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	51
-1. Introducción	52
-2. Casos OQ por módulo	52
-auth	52
-security	52
-auditoria	52
-audit-prep	52
-approvals	52
-management	52
-documents	52
-files	52
-notifications	53
-dashboard	53
-gmail	53
-signature	53
-3. Escenarios de error a registrar	53
-4. Conclusiones de OQ	53
-PQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	53
-1. Introducción	54
-2. Casos PQ	55
-3. Riesgos PQ vigentes	55
-4. Conclusiones de PQ	56
-INFORME DE HALLAZGOS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL	56
-1. Objetivo	56
-2. Alcance revisado	56
-3. Hallazgos vigentes	56
-H-A01-001 Segmentacion pendiente en approvals	56
-H-A01-002 Total global en management requests	56
-H-A01-003 Cast inseguro en management trace	56
-H-A01-004 Acoplamiento auth-attendance	56
-H-A01-005 Dependencias auxiliares en security	56
-H-A01-006 Dependencias SQL duras en signature	56
-4. Hallazgos cerrados en esta revision	56
-5. Elementos fuera de alcance del área	57
-6. Conclusion	57
-PROTOCOLO DE EJECUCION IQ	57
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	57
-1. Objetivo	57
-2. Casos de ejecución	58
-PROTOCOLO DE EJECUCION OQ	58
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	58
-1. Objetivo	58
-2. Casos de ejecución	59
-PROTOCOLO DE EJECUCION PQ	59
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	59
-1. Objetivo	59
-2. Casos PQ	60
-REGISTRO DE EVIDENCIAS Y DESVIACIONES	60
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental	60
-1. Objetivo	60
-2. Tabla de evidencias	61
-3. Tabla de desviaciones	61
-4. Criterio de cierre documental	61
-Conclusion ejecutiva	61
-Referencias	61
-
-Contenido
- TOC \o "1-3" \h \z \u ÍNDICE	2
-0. CONTROL DOCUMENTAL	3
-
-VALIDACION DEL AREA
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-Control documental
-CampoValorSistemaSPIDocumentoValidación consolidada del áreaÁreaÁrea 01: Gobierno, Seguridad, Cumplimiento y Gestión DocumentalCódigo documentalVAL-SPI-GSCGD-PAQUETEVersión1.0EstadoBORRADORFecha de emisión2026-03-18Elaborado porIngenieria de SoftwareRevisado por__________________Aprobado por__________________Firmas y sumillas
-Rol documentalNombre y cargoFirmaSumillaFechaElaborado porIngenieria de Software__________________________________________Revisado por____________________________________________________________Aprobado por____________________________________________________________Introducción
-El presente documento consolida la documentación de validación del Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental del sistema SPI. Su contenido se elaboro a partir de una revision integral del código vigente, del comportamiento observable de los módulos incluidos en el alcance, de la estructura de datos asociada y de los controles funcionales y técnicos que sostienen auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail dentro de la operación real del sistema.
-La intencion de este consolidado es presentar una versión formal, continua y coherente de la documentación del área, con criterio de ingenieria de software, de forma que el lector disponga en un unico documento de los requerimientos, la especificacion funcional, el diseño técnico, el soporte de datos, las calificaciones, los protocolos de prueba y el estado actualizado de hallazgos, sin depender de referencias a artefactos internos de trabajo.
-Objetivo
-Establecer de forma integral los criterios de validación del área Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental, documentando los requerimientos, el comportamiento funcional esperado, el diseño técnico de soporte, las estructuras de datos, las calificaciones IQ/OQ/PQ, los protocolos de ejecución y el registro de hallazgos, evidencias y desviaciones con un nivel de detalle suficiente para su revision técnica, funcional y documental.
-De manera complementaria, el documento busca servir como referencia controlada para la ejecución de validaciones formales del área, reduciendo ambiguedades, alineando el contenido con la implementacion vigente y dejando trazabilidad sobre los puntos corregidos y los riesgos residuales que aun requieren seguimiento.
-Alcance
-La validación cubre los módulos auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail, incluyendo sus rutas, servicios, middlewares, persistencia, dependencias SQL, integraciónes externas y reglas de negocio asociadas al área.
-Tambien forman parte del alcance las calificaciones de instalación, operación y desempeño, junto con sus protocolos de ejecución, criterios de aceptacion, mecanismos de captura de evidencia y registro de desviaciones. Quedan fuera de este documento los dominios funcionales no pertenecientes al área y los desarrollos auxiliares que no formen parte del flujo core validado.
-De manera expresa, el mecanismo de respaldo de base de datos hacia Drive no se incorpora al alcance funcional del Área 01, aun cuando exista en el mismo repositorio y comparta infraestructura técnica. Su naturaleza corresponde a continuidad operativa, resguardo de informacion y administracion de plataforma, por lo que debe evaluarse en un dominio de infraestructura, operaciones TI o continuidad del servicio, no dentro del expediente funcional de Gobierno, Seguridad y Cumplimiento.
-Base de evaluacion
-* Revision del código vigente del repositorio y de los módulos incluidos en el área.
-* Verificacion de contratos entre backend y frontend, incluyendo rutas, payloads y respuestas observables.
-* Contraste con estructuras de datos y dependencias SQL reales utilizadas por el área.
-* Análisis de riesgos, hallazgos corregidos, hallazgos residuales y criterios de impacto.
-* Preparacion de protocolos formales de ejecución, criterios de aceptacion y captura de evidencia.
-Marco normativo y de referencia
-* Politicas internas de control documental y trazabilidad del sistema SPI.
-* Marco de proteccion de datos personales aplicable a flujos de consentimiento, sesión e informacion del usuario (Asamblea Nacional del Ecuador, 2021; Presidencia de la República del Ecuador, 2023).
-* Criterios de seguridad de la informacion usados como referencia para autenticación, control de acceso y trazabilidad de eventos (International Organization for Standardization [ISO] & International Electrotechnical Commission [IEC], 2022).
-* Requerimientos funcionales y técnicos vigentes derivados de la implementacion validada.
-* Protocolos formales de ejecución de IQ, OQ y PQ preparados para evidencia objetiva.
-Documentos de soporte
-Titulo del documentoAño de publicacionLey Organica de Proteccion de Datos Personales2021Reglamento General a la Ley Organica de Proteccion de Datos Personales2023ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection - Information security management systems - Requirements2022Módulos evaluados
-MóduloAlcance funcional evaluadoauthAutenticación, sesiones, consentimiento interno y control de accesosecurityEventos de seguridad, logins fuera de horario y revision TIauditoriaBitacora transversal, consulta y exportacion de evidenciaaudit-prepPreparacion documental de auditoria y acceso externo controladoapprovalsCola y decision del flujo técnico soportadomanagementMetricas gerenciales, trazabilidad y soporte documentalsignatureFirma avanzada, verificacion publica y audit trail documentaldocumentsGeneracion documental desde plantilla, firma posicionada y exportacion PDFfilesCarga, descarga y custodia de adjuntos por solicitudnotificationsNotificaciones operativas y lectura de eventos por usuariodashboardResumen operativo del dashboard comercial del dominiogmailAutorización OAuth de Gmail y envio de correo desde la cuenta del usuarioMetodologia de validación
-La documentación consolidada se construye con criterio de ingenieria de software sobre cuatro capas complementarias:
-* requerimientos de usuario y funcionales
-* diseño técnico y diccionario de datos
-* calificación de instalación, operación y desempeño
-* hallazgos vigentes y registro de evidencias/desviaciones
-Cada sección del presente documento representa una parte formal del proceso de validación del área y se presenta como un cuerpo técnico continuo, redactado para su lectura documental y no como una simple enumeracion de artefactos de trabajo.
-Definiciones
-TerminoDefinicionOAuth 2.0Mecanismo de federacion usado por SPI para autenticar usuarios internos mediante Google.JWTToken firmado que representa la sesión autenticada del usuario frente al backend.Refresh TokenCredencial usada para renovar un access token vigente sobre una sesión activa registrada.RBACControl de acceso basado en roles aplicado por middlewares y validaciones de módulo.LOPDPMarco regulatorio de proteccion de datos personales considerado en el flujo de aceptacion interna del sistema.Audit TrailTrazabilidad técnica o funcional de eventos relevantes registrados por los módulos del área.Off-hours loginEvento de inicio de sesión detectado fuera del horario esperado y tratado como evento de seguridad.Bitacora de auditoriaRegistro transversal de eventos del sistema consultable por roles autorizados.Firma avanzadaProceso de firma documental con hash, sello, QR y evidencia técnica asociada.Token de verificacionIdentificador publico para consultar la validez de un documento firmado.IQCalificación de instalación que verifica que los componentes requeridos esten desplegados y disponibles.OQCalificación de operación que valida el funcionamiento esperado bajo condiciones normales y de error.PQCalificación de desempeño que verifica consistencia del sistema en su contexto de uso real.RTMMatriz de trazabilidad entre requerimientos, especificaciones, diseño y pruebas.Matriz de trazabilidad resumida
-Capa documentalProposito dentro de la validaciónURSDefine requerimientos de usuario y expectativas operativas del áreaFRSDescribe comportamiento funcional verificable y reglas de negocio observadasDDSDocumenta arquitectura, dependencias tecnicas y diseño del dominioDDRelaciona las entidades y estructuras de datos utilizadas por el áreaIQVerifica instalación, despliegue y disponibilidad de componentesOQValida operación funcional bajo condiciones normales y de errorPQEvalua estabilidad y consistencia del área en uso representativoHallazgosRegistra no conformidades, correcciones y riesgos residualesEvidenciasConsolida soporte objetivo de ejecución, desviaciones y cierreURS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-La presente sección establece los requerimientos de usuario del área evaluada, describiendo las necesidades funcionales, los actores que interactuan con el sistema y las condiciones de operación esperadas desde la perspectiva del negocio y de los usuarios autorizados.
-1. Introducción
-El presente documento define los requerimientos de usuario del Área 01 del sistema SPI, correspondiente a Gobierno, Seguridad, Cumplimiento y Gestión Documental. Su finalidad es establecer, desde la perspectiva del negocio y de los actores que usan el sistema, que capacidades deben existir, por que son necesarias, como deben manifestarse en la operación diaria y cuando deben activarse dentro del ciclo real del sistema.
-El área integra funciones de identidad, control de acceso, monitoreo de seguridad, auditoria, preparacion de evidencia, gestión documental, notificaciones operativas, dashboards del dominio y firma avanzada. La necesidad de estas capacidades se justifica por la obligacion de mantener trazabilidad de acciones, integridad documental, control de sesiones, evidencia sobre accesos sensibles y tratamiento responsable de la informacion. Estas exigencias son consistentes con la Ley Organica de Proteccion de Datos Personales, su reglamento general y con criterios de control de acceso, registro de eventos y seguridad de la informacion alineados con ISO/IEC 27001:2022.
-2. Objetivo
-Definir los requerimientos de usuario de alto nivel para los módulos auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail, estableciendo su justificacion funcional, su forma esperada de operación y el momento o contexto en que deben intervenir.
-3. Alcance
-Incluye backend Express y middlewares transversales del área, frontend React consumidor de seguridad, auditoria, firma y soporte documental, persistencia PostgreSQL asociada a identidad, auditoria, solicitudes, documentos y notificaciones, integraciónes Google OAuth, Drive, Docs y Gmail, y validación documental y operativa de IQ, OQ y PQ para el área.
-Excluye flujos de negocio propios de otras areas, automatizaciones de continuidad operativa e infraestructura y mecanismos de respaldo de base de datos.
-4. Actores
-* Colaborador autenticado
-* Usuario nuevo pendiente de aceptacion LOPDP interna
-* Equipo TI
-* Jefe TI o administrador TI
-* Gerencia o Gerencia General
-* Jefe técnico o jefe de servicio técnico
-* Firmante documental
-* Revisor de seguridad
-* Auditor externo temporal
-* Usuario habilitado para correo con Gmail
-5. Justificacion general del área
-El Área 01 existe para sostener las capacidades transversales sin las cuales SPI no puede operar con gobierno técnico verificable. El sistema necesita saber quien accede, bajo que rol, desde que sesión y con que evidencia; necesita registrar eventos auditables, aislar eventos de seguridad, preparar documentación para auditorias, notificar hechos operativos, custodiar adjuntos y documentos generados, formalizar firmas avanzadas y permitir verificacion posterior de documentos. El área tambien necesita exponer visibilidad ejecutiva de partes concretas del dominio y permitir, cuando el proceso lo exige, el envio de correo desde la cuenta autorizada del usuario.
-6. Justificacion por módulo
-MóduloPor que existeComo opera a alto nivelCuando aplicaauthPara autenticar usuarios y controlar sesiones.Google OAuth, JWT, refresh, logout y perfil.Al iniciar, mantener o cerrar sesión.securityPara detectar y revisar eventos de acceso sensibles.Consulta auditoria, correlaciona notificaciones y permite revision TI.Cuando TI necesita revisar actividad de riesgo.auditoriaPara sostener trazabilidad institucional.Lista, filtra, detalla y exporta bitacora transversal.Cuando se requiere investigacion o evidencia.audit-prepPara preparar auditoria de forma controlada.Administra ventana, secciones, documentos y accesos externos.Antes y durante auditorias formales.approvalsPara resolver decisiones del flujo técnico soportado.Presenta pendientes y registra aprobaciones o rechazos.Cuando una solicitud requiere decision formal.managementPara entregar visibilidad gerencial del dominio.Expone metricas, listados, trazabilidad y documentos asociados.Durante seguimiento ejecutivo.signaturePara garantizar integridad y verificabilidad documental.Calcula hash, firma, sella, genera QR y verifica.Cuando un documento debe quedar formalizado.documentsPara generar documentos operativos controlados.Crea desde plantilla, permite firma posicionada y exporta PDF.Cuando una solicitud necesita documento formalizable.filesPara custodiar adjuntos por solicitud.Carga, lista, descarga y elimina archivos con control de rol.Cuando un flujo requiere anexos.notificationsPara informar eventos operativos al usuario.Lista, crea, marca como leidas y elimina notificaciones.Cuando el sistema o un rol autorizado debe avisar un evento.dashboardPara exponer resumen operacional del dominio montado.Devuelve metricas agregadas del dashboard comercial.Cuando el rol autorizado requiere resumen ejecutivo.gmailPara enviar correo desde la cuenta real del usuario.Gestiona OAuth, estado, envio y revocacion.Cuando el flujo requiere correo autenticado.7. Requerimientos funcionales del usuario
-* REQ-GD-001: El sistema debe autenticar usuarios internos mediante Google OAuth y crear una sesión trazable.
-* REQ-GD-002: El sistema debe emitir accessToken y refreshToken y permitir renovar la sesión activa valida.
-* REQ-GD-003: El sistema debe permitir consultar el perfil del usuario autenticado.
-* REQ-GD-004: El sistema debe permitir cerrar la sesión activa del usuario y registrar dicho cierre.
-* REQ-GD-005: El sistema debe permitir registrar la aceptacion interna de LOPDP con evidencia documental.
-* REQ-GD-006: El sistema debe registrar eventos criticos de login y eventos fuera de horario en la bitacora de auditoria.
-* REQ-GD-007: El sistema debe permitir a TI consultar, revisar y exportar eventos de login fuera de horario.
-* REQ-GD-008: El sistema debe permitir activar o desactivar una ventana de auditoria y definir sus fechas de vigencia.
-* REQ-GD-009: El sistema debe permitir administrar secciones y documentos de auditoria segun rol autorizado.
-* REQ-GD-010: El sistema debe permitir aprobar o rechazar solicitudes del flujo técnico habilitado y persistir la decision.
-* REQ-GD-011: El sistema debe permitir a gerencia consultar metricas, trazabilidad y documentos asociados a una solicitud.
-* REQ-GD-012: El sistema debe permitir crear documentos desde plantilla y recuperarlos por solicitud o identificador.
-* REQ-GD-013: El sistema debe permitir insertar firma posicionada, exportar PDF y escalar a firma avanzada segun el flujo soportado.
-* REQ-GD-014: El sistema debe permitir subir, listar, descargar y eliminar adjuntos segun rol.
-* REQ-GD-015: El sistema debe permitir listar notificaciones del usuario y conocer su conteo no leido.
-* REQ-GD-016: El sistema debe permitir crear notificaciones; solo roles privilegiados pueden direccionarlas a otros usuarios.
-* REQ-GD-017: El sistema debe permitir consultar el resumen operacional disponible en dashboard para roles autorizados.
-* REQ-GD-018: El sistema debe permitir autorizar Gmail, validar si la autorización existe, enviar correos y revocar el acceso.
-* REQ-GD-019: El sistema debe permitir firmar un documento con hash, sello institucional y QR de verificacion.
-* REQ-GD-020: El sistema debe permitir verificar publicamente un documento firmado mediante token de verificacion.
-8. Requerimientos no funcionales
-* Todo acceso autenticado debe pasar por validación JWT y control de rol aplicable.
-* Los eventos criticos deben dejar evidencia en auditoria.logs o en el log técnico propio del módulo.
-* La renovacion de sesión no debe operar sobre refresh tokens ya invalidados o sin sesión activa.
-* Los documentos y archivos deben respetar restricciones de tipo, tamano y permisos del flujo que los consuma.
-* La verificacion publica de firma debe estar protegida por rate limit y control de dependencias SQL.
-* Las notificaciones a terceros deben quedar restringidas a roles privilegiados.
-* El uso de Gmail debe depender de autorización valida del usuario y responder con error controlado cuando falte dicha autorización.
-9. Conclusion
-Los requerimientos de usuario del Área 01 se justifican por la necesidad institucional de mantener autenticación confiable, seguridad observable, trazabilidad transversal, preparacion documental de auditoria, decisiones soportadas, custodia de documentos y adjuntos, notificaciones operativas, visibilidad ejecutiva del dominio y firma documental verificable.
-FRS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-Esta sección desarrolla la especificacion funcional del área, detallando el comportamiento esperado de cada módulo, las reglas de negocio observadas y los criterios que permiten validar que la implementacion responde a lo requerido.
-1. Introducción
-La presente especificacion funcional describe el comportamiento verificable del Área 01 del sistema SPI. Su objetivo es traducir los requerimientos de usuario del dominio a funciones concretas observables en el sistema, explicando para cada módulo por que existe la funcion, como debe ejecutarse y cuando debe intervenir dentro de la operación real. Esta FRS se elaboro a partir del código vigente y de los contratos efectivamente expuestos por backend y frontend.
-2. Objetivo
-Definir de manera funcional y verificable las capacidades del Área 01, detallando el comportamiento esperado de auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail, junto con sus entradas, salidas, validaciones y contexto de ejecución.
-3. Alcance funcional
-El alcance de esta FRS comprende autenticación federada, control de sesión, monitoreo off-hours, consulta y exportacion de auditoria, preparacion documental, aprobaciones del flujo técnico soportado, visibilidad gerencial, gestión documental desde plantilla, custodia de adjuntos, notificaciones operativas, dashboard comercial montado y autorización/envio mediante Gmail.
-4. Requerimientos funcionales detallados
-FR-GD-001 Autenticación federada
-* Endpoints: GET /api/v1/auth/google, GET /api/v1/auth/google/callback.
-* Proceso: intercambio de code, resolucion de userinfo, creacion o actualizacion de usuario, generacion de JWT, registro de sesión, auditoria y redireccion al frontend.
-* Cuando aplica: cada vez que un usuario inicia sesión mediante el flujo corporativo.
-FR-GD-002 Perfil, refresh y logout
-* Endpoints: GET /api/v1/auth/me, POST /api/v1/auth/refresh, POST /api/v1/auth/logout.
-* me devuelve identidad y contexto; refresh valida que el refresh token corresponda a una sesión activa; logout cierra la sesión o sesiones activas asociadas.
-FR-GD-003 Aceptacion interna LOPDP
-* Endpoint: POST /api/v1/auth/lopdp/accept.
-* Valida aceptacion y archivos, crea carpeta y evidencia en Drive, actualiza users e inserta fila en user_lopdp_consents.
-FR-GD-004 Monitoreo de seguridad off-hours
-* Endpoints: GET /api/v1/security/offhours-logins, GET /api/v1/security/offhours-logins/:id/timeline, POST /api/v1/security/offhours-logins/:id/review, GET /api/v1/security/offhours-logins/export.
-* Lee auditoria.logs, correlaciona notifications, users y departments y permite exportacion saneada.
-FR-GD-005 Consulta de auditoria
-* Endpoints: GET /api/v1/auditoria, GET /api/v1/auditoria/:id, GET /api/v1/auditoria/export/csv.
-* Filtra, pagina, detalla y exporta bitacora transversal.
-FR-GD-006 Preparacion de auditoria
-* Endpoints: GET/PUT /api/v1/audit-prep/status, GET/POST /api/v1/audit-prep/sections, GET/POST/PATCH /api/v1/audit-prep/documents, GET/POST/DELETE /api/v1/audit-prep/external-access.
-* Mantiene settings, filtra secciones, registra audit_documents, crea carpetas Drive y limita accesos externos activos a dos.
-FR-GD-007 Aprobaciones operativas soportadas
-* Endpoints: GET /api/v1/approvals/pending, POST /api/v1/approvals/:id/approve, POST /api/v1/approvals/:id/reject.
-* Lista pendientes, actualiza requests.status, registra decision en request_approvals y dispara correo.
-FR-GD-008 Gestión gerencial
-* Endpoints: GET /api/v1/management/stats, GET /api/v1/management/requests, GET /api/v1/management/trace/:id, GET /api/v1/management/documents/:id.
-* Entrega metricas, solicitudes, trazabilidad y soporte documental del dominio.
-FR-GD-009 Gestión documental desde plantilla
-* Endpoints: POST /api/v1/documents/from-template, GET /api/v1/documents/by-request/:requestId, GET /api/v1/documents/:documentId, POST /api/v1/documents/:documentId/sign, POST /api/v1/documents/:documentId/sign-advanced, POST /api/v1/documents/:documentId/export-pdf.
-* Crea documentos desde plantilla, permite firma posicionada o avanzada y exporta PDF.
-FR-GD-010 Gestión de adjuntos
-* Endpoints: POST /api/v1/files/upload/:requestId, GET /api/v1/files/by-request/:requestId, GET /api/v1/files/:fileId/metadata, GET /api/v1/files/:fileId/download, DELETE /api/v1/files/:fileId.
-* Custodia anexos con carga multiple, metadata, descarga y borrado controlado.
-FR-GD-011 Notificaciones operativas
-* Endpoints: GET /api/v1/notifications, POST /api/v1/notifications, PATCH /api/v1/notifications/read-all, PATCH /api/v1/notifications/:id/read, DELETE /api/v1/notifications/clear, DELETE /api/v1/notifications/:id.
-* Lista la bandeja del usuario, crea notificaciones y controla lectura o eliminacion.
-FR-GD-012 Dashboard operacional montado
-* Endpoint: GET /api/v1/dashboard/comercial/summary.
-* Exige autenticación, rol permitido y permite fresh=1 para refresco de cache.
-FR-GD-013 Autorización y envio mediante Gmail
-* Endpoints: GET /api/v1/gmail/auth/url, GET /api/v1/gmail/auth/callback, GET /api/v1/gmail/auth/status, POST /api/v1/gmail/send, DELETE /api/v1/gmail/auth/revoke.
-* Genera URL de autorización, guarda tokens en user_gmail_tokens, informa estado, envia correo y revoca acceso.
-FR-GD-014 Firma avanzada y verificacion publica
-* Endpoints: POST /api/v1/signature/documents/:documentId/sign, GET /api/v1/signature/verificar/:token, GET /api/v1/signature/documents/:documentId/audit-trail, GET /api/v1/signature/dashboard.
-* Calcula hash, registra firma avanzada, genera sello y QR, bloquea documento, verifica y expone metricas.
-5. Flujos principales
-Flujo A - Login corporativo
-PasoActividad1Usuario inicia loginSiguiente paso2Google OAuthSiguiente paso3Callback backendSiguiente paso4Crear/actualizar usuarioSiguiente paso5Crear sesión y tokensSiguiente paso6Auditoria y off-hoursSiguiente paso7Frontend con sesión operativaFlujo B - Revision off-hours
-PasoActividad1Login fuera de horarioSiguiente paso2auditoria.logsSiguiente paso3Relacion con notificationsSiguiente paso4Consulta TISiguiente paso5Timeline y detalleSiguiente paso6Revision y cierreFlujo C - Preparacion y custodia documental de auditoria
-PasoActividad1Activar auditoriaSiguiente paso2Definir seccionesSiguiente paso3Cargar documentoSiguiente paso4Persistir audit_documents + DriveSiguiente paso5Descarga por rolSiguiente paso6Alta/revocacion de acceso externoFlujo D - Gestión documental y firma
-PasoActividad1Crear desde plantillaSiguiente paso2Recuperar documentoSiguiente paso3Firma posicionada o avanzadaSiguiente paso4Exportar PDFSiguiente paso5Sello, QR y bloqueoSiguiente paso6Verificacion publicaFlujo E - Notificacion y correo autenticado
-PasoActividad1Evento operativoSiguiente paso2Crear notificacionSiguiente paso3Usuario lista/lee/limpiaSiguiente paso4Si requiere correoSiguiente paso5OAuth GmailSiguiente paso6Enviar emailSiguiente paso7Auditoria del envio6. Conclusion
-La FRS del Área 01 deja descrito el comportamiento funcional real del dominio ampliado. El área incorpora gestión documental, notificaciones, adjuntos, dashboard operacional y Gmail donde existe evidencia técnica de montaje y consumo.
-DDS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-En esta sección se describe el diseño técnico del área, incluyendo arquitectura aplicativa, responsabilidades por módulo, contratos relevantes, dependencias transversales y consideraciones de integración necesarias para la validación técnica.
-1. Introducción
-El presente documento describe el diseño técnico real del Área 01 del sistema SPI. Su objetivo no es solamente enumerar archivos, rutas y tablas, sino explicar por que cada componente técnico existe dentro del dominio, como se relaciona con los demas módulos y cuando interviene dentro de los flujos transversales de autenticación, seguridad, auditoria, aprobaciones, gestión documental, notificaciones, dashboards y firma.
-2. Objetivo
-Documentar la arquitectura, los componentes técnicos, las dependencias, las integraciónes y los mecanismos de control que soportan el Área 01.
-3. Arquitectura del área
-3.1 Capas
-* Frontend React.
-* API Express.
-* Servicios de negocio por módulo.
-* Persistencia PostgreSQL.
-* Integraciónes Google OAuth, Drive, Docs y Gmail.
-* Jobs internos y utilitarios de soporte.
-3.2 Ruteo y seguridad global
-* app.js monta autenticación publica en /api/v1/auth.
-* signature conserva montaje histórico en /api y expone alias versionado en /api/v1/signature.
-* documents, files, notifications, dashboard y gmail estan montados en runtime bajo /api/v1.
-* verifyToken protege todo lo no exceptuado.
-* requireRole concentra control de acceso por módulo.
-* auditMiddleware deja trazabilidad transversal.
-4. Integraciónes del área
-IntegraciónPor que existeComo se usaCuando intervieneGoogle OAuthPara delegar autenticación federada y autorización de GmailIntercambio de code, consulta de userinfo y obtencion de tokens OAuthDurante login y autorización GmailGoogle DrivePara custodiar evidencia documental y archivos asociadosCreacion de carpetas, carga de archivos y enlace a metadatos persistidosDurante LOPDP, audit-prep y generacion documentalGoogle DocsPara generar o modificar documentos basePlantillas, contenido y exportacion posteriorDurante documentsGmail APIPara enviar correo desde la cuenta autorizada del usuarioOAuth por usuario, consulta de estado, envio y revocacionDurante flujos que exigen correo autenticadoFunciones SQL de firmaPara consolidar sello, QR y verificacion documentalLlamadas a funciones y vistas especializadas de base de datosDurante firma y verificacion publica4.1 Delimitacion frente a respaldo de base de datos
-El repositorio contiene un job técnico de respaldo de base de datos hacia Google Drive, expuesto por internalJobs.routes.js y materializado en databaseBackupToDrive.js. Ese mecanismo no forma parte del dominio funcional del Área 01 y debe tratarse en un expediente separado de infraestructura o continuidad TI.
-5. Diseño por módulo
-auth
-Usa Google OAuth, crea o actualiza usuario, emite JWT, registra sesión y soporta perfil, refresh, logout y aceptacion documental interna.
-security
-Lee eventos desde auditoria.logs, enlaza notificaciones y contexto de usuario, sanea salida y permite consulta, revision, timeline y exportacion.
-auditoria
-Filtra, pagina y exporta registros de auditoria.logs para investigacion y evidencia.
-audit-prep
-Mantiene audit_settings, filtra audit_sections, registra audit_documents y controla accesos externos temporales.
-approvals
-Consulta pendientes sobre requests, registra decisiones en request_approvals, actualiza estado y dispara notificacion o correo.
-management
-Agrega metricas desde requests, lista solicitudes, consulta trazabilidad en auditoria.logs y relaciona adjuntos y versiones.
-documents
-createFromTemplate crea documentos, signAtTag inserta firma grafica, signAdvanced escala a firma avanzada, exportPdf genera salida PDF y los endpoints de lectura recuperan el documento por solicitud o identificador.
-files
-Usa multer con almacenamiento temporal en /tmp, permite carga multiple, listado por solicitud, metadata, descarga y borrado controlado.
-notifications
-Lista notificaciones y conteo no leido, crea notificaciones propias o cruzadas segun rol y permite marcar lectura, limpiar historial o eliminar una notificacion.
-dashboard
-Expone GET /api/v1/dashboard/comercial/summary, usa cache opcional y clasifica errores de esquema o base de datos.
-gmail
-Genera URL de autorización OAuth, procesa callback publico, persiste tokens en user_gmail_tokens, verifica estado de autorización, envia correos y revoca acceso.
-signature
-Calcula hash, registra firma avanzada, genera sello y QR, bloquea documento y expone verificacion publica y dashboard.
-6. Modelo técnico de datos
-Entidades principales
-* users
-* departments
-* user_sessions
-* user_lopdp_consents
-* user_gmail_tokens
-* auditoria.logs
-* notifications
-* requests
-* request_types
-* request_approvals
-* request_attachments
-* request_versions
-* audit_settings
-* audit_sections
-* audit_documents
-* audit_access_grants
-* documents
-* document_hashes
-* document_signatures_advanced
-* document_seals
-* document_qr_codes
-* document_signature_logs
-* document_verification_info
-7. API real del área
-* auth: /api/v1/auth/*
-* security: /api/v1/security/*
-* auditoria: /api/v1/auditoria/*
-* audit-prep: /api/v1/audit-prep/*
-* approvals: /api/v1/approvals/*
-* management: /api/v1/management/*
-* documents: /api/v1/documents/*
-* files: /api/v1/files/*
-* notifications: /api/v1/notifications/*
-* dashboard: /api/v1/dashboard/comercial/summary
-* gmail: /api/v1/gmail/*
-* signature: /api/ y /api/v1/signature/
-8. Frontend consumidor relevante
-* spi_front/src/modules/shared/pages/LoginCallback.jsx
-* spi_front/src/modules/audit-prep/AuditPrepPage.jsx
-* spi_front/src/modules/auditoria/*
-* spi_front/src/modules/signature/pages/SignatureDashboard.jsx
-* spi_front/src/core/ui/NotificationContext.jsx
-* spi_front/src/core/ui/components/NotificationBell.jsx
-* spi_front/src/core/ui/widgets/GmailAuthWidget.jsx
-* spi_front/src/core/api/documentsApi.js
-* spi_front/src/core/api/filesApi.js
-* spi_front/src/core/api/notificationsApi.js
-* spi_front/src/core/api/dashboardApi.js
-9. Conclusion
-El diseño técnico del Área 01 muestra un dominio transversal que articula autenticación, seguridad, auditoria, preparacion documental, documentos formales, adjuntos, notificaciones, dashboard y correo autenticado con una base técnica verificable en runtime.
-DICCIONARIO DE DATOS
-Esta sección documenta las entidades de datos, campos, relaciones e indices que soportan el funcionamiento real del área, tomando como fuente la estructura vigente de base de datos y su correspondencia con el código en operación.
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-1. Introducción
-El presente diccionario de datos documenta las estructuras persistentes que soportan el funcionamiento real del Área 01. Su funcion es explicar no solo que tablas, vistas y campos existen, sino tambien por que forman parte del dominio, como se relacionan con los módulos del área y cuando intervienen dentro de los flujos auditables, gerenciales o documentales del sistema.
-2. Objetivo
-Documentar las estructuras de datos reales consumidas por los módulos auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail, tomando como fuente la base vigente en Neon y justificando su uso dentro del dominio de Gobierno, Seguridad, Cumplimiento y Gestión Documental.
-3. Fuente de verdad
-* Motor consultado: PostgreSQL en Neon.
-* Base consultada: FamSPI.
-* Extraccion realizada desde catalogos reales (information_schema, pg_catalog).
-* Regla aplicada: cuando el código usa objetos distintos a los existentes en Neon, se registra como discrepancia técnica.
-4. Criterio de inclusion
-Las entidades incluidas en este diccionario fueron seleccionadas porque participan de manera directa en alguno de los siguientes escenarios:
-* autenticación y manejo de sesión
-* trazabilidad y bitacora del sistema
-* revision de seguridad
-* preparacion documental de auditoria
-* decisiones de aprobacion del flujo soportado
-* consulta gerencial de solicitudes y evidencia
-* generacion documental desde plantilla
-* custodia de adjuntos por solicitud
-* notificaciones operativas por usuario
-* autorización y uso de Gmail donde existe persistencia verificable
-* firma avanzada, verificacion y auditoria documental
-5. Como leer este diccionario
-Cada entidad documentada incluye:
-* tipo de objeto
-* módulos consumidores
-* justificacion funcional o técnica de uso
-* clave primaria y relaciones visibles
-* definicion de campos relevantes
-* indices visibles cuando aportan criterio de desempeño o trazabilidad
-6. Tablas y vistas incluidas
-* auditoria.logs (table)
-* public.audit_access_grants (table)
-* public.audit_documents (table)
-* public.audit_sections (table)
-* public.audit_settings (table)
-* public.departments (table)
-* public.document_hashes (table)
-* public.document_qr_codes (table)
-* public.document_seals (table)
-* public.document_signature_logs (table)
-* public.document_signatures_advanced (table)
-* public.document_verification_info (view)
-* public.documents (table)
-* public.notifications (table)
-* public.request_approvals (table)
-* public.request_attachments (table)
-* public.request_types (table)
-* public.request_versions (table)
-* public.requests (table)
-* public.user_attendance_records (table)
-* public.user_lopdp_consents (table)
-* public.user_profile (table)
-* public.user_sessions (table)
-* public.users (table)
-7. Cuando intervienen estas entidades
-* users, departments, user_sessions, user_profile y user_lopdp_consents intervienen durante autenticaciÃ³n, perfil, sesiones y aceptaciÃ³n interna.
-* auditoria.logs y notifications intervienen cuando el sistema registra, expone o revisa eventos relevantes.
-* audit_* intervienen durante preparaciÃ³n documental y control de auditorÃa.
-* requests, request_types, request_approvals, request_attachments y request_versions intervienen durante decisiones operativas y visibilidad gerencial.
-* documents y document_* intervienen durante firma avanzada, verificaciÃ³n pÃºblica y audit trail documental.
-8. Diccionario por entidad
-auditoria.logs
-* Tipo de objeto: table.
-* Módulos que la consumen: auth, auditoria, security, approvals.
-* Descripcion: Registra todas las acciones de usuarios del sistema SPI Fam (creaciones, modificaciones, logins, etc.)
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('auditoria.logs_id_seq'::regclass)usuario_idintegerYESusuario_emailcharacter varyingYESCorreo del usuario que realizÃƒÂ³ la acciÃƒÂ³nrolcharacter varyingYESmódulocharacter varyingYESMÃƒÂ³dulo afectado (auth, solicitudes, mantenimientos, etc.)accioncharacter varyingYESTipo de acciÃƒÂ³n (CREATE, UPDATE, DELETE, LOGIN, APPROVE, etc.)descripciontextYESDescripciÃƒÂ³n amigable de la acciÃƒÂ³n realizadadatos_anterioresjsonbYESJSON con los datos antes del cambiodatos_nuevosjsonbYESJSON con los datos despuÃƒÂ(c)s del cambioipcharacter varyingYESuser_agenttextYESfechatimestamp without time zoneYESCURRENT_TIMESTAMPFecha y hora del evento registradoduracion_msintegerYESrequest_idintegerYESmantenimiento_idintegerYESinventario_idintegerYESautobooleanYESfalsecreado_entimestamp with time zoneYESnow()* Indices visibles:
-* idx_auditoria_accion: CREATE INDEX idx_auditoria_accion ON auditoria.logs USING btree (accion)
-* idx_auditoria_fecha: CREATE INDEX idx_auditoria_fecha ON auditoria.logs USING btree (fecha DESC)
-* idx_auditoria_modulo: CREATE INDEX idx_auditoria_modulo ON auditoria.logs USING btree (módulo)
-* idx_auditoria_usuario: CREATE INDEX idx_auditoria_usuario ON auditoria.logs USING btree (usuario_email)
-* logs_pkey: CREATE UNIQUE INDEX logs_pkey ON auditoria.logs USING btree (id)
-public.audit_access_grants
-* Tipo de objeto: table.
-* Módulos que la consumen: audit-prep.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* created_by -> public.users.id
-* revoked_by -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('audit_access_grants_id_seq'::regclass)emailtextNOdisplay_nametextYESexpires_attimestamp with time zoneYESactivebooleanNOtruecreated_byintegerYEScreated_attimestamp with time zoneNOnow()revoked_attimestamp with time zoneYESrevoked_byintegerYES* Indices visibles:
-* audit_access_grants_pkey: CREATE UNIQUE INDEX audit_access_grants_pkey ON public.audit_access_grants USING btree (id)
-public.audit_documents
-* Tipo de objeto: table.
-* Módulos que la consumen: audit-prep.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* section_code -> public.audit_sections.code
-* uploaded_by -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('audit_documents_id_seq'::regclass)section_codetextNOnametextNOstatustextNO'pendiente'::textdrive_file_idtextYESdrive_folder_idtextYESuploaded_byintegerYESuploaded_attimestamp with time zoneYESmetadatajsonbNO'{}'::jsonbcreated_attimestamp with time zoneNOnow()updated_attimestamp with time zoneNOnow()* Indices visibles:
-* audit_documents_pkey: CREATE UNIQUE INDEX audit_documents_pkey ON public.audit_documents USING btree (id)
-* idx_audit_documents_section: CREATE INDEX idx_audit_documents_section ON public.audit_documents USING btree (section_code)
-* idx_audit_documents_status: CREATE INDEX idx_audit_documents_status ON public.audit_documents USING btree (status)
-public.audit_sections
-* Tipo de objeto: table.
-* Módulos que la consumen: audit-prep.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('audit_sections_id_seq'::regclass)codetextNOtitletextNOdescriptiontextYESáreatextYESstorage_pathtextYESallowed_roles_text[]NO'{}'::text[]orderingintegerNO0activebooleanNOtruemetadatajsonbNO'{}'::jsonbcreated_attimestamp with time zoneNOnow()updated_attimestamp with time zoneNOnow()* Indices visibles:
-* audit_sections_code_key: CREATE UNIQUE INDEX audit_sections_code_key ON public.audit_sections USING btree (code)
-* audit_sections_pkey: CREATE UNIQUE INDEX audit_sections_pkey ON public.audit_sections USING btree (id)
-public.audit_settings
-* Tipo de objeto: table.
-* Módulos que la consumen: audit-prep.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidsmallintNO1audit_modebooleanNOfalseaudit_start_datetimestamp with time zoneYESaudit_end_datetimestamp with time zoneYESdrive_root_idtextYESchecklist_schemajsonbNO'{}'::jsonbcreated_attimestamp with time zoneNOnow()updated_attimestamp with time zoneNOnow()* Indices visibles:
-* audit_settings_pkey: CREATE UNIQUE INDEX audit_settings_pkey ON public.audit_settings USING btree (id)
-public.departments
-* Tipo de objeto: table.
-* Módulos que la consumen: auth.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('departments_id_seq'::regclass)codecharacter varyingNOnamecharacter varyingNOdescriptiontextYEScreated_attimestamp without time zoneYESnow()updated_attimestamp without time zoneYESnow()* Indices visibles:
-* departments_code_key: CREATE UNIQUE INDEX departments_code_key ON public.departments USING btree (code)
-* departments_pkey: CREATE UNIQUE INDEX departments_pkey ON public.departments USING btree (id)
-public.document_hashes
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: Cryptographic hashes for document integrity verification
-* Clave primaria: id
-* Relaciones foraneas:
-* calculated_by -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('document_hashes_id_seq'::regclass)document_idbigintNOdocument_typecharacter varyingNOType of document: pdf, docx, excel, etc.hash_sha256character varyingNOSHA-256 hash of the document contenthash_algorithmcharacter varyingYES'SHA-256'::character varyingcalculated_attimestamp with time zoneYESnow()calculated_byintegerYESis_currentbooleanYEStrueTrue if this is the current valid hash for the document* Indices visibles:
-* document_hashes_pkey: CREATE UNIQUE INDEX document_hashes_pkey ON public.document_hashes USING btree (id)
-* idx_document_hashes_current: CREATE INDEX idx_document_hashes_current ON public.document_hashes USING btree (document_id, is_current) WHERE (is_current = true)
-* idx_document_hashes_document_id: CREATE INDEX idx_document_hashes_document_id ON public.document_hashes USING btree (document_id)
-* unique_current_hash: CREATE UNIQUE INDEX unique_current_hash ON public.document_hashes USING btree (document_id, is_current)
-public.document_qr_codes
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: QR codes for public document verification
-* Clave primaria: id
-* Relaciones foraneas:
-* document_id -> public.documents.id
-* seal_id -> public.document_seals.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('document_qr_codes_id_seq'::regclass)document_idbigintNOseal_idintegerYESqr_codetextNOBase64 encoded QR code imageqr_urltextNOPublic URL for document verificationverification_tokenuuidYESgen_random_uuid()Token for public verification endpointgenerated_attimestamp with time zoneYESnow()expires_attimestamp with time zoneYESis_activebooleanYEStrueaccess_countintegerYES0last_accessed_attimestamp with time zoneYES* Indices visibles:
-* document_qr_codes_pkey: CREATE UNIQUE INDEX document_qr_codes_pkey ON public.document_qr_codes USING btree (id)
-* idx_document_qr_codes_active: CREATE INDEX idx_document_qr_codes_active ON public.document_qr_codes USING btree (is_active) WHERE (is_active = true)
-* idx_document_qr_codes_document_id: CREATE INDEX idx_document_qr_codes_document_id ON public.document_qr_codes USING btree (document_id)
-* idx_document_qr_codes_seal_id: CREATE INDEX idx_document_qr_codes_seal_id ON public.document_qr_codes USING btree (seal_id)
-* idx_document_qr_codes_token: CREATE INDEX idx_document_qr_codes_token ON public.document_qr_codes USING btree (verification_token)
-* idx_document_qr_codes_verification: CREATE INDEX idx_document_qr_codes_verification ON public.document_qr_codes USING btree (document_id, is_active, verification_token)
-public.document_seals
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: Institutional digital seals for document authentication
-* Clave primaria: id
-* Relaciones foraneas:
-* authorized_user_id -> public.users.id
-* document_hash_id -> public.document_hashes.id
-* document_id -> public.documents.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('document_seals_id_seq'::regclass)document_idbigintNOseal_codecharacter varyingNOUnique institutional seal code (format: SPI-YYYY-TYPE-NNNNN)seal_typecharacter varyingYES'institutional'::character varyingissued_bycharacter varyingYES'SPI Fam'::character varyingauthorized_rolecharacter varyingNORole that authorized the seal (DPD, Manager, etc.)authorized_user_idintegerYESseal_tokenuuidYESgen_random_uuid()Unique token for seal verification and API accessdocument_hash_idintegerYESissued_attimestamp with time zoneYESnow()expires_attimestamp with time zoneYESis_activebooleanYEStruecreated_attimestamp with time zoneYESnow()* Indices visibles:
-* document_seals_pkey: CREATE UNIQUE INDEX document_seals_pkey ON public.document_seals USING btree (id)
-* document_seals_seal_code_key: CREATE UNIQUE INDEX document_seals_seal_code_key ON public.document_seals USING btree (seal_code)
-* idx_document_seals_active: CREATE INDEX idx_document_seals_active ON public.document_seals USING btree (is_active) WHERE (is_active = true)
-* idx_document_seals_document_id: CREATE INDEX idx_document_seals_document_id ON public.document_seals USING btree (document_id)
-* idx_document_seals_seal_code: CREATE INDEX idx_document_seals_seal_code ON public.document_seals USING btree (seal_code)
-* idx_document_seals_token: CREATE INDEX idx_document_seals_token ON public.document_seals USING btree (seal_token)
-* idx_document_seals_verification: CREATE INDEX idx_document_seals_verification ON public.document_seals USING btree (document_id, is_active, seal_token)
-public.document_signature_logs
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* user_id -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('document_signature_logs_id_seq'::regclass)document_idbigintNOevent_typecharacter varyingNOevent_descriptiontextYESuser_idintegerYESuser_namecharacter varyingYESuser_rolecharacter varyingYESuser_emailcharacter varyingYESip_addressinetYESuser_agenttextYESsession_idcharacter varyingYESevent_hashcharacter varyingNOprevious_event_hashcharacter varyingYESevent_datajsonbYESevent_timestamptimestamp with time zoneYESnow()created_attimestamp with time zoneYESnow()* Indices visibles:
-* document_signature_logs_pkey: CREATE UNIQUE INDEX document_signature_logs_pkey ON public.document_signature_logs USING btree (id)
-public.document_signatures_advanced
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: Advanced electronic signatures with full audit trail
-* Clave primaria: id
-* Relaciones foraneas:
-* document_hash_id -> public.document_hashes.id
-* document_id -> public.documents.id
-* signer_user_id -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('document_signatures_advanced_id_seq'::regclass)document_idbigintNOsigner_user_idintegerNOsigner_rolecharacter varyingNORole of the signer at the time of signingsignature_typecharacter varyingYES'advanced_electronic'::character varyingType of signature: advanced_electronic, qualified, etc.signer_namecharacter varyingNOsigner_emailcharacter varyingNOsigner_departmentcharacter varyingYESsigned_attimestamp with time zoneYESnow()ip_addressinetNOuser_agenttextYESsession_idcharacter varyingYESauth_methodcharacter varyingYES'oauth_corporate'::character varyingAuthentication method used: oauth_corporate, certificate, etc.document_hash_idintegerYESReference to the document hash at time of signingsignature_hashcharacter varyingYESHash of the complete signature record for tamper detectionis_validbooleanYEStrueinvalidated_attimestamp with time zoneYESinvalidation_reasontextYEScreated_attimestamp with time zoneYESnow()* Indices visibles:
-* document_signatures_advanced_pkey: CREATE UNIQUE INDEX document_signatures_advanced_pkey ON public.document_signatures_advanced USING btree (id)
-* idx_document_signatures_advanced_document_id: CREATE INDEX idx_document_signatures_advanced_document_id ON public.document_signatures_advanced USING btree (document_id)
-* idx_document_signatures_advanced_signed_at: CREATE INDEX idx_document_signatures_advanced_signed_at ON public.document_signatures_advanced USING btree (signed_at DESC)
-* idx_document_signatures_advanced_signer: CREATE INDEX idx_document_signatures_advanced_signer ON public.document_signatures_advanced USING btree (signer_user_id)
-* idx_document_signatures_advanced_valid: CREATE INDEX idx_document_signatures_advanced_valid ON public.document_signatures_advanced USING btree (is_valid) WHERE (is_valid = true)
-public.document_verification_info
-* Tipo de objeto: view.
-* Módulos que la consumen: signature.
-* Descripcion: Complete verification information for documents with seals and QR codes
-* Clave primaria: No aplica / no visible.
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentariodocument_idbigintYESdoc_drive_idtextYESpdf_drive_idtextYESsignature_statuscharacter varyingYESis_lockedbooleanYESseal_codecharacter varyingYESseal_tokenuuidYESissued_bycharacter varyingYESauthorized_rolecharacter varyingYESissued_attimestamp with time zoneYESseal_activebooleanYESqr_urltextYESverification_tokenuuidYESaccess_countintegerYESlast_accessed_attimestamp with time zoneYESqr_activebooleanYEShash_sha256character varyingYEShash_calculated_attimestamp with time zoneYESlast_signed_attimestamp with time zoneYESlast_signer_namecharacter varyingYESlast_signer_rolecharacter varyingYESpublic.documents
-* Tipo de objeto: table.
-* Módulos que la consumen: signature.
-* Descripcion: Documentos generados desde plantillas: DOCX/PDF/firma y carpeta Drive por request.
-* Clave primaria: id
-* Relaciones foraneas:
-* current_hash_id -> public.document_hashes.id
-* locked_by -> public.users.id
-* request_id -> public.requests.id
-* request_type_id -> public.request_types.id
-CampoTipoNuloDefaultComentarioidbigintNOnextval('documents_id_seq'::regclass)request_idintegerNOrequest_type_idintegerNOdoc_drive_idtextYESpdf_drive_idtextYESfolder_drive_idtextYESversion_numberintegerYES1signedbooleanYESfalsecreated_attimestamp without time zoneYESnow()updated_attimestamp without time zoneYESnow()signature_statuscharacter varyingYES'pending'::character varyingStatus: pending, signed, locked, expiredcurrent_hash_idintegerYESReference to the current document hashis_lockedbooleanYESfalseTrue if document is locked after signinglocked_attimestamp with time zoneYESTimestamp when document was lockedlocked_byintegerYESUser who locked the document* Indices visibles:
-* documents_pkey: CREATE UNIQUE INDEX documents_pkey ON public.documents USING btree (id)
-* idx_documents_request_id: CREATE INDEX idx_documents_request_id ON public.documents USING btree (request_id)
-public.notifications
-* Tipo de objeto: table.
-* Módulos que la consumen: auth, security, approvals.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* user_id -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('notifications_id_seq'::regclass)user_idintegerNOtitlecharacter varyingNOmessagetextYEStypecharacter varyingYES'info'::character varyingsourcecharacter varyingYESstatuscharacter varyingYES'unread'::character varyingpriorityintegerYES0metajsonbYES'{}'::jsonbcreated_attimestamp with time zoneYESnow()read_attimestamp with time zoneYES* Indices visibles:
-* idx_notifications_status: CREATE INDEX idx_notifications_status ON public.notifications USING btree (status)
-* idx_notifications_user: CREATE INDEX idx_notifications_user ON public.notifications USING btree (user_id)
-* notifications_pkey: CREATE UNIQUE INDEX notifications_pkey ON public.notifications USING btree (id)
-public.request_approvals
-* Tipo de objeto: table.
-* Módulos que la consumen: approvals.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* approver_id -> public.users.id
-* request_id -> public.requests.id
-* Restricciones CHECK relevantes:
-* CHECK (((action IS NULL) OR (action = ANY (ARRAY['approve'::text, 'reject'::text])))) NOT VALID
-CampoTipoNuloDefaultComentarioidintegerNOnextval('request_approvals_id_seq'::regclass)request_idintegerYESapprover_idintegerYEStokentextYEStoken_expires_attimestamp without time zoneYESusedbooleanYESfalseactiontextYEScommentstextYESacted_attimestamp without time zoneYES* Indices visibles:
-* idx_request_approvals_pending: CREATE INDEX idx_request_approvals_pending ON public.request_approvals USING btree (used, token_expires_at)
-* request_approvals_pkey: CREATE UNIQUE INDEX request_approvals_pkey ON public.request_approvals USING btree (id)
-* request_approvals_token_key: CREATE UNIQUE INDEX request_approvals_token_key ON public.request_approvals USING btree (token)
-public.request_attachments
-* Tipo de objeto: table.
-* Módulos que la consumen: management.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* request_id -> public.requests.id
-* uploaded_by -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('request_attachments_id_seq'::regclass)request_idintegerYESdrive_file_idtextYESfilenametextYESmimetypetextYESuploaded_byintegerYEScreated_attimestamp without time zoneYESnow()drive_linktextYESmime_typetextYESsizebigintYEStitletextYES* Indices visibles:
-* idx_request_attachments_request: CREATE INDEX idx_request_attachments_request ON public.request_attachments USING btree (request_id)
-* request_attachments_pkey: CREATE UNIQUE INDEX request_attachments_pkey ON public.request_attachments USING btree (id)
-public.request_types
-* Tipo de objeto: table.
-* Módulos que la consumen: management, signature.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('request_types_id_seq'::regclass)titletextNOdrive_folder_idtextYESschemajsonbYEScreated_attimestamp without time zoneYESnow()codetextNOversióntextYESreferencetextYEStemplate_doc_idtextYES* Indices visibles:
-* idx_request_types_schema_gin: CREATE INDEX idx_request_types_schema_gin ON public.request_types USING gin (schema)
-* request_types_code_unique: CREATE UNIQUE INDEX request_types_code_unique ON public.request_types USING btree (code)
-* request_types_pkey: CREATE UNIQUE INDEX request_types_pkey ON public.request_types USING btree (id)
-public.request_versions
-* Tipo de objeto: table.
-* Módulos que la consumen: management.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* request_id -> public.requests.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('request_versions_id_seq'::regclass)request_idintegerYESversion_numberintegerYESpayloadjsonbYEScreated_attimestamp without time zoneYESnow()* Indices visibles:
-* request_versions_pkey: CREATE UNIQUE INDEX request_versions_pkey ON public.request_versions USING btree (id)
-* uidx_request_versions_req_ver: CREATE UNIQUE INDEX uidx_request_versions_req_ver ON public.request_versions USING btree (request_id, version_number)
-public.requests
-* Tipo de objeto: table.
-* Módulos que la consumen: approvals, management, signature.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* origin_department_id -> public.departments.id
-* request_type_id -> public.request_types.id
-* requester_id -> public.users.id
-* Restricciones CHECK relevantes:
-* CHECK ((status = ANY (ARRAY['pendiente'::text, 'en_revision'::text, 'aprobado'::text, 'rechazado'::text, 'cancelado'::text])))
-CampoTipoNuloDefaultComentarioidintegerNOnextval('requests_id_seq'::regclass)requester_idintegerNOstatustextYES'pendiente'::textversion_numberintegerYES1created_attimestamp without time zoneYESnow()updated_attimestamp without time zoneYESnow()request_group_iduuidYESrequest_type_idintegerYESpayloadjsonbYESacta_generadabooleanYESfalselegacy_purchase_iduuidYESReverse mapping to legacy purchase for debuggingdrive_comercial_folder_idtextYESGoogle Drive folder ID for the main "Comercial" folder at root leveldrive_user_folder_idtextYESGoogle Drive folder ID for the user-specific folder within "Comercial"drive_type_folder_idtextYESGoogle Drive folder ID for the request type folder (e.g., "InspecciÃƒÂ³n de Ambiente")drive_request_folder_idtextYESGoogle Drive folder ID for the specific request folder (REQ-xxxx)origin_department_idintegerYESorigin_department_nametextYES* Indices visibles:
-* idx_requests_created_at: CREATE INDEX idx_requests_created_at ON public.requests USING btree (created_at)
-* idx_requests_drive_comercial_folder: CREATE INDEX idx_requests_drive_comercial_folder ON public.requests USING btree (drive_comercial_folder_id) WHERE (drive_comercial_folder_id IS NOT NULL)
-* idx_requests_drive_request_folder: CREATE INDEX idx_requests_drive_request_folder ON public.requests USING btree (drive_request_folder_id) WHERE (drive_request_folder_id IS NOT NULL)
-* idx_requests_drive_type_folder: CREATE INDEX idx_requests_drive_type_folder ON public.requests USING btree (drive_type_folder_id) WHERE (drive_type_folder_id IS NOT NULL)
-* idx_requests_drive_user_folder: CREATE INDEX idx_requests_drive_user_folder ON public.requests USING btree (drive_user_folder_id) WHERE (drive_user_folder_id IS NOT NULL)
-* idx_requests_legacy_purchase_id: CREATE INDEX idx_requests_legacy_purchase_id ON public.requests USING btree (legacy_purchase_id) WHERE (legacy_purchase_id IS NOT NULL)
-* idx_requests_payload_gin: CREATE INDEX idx_requests_payload_gin ON public.requests USING gin (payload)
-* idx_requests_status: CREATE INDEX idx_requests_status ON public.requests USING btree (status)
-* requests_pkey: CREATE UNIQUE INDEX requests_pkey ON public.requests USING btree (id)
-public.user_attendance_records
-* Tipo de objeto: table.
-* Módulos que la consumen: auth (referencia transversal).
-* Descripcion: Daily attendance records per user with entry, lunch, and exit times. Integrates with user signatures from lopdp_internal_signature_file_id.
-* Clave primaria: id
-* Relaciones foraneas:
-* user_id -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('user_attendance_records_id_seq'::regclass)user_idintegerNOForeign key to users tabledatedateNODate of the attendance record (without time component)entry_timetimestamp with time zoneYESTimestamp when user clocked in for the daylunch_start_timetimestamp with time zoneYESTimestamp when user started lunch break (requires signature)lunch_end_timetimestamp with time zoneYESTimestamp when user returned from lunch breakexit_timetimestamp with time zoneYESTimestamp when user clocked out for the day (requires signature)notestextYESOptional notes for special circumstances (late arrival, early departure, etc.)created_attimestamp with time zoneYESnow()updated_attimestamp with time zoneYESnow()entry_locationtextYESlunch_start_locationtextYESlunch_end_locationtextYESexit_locationtextYESis_overtimebooleanYESfalseIndicates if the user worked overtime on this dayovertime_hoursnumericYES0.00Number of overtime hours worked (automatically calculated)total_hoursnumericYES0.00Total hours worked including overtimeentry_location_accuracynumericYESentry_location_timestamptimestamp with time zoneYESentry_location_sourcetextYES'gps'::textlunch_start_location_accuracynumericYESlunch_start_location_timestamptimestamp with time zoneYESlunch_start_location_sourcetextYES'gps'::textlunch_end_location_accuracynumericYESlunch_end_location_timestamptimestamp with time zoneYESlunch_end_location_sourcetextYES'gps'::textexit_location_accuracynumericYESexit_location_timestamptimestamp with time zoneYESexit_location_sourcetextYES'gps'::textauto_shift_end_attimestamp with time zoneYESCalculated timestamp when 8h shift should end (entry_time + 8 hours)auto_closed_attimestamp with time zoneYESTimestamp when system automatically closed the shiftovertime_start_attimestamp with time zoneYESTimestamp when overtime counting started (same as auto_shift_end_at)latitudenumericYESlongitudenumericYESaccuracynumericYESlocation_addresstextYES* Indices visibles:
-* idx_attendance_date: CREATE INDEX idx_attendance_date ON public.user_attendance_records USING btree (date DESC)
-* idx_attendance_incomplete: CREATE INDEX idx_attendance_incomplete ON public.user_attendance_records USING btree (user_id, date) WHERE (exit_time IS NULL)
-* idx_attendance_user_date: CREATE INDEX idx_attendance_user_date ON public.user_attendance_records USING btree (user_id, date DESC)
-* idx_user_attendance_records_auto_closed_at: CREATE INDEX idx_user_attendance_records_auto_closed_at ON public.user_attendance_records USING btree (auto_closed_at)
-* idx_user_attendance_records_auto_shift_end_at: CREATE INDEX idx_user_attendance_records_auto_shift_end_at ON public.user_attendance_records USING btree (auto_shift_end_at)
-* unique_user_date: CREATE UNIQUE INDEX unique_user_date ON public.user_attendance_records USING btree (user_id, date)
-* user_attendance_records_pkey: CREATE UNIQUE INDEX user_attendance_records_pkey ON public.user_attendance_records USING btree (id)
-public.user_lopdp_consents
-* Tipo de objeto: table.
-* Módulos que la consumen: auth.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('user_lopdp_consents_id_seq'::regclass)user_idintegerYESuser_emailcharacter varyingNOstatuscharacter varyingNOpdf_file_idcharacter varyingYESsignature_file_idcharacter varyingYESipcharacter varyingYESuser_agenttextYESnotestextYEScreated_attimestamp without time zoneYESCURRENT_TIMESTAMP* Indices visibles:
-* user_lopdp_consents_pkey: CREATE UNIQUE INDEX user_lopdp_consents_pkey ON public.user_lopdp_consents USING btree (id)
-public.user_profile
-* Tipo de objeto: table.
-* Módulos que la consumen: auth.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* user_id -> public.users.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('user_profile_id_seq'::regclass)user_idintegerNOavatar_urltextYESavatar_drive_idtextYESmetadatajsonbYES'{}'::jsonbpreferencesjsonbYES'{}'::jsonbcreated_attimestamp with time zoneNOnow()updated_attimestamp with time zoneNOnow()* Indices visibles:
-* idx_user_profile_user_id: CREATE INDEX idx_user_profile_user_id ON public.user_profile USING btree (user_id)
-* user_profile_pkey: CREATE UNIQUE INDEX user_profile_pkey ON public.user_profile USING btree (id)
-* user_profile_user_id_key: CREATE UNIQUE INDEX user_profile_user_id_key ON public.user_profile USING btree (user_id)
-public.user_sessions
-* Tipo de objeto: table.
-* Módulos que la consumen: auth.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas: no aplica o no visibles.
-CampoTipoNuloDefaultComentarioidintegerNOnextval('user_sessions_id_seq'::regclass)user_emailcharacter varyingNOlogin_timetimestamp without time zoneYESnow()logout_timetimestamp without time zoneYESipcharacter varyingYESuser_agenttextYESrefresh_tokentextYES* Indices visibles:
-* user_sessions_pkey: CREATE UNIQUE INDEX user_sessions_pkey ON public.user_sessions USING btree (id)
-public.users
-* Tipo de objeto: table.
-* Módulos que la consumen: auth, approvals, audit-prep, management, signature.
-* Descripcion: Sin comentario de catalogo.
-* Clave primaria: id
-* Relaciones foraneas:
-* department_id -> public.departments.id
-* department_id -> public.departments.id
-CampoTipoNuloDefaultComentarioidintegerNOnextval('users_id_seq'::regclass)google_idtextYESemailtextNOnametextYESdepartment_idintegerYESroletextYEScreated_attimestamp without time zoneYESnow()updated_attimestamp without time zoneYESnow()fullnametextYESlopdp_internal_statuscharacter varyingNO'granted'::character varyinglopdp_internal_signed_attimestamp without time zoneYESlopdp_internal_pdf_file_idcharacter varyingYESlopdp_internal_signature_file_idcharacter varyingYESlopdp_internal_ipcharacter varyingYESlopdp_internal_user_agenttextYESlopdp_internal_notestextYEScan_sign_documentsbooleanYESfalseWhether user has permission to sign documentssignature_rolecharacter varyingYESRole for signature authorization (DPD, Manager, etc.)signature_certificate_idcharacter varyingYESID of digital certificate for qualified signaturesactivebooleanNOtrueIndica si el usuario estÃƒÂ¡ activo en el sistema. Los usuarios inactivos no pueden acceder.* Indices visibles:
-* idx_users_active: CREATE INDEX idx_users_active ON public.users USING btree (active)
-* users_email_key: CREATE UNIQUE INDEX users_email_key ON public.users USING btree (email)
-* users_google_id_key: CREATE UNIQUE INDEX users_google_id_key ON public.users USING btree (google_id)
-* users_pkey: CREATE UNIQUE INDEX users_pkey ON public.users USING btree (id)
-5. Hallazgos de consistencia código vs base real
-* security core esta alineado con auditoria.logs, notifications y user_sessions; las tablas auxiliares esperadas por security.whitelist.js y security.siem.js no forman parte del flujo core verificado.
-* management.service.js ya usa auditoria.logs, request_attachments y request_versions.
-* audit-prep.service.js ya no depende de users.nombre_completo; usa fullname, name o email segun disponibilidad.
-* signature.controller.js y services/signatures/* ya trabajan con signer_email y no insertan consent_text sobre document_signatures_advanced.
-* signature mantiene dependencia fuerte de create_document_seal_and_qr, track_qr_access y document_verification_info; estos objetos deben existir en el entorno.
-* auth/me ya no toca user_attendance_records, pero auth.googleCallback sigue ejecutando ensureDailyClockIn() como side effect transversal.
-* approvals sigue limitado a la cola técnica soportada por requests y request_approvals; no implementa un motor transversal de aprobaciones por área.
-IQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-La calificación de instalación resume la verificacion de componentes, rutas, dependencias y prerrequisitos técnicos necesarios para ejecutar correctamente el área dentro del entorno objetivo.
-1. Introducción
-La calificación de instalación del Área 01 tiene como finalidad demostrar que los componentes técnicos necesarios para el funcionamiento de los módulos de Gobierno, Seguridad, Cumplimiento y Gestión Documental se encuentran correctamente desplegados, configurados y accesibles en el entorno objetivo. Esta revision considera montaje real de rutas, middleware transversal, tablas y objetos SQL requeridos y alineacion basica entre backend, frontend e integraciónes externas.
-2. Objetivo
-Verificar que el Área 01 se encuentre instalada y preparada para operar en el entorno evaluado, confirmando que los módulos auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail disponen de los componentes minimos requeridos.
-3. Casos IQ
-IDMóduloVerificacionEstado actualIQ-GD-001authExisten rutas, controller y repositorio de sesiónConformeIQ-GD-002securityExisten rutas y tablas core (auditoria.logs, notifications, user_sessions)ConformeIQ-GD-003auditoriaExisten rutas, controller y servicioConformeIQ-GD-004audit-prepExisten audit_settings, audit_sections, audit_documents, audit_access_grantsConformeIQ-GD-005approvalsExisten rutas, controller y servicioConformeIQ-GD-006managementExisten rutas, controller y servicioConformeIQ-GD-007documentsExisten documents.routes.js, controller y servicioConformeIQ-GD-008filesExisten files.routes.js, controller, servicio y multerConformeIQ-GD-009notificationsExisten rutas, controller y servicioConformeIQ-GD-010dashboardExiste ruta montada /api/v1/dashboard/comercial/summaryConformeIQ-GD-011gmailExisten rutas, controller, servicio y callback publico exceptuadoConformeIQ-GD-012gmailExiste tabla user_gmail_tokens para persistencia OAuthConformeIQ-GD-013signatureExisten rutas, alias versionado y dependencias SQL coreConforme parcialIQ-GD-014securityExisten tablas auxiliares esperadas por security.whitelist.js y security.siem.jsNo conforme parcial4. Conclusiones de IQ
-El Área 01 queda instalada y operativa de forma mayoritariamente conforme para su flujo core ampliado. La incorporacion de gestión documental, archivos, notificaciones, dashboard y Gmail se encuentra respaldada por montaje real de rutas y por dependencias tecnicas verificables. Los puntos parciales se concentran en artefactos auxiliares de seguridad y dependencias SQL especializadas de firma.
-OQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-La calificación operacional consolida la comprobacion funcional del área bajo condiciones normales y de error controlado, verificando que las funciones implementadas respondan de forma coherente a la especificacion vigente.
-1. Introducción
-La calificación operacional del Área 01 se orienta a demostrar que los módulos incluidos en su alcance ejecutan las funciones esperadas de manera coherente con la especificacion funcional vigente. El foco principal es validar autenticación, seguridad, auditoria, preparacion documental, aprobaciones, gestión gerencial, documentos, archivos, notificaciones, dashboard, Gmail y firma documental bajo condiciones normales y de error controlado.
-2. Casos OQ por módulo
-auth
-* GET /api/v1/auth/google: redirige a Google OAuth.
-* GET /api/v1/auth/google/callback?code=*: crea o actualiza usuario, crea sesión y registra auditoria.
-* GET /api/v1/auth/me: devuelve perfil autenticado.
-* POST /api/v1/auth/refresh: renueva tokens solo si el refresh token corresponde a una sesión activa.
-* POST /api/v1/auth/lopdp/accept: guarda evidencia interna en Drive y actualiza users y user_lopdp_consents.
-security
-* GET /api/v1/security/offhours-logins: devuelve eventos off-hours saneados y paginados.
-* GET /api/v1/security/offhours-logins/:id/timeline: devuelve timeline asociado al correlation_id.
-* POST /api/v1/security/offhours-logins/:id/review: marca notificaciones de seguridad como revisadas.
-* GET /api/v1/security/offhours-logins/export: exporta CSV o JSON saneado.
-auditoria
-* GET /api/v1/auditoria, GET /api/v1/auditoria/:id, GET /api/v1/auditoria/export/csv deben listar, detallar y exportar la bitacora.
-audit-prep
-* GET /api/v1/audit-prep/status devuelve estado y ventana.
-* PUT /api/v1/audit-prep/status actualiza modo y fechas.
-* GET /api/v1/audit-prep/sections filtra secciones por rol.
-* POST /api/v1/audit-prep/documents/upload valida archivo, crea carpeta Drive y registra audit_documents.
-* GET /api/v1/audit-prep/documents/:id/download entrega documento si la sección esta permitida.
-approvals
-* GET /api/v1/approvals/pending lista pendientes del flujo soportado.
-* POST /api/v1/approvals/:id/approve y POST /api/v1/approvals/:id/reject registran decision y actualizan requests.status.
-management
-* GET /api/v1/management/stats, GET /api/v1/management/requests, GET /api/v1/management/trace/:id, GET /api/v1/management/documents/:id deben devolver metricas, solicitudes, trazabilidad y soporte documental.
-documents
-* POST /api/v1/documents/from-template crea documento desde plantilla.
-* GET /api/v1/documents/by-request/:requestId lista documentos por solicitud.
-* POST /api/v1/documents/:documentId/sign inserta firma posicionada.
-* POST /api/v1/documents/:documentId/export-pdf exporta PDF.
-files
-* POST /api/v1/files/upload/:requestId carga adjuntos.
-* GET /api/v1/files/by-request/:requestId lista adjuntos.
-* GET /api/v1/files/:fileId/download descarga archivo.
-* DELETE /api/v1/files/:fileId elimina archivo solo si el rol esta autorizado.
-notifications
-* GET /api/v1/notifications devuelve notificaciones del usuario y conteo no leido.
-* POST /api/v1/notifications crea notificacion; si apunta a otro usuario exige rol privilegiado.
-* PATCH /api/v1/notifications/:id/read, PATCH /api/v1/notifications/read-all, DELETE /api/v1/notifications/clear gestionan la bandeja.
-dashboard
-* GET /api/v1/dashboard/comercial/summary devuelve resumen operacional comercial para rol autorizado.
-* GET /api/v1/dashboard/comercial/summary?fresh=1 invalida cache y devuelve resumen fresco.
-gmail
-* GET /api/v1/gmail/auth/url devuelve URL de autorización Gmail.
-* GET /api/v1/gmail/auth/callback?code=* guarda tokens del usuario y devuelve pagina de autorización exitosa.
-* GET /api/v1/gmail/auth/status informa si el usuario tiene Gmail autorizado.
-* POST /api/v1/gmail/send envia email usando la cuenta autorizada del usuario.
-* DELETE /api/v1/gmail/auth/revoke revoca el acceso y elimina los tokens.
-signature
-* POST /api/v1/signature/documents/:documentId/sign calcula hash, inserta firma, crea sello y QR y bloquea documento.
-* GET /api/v1/signature/verificar/:token devuelve verificacion publica si el token existe y esta activo.
-* GET /api/v1/signature/documents/:documentId/audit-trail devuelve trail documental.
-* GET /api/v1/signature/dashboard devuelve metricas del módulo.
-3. Escenarios de error a registrar
-* 401 token ausente o invalido
-* 403 acceso por rol no autorizado
-* 404 id o token inexistente
-* 409 conflicto de negocio en audit-prep o documents
-* 500 error SQL, integración Drive, Docs, Gmail o funcion SQL de firma
-* 503 indisponibilidad de dashboard por error de base clasificado
-4. Conclusiones de OQ
-La OQ del Área 01 debe demostrar no solo que autenticación, seguridad, auditoria y firma operan, sino tambien que la gestión documental, los adjuntos, las notificaciones, el dashboard y Gmail responden de forma coherente, trazable y controlada.
-PQ - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-La calificación de desempeño documenta la respuesta del área en condiciones de uso real o representativo, considerando estabilidad, consistencia, trazabilidad y comportamiento repetitivo de los flujos principales.
-1. Introducción
-La calificación de desempeño del Área 01 tiene como proposito demostrar que los módulos comprendidos dentro del dominio de Gobierno, Seguridad, Cumplimiento y Gestión Documental mantienen un comportamiento estable, consistente y trazable cuando operan en condiciones representativas de uso real.
-2. Casos PQ
-IDMóduloEscenarioResultado esperadoPQ-GD-001auth20 consultas consecutivas a /api/v1/auth/me con el mismo tokenrespuestas consistentes sin efectos secundarios inesperadosPQ-GD-002auth10 refresh encadenados usando siempre el ultimo refresh token validono acepta tokens ya reemplazados o sin sesión activaPQ-GD-003securityconsulta repetida de eventos off-hours con filtros y exportrespuestas estables, saneadas y exportablesPQ-GD-004auditorialistados amplios, detalle y export CSVpaginacion y export establesPQ-GD-005audit-prep5 cargas consecutivas de documentos validospersistencia coherente en audit_documents y continuidad de descargaPQ-GD-006approvalsserie de aprobaciones y rechazos validosrequests y request_approvals se mantienen consistentesPQ-GD-007managementcargas repetidas de stats, requests, trace y documentsoperación estable con trazabilidad gerencial consistentePQ-GD-008documents10 creaciones desde plantilla y 10 consultas por solicitudcreacion y lectura consistentes sin perdida de referenciaPQ-GD-009files10 cargas y 10 descargas de adjuntos por lotestream y metadata consistentesPQ-GD-010notifications30 operaciones mixtas de listar, leer y limpiarbandeja consistente y conteo no leido correctoPQ-GD-011dashboard20 consultas al resumen comercial con y sin fresh=1respuesta funcional sostenida y sin degradacion criticaPQ-GD-012gmail5 envios sucesivos con autorización validaenvio estable y trazabilidad del móduloPQ-GD-013signaturemultiples verificaciones de token QR validorespuesta estable y tracking coherentePQ-GD-014áreacombinacion de login, evento off-hours, notificacion, generacion documental y firmala trazabilidad debe poder seguirse de extremo a extremo3. Riesgos PQ vigentes
-* auth mantiene un acoplamiento transversal con attendance durante login.
-* approvals requiere seguimiento para asegurar segmentacion consistente del universo visible.
-* management debe mantener consistencia entre metricas, listados y trazabilidad gerencial.
-* signature depende de funciones y vistas SQL especializadas cuya ausencia afecta el flujo completo.
-* gmail depende de autorización previa valida del usuario y de integración Google operativa.
-4. Conclusiones de PQ
-La incorporacion de gestión documental, archivos, notificaciones, dashboard y Gmail exige que la PQ confirme no solo estabilidad de seguridad y auditoria, sino tambien consistencia del soporte documental transversal del sistema.
-INFORME DE HALLAZGOS - AREA 01 GOBIERNO, SEGURIDAD, CUMPLIMIENTO Y GESTION DOCUMENTAL
-En esta sección se registran los hallazgos técnicos vigentes del área, distinguiendo entre hallazgos corregidos, riesgos residuales y observaciones que requieren seguimiento para no comprometer la integridad funcional ni documental.
-1. Objetivo
-Documentar los hallazgos vigentes del Área 01 tras su revalidacion contra el código real del sistema, incorporando el alcance ampliado de gestión documental y dejando separado lo que corresponde a infraestructura o continuidad operativa.
-2. Alcance revisado
-El análisis cubre auth, security, auditoria, audit-prep, approvals, management, signature, documents, files, notifications, dashboard y gmail.
-3. Hallazgos vigentes
-H-A01-001 Segmentacion pendiente en approvals
-El módulo approvals sigue mostrando una cola cuyo universo visible requiere mayor precision funcional por aprobador real o por matriz formal de tipos soportados.
-H-A01-002 Total global en management requests
-management/requests necesita devolver un total global confiable ademas del lote paginado.
-H-A01-003 Cast inseguro en management trace
-La consulta de trazabilidad puede depender de casts sobre valores JSON no siempre normalizados.
-H-A01-004 Acoplamiento auth-attendance
-El callback de autenticación mantiene un efecto secundario hacia asistencia.
-H-A01-005 Dependencias auxiliares en security
-security.whitelist.js y security.siem.js siguen dependiendo de artefactos auxiliares que no forman parte del flujo core verificado.
-H-A01-006 Dependencias SQL duras en signature
-El flujo completo de firma depende de vistas y funciones SQL especificas.
-4. Hallazgos cerrados en esta revision
-* Montaje de security confirmado en runtime.
-* Referencias SQL de management alineadas al esquema real principal.
-* Compatibilidad de signature bajo /api y alias /api/v1/signature.
-* Resolucion de credenciales Google sin dependencia funcional a archivo secreto versionado.
-* Incorporacion formal de documents, files, notifications, dashboard y gmail al alcance documental del área.
-5. Elementos fuera de alcance del área
-* Respaldo de base de datos y continuidad operativa de plataforma.
-* Jobs internos de infraestructura sin relacion funcional directa con el dominio.
-* Módulos de negocio propios de otras areas salvo cuando consumen servicios transversales del área.
-6. Conclusion
-El Área 01 queda ampliada y mejor delimitada documentalmente. Los hallazgos vigentes se concentran en robustez, segmentacion y dependencias especializadas; no invalidan la incorporacion del subdominio de gestión documental, pero deben mantenerse visibles para la siguiente ronda de remediacion.
-PROTOCOLO DE EJECUCION IQ
-Este protocolo define las actividades, evidencias esperadas, criterios de aceptacion y campos de registro requeridos para ejecutar formalmente la calificación de instalación del área.
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-1. Objetivo
-Definir los pasos de ejecución de la IQ para verificar montaje, dependencias y prerrequisitos técnicos del Área 01 ampliada.
-2. Casos de ejecución
-IDMóduloVerificacionResultado esperadoIQP-GD-001authVerificar /api/v1/auth/google y existencia de callbackRutas accesibles y montadasIQP-GD-002securityVerificar auditoria.logs, notifications, user_sessionsObjetos visibles en DBIQP-GD-003audit-prepVerificar audit_settings, audit_sections, audit_documents, audit_access_grants y GET /api/v1/audit-prep/statusTablas existentes y endpoint operativoIQP-GD-004managementVerificar /api/v1/management/stats, /requests, /trace/:id, /documents/:idEndpoints accesiblesIQP-GD-005documentsVerificar /api/v1/documents/by-request/{id} y /api/v1/documents/{id}Rutas documentales disponiblesIQP-GD-006filesVerificar /api/v1/files/by-request/{id} y /api/v1/files/{id}/downloadCapa de adjuntos montadaIQP-GD-007notificationsVerificar GET /api/v1/notificationsMódulo operativoIQP-GD-008dashboardVerificar GET /api/v1/dashboard/comercial/summaryDashboard montadoIQP-GD-009gmailVerificar /api/v1/gmail/auth/url, callback exceptuado y tabla user_gmail_tokensOAuth Gmail inicializableIQP-GD-010signatureVerificar tablas de firma, vista document_verification_info y funciones SQL requeridasDependencias de firma presentesPROTOCOLO DE EJECUCION OQ
-Este protocolo establece los casos de prueba operacionales que deben ejecutarse para verificar la respuesta funcional del área, la gestión de errores y la persistencia asociada a los flujos evaluados.
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-1. Objetivo
-Definir los pasos operativos para validar el comportamiento funcional del Área 01 bajo condiciones normales y de error controlado.
-2. Casos de ejecución
-IDMóduloEscenarioResultado esperadoOQP-GD-001authLogin y callbackUsuario autenticado y sesión creadaOQP-GD-002securityRevision de evento off-hoursConfirmacion de revision y notifications.read_at actualizadoOQP-GD-003audit-prepCarga documental validaConfirmacion y metadata del documentoOQP-GD-004approvalsAprobacion validaSolicitud aprobada y decision registradaOQP-GD-005managementConsulta de documentos y versionesAdjuntos y versiones visiblesOQP-GD-006documentsCreacion desde plantillaDocumento creadoOQP-GD-007documentsExportacion PDFPDF generadoOQP-GD-008filesCarga y descarga de adjuntosCarga y descarga exitosasOQP-GD-009notificationsCreacion y lectura de notificacionNotificacion visible y luego leidaOQP-GD-010dashboardConsulta de resumen comercialResumen devueltoOQP-GD-011gmailAutorización y estadoEstado autorizadoOQP-GD-012gmailEnvio de correoCorreo enviadoOQP-GD-013signatureFirma documental completaFirma exitosa y documento bloqueadoPROTOCOLO DE EJECUCION PQ
-Este protocolo describe los escenarios de desempeño y uso repetitivo necesarios para demostrar que el área mantiene estabilidad operativa, consistencia de datos y trazabilidad suficiente en contexto de uso real.
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-1. Objetivo
-Definir los pasos de prueba para demostrar que el Área 01 mantiene desempeño y consistencia en condiciones representativas de uso real.
-2. Casos PQ
-IDMóduloEscenarioResultado esperadoPQP-GD-001auth20 consultas seguidas a /auth/meRespuesta funcional sostenidaPQP-GD-002securityConsulta y export repetidos de off-hoursRespuestas establesPQP-GD-003audit-prep5 cargas consecutivas de documentos validosPersistencia coherentePQP-GD-004approvalsSerie de decisiones validasEstados consistentesPQP-GD-005managementConsultas repetidas de stats, requests, trace, documentsRespuesta funcional sostenidaPQP-GD-006documentsCreacion y consulta repetida de documentosRelacion documento-solicitud consistentePQP-GD-007filesCargas y descargas repetidasStream y metadata consistentesPQP-GD-008notificationsOperaciones mixtas de bandejaConteo y estado coherentesPQP-GD-009dashboardConsulta repetida con fresh=1Respuesta establePQP-GD-010gmailEnvio repetido en entorno controladoEnvio sostenido y trazablePQP-GD-011signatureFirma repetida en entorno controladoPersistencia consistente de hash, firma, sello y QRREGISTRO DE EVIDENCIAS Y DESVIACIONES
-La presente sección constituye la bitacora formal para documentar evidencias, desviaciones, defectos y decisiones de cierre derivadas de la ejecución de IQ, OQ y PQ.
-Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental
-1. Objetivo
-Concentrar la evidencia objetiva generada durante IQ, OQ y PQ, junto con las desviaciones detectadas, su análisis, responsable y estado de cierre.
-2. Tabla de evidencias
-ID evidenciaFaseCaso relacionadoTipo de evidenciaDescripcionResponsableFechaRuta o referenciaEV-GD-001IQ______Captura / SQL / Log / Archivo________________________EV-GD-002OQ______Captura / SQL / Log / Archivo________________________EV-GD-003PQ______Captura / SQL / Log / Archivo________________________3. Tabla de desviaciones
-ID desviacionFaseCaso relacionadoDescripcionImpactoAccion propuestaResponsableEstadoDEV-GD-001____________________________________Abierta / En curso / CerradaDEV-GD-002____________________________________Abierta / En curso / Cerrada4. Criterio de cierre documental
-El expediente se considera completo cuando cada caso ejecutado dispone de evidencia suficiente, cada desviacion tiene tratamiento documentado y el cierre del área puede sustentarse con trazabilidad objetiva.
-Conclusion ejecutiva
-La documentación consolidada del Área 01: Gobierno, Seguridad, Cumplimiento y Gestión Documental integra los requerimientos, la especificacion funcional, el diseño técnico, el soporte de datos, las calificaciones y los protocolos de prueba necesarios para una validación formal del dominio. El contenido se encuentra alineado con la implementacion vigente revisada y presenta, de forma controlada, el estado de los hallazgos corregidos y de los riesgos residuales aun abiertos.
-Con base en la documentación incluida, el área dispone de un expediente técnico suficiente para ejecutar IQ, OQ y PQ, registrar evidencia objetiva y sostener una conclusion de validación con criterio de ingenieria de software. Cualquier cierre definitivo del proceso debe apoyarse en la ejecución real de protocolos y en la resolucion o aceptacion formal de hallazgos residuales.
-Referencias
-* Asamblea Nacional del Ecuador. (2021). Ley Organica de Proteccion de Datos Personales. Registro Oficial, Quinto Suplemento No. 459. https://www.asambleanacional.gob.ec/sites/default/files/private/asambleanacional/filesasambleanacionalnameuid-29/Leyes%202013-2017/920-lmoreno/ro-459-5to-sup-26-05-2021.pdf
-* Presidencia de la Republica del Ecuador. (2023). Reglamento General a la Ley Organica de Proteccion de Datos Personales. Registro Oficial. https://www.gob.ec/sites/default/files/regulations/2025-01/02%20Reglamento%20General%20a%20la%20Ley%20Org%C3%A1nica%20de%20Protecci%C3%B3n%20de%20Datos%20Personales_0.pdf
-* International Organization for Standardization, & International Electrotechnical Commission. (2022). ISO/IEC 27001:2022 Information security, cybersecurity and privacy protection - Information security management systems - Requirements. ISO.
-
-
-
-VAL-SPI-GSCGD-PAQUETE | Area 01: Gobierno, Seguridad, Cumplimiento y Gestion Documental | BORRADOR
-
-
-
-SPI 1.0 | Página 
-
-
-
-
-

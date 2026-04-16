@@ -106,6 +106,12 @@ const businessCaseLink = {
  path: "/dashboard/business-case",
 };
 
+const deliveryCeilingsLink = {
+ name: "Maximos y Saldos",
+ icon: FiLayers,
+ path: "/dashboard/comercial/delivery-ceilings",
+};
+
 const businessCaseObservabilityLink = {
  name: "Obs. BC",
  icon: FiActivity,
@@ -296,7 +302,8 @@ const getPriorityGroups = (scope, role, auditActive) => {
  // 📊 GERENCIA - Enfoque en control y supervisión
  if (["gerencia", "gerencia_general", "gerente_general", "director"].includes(scope)) {
  groups.critical.push(businessCaseLink, aprobacionesPlanLink); // Estrategia y Control
- groups.primary.push(gerenciaContractApprovalsLink, permisosLink, auditLinks[0]); // Gestión de personal y Auditoría
+ groups.primary.push(gerenciaContractApprovalsLink, permisosLink, auditLinks[0]); // Gestion de personal y auditoria
+ groups.primary.push(deliveryCeilingsLink);
  groups.secondary.push(auditPrepLink); // Preparación
  groups.admin.push(...talentoLinks); // Gestión administrativa
  }
@@ -330,6 +337,7 @@ const getPriorityGroups = (scope, role, auditActive) => {
  if (workspaceAllowedRoles.includes(scope) || role.includes("backoffice")) {
  groups.primary.unshift(purchasesWorkspaceLink); // Workspace primero en primary
  }
+ groups.primary.push(deliveryCeilingsLink);
 
  if (["jefe_comercial"].includes(scope)) {
  groups.primary.push(aprobacionesPlanLink);

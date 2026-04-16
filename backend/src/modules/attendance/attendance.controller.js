@@ -14,6 +14,9 @@ const { normalizeDateTime, normalizeRow } = require("../../utils/normalizers");
 const { getBusinessDate, ensureDailyClockIn } = require("./attendance.utils");
 const { generateAttendancePDF } = require("./attendance.service");
 const { hasReportingAccess } = require("./attendance.auth");
+const { normalizeAttendanceRangeFilters } = require("./attendanceRangeFilters");
+const { buildAttendanceRangeQuery } = require("./attendanceReports.service");
+const { logAttendanceReportAccess } = require("./attendanceAudit.service");
 const notificationManager = require("../notifications/notificationManager");
 
 const ATTENDANCE_LOCATION_TARGETS = Object.freeze({
@@ -865,12 +868,33 @@ const getUserAttendance = async (req, res) => {
 const getRange = async (req, res) => {
   try {
     const requesterId = Number(req.user?.id || 0);
-    const { start, end, userId, status } = req.query;
+    const {
+      start,
+      end,
+      status,
+      userId,
+      userIds,
+      departmentId,
+      onlyDiscrepancies,
+      onlyWithGeo,
+      quickRange,
+      timezone,
+      rangeDays,
+      exceedsRecommendedRange,
+      dateRangeError,
+    } = normalizeAttendanceRangeFilters(req.query);
 
     if (!start || !end) {
       return res.status(400).json({
         ok: false,
         message: "Fechas de inicio y fin requeridas",
+      });
+    }
+
+    if (dateRangeError) {
+      return res.status(400).json({
+        ok: false,
+        message: "La fecha de fin no puede ser anterior a la fecha de inicio",
       });
     }
 
@@ -908,32 +932,14 @@ const getRange = async (req, res) => {
       });
     }
 
-    let query = `
-      SELECT 
-        a.*,
-        u.fullname,
-        u.email,
-        u.role,
-        d.name AS department_name
-      FROM user_attendance_records a
-      JOIN users u ON a.user_id = u.id
-      LEFT JOIN departments d ON u.department_id = d.id
-      WHERE a.date BETWEEN $1 AND $2
-    `;
+      const { query, params } = buildAttendanceRangeQuery({
+        isAdminScope,
+        hasExplicitTarget,
+        targetUserId,
+        requesterId,
+      });
 
-    const params = [start, end];
-
-    if (isAdminScope && hasExplicitTarget) {
-      query += " AND a.user_id = $3";
-      params.push(targetUserId);
-    } else if (!isAdminScope) {
-      query += " AND a.user_id = $3";
-      params.push(requesterId);
-    }
-
-    query += " ORDER BY a.date DESC, u.fullname ASC";
-
-    const result = await db.query(query, params);
+      const result = await db.query(query, params);
     const normalizedRows = enrichAttendanceRows(result.rows);
     const filteredRows = normalizedStatus
       ? normalizedRows.filter((row) => row.attendance_status === normalizedStatus)
@@ -956,23 +962,74 @@ const getRange = async (req, res) => {
       }
     );
 
-    return res.status(200).json({
-      ok: true,
-      total: normalizedRows.length,
-      filteredTotal: filteredRows.length,
-      status: normalizedStatus || "all",
-      summary: {
-        ...summary,
-        filteredTotal: filteredRows.length,
-        labels: ATTENDANCE_STATUS_LABELS,
-      },
-      data: filteredRows,
-    });
+        const responsePayload = {
+          ok: true,
+          total: normalizedRows.length,
+          filteredTotal: filteredRows.length,
+          status: normalizedStatus || "all",
+          summary: {
+          ...summary,
+          filteredTotal: filteredRows.length,
+            labels: ATTENDANCE_STATUS_LABELS,
+          },
+          data: filteredRows,
+        meta: {
+          start,
+          end,
+          timezone,
+          userId,
+          userIds,
+          departmentId,
+          status: normalizedStatus || null,
+          quickRange,
+          onlyDiscrepancies,
+          onlyWithGeo,
+          rangeDays,
+          exceedsRecommendedRange,
+            warnings: exceedsRecommendedRange
+              ? ["El rango seleccionado supera los 31 dias recomendados"]
+              : [],
+          },
+        };
+
+        logAttendanceReportAccess({
+          requester: req.user || {},
+          filters: {
+            start,
+            end,
+            status: normalizedStatus,
+            userId,
+            userIds,
+            departmentId,
+            onlyDiscrepancies,
+            onlyWithGeo,
+            quickRange,
+            timezone,
+          },
+          result: {
+            total: responsePayload.total,
+            filteredTotal: responsePayload.filteredTotal,
+            warnings: responsePayload.meta.warnings,
+          },
+        });
+
+        return res.status(200).json(responsePayload);
   } catch (err) {
-    logger.error({ err }, "❌ Error obteniendo rango de asistencia");
+    logger.error(
+      {
+        err,
+        requesterId: Number(req.user?.id || 0),
+        range: {
+          start: req.query?.start || null,
+          end: req.query?.end || null,
+          userId: req.query?.userId || null,
+        },
+      },
+      'Error obteniendo rango de asistencia'
+    );
     return res.status(500).json({
       ok: false,
-      message: "Error obteniendo registros de asistencia",
+      message: 'Error obteniendo registros de asistencia',
     });
   }
 };
@@ -1485,3 +1542,4 @@ module.exports = {
   markOvertime,
   getOvertimeRecords,
 };
+

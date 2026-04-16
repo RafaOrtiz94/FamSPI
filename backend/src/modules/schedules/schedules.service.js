@@ -181,7 +181,7 @@ async function tableExists(schema, table) {
 async function firstExistingColumn(schema, table, candidates = []) {
   for (const candidate of candidates) {
     // columnExists ya tiene cache interno por columna.
-    // eslint-disable-next-line no-await-in-loop
+     
     const exists = await columnExists(schema, table, candidate);
     if (exists) return candidate;
   }
@@ -1335,7 +1335,7 @@ async function optimizeRoute({ scheduleIds, user }) {
         google_maps_url: buildGoogleMapsDeepLink(mappable),
         waze_url: buildWazeDeepLink(mappable),
       });
-      // eslint-disable-next-line no-continue
+       
       continue;
     }
 

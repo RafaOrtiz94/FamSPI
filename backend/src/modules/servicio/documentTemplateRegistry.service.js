@@ -357,7 +357,7 @@ const seedDocumentTemplateCatalog = async () => {
       updated_at_seed: new Date().toISOString(),
       contract_type: "service_field_contract",
     };
-    // eslint-disable-next-line no-await-in-loop
+     
     await db.query(
       `
         INSERT INTO servicio.document_template_catalog (

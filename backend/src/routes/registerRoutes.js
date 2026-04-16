@@ -23,6 +23,9 @@ const vacacionesRoutes = require("../modules/vacaciones/vacaciones.routes");
 const clientsRoutes = require("../modules/clients/clients.routes");
 const schedulesRoutes = require("../modules/schedules/schedules.routes");
 const privatePurchasesRoutes = require("../modules/private-purchases/privatePurchases.routes");
+const deliveryRequestsRoutes = require("../modules/delivery-requests/deliveryRequests.routes");
+const deliveryCeilingsRoutes = require("../modules/delivery-ceilings/deliveryCeilings.routes");
+const publicDeliveryPlansRoutes = require("../modules/public-delivery-plans/publicDeliveryPlans.routes");
 const applicantsRoutes = require("../modules/applicants/applicants.routes");
 const {
   businessCaseRoutes,
@@ -43,6 +46,22 @@ const viaticosRoutes = require("../modules/viaticos/viaticos.routes");
 const mantenimientosRoutes = require("../modules/mantenimientos/mantenimientos.routes");
 const integrationsRoutes = require("../modules/integrations/integrations.routes");
 const externalCasesRoutes = require("../modules/servicio/externalCases.routes");
+const calidadRoutes = require("../modules/calidad/ca0101.routes");
+const calidadCleaningRoutes = require("../modules/calidad/ca0102.routes");
+const calidadGoodPracticesRoutes = require("../modules/calidad/ca0103.routes");
+const calidadDocumentManagementRoutes = require("../modules/calidad/ca0105.routes");
+const calidadRecallRoutes = require("../modules/calidad/ca0106.routes");
+const calidadComplaintsRoutes = require("../modules/calidad/ca0107.routes");
+const calidadRefrigeratedRoutes = require("../modules/calidad/ca0108.routes");
+const calidadCapaRoutes = require("../modules/calidad/ca0109.routes");
+const calidadRiskRoutes = require("../modules/calidad/ca0110.routes");
+const calidadSpillRoutes = require("../modules/calidad/ca0111.routes");
+const calidadHygieneRoutes = require("../modules/calidad/ca0112.routes");
+const calidadCommRoutes = require("../modules/calidad/ca0113.routes");
+const calidadQualAreaRoutes = require("../modules/calidad/ca0114.routes");
+const calidadAuditRoutes = require("../modules/calidad/ca0115.routes");
+const calidadSamplingRoutes = require("../modules/calidad/ca0116.routes");
+const calidadTecnoRoutes = require("../modules/calidad/ca0117.routes");
 const internalJobsRouter = require("./internalJobs.routes");
 
 function mountPublicRoutes(app) {
@@ -70,7 +89,24 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/calculation-templates", calculationTemplatesRoutes);
   app.use("/api/v1/mantenimientos", mantenimientosRoutes);
   app.use("/api/v1/integrations", integrationsRoutes);
+  app.use("/internal/integration", integrationsRoutes);
   app.use("/api/v1/servicio/external-cases", externalCasesRoutes);
+app.use("/api/v1/calidad", calidadRoutes);
+  app.use("/api/v1/calidad/cleaning", calidadCleaningRoutes);
+  app.use("/api/v1/calidad/buenas-practicas", calidadGoodPracticesRoutes);
+  app.use("/api/v1/calidad/documentos", calidadDocumentManagementRoutes);
+  app.use("/api/v1/calidad/recall", calidadRecallRoutes);
+  app.use("/api/v1/calidad/quejas", calidadComplaintsRoutes);
+  app.use("/api/v1/calidad/refrigerados", calidadRefrigeratedRoutes);
+app.use("/api/v1/calidad/capa", calidadCapaRoutes);
+  app.use("/api/v1/calidad/riesgos", calidadRiskRoutes);
+  app.use("/api/v1/calidad/incidentes", calidadSpillRoutes);
+  app.use("/api/v1/calidad/higiene", calidadHygieneRoutes);
+  app.use("/api/v1/calidad/comunicaciones", calidadCommRoutes);
+  app.use("/api/v1/calidad/areas-calificadas", calidadQualAreaRoutes);
+  app.use("/api/v1/calidad/auditorias", calidadAuditRoutes);
+  app.use("/api/v1/calidad/muestreo", calidadSamplingRoutes);
+  app.use("/api/v1/calidad/tecnovigilancia", calidadTecnoRoutes);
   app.use("/api/v1/users", usersRoutes);
   app.use("/api/v1/collaborators", collaboratorsRoutes);
   app.use("/api/v1/offboarding", offboardingRoutes);
@@ -81,6 +117,9 @@ function mountPrivateRoutes(app) {
   app.use("/api/v1/gmail", gmailRoutes);
   app.use("/api/v1/equipment-purchases", equipmentPurchaseRoutes);
   app.use("/api/v1/private-purchases", privatePurchasesRoutes);
+  app.use("/api/v1/delivery-ceilings", deliveryCeilingsRoutes);
+  app.use("/api/v1/delivery-requests", deliveryRequestsRoutes);
+  app.use("/api/v1/public-delivery-plans", publicDeliveryPlansRoutes);
   app.use("/api/v1/personnel-requests", personnelRequestsRoutes);
   app.use("/api/v1/permisos", permisosRoutes);
   app.use("/api/v1/vacaciones", vacacionesRoutes);

@@ -27,6 +27,7 @@ const {
   generateActa,
   addDriveAttachment,
 } = require("../requests/requests.service");
+const { enqueuePurchaseStatusChangedEvent } = require("../integrations/hooks");
 
 const DEFAULT_ROOT_ENV_KEYS = ["DRIVE_ROOT_FOLDER_ID", "DRIVE_FOLDER_ID"];
 const ROOT_FOLDER_NAME = process.env.EQUIPMENT_PURCHASE_ROOT_FOLDER || "Solicitudes de compra de equipos";
@@ -559,6 +560,14 @@ async function notifyDeliveryStage({ request, title, message, meta = {}, priorit
       "No se pudieron enviar notificaciones del flujo de entrega",
     );
   }
+
+  // REQ-SPI-013: no await externo en el request path.
+  enqueuePurchaseStatusChangedEvent({
+    purchaseType: "equipment_purchase",
+    id: request.id,
+    status: request.status,
+    businessCaseId: request?.extra?.auto_business_case_id || request?.auto_business_case_id || null,
+  });
 }
 
 function driveLink(fileId) {
@@ -3755,7 +3764,7 @@ async function upsertInstallationWorkflow({
     const photoPayload = Array.isArray(payload.photos) ? payload.photos : [];
     const storedPhotos = [];
     for (let i = 0; i < photoPayload.length; i += 1) {
-      // eslint-disable-next-line no-await-in-loop
+       
       const stored = await storeFst14EvidencePhoto(folderId, photoPayload[i], i);
       if (stored) storedPhotos.push(stored);
     }

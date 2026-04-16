@@ -5,9 +5,22 @@
  */
 
 const router = require("express").Router();
+const rateLimit = require("express-rate-limit");
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./attendance.controller");
 const { requireAttendanceReportAccess } = require("./attendance.auth");
+
+const attendanceReportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    ok: false,
+    code: "ATTENDANCE_REPORT_RATE_LIMIT",
+    message: "Demasiadas consultas al reporte de asistencia, intenta de nuevo en unos segundos",
+  },
+});
 
 // Clock in/out endpoints
 router.post("/clock-in", verifyToken, controller.clockIn);
@@ -41,12 +54,15 @@ router.get("/overtime", verifyToken, controller.getOvertimeRecords);
 // Query endpoints
 router.get("/today", verifyToken, controller.getToday);
 router.get("/user/:userId", verifyToken, requireAttendanceReportAccess("param"), controller.getUserAttendance);
-router.get("/range", verifyToken, requireAttendanceReportAccess("query", { allowAll: true }), controller.getRange);
+router.get(
+  "/range",
+  verifyToken,
+  requireAttendanceReportAccess("query", { allowAll: true }),
+  attendanceReportLimiter,
+  controller.getRange
+);
 
 // PDF generation
 router.get("/pdf/:userId", verifyToken, requireAttendanceReportAccess("param", { allowAll: true }), controller.generatePDF);
 
-router.get("/validate-balance", verifyToken, controller.validateBalance);
-router.post("/validate-balance", verifyToken, controller.validateBa)
-router.put("/validate-balance", verifyToken, controller.validate
 module.exports = router;

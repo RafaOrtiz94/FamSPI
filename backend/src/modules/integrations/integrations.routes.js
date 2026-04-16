@@ -20,6 +20,8 @@ const WRITE_ROLES = [
   "ti",
   "jefe_ti",
   "admin_ti",
+  "admin",
+  "administrador",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
   "gerencia",
@@ -28,5 +30,9 @@ const WRITE_ROLES = [
 
 router.get("/health", requireRole(READ_ROLES), controller.getHealth);
 router.post("/external-cases/sync/process-queue", requireRole(WRITE_ROLES), controller.processExternalSyncQueue);
+router.get("/product-map/coverage-report", requireRole(WRITE_ROLES), controller.getProductMapCoverageReport);
+router.get("/product-map", requireRole(WRITE_ROLES), controller.listProductMap);
+router.post("/product-map", requireRole(WRITE_ROLES), controller.upsertProductMap);
+router.patch("/product-map/:id", requireRole(WRITE_ROLES), controller.patchProductMap);
 
 module.exports = router;

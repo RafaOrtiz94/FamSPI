@@ -1,0 +1,1132 @@
+﻿# Requerimientos de Integracion - Operaciones, Servicio y Logistica
+
+- Codigo de area: A04
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_04_operaciones_servicio_logistica.md
+- Modulos SPI del inventario: operaciones, inventario, logistica, servicio, tecnico, technical-applications, mantenimientos
+- Modulos/modelos Odoo objetivo: stock, stock.picking, stock.move, stock.lot, quality, maintenance, sale_stock, purchase_stock
+- Prioridad del area: CRITICO
+- Total de requerimientos del documento: 1100
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A04-0001 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `operaciones` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0002 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0003 [WF][CRITICO] Toda reapertura del proceso cierre de mantenimiento debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0004 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0005 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0006 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0007 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de mantenimientos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0008 [TST][CRITICO] El area debe definir pruebas E2E de recepcion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0009 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0010 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0011 [WF][CRITICO] El workflow de inspeccion de calidad debe impedir transiciones de estado en Odoo si SPI `servicio` no confirma precondiciones de negocio.
+- REQ-INT-A04-0012 [SEC][CRITICO] El intercambio de datos de tecnico debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0013 [AUD][CRITICO] Los cambios criticos de trazabilidad por lote deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0014 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0015 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso planificacion operativa.
+- REQ-INT-A04-0016 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0017 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `logistica` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0018 [INT][CRITICO] La integracion de servicio con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0019 [WF][CRITICO] El cierre de atencion tecnica debe exigir evidencia documental `acta de entrega` y validacion de control `validacion de caducidad` antes de completarse.
+- REQ-INT-A04-0020 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0021 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0022 [NFR][CRITICO] El proceso de integracion del modulo `operaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0023 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0024 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0025 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0026 [INT][CRITICO] Ante evento de reasignacion en SPI `tecnico`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0027 [WF][CRITICO] Las aprobaciones del proceso entrega parcial deben mantenerse alineadas entre SPI `technical-applications` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0028 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0029 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0030 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0031 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0032 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `servicio` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0033 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0034 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0035 [WF][CRITICO] Los cambios de responsable en recepcion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0036 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0037 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0038 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0039 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0040 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0041 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `technical-applications` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0042 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0043 [WF][CRITICO] Toda reapertura del proceso despacho debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0044 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0045 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0046 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0047 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de tecnico incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0048 [TST][CRITICO] El area debe definir pruebas E2E de cierre de mantenimiento con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0049 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0050 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0051 [WF][CRITICO] El workflow de planificacion operativa debe impedir transiciones de estado en Odoo si SPI `inventario` no confirma precondiciones de negocio.
+- REQ-INT-A04-0052 [SEC][CRITICO] El intercambio de datos de logistica debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0053 [AUD][CRITICO] Los cambios criticos de recepcion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0054 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0055 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso atencion tecnica.
+- REQ-INT-A04-0056 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0057 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `operaciones` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0058 [INT][CRITICO] La integracion de inventario con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0059 [WF][CRITICO] El cierre de reserva de inventario debe exigir evidencia documental `checklist de inspeccion` y validacion de control `trazabilidad lote/serie` antes de completarse.
+- REQ-INT-A04-0060 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0061 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0062 [NFR][CRITICO] El proceso de integracion del modulo `technical-applications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0063 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0064 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0065 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0066 [INT][CRITICO] Ante evento de actualizacion en SPI `logistica`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0067 [WF][CRITICO] Las aprobaciones del proceso trazabilidad por lote deben mantenerse alineadas entre SPI `servicio` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0068 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0069 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0070 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0071 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0072 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `inventario` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0073 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0074 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0075 [WF][CRITICO] Los cambios de responsable en cierre de mantenimiento deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0076 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0077 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0078 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0079 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0080 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0081 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `servicio` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0082 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0083 [WF][CRITICO] Toda reapertura del proceso inspeccion de calidad debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0084 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0085 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0086 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0087 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de logistica incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0088 [TST][CRITICO] El area debe definir pruebas E2E de despacho con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0089 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0090 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0091 [WF][CRITICO] El workflow de atencion tecnica debe impedir transiciones de estado en Odoo si SPI `mantenimientos` no confirma precondiciones de negocio.
+- REQ-INT-A04-0092 [SEC][CRITICO] El intercambio de datos de operaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0093 [AUD][CRITICO] Los cambios criticos de cierre de mantenimiento deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0094 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0095 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso reserva de inventario.
+- REQ-INT-A04-0096 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0097 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `technical-applications` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0098 [INT][CRITICO] La integracion de mantenimientos con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0099 [WF][CRITICO] El cierre de entrega parcial debe exigir evidencia documental `informe tecnico` y validacion de control `secuencia de estados` antes de completarse.
+- REQ-INT-A04-0100 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A04-0101 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0102 [NFR][CRITICO] El proceso de integracion del modulo `servicio` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0103 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0104 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0105 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0106 [INT][CRITICO] Ante evento de firma en SPI `operaciones`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0107 [WF][CRITICO] Las aprobaciones del proceso recepcion deben mantenerse alineadas entre SPI `inventario` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0108 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0109 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0110 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0111 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0112 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `mantenimientos` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0113 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0114 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0115 [WF][CRITICO] Los cambios de responsable en despacho deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0116 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0117 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0118 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0119 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0120 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0121 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `inventario` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0122 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0123 [WF][CRITICO] Toda reapertura del proceso planificacion operativa debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0124 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0125 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0126 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0127 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de operaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0128 [TST][CRITICO] El area debe definir pruebas E2E de inspeccion de calidad con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0129 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0130 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0131 [WF][CRITICO] El workflow de reserva de inventario debe impedir transiciones de estado en Odoo si SPI `tecnico` no confirma precondiciones de negocio.
+- REQ-INT-A04-0132 [SEC][CRITICO] El intercambio de datos de technical-applications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0133 [AUD][CRITICO] Los cambios criticos de despacho deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0134 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0135 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso entrega parcial.
+- REQ-INT-A04-0136 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0137 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `servicio` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0138 [INT][CRITICO] La integracion de tecnico con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0139 [WF][CRITICO] El cierre de trazabilidad por lote debe exigir evidencia documental `acta de entrega` y validacion de control `no despacho sin stock` antes de completarse.
+- REQ-INT-A04-0140 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0141 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0142 [NFR][CRITICO] El proceso de integracion del modulo `inventario` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0143 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0144 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0145 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0146 [INT][CRITICO] Ante evento de reasignacion en SPI `technical-applications`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0147 [WF][CRITICO] Las aprobaciones del proceso cierre de mantenimiento deben mantenerse alineadas entre SPI `mantenimientos` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0148 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0149 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0150 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0151 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0152 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `tecnico` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0153 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0154 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0155 [WF][CRITICO] Los cambios de responsable en inspeccion de calidad deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0156 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0157 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0158 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0159 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0160 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0161 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `mantenimientos` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0162 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0163 [WF][CRITICO] Toda reapertura del proceso atencion tecnica debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0164 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0165 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0166 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0167 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de technical-applications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0168 [TST][CRITICO] El area debe definir pruebas E2E de planificacion operativa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0169 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0170 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0171 [WF][CRITICO] El workflow de entrega parcial debe impedir transiciones de estado en Odoo si SPI `logistica` no confirma precondiciones de negocio.
+- REQ-INT-A04-0172 [SEC][CRITICO] El intercambio de datos de servicio debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0173 [AUD][CRITICO] Los cambios criticos de inspeccion de calidad deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0174 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0175 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso trazabilidad por lote.
+- REQ-INT-A04-0176 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0177 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `inventario` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0178 [INT][CRITICO] La integracion de logistica con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0179 [WF][CRITICO] El cierre de recepcion debe exigir evidencia documental `checklist de inspeccion` y validacion de control `regla FEFO` antes de completarse.
+- REQ-INT-A04-0180 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0181 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0182 [NFR][CRITICO] El proceso de integracion del modulo `mantenimientos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0183 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0184 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0185 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0186 [INT][CRITICO] Ante evento de actualizacion en SPI `servicio`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0187 [WF][CRITICO] Las aprobaciones del proceso despacho deben mantenerse alineadas entre SPI `tecnico` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0188 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0189 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0190 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0191 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0192 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `logistica` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0193 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0194 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0195 [WF][CRITICO] Los cambios de responsable en planificacion operativa deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0196 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0197 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0198 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0199 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0200 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+
+### Bloque 201-300
+- REQ-INT-A04-0201 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `tecnico` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0202 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0203 [WF][CRITICO] Toda reapertura del proceso reserva de inventario debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0204 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0205 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0206 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0207 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de servicio incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0208 [TST][CRITICO] El area debe definir pruebas E2E de atencion tecnica con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0209 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0210 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0211 [WF][CRITICO] El workflow de trazabilidad por lote debe impedir transiciones de estado en Odoo si SPI `operaciones` no confirma precondiciones de negocio.
+- REQ-INT-A04-0212 [SEC][CRITICO] El intercambio de datos de inventario debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0213 [AUD][CRITICO] Los cambios criticos de planificacion operativa deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0214 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0215 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso recepcion.
+- REQ-INT-A04-0216 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0217 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `mantenimientos` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0218 [INT][CRITICO] La integracion de operaciones con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0219 [WF][CRITICO] El cierre de cierre de mantenimiento debe exigir evidencia documental `informe tecnico` y validacion de control `completitud de acta` antes de completarse.
+- REQ-INT-A04-0220 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0221 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0222 [NFR][CRITICO] El proceso de integracion del modulo `tecnico` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0223 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0224 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0225 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0226 [INT][CRITICO] Ante evento de firma en SPI `inventario`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0227 [WF][CRITICO] Las aprobaciones del proceso inspeccion de calidad deben mantenerse alineadas entre SPI `logistica` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0228 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0229 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0230 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0231 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0232 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `operaciones` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0233 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0234 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0235 [WF][CRITICO] Los cambios de responsable en atencion tecnica deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0236 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0237 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0238 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0239 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0240 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0241 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `logistica` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0242 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0243 [WF][CRITICO] Toda reapertura del proceso entrega parcial debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0244 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0245 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0246 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0247 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de inventario incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0248 [TST][CRITICO] El area debe definir pruebas E2E de reserva de inventario con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0249 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0250 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0251 [WF][CRITICO] El workflow de recepcion debe impedir transiciones de estado en Odoo si SPI `technical-applications` no confirma precondiciones de negocio.
+- REQ-INT-A04-0252 [SEC][CRITICO] El intercambio de datos de mantenimientos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0253 [AUD][CRITICO] Los cambios criticos de atencion tecnica deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0254 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0255 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de mantenimiento.
+- REQ-INT-A04-0256 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0257 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `tecnico` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0258 [INT][CRITICO] La integracion de technical-applications con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0259 [WF][CRITICO] El cierre de despacho debe exigir evidencia documental `acta de entrega` y validacion de control `control de inspeccion` antes de completarse.
+- REQ-INT-A04-0260 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0261 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0262 [NFR][CRITICO] El proceso de integracion del modulo `logistica` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0263 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0264 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0265 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0266 [INT][CRITICO] Ante evento de reasignacion en SPI `mantenimientos`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0267 [WF][CRITICO] Las aprobaciones del proceso planificacion operativa deben mantenerse alineadas entre SPI `operaciones` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0268 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0269 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0270 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0271 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0272 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `technical-applications` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0273 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0274 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0275 [WF][CRITICO] Los cambios de responsable en reserva de inventario deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0276 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0277 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0278 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0279 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0280 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0281 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `operaciones` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0282 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0283 [WF][CRITICO] Toda reapertura del proceso trazabilidad por lote debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0284 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0285 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0286 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0287 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de mantenimientos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0288 [TST][CRITICO] El area debe definir pruebas E2E de entrega parcial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0289 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0290 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0291 [WF][CRITICO] El workflow de cierre de mantenimiento debe impedir transiciones de estado en Odoo si SPI `servicio` no confirma precondiciones de negocio.
+- REQ-INT-A04-0292 [SEC][CRITICO] El intercambio de datos de tecnico debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0293 [AUD][CRITICO] Los cambios criticos de reserva de inventario deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0294 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0295 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso despacho.
+- REQ-INT-A04-0296 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0297 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `logistica` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0298 [INT][CRITICO] La integracion de servicio con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0299 [WF][CRITICO] El cierre de inspeccion de calidad debe exigir evidencia documental `checklist de inspeccion` y validacion de control `validacion de caducidad` antes de completarse.
+- REQ-INT-A04-0300 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A04-0301 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0302 [NFR][CRITICO] El proceso de integracion del modulo `operaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0303 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0304 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0305 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0306 [INT][CRITICO] Ante evento de actualizacion en SPI `tecnico`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0307 [WF][CRITICO] Las aprobaciones del proceso atencion tecnica deben mantenerse alineadas entre SPI `technical-applications` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0308 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0309 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0310 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0311 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0312 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `servicio` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0313 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0314 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0315 [WF][CRITICO] Los cambios de responsable en entrega parcial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0316 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0317 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0318 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0319 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0320 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0321 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `technical-applications` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0322 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0323 [WF][CRITICO] Toda reapertura del proceso recepcion debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0324 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0325 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0326 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0327 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de tecnico incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0328 [TST][CRITICO] El area debe definir pruebas E2E de trazabilidad por lote con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0329 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0330 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0331 [WF][CRITICO] El workflow de despacho debe impedir transiciones de estado en Odoo si SPI `inventario` no confirma precondiciones de negocio.
+- REQ-INT-A04-0332 [SEC][CRITICO] El intercambio de datos de logistica debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0333 [AUD][CRITICO] Los cambios criticos de entrega parcial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0334 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0335 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso inspeccion de calidad.
+- REQ-INT-A04-0336 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0337 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `operaciones` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0338 [INT][CRITICO] La integracion de inventario con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0339 [WF][CRITICO] El cierre de planificacion operativa debe exigir evidencia documental `informe tecnico` y validacion de control `trazabilidad lote/serie` antes de completarse.
+- REQ-INT-A04-0340 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0341 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0342 [NFR][CRITICO] El proceso de integracion del modulo `technical-applications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0343 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0344 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0345 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0346 [INT][CRITICO] Ante evento de firma en SPI `logistica`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0347 [WF][CRITICO] Las aprobaciones del proceso reserva de inventario deben mantenerse alineadas entre SPI `servicio` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0348 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0349 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0350 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0351 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0352 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `inventario` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0353 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0354 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0355 [WF][CRITICO] Los cambios de responsable en trazabilidad por lote deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0356 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0357 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0358 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0359 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0360 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0361 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `servicio` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0362 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0363 [WF][CRITICO] Toda reapertura del proceso cierre de mantenimiento debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0364 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0365 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0366 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0367 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de logistica incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0368 [TST][CRITICO] El area debe definir pruebas E2E de recepcion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0369 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0370 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0371 [WF][CRITICO] El workflow de inspeccion de calidad debe impedir transiciones de estado en Odoo si SPI `mantenimientos` no confirma precondiciones de negocio.
+- REQ-INT-A04-0372 [SEC][CRITICO] El intercambio de datos de operaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0373 [AUD][CRITICO] Los cambios criticos de trazabilidad por lote deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0374 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0375 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso planificacion operativa.
+- REQ-INT-A04-0376 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0377 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `technical-applications` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0378 [INT][CRITICO] La integracion de mantenimientos con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0379 [WF][CRITICO] El cierre de atencion tecnica debe exigir evidencia documental `acta de entrega` y validacion de control `secuencia de estados` antes de completarse.
+- REQ-INT-A04-0380 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0381 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0382 [NFR][CRITICO] El proceso de integracion del modulo `servicio` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0383 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0384 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0385 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0386 [INT][CRITICO] Ante evento de reasignacion en SPI `operaciones`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0387 [WF][CRITICO] Las aprobaciones del proceso entrega parcial deben mantenerse alineadas entre SPI `inventario` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0388 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0389 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0390 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0391 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0392 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `mantenimientos` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0393 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0394 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0395 [WF][CRITICO] Los cambios de responsable en recepcion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0396 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0397 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0398 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0399 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0400 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+
+### Bloque 401-500
+- REQ-INT-A04-0401 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `inventario` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0402 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0403 [WF][CRITICO] Toda reapertura del proceso despacho debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0404 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0405 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0406 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0407 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de operaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0408 [TST][CRITICO] El area debe definir pruebas E2E de cierre de mantenimiento con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0409 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0410 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0411 [WF][CRITICO] El workflow de planificacion operativa debe impedir transiciones de estado en Odoo si SPI `tecnico` no confirma precondiciones de negocio.
+- REQ-INT-A04-0412 [SEC][CRITICO] El intercambio de datos de technical-applications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0413 [AUD][CRITICO] Los cambios criticos de recepcion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0414 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0415 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso atencion tecnica.
+- REQ-INT-A04-0416 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0417 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `servicio` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0418 [INT][CRITICO] La integracion de tecnico con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0419 [WF][CRITICO] El cierre de reserva de inventario debe exigir evidencia documental `checklist de inspeccion` y validacion de control `no despacho sin stock` antes de completarse.
+- REQ-INT-A04-0420 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0421 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0422 [NFR][CRITICO] El proceso de integracion del modulo `inventario` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0423 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0424 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0425 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0426 [INT][CRITICO] Ante evento de actualizacion en SPI `technical-applications`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0427 [WF][CRITICO] Las aprobaciones del proceso trazabilidad por lote deben mantenerse alineadas entre SPI `mantenimientos` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0428 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0429 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0430 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0431 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0432 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `tecnico` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0433 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0434 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0435 [WF][CRITICO] Los cambios de responsable en cierre de mantenimiento deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0436 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0437 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0438 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0439 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0440 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0441 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `mantenimientos` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0442 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0443 [WF][CRITICO] Toda reapertura del proceso inspeccion de calidad debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0444 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0445 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0446 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0447 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de technical-applications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0448 [TST][CRITICO] El area debe definir pruebas E2E de despacho con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0449 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0450 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0451 [WF][CRITICO] El workflow de atencion tecnica debe impedir transiciones de estado en Odoo si SPI `logistica` no confirma precondiciones de negocio.
+- REQ-INT-A04-0452 [SEC][CRITICO] El intercambio de datos de servicio debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0453 [AUD][CRITICO] Los cambios criticos de cierre de mantenimiento deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0454 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0455 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso reserva de inventario.
+- REQ-INT-A04-0456 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0457 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `inventario` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0458 [INT][CRITICO] La integracion de logistica con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0459 [WF][CRITICO] El cierre de entrega parcial debe exigir evidencia documental `informe tecnico` y validacion de control `regla FEFO` antes de completarse.
+- REQ-INT-A04-0460 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0461 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0462 [NFR][CRITICO] El proceso de integracion del modulo `mantenimientos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0463 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0464 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0465 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0466 [INT][CRITICO] Ante evento de firma en SPI `servicio`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0467 [WF][CRITICO] Las aprobaciones del proceso recepcion deben mantenerse alineadas entre SPI `tecnico` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0468 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0469 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0470 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0471 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0472 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `logistica` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0473 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0474 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0475 [WF][CRITICO] Los cambios de responsable en despacho deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0476 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0477 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0478 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0479 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0480 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0481 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `tecnico` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0482 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0483 [WF][CRITICO] Toda reapertura del proceso planificacion operativa debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0484 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0485 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0486 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0487 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de servicio incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0488 [TST][CRITICO] El area debe definir pruebas E2E de inspeccion de calidad con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0489 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0490 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0491 [WF][CRITICO] El workflow de reserva de inventario debe impedir transiciones de estado en Odoo si SPI `operaciones` no confirma precondiciones de negocio.
+- REQ-INT-A04-0492 [SEC][CRITICO] El intercambio de datos de inventario debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0493 [AUD][CRITICO] Los cambios criticos de despacho deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0494 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0495 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso entrega parcial.
+- REQ-INT-A04-0496 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0497 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `mantenimientos` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0498 [INT][CRITICO] La integracion de operaciones con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0499 [WF][CRITICO] El cierre de trazabilidad por lote debe exigir evidencia documental `acta de entrega` y validacion de control `completitud de acta` antes de completarse.
+- REQ-INT-A04-0500 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 501-600
+- REQ-INT-A04-0501 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0502 [NFR][CRITICO] El proceso de integracion del modulo `tecnico` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0503 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0504 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0505 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0506 [INT][CRITICO] Ante evento de reasignacion en SPI `inventario`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0507 [WF][CRITICO] Las aprobaciones del proceso cierre de mantenimiento deben mantenerse alineadas entre SPI `logistica` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0508 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0509 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0510 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0511 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0512 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `operaciones` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0513 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0514 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0515 [WF][CRITICO] Los cambios de responsable en inspeccion de calidad deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0516 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0517 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0518 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0519 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0520 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0521 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `logistica` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0522 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0523 [WF][CRITICO] Toda reapertura del proceso atencion tecnica debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0524 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0525 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0526 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0527 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de inventario incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0528 [TST][CRITICO] El area debe definir pruebas E2E de planificacion operativa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0529 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0530 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0531 [WF][CRITICO] El workflow de entrega parcial debe impedir transiciones de estado en Odoo si SPI `technical-applications` no confirma precondiciones de negocio.
+- REQ-INT-A04-0532 [SEC][CRITICO] El intercambio de datos de mantenimientos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0533 [AUD][CRITICO] Los cambios criticos de inspeccion de calidad deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0534 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0535 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso trazabilidad por lote.
+- REQ-INT-A04-0536 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0537 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `tecnico` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0538 [INT][CRITICO] La integracion de technical-applications con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0539 [WF][CRITICO] El cierre de recepcion debe exigir evidencia documental `checklist de inspeccion` y validacion de control `control de inspeccion` antes de completarse.
+- REQ-INT-A04-0540 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0541 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0542 [NFR][CRITICO] El proceso de integracion del modulo `logistica` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0543 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0544 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0545 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0546 [INT][CRITICO] Ante evento de actualizacion en SPI `mantenimientos`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0547 [WF][CRITICO] Las aprobaciones del proceso despacho deben mantenerse alineadas entre SPI `operaciones` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0548 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0549 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0550 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0551 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0552 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `technical-applications` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0553 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0554 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0555 [WF][CRITICO] Los cambios de responsable en planificacion operativa deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0556 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0557 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0558 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0559 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0560 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0561 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `operaciones` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0562 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0563 [WF][CRITICO] Toda reapertura del proceso reserva de inventario debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0564 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0565 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0566 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0567 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de mantenimientos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0568 [TST][CRITICO] El area debe definir pruebas E2E de atencion tecnica con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0569 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0570 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0571 [WF][CRITICO] El workflow de trazabilidad por lote debe impedir transiciones de estado en Odoo si SPI `servicio` no confirma precondiciones de negocio.
+- REQ-INT-A04-0572 [SEC][CRITICO] El intercambio de datos de tecnico debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0573 [AUD][CRITICO] Los cambios criticos de planificacion operativa deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0574 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0575 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso recepcion.
+- REQ-INT-A04-0576 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0577 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `logistica` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0578 [INT][CRITICO] La integracion de servicio con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0579 [WF][CRITICO] El cierre de cierre de mantenimiento debe exigir evidencia documental `informe tecnico` y validacion de control `validacion de caducidad` antes de completarse.
+- REQ-INT-A04-0580 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0581 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0582 [NFR][CRITICO] El proceso de integracion del modulo `operaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0583 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0584 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0585 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0586 [INT][CRITICO] Ante evento de firma en SPI `tecnico`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0587 [WF][CRITICO] Las aprobaciones del proceso inspeccion de calidad deben mantenerse alineadas entre SPI `technical-applications` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0588 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0589 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0590 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0591 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0592 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `servicio` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0593 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0594 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0595 [WF][CRITICO] Los cambios de responsable en atencion tecnica deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0596 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0597 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0598 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0599 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0600 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+
+### Bloque 601-700
+- REQ-INT-A04-0601 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `technical-applications` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0602 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0603 [WF][CRITICO] Toda reapertura del proceso entrega parcial debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0604 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0605 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0606 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0607 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de tecnico incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0608 [TST][CRITICO] El area debe definir pruebas E2E de reserva de inventario con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0609 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0610 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0611 [WF][CRITICO] El workflow de recepcion debe impedir transiciones de estado en Odoo si SPI `inventario` no confirma precondiciones de negocio.
+- REQ-INT-A04-0612 [SEC][CRITICO] El intercambio de datos de logistica debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0613 [AUD][CRITICO] Los cambios criticos de atencion tecnica deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0614 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0615 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de mantenimiento.
+- REQ-INT-A04-0616 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0617 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `operaciones` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0618 [INT][CRITICO] La integracion de inventario con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0619 [WF][CRITICO] El cierre de despacho debe exigir evidencia documental `acta de entrega` y validacion de control `trazabilidad lote/serie` antes de completarse.
+- REQ-INT-A04-0620 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0621 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0622 [NFR][CRITICO] El proceso de integracion del modulo `technical-applications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0623 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0624 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0625 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0626 [INT][CRITICO] Ante evento de reasignacion en SPI `logistica`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0627 [WF][CRITICO] Las aprobaciones del proceso planificacion operativa deben mantenerse alineadas entre SPI `servicio` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0628 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0629 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0630 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0631 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0632 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `inventario` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0633 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0634 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0635 [WF][CRITICO] Los cambios de responsable en reserva de inventario deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0636 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0637 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0638 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0639 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0640 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0641 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `servicio` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0642 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0643 [WF][CRITICO] Toda reapertura del proceso trazabilidad por lote debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0644 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0645 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0646 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0647 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de logistica incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0648 [TST][CRITICO] El area debe definir pruebas E2E de entrega parcial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0649 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0650 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0651 [WF][CRITICO] El workflow de cierre de mantenimiento debe impedir transiciones de estado en Odoo si SPI `mantenimientos` no confirma precondiciones de negocio.
+- REQ-INT-A04-0652 [SEC][CRITICO] El intercambio de datos de operaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0653 [AUD][CRITICO] Los cambios criticos de reserva de inventario deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0654 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0655 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso despacho.
+- REQ-INT-A04-0656 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0657 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `technical-applications` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0658 [INT][CRITICO] La integracion de mantenimientos con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0659 [WF][CRITICO] El cierre de inspeccion de calidad debe exigir evidencia documental `checklist de inspeccion` y validacion de control `secuencia de estados` antes de completarse.
+- REQ-INT-A04-0660 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0661 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0662 [NFR][CRITICO] El proceso de integracion del modulo `servicio` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0663 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0664 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0665 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0666 [INT][CRITICO] Ante evento de actualizacion en SPI `operaciones`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0667 [WF][CRITICO] Las aprobaciones del proceso atencion tecnica deben mantenerse alineadas entre SPI `inventario` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0668 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0669 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0670 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0671 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0672 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `mantenimientos` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0673 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0674 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0675 [WF][CRITICO] Los cambios de responsable en entrega parcial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0676 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0677 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0678 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0679 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0680 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0681 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `inventario` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0682 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0683 [WF][CRITICO] Toda reapertura del proceso recepcion debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0684 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0685 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0686 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0687 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de operaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0688 [TST][CRITICO] El area debe definir pruebas E2E de trazabilidad por lote con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0689 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0690 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0691 [WF][CRITICO] El workflow de despacho debe impedir transiciones de estado en Odoo si SPI `tecnico` no confirma precondiciones de negocio.
+- REQ-INT-A04-0692 [SEC][CRITICO] El intercambio de datos de technical-applications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0693 [AUD][CRITICO] Los cambios criticos de entrega parcial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0694 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0695 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso inspeccion de calidad.
+- REQ-INT-A04-0696 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0697 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `servicio` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0698 [INT][CRITICO] La integracion de tecnico con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0699 [WF][CRITICO] El cierre de planificacion operativa debe exigir evidencia documental `informe tecnico` y validacion de control `no despacho sin stock` antes de completarse.
+- REQ-INT-A04-0700 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 701-800
+- REQ-INT-A04-0701 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0702 [NFR][CRITICO] El proceso de integracion del modulo `inventario` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0703 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0704 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0705 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0706 [INT][CRITICO] Ante evento de firma en SPI `technical-applications`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0707 [WF][CRITICO] Las aprobaciones del proceso reserva de inventario deben mantenerse alineadas entre SPI `mantenimientos` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0708 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0709 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0710 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0711 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0712 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `tecnico` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0713 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0714 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0715 [WF][CRITICO] Los cambios de responsable en trazabilidad por lote deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0716 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0717 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0718 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0719 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0720 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0721 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `mantenimientos` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0722 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0723 [WF][CRITICO] Toda reapertura del proceso cierre de mantenimiento debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0724 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0725 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0726 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0727 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de technical-applications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0728 [TST][CRITICO] El area debe definir pruebas E2E de recepcion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0729 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0730 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0731 [WF][CRITICO] El workflow de inspeccion de calidad debe impedir transiciones de estado en Odoo si SPI `logistica` no confirma precondiciones de negocio.
+- REQ-INT-A04-0732 [SEC][CRITICO] El intercambio de datos de servicio debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0733 [AUD][CRITICO] Los cambios criticos de trazabilidad por lote deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0734 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0735 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso planificacion operativa.
+- REQ-INT-A04-0736 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0737 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `inventario` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0738 [INT][CRITICO] La integracion de logistica con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0739 [WF][CRITICO] El cierre de atencion tecnica debe exigir evidencia documental `acta de entrega` y validacion de control `regla FEFO` antes de completarse.
+- REQ-INT-A04-0740 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0741 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0742 [NFR][CRITICO] El proceso de integracion del modulo `mantenimientos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0743 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0744 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0745 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0746 [INT][CRITICO] Ante evento de reasignacion en SPI `servicio`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0747 [WF][CRITICO] Las aprobaciones del proceso entrega parcial deben mantenerse alineadas entre SPI `tecnico` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0748 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0749 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0750 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0751 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0752 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `logistica` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0753 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0754 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0755 [WF][CRITICO] Los cambios de responsable en recepcion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0756 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0757 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0758 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0759 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0760 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0761 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `tecnico` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0762 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0763 [WF][CRITICO] Toda reapertura del proceso despacho debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0764 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0765 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0766 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0767 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de servicio incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0768 [TST][CRITICO] El area debe definir pruebas E2E de cierre de mantenimiento con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0769 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0770 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0771 [WF][CRITICO] El workflow de planificacion operativa debe impedir transiciones de estado en Odoo si SPI `operaciones` no confirma precondiciones de negocio.
+- REQ-INT-A04-0772 [SEC][CRITICO] El intercambio de datos de inventario debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0773 [AUD][CRITICO] Los cambios criticos de recepcion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0774 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0775 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso atencion tecnica.
+- REQ-INT-A04-0776 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0777 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `mantenimientos` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0778 [INT][CRITICO] La integracion de operaciones con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0779 [WF][CRITICO] El cierre de reserva de inventario debe exigir evidencia documental `checklist de inspeccion` y validacion de control `completitud de acta` antes de completarse.
+- REQ-INT-A04-0780 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0781 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0782 [NFR][CRITICO] El proceso de integracion del modulo `tecnico` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0783 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0784 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0785 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0786 [INT][CRITICO] Ante evento de actualizacion en SPI `inventario`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0787 [WF][CRITICO] Las aprobaciones del proceso trazabilidad por lote deben mantenerse alineadas entre SPI `logistica` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0788 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0789 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0790 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0791 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0792 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `operaciones` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0793 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0794 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0795 [WF][CRITICO] Los cambios de responsable en cierre de mantenimiento deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0796 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0797 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0798 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0799 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0800 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+
+### Bloque 801-900
+- REQ-INT-A04-0801 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `logistica` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0802 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0803 [WF][CRITICO] Toda reapertura del proceso inspeccion de calidad debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0804 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0805 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0806 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0807 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de inventario incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0808 [TST][CRITICO] El area debe definir pruebas E2E de despacho con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0809 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0810 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0811 [WF][CRITICO] El workflow de atencion tecnica debe impedir transiciones de estado en Odoo si SPI `technical-applications` no confirma precondiciones de negocio.
+- REQ-INT-A04-0812 [SEC][CRITICO] El intercambio de datos de mantenimientos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0813 [AUD][CRITICO] Los cambios criticos de cierre de mantenimiento deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0814 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0815 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso reserva de inventario.
+- REQ-INT-A04-0816 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0817 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `tecnico` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0818 [INT][CRITICO] La integracion de technical-applications con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0819 [WF][CRITICO] El cierre de entrega parcial debe exigir evidencia documental `informe tecnico` y validacion de control `control de inspeccion` antes de completarse.
+- REQ-INT-A04-0820 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0821 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0822 [NFR][CRITICO] El proceso de integracion del modulo `logistica` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0823 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0824 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0825 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0826 [INT][CRITICO] Ante evento de firma en SPI `mantenimientos`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0827 [WF][CRITICO] Las aprobaciones del proceso recepcion deben mantenerse alineadas entre SPI `operaciones` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0828 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0829 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0830 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0831 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0832 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `technical-applications` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0833 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0834 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0835 [WF][CRITICO] Los cambios de responsable en despacho deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0836 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0837 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0838 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0839 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0840 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0841 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `operaciones` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0842 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0843 [WF][CRITICO] Toda reapertura del proceso planificacion operativa debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0844 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0845 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0846 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0847 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de mantenimientos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0848 [TST][CRITICO] El area debe definir pruebas E2E de inspeccion de calidad con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0849 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0850 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0851 [WF][CRITICO] El workflow de reserva de inventario debe impedir transiciones de estado en Odoo si SPI `servicio` no confirma precondiciones de negocio.
+- REQ-INT-A04-0852 [SEC][CRITICO] El intercambio de datos de tecnico debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0853 [AUD][CRITICO] Los cambios criticos de despacho deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0854 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0855 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso entrega parcial.
+- REQ-INT-A04-0856 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0857 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `logistica` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0858 [INT][CRITICO] La integracion de servicio con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0859 [WF][CRITICO] El cierre de trazabilidad por lote debe exigir evidencia documental `acta de entrega` y validacion de control `validacion de caducidad` antes de completarse.
+- REQ-INT-A04-0860 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0861 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0862 [NFR][CRITICO] El proceso de integracion del modulo `operaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0863 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0864 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0865 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0866 [INT][CRITICO] Ante evento de reasignacion en SPI `tecnico`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0867 [WF][CRITICO] Las aprobaciones del proceso cierre de mantenimiento deben mantenerse alineadas entre SPI `technical-applications` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0868 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0869 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0870 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0871 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0872 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `servicio` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0873 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0874 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0875 [WF][CRITICO] Los cambios de responsable en inspeccion de calidad deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0876 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0877 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0878 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0879 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0880 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+- REQ-INT-A04-0881 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `technical-applications` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0882 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0883 [WF][CRITICO] Toda reapertura del proceso atencion tecnica debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-0884 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0885 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0886 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0887 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de tecnico incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0888 [TST][CRITICO] El area debe definir pruebas E2E de planificacion operativa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0889 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0890 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0891 [WF][CRITICO] El workflow de entrega parcial debe impedir transiciones de estado en Odoo si SPI `inventario` no confirma precondiciones de negocio.
+- REQ-INT-A04-0892 [SEC][CRITICO] El intercambio de datos de logistica debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0893 [AUD][CRITICO] Los cambios criticos de inspeccion de calidad deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0894 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0895 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso trazabilidad por lote.
+- REQ-INT-A04-0896 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0897 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `operaciones` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0898 [INT][CRITICO] La integracion de inventario con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0899 [WF][CRITICO] El cierre de recepcion debe exigir evidencia documental `checklist de inspeccion` y validacion de control `trazabilidad lote/serie` antes de completarse.
+- REQ-INT-A04-0900 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 901-1000
+- REQ-INT-A04-0901 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0902 [NFR][CRITICO] El proceso de integracion del modulo `technical-applications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0903 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-0904 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-0905 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0906 [INT][CRITICO] Ante evento de actualizacion en SPI `logistica`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0907 [WF][CRITICO] Las aprobaciones del proceso despacho deben mantenerse alineadas entre SPI `servicio` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0908 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0909 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0910 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0911 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0912 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `inventario` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0913 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0914 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0915 [WF][CRITICO] Los cambios de responsable en planificacion operativa deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0916 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0917 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0918 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0919 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0920 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-0921 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `servicio` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0922 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0923 [WF][CRITICO] Toda reapertura del proceso reserva de inventario debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-0924 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0925 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0926 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0927 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de logistica incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0928 [TST][CRITICO] El area debe definir pruebas E2E de atencion tecnica con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0929 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0930 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0931 [WF][CRITICO] El workflow de trazabilidad por lote debe impedir transiciones de estado en Odoo si SPI `mantenimientos` no confirma precondiciones de negocio.
+- REQ-INT-A04-0932 [SEC][CRITICO] El intercambio de datos de operaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0933 [AUD][CRITICO] Los cambios criticos de planificacion operativa deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0934 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0935 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso recepcion.
+- REQ-INT-A04-0936 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0937 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `technical-applications` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0938 [INT][CRITICO] La integracion de mantenimientos con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0939 [WF][CRITICO] El cierre de cierre de mantenimiento debe exigir evidencia documental `informe tecnico` y validacion de control `secuencia de estados` antes de completarse.
+- REQ-INT-A04-0940 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0941 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0942 [NFR][CRITICO] El proceso de integracion del modulo `servicio` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0943 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-0944 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-0945 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0946 [INT][CRITICO] Ante evento de firma en SPI `operaciones`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0947 [WF][CRITICO] Las aprobaciones del proceso inspeccion de calidad deben mantenerse alineadas entre SPI `inventario` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0948 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0949 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0950 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0951 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0952 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `mantenimientos` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0953 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0954 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0955 [WF][CRITICO] Los cambios de responsable en atencion tecnica deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0956 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0957 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0958 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0959 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-0960 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-0961 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `inventario` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-0962 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-0963 [WF][CRITICO] Toda reapertura del proceso entrega parcial debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-0964 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-0965 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-0966 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-0967 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de operaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-0968 [TST][CRITICO] El area debe definir pruebas E2E de reserva de inventario con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-0969 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-0970 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-0971 [WF][CRITICO] El workflow de recepcion debe impedir transiciones de estado en Odoo si SPI `tecnico` no confirma precondiciones de negocio.
+- REQ-INT-A04-0972 [SEC][CRITICO] El intercambio de datos de technical-applications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-0973 [AUD][CRITICO] Los cambios criticos de atencion tecnica deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-0974 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-0975 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de mantenimiento.
+- REQ-INT-A04-0976 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-0977 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `servicio` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-0978 [INT][CRITICO] La integracion de tecnico con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-0979 [WF][CRITICO] El cierre de despacho debe exigir evidencia documental `acta de entrega` y validacion de control `no despacho sin stock` antes de completarse.
+- REQ-INT-A04-0980 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-0981 [AUD][CRITICO] Cada evento de rechazo sobre inspecciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-0982 [NFR][CRITICO] El proceso de integracion del modulo `inventario` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-0983 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de lotes entre SPI y Odoo.
+- REQ-INT-A04-0984 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A04-0985 [DAT][CRITICO] El proceso de upsert para movimientos de inventario debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-0986 [INT][CRITICO] Ante evento de reasignacion en SPI `technical-applications`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-0987 [WF][CRITICO] Las aprobaciones del proceso planificacion operativa deben mantenerse alineadas entre SPI `mantenimientos` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-0988 [SEC][CRITICO] Las operaciones sensibles sobre intervenciones tecnicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-0989 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de mantenimientos preventivos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-0990 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-0991 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para actas de entrega con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-0992 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `tecnico` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-0993 [DAT][CRITICO] La carga de inspecciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-0994 [INT][CRITICO] La sincronizacion de productos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-0995 [WF][CRITICO] Los cambios de responsable en reserva de inventario deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-0996 [SEC][CRITICO] La integracion de series debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-0997 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-0998 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de transferencias sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-0999 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-1000 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de intervenciones tecnicas.
+
+### Bloque 1001-1100
+- REQ-INT-A04-1001 [DAT][CRITICO] El integrador debe sincronizar mantenimientos preventivos del modulo SPI `mantenimientos` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-1002 [INT][CRITICO] La interfaz SPI-Odoo para mantenimientos correctivos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-1003 [WF][CRITICO] Toda reapertura del proceso trazabilidad por lote debe generar evento compensatorio y revalidar datos integrados de actas de entrega.
+- REQ-INT-A04-1004 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-1005 [AUD][CRITICO] La evidencia `informe tecnico` asociada a inspecciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-1006 [NFR][CRITICO] La sincronizacion de productos debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-1007 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de technical-applications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-1008 [TST][CRITICO] El area debe definir pruebas E2E de entrega parcial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-1009 [DAT][CRITICO] Toda transferencia de movimientos de inventario debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-1010 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de transferencias con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-1011 [WF][CRITICO] El workflow de cierre de mantenimiento debe impedir transiciones de estado en Odoo si SPI `logistica` no confirma precondiciones de negocio.
+- REQ-INT-A04-1012 [SEC][CRITICO] El intercambio de datos de servicio debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-1013 [AUD][CRITICO] Los cambios criticos de reserva de inventario deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-1014 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-1015 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso despacho.
+- REQ-INT-A04-1016 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para guias de despacho cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-1017 [DAT][CRITICO] El sistema debe mapear campos obligatorios de inspecciones entre SPI `inventario` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-1018 [INT][CRITICO] La integracion de logistica con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-1019 [WF][CRITICO] El cierre de inspeccion de calidad debe exigir evidencia documental `checklist de inspeccion` y validacion de control `regla FEFO` antes de completarse.
+- REQ-INT-A04-1020 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-1021 [AUD][CRITICO] Cada evento de asignacion sobre movimientos de inventario debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-1022 [NFR][CRITICO] El proceso de integracion del modulo `mantenimientos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-1023 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de ordenes de servicio entre SPI y Odoo.
+- REQ-INT-A04-1024 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A04-1025 [DAT][CRITICO] El proceso de upsert para mantenimientos preventivos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-1026 [INT][CRITICO] Ante evento de actualizacion en SPI `servicio`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-1027 [WF][CRITICO] Las aprobaciones del proceso atencion tecnica deben mantenerse alineadas entre SPI `tecnico` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-1028 [SEC][CRITICO] Las operaciones sensibles sobre guias de despacho deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-1029 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de inspecciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-1030 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-1031 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para lotes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-1032 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `logistica` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-1033 [DAT][CRITICO] La carga de movimientos de inventario debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-1034 [INT][CRITICO] La sincronizacion de transferencias debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-1035 [WF][CRITICO] Los cambios de responsable en entrega parcial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-1036 [SEC][CRITICO] La integracion de intervenciones tecnicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-1037 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-1038 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de mantenimientos correctivos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-1039 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-1040 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de guias de despacho.
+- REQ-INT-A04-1041 [DAT][CRITICO] El integrador debe sincronizar inspecciones del modulo SPI `tecnico` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-1042 [INT][CRITICO] La interfaz SPI-Odoo para productos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-1043 [WF][CRITICO] Toda reapertura del proceso recepcion debe generar evento compensatorio y revalidar datos integrados de lotes.
+- REQ-INT-A04-1044 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-1045 [AUD][CRITICO] La evidencia `acta de entrega` asociada a movimientos de inventario debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-1046 [NFR][CRITICO] La sincronizacion de transferencias debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-1047 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de servicio incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-1048 [TST][CRITICO] El area debe definir pruebas E2E de trazabilidad por lote con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-1049 [DAT][CRITICO] Toda transferencia de mantenimientos preventivos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-1050 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de mantenimientos correctivos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-1051 [WF][CRITICO] El workflow de despacho debe impedir transiciones de estado en Odoo si SPI `operaciones` no confirma precondiciones de negocio.
+- REQ-INT-A04-1052 [SEC][CRITICO] El intercambio de datos de inventario debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-1053 [AUD][CRITICO] Los cambios criticos de entrega parcial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-1054 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-1055 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso inspeccion de calidad.
+- REQ-INT-A04-1056 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para series cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-1057 [DAT][CRITICO] El sistema debe mapear campos obligatorios de movimientos de inventario entre SPI `mantenimientos` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-1058 [INT][CRITICO] La integracion de operaciones con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-1059 [WF][CRITICO] El cierre de planificacion operativa debe exigir evidencia documental `informe tecnico` y validacion de control `completitud de acta` antes de completarse.
+- REQ-INT-A04-1060 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A04-1061 [AUD][CRITICO] Cada evento de creacion sobre mantenimientos preventivos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A04-1062 [NFR][CRITICO] El proceso de integracion del modulo `tecnico` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A04-1063 [OPS][CRITICO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de actas de entrega entre SPI y Odoo.
+- REQ-INT-A04-1064 [TST][CRITICO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A04-1065 [DAT][CRITICO] El proceso de upsert para inspecciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A04-1066 [INT][CRITICO] Ante evento de firma en SPI `inventario`, la integracion debe publicar mensaje y actualizar Odoo `stock.lot` con trazabilidad completa.
+- REQ-INT-A04-1067 [WF][CRITICO] Las aprobaciones del proceso reserva de inventario deben mantenerse alineadas entre SPI `logistica` y Odoo `quality` sin saltos de estado.
+- REQ-INT-A04-1068 [SEC][CRITICO] Las operaciones sensibles sobre series deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A04-1069 [AUD][CRITICO] El area debe disponer reporte conciliado SPI-Odoo de movimientos de inventario con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A04-1070 [NFR][CRITICO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A04-1071 [OPS][CRITICO] El equipo operador debe disponer tablero de monitoreo para ordenes de servicio con estado, ultimo intento y proximo reintento.
+- REQ-INT-A04-1072 [TST][CRITICO] Cada entrega debe incluir pruebas de contrato API entre SPI `operaciones` y Odoo `stock.picking` con version bloqueada.
+- REQ-INT-A04-1073 [DAT][CRITICO] La carga de mantenimientos preventivos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `stock.move`.
+- REQ-INT-A04-1074 [INT][CRITICO] La sincronizacion de mantenimientos correctivos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A04-1075 [WF][CRITICO] Los cambios de responsable en trazabilidad por lote deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A04-1076 [SEC][CRITICO] La integracion de guias de despacho debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A04-1077 [AUD][CRITICO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A04-1078 [NFR][CRITICO] La solucion debe soportar crecimiento de volumen de productos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A04-1079 [OPS][CRITICO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A04-1080 [TST][CRITICO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de series.
+- REQ-INT-A04-1081 [DAT][CRITICO] El integrador debe sincronizar movimientos de inventario del modulo SPI `logistica` hacia Odoo `stock.move` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A04-1082 [INT][CRITICO] La interfaz SPI-Odoo para transferencias debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A04-1083 [WF][CRITICO] Toda reapertura del proceso cierre de mantenimiento debe generar evento compensatorio y revalidar datos integrados de ordenes de servicio.
+- REQ-INT-A04-1084 [SEC][CRITICO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A04-1085 [AUD][CRITICO] La evidencia `checklist de inspeccion` asociada a mantenimientos preventivos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A04-1086 [NFR][CRITICO] La sincronizacion de mantenimientos correctivos debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A04-1087 [OPS][CRITICO] Deben definirse runbooks de operacion para incidentes de inventario incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A04-1088 [TST][CRITICO] El area debe definir pruebas E2E de recepcion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A04-1089 [DAT][CRITICO] Toda transferencia de inspecciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A04-1090 [INT][CRITICO] La capa de integracion debe permitir observabilidad tecnica de productos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A04-1091 [WF][CRITICO] El workflow de inspeccion de calidad debe impedir transiciones de estado en Odoo si SPI `technical-applications` no confirma precondiciones de negocio.
+- REQ-INT-A04-1092 [SEC][CRITICO] El intercambio de datos de mantenimientos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `maintenance`.
+- REQ-INT-A04-1093 [AUD][CRITICO] Los cambios criticos de trazabilidad por lote deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A04-1094 [NFR][CRITICO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A04-1095 [OPS][CRITICO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso planificacion operativa.
+- REQ-INT-A04-1096 [TST][CRITICO] Se deben ejecutar pruebas unitarias, integracion y regresion para intervenciones tecnicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A04-1097 [DAT][CRITICO] El sistema debe mapear campos obligatorios de mantenimientos preventivos entre SPI `tecnico` y Odoo `stock.move` preservando historial de cambios y control de version.
+- REQ-INT-A04-1098 [INT][CRITICO] La integracion de technical-applications con `stock.lot` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A04-1099 [WF][CRITICO] El cierre de atencion tecnica debe exigir evidencia documental `acta de entrega` y validacion de control `control de inspeccion` antes de completarse.
+- REQ-INT-A04-1100 [SEC][CRITICO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.

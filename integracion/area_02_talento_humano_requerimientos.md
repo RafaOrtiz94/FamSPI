@@ -1,0 +1,1132 @@
+﻿# Requerimientos de Integracion - Talento Humano
+
+- Codigo de area: A02
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_02_talento_humano.md
+- Modulos SPI del inventario: talento_humano, users, user-profile, user-certifications, collaborators, attendance, vacaciones, permisos, personnel-requests, applicants, departments
+- Modulos/modelos Odoo objetivo: hr, hr_attendance, hr_holidays, hr_recruitment, hr_skills, hr_contract, hr_payroll, res.users
+- Prioridad del area: ALTO
+- Total de requerimientos del documento: 1100
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A02-0001 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `talento_humano` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0002 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0003 [WF][ALTO] Toda reapertura del proceso seleccion de personal debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0004 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0005 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0006 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0007 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de vacaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0008 [TST][ALTO] El area debe definir pruebas E2E de asignacion departamental con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0009 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0010 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0011 [WF][ALTO] El workflow de aprobacion de vacaciones debe impedir transiciones de estado en Odoo si SPI `departments` no confirma precondiciones de negocio.
+- REQ-INT-A02-0012 [SEC][ALTO] El intercambio de datos de talento_humano debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0013 [AUD][ALTO] Los cambios criticos de offboarding deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0014 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0015 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso alta de colaborador.
+- REQ-INT-A02-0016 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0017 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `attendance` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0018 [INT][ALTO] La integracion de vacaciones con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0019 [WF][ALTO] El cierre de aprobacion de permisos debe exigir evidencia documental `expediente laboral` y validacion de control `vigencia de certificaciones` antes de completarse.
+- REQ-INT-A02-0020 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0021 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0022 [NFR][ALTO] El proceso de integracion del modulo `departments` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0023 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0024 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0025 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0026 [INT][ALTO] Ante evento de reasignacion en SPI `user-certifications`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0027 [WF][ALTO] Las aprobaciones del proceso control de asistencia deben mantenerse alineadas entre SPI `collaborators` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0028 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0029 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0030 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0031 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0032 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `applicants` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0033 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0034 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0035 [WF][ALTO] Los cambios de responsable en asignacion departamental deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0036 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0037 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0038 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0039 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0040 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0041 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `permisos` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0042 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0043 [WF][ALTO] Toda reapertura del proceso actualizacion de perfil debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0044 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0045 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0046 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0047 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de user-profile incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0048 [TST][ALTO] El area debe definir pruebas E2E de seleccion de personal con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0049 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0050 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0051 [WF][ALTO] El workflow de alta de colaborador debe impedir transiciones de estado en Odoo si SPI `vacaciones` no confirma precondiciones de negocio.
+- REQ-INT-A02-0052 [SEC][ALTO] El intercambio de datos de permisos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0053 [AUD][ALTO] Los cambios criticos de asignacion departamental deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0054 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0055 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de permisos.
+- REQ-INT-A02-0056 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0057 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `users` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0058 [INT][ALTO] La integracion de user-profile con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0059 [WF][ALTO] El cierre de cierre de novedades debe exigir evidencia documental `acta de ingreso` y validacion de control `politica de cupos` antes de completarse.
+- REQ-INT-A02-0060 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0061 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0062 [NFR][ALTO] El proceso de integracion del modulo `vacaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0063 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0064 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0065 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0066 [INT][ALTO] Ante evento de actualizacion en SPI `departments`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0067 [WF][ALTO] Las aprobaciones del proceso offboarding deben mantenerse alineadas entre SPI `talento_humano` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0068 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0069 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0070 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0071 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0072 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `attendance` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0073 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0074 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0075 [WF][ALTO] Los cambios de responsable en seleccion de personal deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0076 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0077 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0078 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0079 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0080 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0081 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `user-certifications` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0082 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0083 [WF][ALTO] Toda reapertura del proceso aprobacion de vacaciones debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0084 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0085 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0086 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0087 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de applicants incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0088 [TST][ALTO] El area debe definir pruebas E2E de actualizacion de perfil con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0089 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0090 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0091 [WF][ALTO] El workflow de aprobacion de permisos debe impedir transiciones de estado en Odoo si SPI `user-profile` no confirma precondiciones de negocio.
+- REQ-INT-A02-0092 [SEC][ALTO] El intercambio de datos de user-certifications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0093 [AUD][ALTO] Los cambios criticos de seleccion de personal deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0094 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0095 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de novedades.
+- REQ-INT-A02-0096 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0097 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `personnel-requests` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0098 [INT][ALTO] La integracion de applicants con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0099 [WF][ALTO] El cierre de control de asistencia debe exigir evidencia documental `historial de asistencia` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A02-0100 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A02-0101 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0102 [NFR][ALTO] El proceso de integracion del modulo `user-profile` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0103 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0104 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0105 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0106 [INT][ALTO] Ante evento de firma en SPI `vacaciones`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0107 [WF][ALTO] Las aprobaciones del proceso asignacion departamental deben mantenerse alineadas entre SPI `permisos` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0108 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0109 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0110 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0111 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0112 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `users` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0113 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0114 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0115 [WF][ALTO] Los cambios de responsable en actualizacion de perfil deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0116 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0117 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0118 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0119 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0120 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0121 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `departments` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0122 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0123 [WF][ALTO] Toda reapertura del proceso alta de colaborador debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0124 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0125 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0126 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0127 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de attendance incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0128 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de vacaciones con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0129 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0130 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0131 [WF][ALTO] El workflow de cierre de novedades debe impedir transiciones de estado en Odoo si SPI `applicants` no confirma precondiciones de negocio.
+- REQ-INT-A02-0132 [SEC][ALTO] El intercambio de datos de departments debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0133 [AUD][ALTO] Los cambios criticos de actualizacion de perfil deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0134 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0135 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso control de asistencia.
+- REQ-INT-A02-0136 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0137 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `collaborators` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0138 [INT][ALTO] La integracion de attendance con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0139 [WF][ALTO] El cierre de offboarding debe exigir evidencia documental `expediente laboral` y validacion de control `consistencia jerarquica` antes de completarse.
+- REQ-INT-A02-0140 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0141 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0142 [NFR][ALTO] El proceso de integracion del modulo `applicants` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0143 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0144 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0145 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0146 [INT][ALTO] Ante evento de reasignacion en SPI `user-profile`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0147 [WF][ALTO] Las aprobaciones del proceso seleccion de personal deben mantenerse alineadas entre SPI `user-certifications` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0148 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0149 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0150 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0151 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0152 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `personnel-requests` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0153 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0154 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0155 [WF][ALTO] Los cambios de responsable en aprobacion de vacaciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0156 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0157 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0158 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0159 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0160 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0161 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `vacaciones` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0162 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0163 [WF][ALTO] Toda reapertura del proceso aprobacion de permisos debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0164 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0165 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0166 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0167 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de users incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0168 [TST][ALTO] El area debe definir pruebas E2E de alta de colaborador con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0169 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0170 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0171 [WF][ALTO] El workflow de control de asistencia debe impedir transiciones de estado en Odoo si SPI `attendance` no confirma precondiciones de negocio.
+- REQ-INT-A02-0172 [SEC][ALTO] El intercambio de datos de vacaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0173 [AUD][ALTO] Los cambios criticos de aprobacion de vacaciones deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0174 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0175 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso offboarding.
+- REQ-INT-A02-0176 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0177 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `talento_humano` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0178 [INT][ALTO] La integracion de users con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0179 [WF][ALTO] El cierre de asignacion departamental debe exigir evidencia documental `acta de ingreso` y validacion de control `matriz de aprobadores` antes de completarse.
+- REQ-INT-A02-0180 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0181 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0182 [NFR][ALTO] El proceso de integracion del modulo `attendance` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0183 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0184 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0185 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0186 [INT][ALTO] Ante evento de actualizacion en SPI `applicants`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0187 [WF][ALTO] Las aprobaciones del proceso actualizacion de perfil deben mantenerse alineadas entre SPI `departments` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0188 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0189 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0190 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0191 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0192 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `collaborators` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0193 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0194 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0195 [WF][ALTO] Los cambios de responsable en alta de colaborador deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0196 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0197 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0198 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0199 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0200 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+
+### Bloque 201-300
+- REQ-INT-A02-0201 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `user-profile` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0202 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0203 [WF][ALTO] Toda reapertura del proceso cierre de novedades debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0204 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0205 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0206 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0207 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de personnel-requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0208 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de permisos con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0209 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0210 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0211 [WF][ALTO] El workflow de offboarding debe impedir transiciones de estado en Odoo si SPI `users` no confirma precondiciones de negocio.
+- REQ-INT-A02-0212 [SEC][ALTO] El intercambio de datos de user-profile debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0213 [AUD][ALTO] Los cambios criticos de alta de colaborador deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0214 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0215 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso asignacion departamental.
+- REQ-INT-A02-0216 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0217 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `permisos` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0218 [INT][ALTO] La integracion de personnel-requests con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0219 [WF][ALTO] El cierre de seleccion de personal debe exigir evidencia documental `historial de asistencia` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A02-0220 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0221 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0222 [NFR][ALTO] El proceso de integracion del modulo `users` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0223 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0224 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0225 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0226 [INT][ALTO] Ante evento de firma en SPI `attendance`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0227 [WF][ALTO] Las aprobaciones del proceso aprobacion de vacaciones deben mantenerse alineadas entre SPI `vacaciones` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0228 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0229 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0230 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0231 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0232 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `talento_humano` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0233 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0234 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0235 [WF][ALTO] Los cambios de responsable en aprobacion de permisos deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0236 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0237 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0238 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0239 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0240 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0241 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `applicants` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0242 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0243 [WF][ALTO] Toda reapertura del proceso control de asistencia debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0244 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0245 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0246 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0247 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de collaborators incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0248 [TST][ALTO] El area debe definir pruebas E2E de cierre de novedades con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0249 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0250 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0251 [WF][ALTO] El workflow de asignacion departamental debe impedir transiciones de estado en Odoo si SPI `personnel-requests` no confirma precondiciones de negocio.
+- REQ-INT-A02-0252 [SEC][ALTO] El intercambio de datos de applicants debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0253 [AUD][ALTO] Los cambios criticos de aprobacion de permisos deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0254 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0255 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso seleccion de personal.
+- REQ-INT-A02-0256 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0257 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `user-certifications` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0258 [INT][ALTO] La integracion de collaborators con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0259 [WF][ALTO] El cierre de actualizacion de perfil debe exigir evidencia documental `expediente laboral` y validacion de control `regla de no solapamiento` antes de completarse.
+- REQ-INT-A02-0260 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0261 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0262 [NFR][ALTO] El proceso de integracion del modulo `personnel-requests` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0263 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0264 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0265 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0266 [INT][ALTO] Ante evento de reasignacion en SPI `users`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0267 [WF][ALTO] Las aprobaciones del proceso alta de colaborador deben mantenerse alineadas entre SPI `user-profile` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0268 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0269 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0270 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0271 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0272 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `permisos` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0273 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0274 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0275 [WF][ALTO] Los cambios de responsable en cierre de novedades deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0276 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0277 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0278 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0279 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0280 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0281 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `attendance` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0282 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0283 [WF][ALTO] Toda reapertura del proceso offboarding debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0284 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0285 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0286 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0287 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de talento_humano incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0288 [TST][ALTO] El area debe definir pruebas E2E de control de asistencia con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0289 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0290 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0291 [WF][ALTO] El workflow de seleccion de personal debe impedir transiciones de estado en Odoo si SPI `collaborators` no confirma precondiciones de negocio.
+- REQ-INT-A02-0292 [SEC][ALTO] El intercambio de datos de attendance debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0293 [AUD][ALTO] Los cambios criticos de cierre de novedades deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0294 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0295 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso actualizacion de perfil.
+- REQ-INT-A02-0296 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0297 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `departments` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0298 [INT][ALTO] La integracion de talento_humano con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0299 [WF][ALTO] El cierre de aprobacion de vacaciones debe exigir evidencia documental `acta de ingreso` y validacion de control `vigencia de certificaciones` antes de completarse.
+- REQ-INT-A02-0300 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A02-0301 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0302 [NFR][ALTO] El proceso de integracion del modulo `collaborators` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0303 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0304 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0305 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0306 [INT][ALTO] Ante evento de actualizacion en SPI `personnel-requests`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0307 [WF][ALTO] Las aprobaciones del proceso aprobacion de permisos deben mantenerse alineadas entre SPI `applicants` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0308 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0309 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0310 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0311 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0312 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `user-certifications` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0313 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0314 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0315 [WF][ALTO] Los cambios de responsable en control de asistencia deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0316 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0317 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0318 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0319 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0320 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0321 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `users` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0322 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0323 [WF][ALTO] Toda reapertura del proceso asignacion departamental debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0324 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0325 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0326 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0327 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de permisos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0328 [TST][ALTO] El area debe definir pruebas E2E de offboarding con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0329 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0330 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0331 [WF][ALTO] El workflow de actualizacion de perfil debe impedir transiciones de estado en Odoo si SPI `talento_humano` no confirma precondiciones de negocio.
+- REQ-INT-A02-0332 [SEC][ALTO] El intercambio de datos de users debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0333 [AUD][ALTO] Los cambios criticos de control de asistencia deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0334 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0335 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de vacaciones.
+- REQ-INT-A02-0336 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0337 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `vacaciones` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0338 [INT][ALTO] La integracion de permisos con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0339 [WF][ALTO] El cierre de alta de colaborador debe exigir evidencia documental `historial de asistencia` y validacion de control `politica de cupos` antes de completarse.
+- REQ-INT-A02-0340 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0341 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0342 [NFR][ALTO] El proceso de integracion del modulo `talento_humano` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0343 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0344 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0345 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0346 [INT][ALTO] Ante evento de firma en SPI `collaborators`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0347 [WF][ALTO] Las aprobaciones del proceso cierre de novedades deben mantenerse alineadas entre SPI `attendance` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0348 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0349 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0350 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0351 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0352 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `departments` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0353 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0354 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0355 [WF][ALTO] Los cambios de responsable en offboarding deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0356 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0357 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0358 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0359 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0360 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0361 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `personnel-requests` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0362 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0363 [WF][ALTO] Toda reapertura del proceso seleccion de personal debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0364 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0365 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0366 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0367 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de user-certifications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0368 [TST][ALTO] El area debe definir pruebas E2E de asignacion departamental con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0369 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0370 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0371 [WF][ALTO] El workflow de aprobacion de vacaciones debe impedir transiciones de estado en Odoo si SPI `permisos` no confirma precondiciones de negocio.
+- REQ-INT-A02-0372 [SEC][ALTO] El intercambio de datos de personnel-requests debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0373 [AUD][ALTO] Los cambios criticos de offboarding deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0374 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0375 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso alta de colaborador.
+- REQ-INT-A02-0376 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0377 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `user-profile` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0378 [INT][ALTO] La integracion de user-certifications con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0379 [WF][ALTO] El cierre de aprobacion de permisos debe exigir evidencia documental `expediente laboral` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A02-0380 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0381 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0382 [NFR][ALTO] El proceso de integracion del modulo `permisos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0383 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0384 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0385 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0386 [INT][ALTO] Ante evento de reasignacion en SPI `talento_humano`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0387 [WF][ALTO] Las aprobaciones del proceso control de asistencia deben mantenerse alineadas entre SPI `users` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0388 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0389 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0390 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0391 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0392 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `vacaciones` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0393 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0394 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0395 [WF][ALTO] Los cambios de responsable en asignacion departamental deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0396 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0397 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0398 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0399 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0400 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+
+### Bloque 401-500
+- REQ-INT-A02-0401 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `collaborators` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0402 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0403 [WF][ALTO] Toda reapertura del proceso actualizacion de perfil debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0404 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0405 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0406 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0407 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de departments incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0408 [TST][ALTO] El area debe definir pruebas E2E de seleccion de personal con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0409 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0410 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0411 [WF][ALTO] El workflow de alta de colaborador debe impedir transiciones de estado en Odoo si SPI `user-certifications` no confirma precondiciones de negocio.
+- REQ-INT-A02-0412 [SEC][ALTO] El intercambio de datos de collaborators debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0413 [AUD][ALTO] Los cambios criticos de asignacion departamental deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0414 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0415 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de permisos.
+- REQ-INT-A02-0416 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0417 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `applicants` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0418 [INT][ALTO] La integracion de departments con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0419 [WF][ALTO] El cierre de cierre de novedades debe exigir evidencia documental `acta de ingreso` y validacion de control `consistencia jerarquica` antes de completarse.
+- REQ-INT-A02-0420 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0421 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0422 [NFR][ALTO] El proceso de integracion del modulo `user-certifications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0423 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0424 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0425 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0426 [INT][ALTO] Ante evento de actualizacion en SPI `permisos`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0427 [WF][ALTO] Las aprobaciones del proceso offboarding deben mantenerse alineadas entre SPI `personnel-requests` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0428 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0429 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0430 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0431 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0432 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `user-profile` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0433 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0434 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0435 [WF][ALTO] Los cambios de responsable en seleccion de personal deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0436 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0437 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0438 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0439 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0440 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0441 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `talento_humano` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0442 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0443 [WF][ALTO] Toda reapertura del proceso aprobacion de vacaciones debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0444 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0445 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0446 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0447 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de vacaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0448 [TST][ALTO] El area debe definir pruebas E2E de actualizacion de perfil con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0449 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0450 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0451 [WF][ALTO] El workflow de aprobacion de permisos debe impedir transiciones de estado en Odoo si SPI `departments` no confirma precondiciones de negocio.
+- REQ-INT-A02-0452 [SEC][ALTO] El intercambio de datos de talento_humano debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0453 [AUD][ALTO] Los cambios criticos de seleccion de personal deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0454 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0455 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de novedades.
+- REQ-INT-A02-0456 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0457 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `attendance` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0458 [INT][ALTO] La integracion de vacaciones con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0459 [WF][ALTO] El cierre de control de asistencia debe exigir evidencia documental `historial de asistencia` y validacion de control `matriz de aprobadores` antes de completarse.
+- REQ-INT-A02-0460 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0461 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0462 [NFR][ALTO] El proceso de integracion del modulo `departments` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0463 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0464 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0465 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0466 [INT][ALTO] Ante evento de firma en SPI `user-certifications`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0467 [WF][ALTO] Las aprobaciones del proceso asignacion departamental deben mantenerse alineadas entre SPI `collaborators` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0468 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0469 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0470 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0471 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0472 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `applicants` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0473 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0474 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0475 [WF][ALTO] Los cambios de responsable en actualizacion de perfil deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0476 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0477 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0478 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0479 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0480 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0481 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `permisos` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0482 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0483 [WF][ALTO] Toda reapertura del proceso alta de colaborador debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0484 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0485 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0486 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0487 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de user-profile incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0488 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de vacaciones con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0489 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0490 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0491 [WF][ALTO] El workflow de cierre de novedades debe impedir transiciones de estado en Odoo si SPI `vacaciones` no confirma precondiciones de negocio.
+- REQ-INT-A02-0492 [SEC][ALTO] El intercambio de datos de permisos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0493 [AUD][ALTO] Los cambios criticos de actualizacion de perfil deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0494 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0495 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso control de asistencia.
+- REQ-INT-A02-0496 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0497 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `users` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0498 [INT][ALTO] La integracion de user-profile con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0499 [WF][ALTO] El cierre de offboarding debe exigir evidencia documental `expediente laboral` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A02-0500 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 501-600
+- REQ-INT-A02-0501 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0502 [NFR][ALTO] El proceso de integracion del modulo `vacaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0503 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0504 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0505 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0506 [INT][ALTO] Ante evento de reasignacion en SPI `departments`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0507 [WF][ALTO] Las aprobaciones del proceso seleccion de personal deben mantenerse alineadas entre SPI `talento_humano` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0508 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0509 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0510 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0511 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0512 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `attendance` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0513 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0514 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0515 [WF][ALTO] Los cambios de responsable en aprobacion de vacaciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0516 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0517 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0518 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0519 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0520 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0521 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `user-certifications` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0522 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0523 [WF][ALTO] Toda reapertura del proceso aprobacion de permisos debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0524 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0525 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0526 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0527 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de applicants incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0528 [TST][ALTO] El area debe definir pruebas E2E de alta de colaborador con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0529 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0530 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0531 [WF][ALTO] El workflow de control de asistencia debe impedir transiciones de estado en Odoo si SPI `user-profile` no confirma precondiciones de negocio.
+- REQ-INT-A02-0532 [SEC][ALTO] El intercambio de datos de user-certifications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0533 [AUD][ALTO] Los cambios criticos de aprobacion de vacaciones deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0534 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0535 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso offboarding.
+- REQ-INT-A02-0536 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0537 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `personnel-requests` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0538 [INT][ALTO] La integracion de applicants con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0539 [WF][ALTO] El cierre de asignacion departamental debe exigir evidencia documental `acta de ingreso` y validacion de control `regla de no solapamiento` antes de completarse.
+- REQ-INT-A02-0540 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0541 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0542 [NFR][ALTO] El proceso de integracion del modulo `user-profile` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0543 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0544 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0545 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0546 [INT][ALTO] Ante evento de actualizacion en SPI `vacaciones`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0547 [WF][ALTO] Las aprobaciones del proceso actualizacion de perfil deben mantenerse alineadas entre SPI `permisos` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0548 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0549 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0550 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0551 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0552 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `users` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0553 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0554 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0555 [WF][ALTO] Los cambios de responsable en alta de colaborador deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0556 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0557 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0558 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0559 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0560 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0561 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `departments` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0562 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0563 [WF][ALTO] Toda reapertura del proceso cierre de novedades debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0564 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0565 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0566 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0567 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de attendance incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0568 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de permisos con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0569 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0570 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0571 [WF][ALTO] El workflow de offboarding debe impedir transiciones de estado en Odoo si SPI `applicants` no confirma precondiciones de negocio.
+- REQ-INT-A02-0572 [SEC][ALTO] El intercambio de datos de departments debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0573 [AUD][ALTO] Los cambios criticos de alta de colaborador deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0574 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0575 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso asignacion departamental.
+- REQ-INT-A02-0576 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0577 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `collaborators` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0578 [INT][ALTO] La integracion de attendance con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0579 [WF][ALTO] El cierre de seleccion de personal debe exigir evidencia documental `historial de asistencia` y validacion de control `vigencia de certificaciones` antes de completarse.
+- REQ-INT-A02-0580 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0581 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0582 [NFR][ALTO] El proceso de integracion del modulo `applicants` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0583 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0584 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0585 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0586 [INT][ALTO] Ante evento de firma en SPI `user-profile`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0587 [WF][ALTO] Las aprobaciones del proceso aprobacion de vacaciones deben mantenerse alineadas entre SPI `user-certifications` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0588 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0589 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0590 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0591 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0592 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `personnel-requests` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0593 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0594 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0595 [WF][ALTO] Los cambios de responsable en aprobacion de permisos deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0596 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0597 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0598 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0599 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0600 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+
+### Bloque 601-700
+- REQ-INT-A02-0601 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `vacaciones` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0602 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0603 [WF][ALTO] Toda reapertura del proceso control de asistencia debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0604 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0605 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0606 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0607 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de users incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0608 [TST][ALTO] El area debe definir pruebas E2E de cierre de novedades con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0609 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0610 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0611 [WF][ALTO] El workflow de asignacion departamental debe impedir transiciones de estado en Odoo si SPI `attendance` no confirma precondiciones de negocio.
+- REQ-INT-A02-0612 [SEC][ALTO] El intercambio de datos de vacaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0613 [AUD][ALTO] Los cambios criticos de aprobacion de permisos deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0614 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0615 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso seleccion de personal.
+- REQ-INT-A02-0616 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0617 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `talento_humano` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0618 [INT][ALTO] La integracion de users con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0619 [WF][ALTO] El cierre de actualizacion de perfil debe exigir evidencia documental `expediente laboral` y validacion de control `politica de cupos` antes de completarse.
+- REQ-INT-A02-0620 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0621 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0622 [NFR][ALTO] El proceso de integracion del modulo `attendance` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0623 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0624 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0625 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0626 [INT][ALTO] Ante evento de reasignacion en SPI `applicants`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0627 [WF][ALTO] Las aprobaciones del proceso alta de colaborador deben mantenerse alineadas entre SPI `departments` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0628 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0629 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0630 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0631 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0632 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `collaborators` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0633 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0634 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0635 [WF][ALTO] Los cambios de responsable en cierre de novedades deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0636 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0637 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0638 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0639 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0640 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0641 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `user-profile` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0642 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0643 [WF][ALTO] Toda reapertura del proceso offboarding debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0644 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0645 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0646 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0647 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de personnel-requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0648 [TST][ALTO] El area debe definir pruebas E2E de control de asistencia con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0649 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0650 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0651 [WF][ALTO] El workflow de seleccion de personal debe impedir transiciones de estado en Odoo si SPI `users` no confirma precondiciones de negocio.
+- REQ-INT-A02-0652 [SEC][ALTO] El intercambio de datos de user-profile debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0653 [AUD][ALTO] Los cambios criticos de cierre de novedades deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0654 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0655 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso actualizacion de perfil.
+- REQ-INT-A02-0656 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0657 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `permisos` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0658 [INT][ALTO] La integracion de personnel-requests con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0659 [WF][ALTO] El cierre de aprobacion de vacaciones debe exigir evidencia documental `acta de ingreso` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A02-0660 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0661 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0662 [NFR][ALTO] El proceso de integracion del modulo `users` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0663 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0664 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0665 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0666 [INT][ALTO] Ante evento de actualizacion en SPI `attendance`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0667 [WF][ALTO] Las aprobaciones del proceso aprobacion de permisos deben mantenerse alineadas entre SPI `vacaciones` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0668 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0669 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0670 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0671 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0672 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `talento_humano` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0673 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0674 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0675 [WF][ALTO] Los cambios de responsable en control de asistencia deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0676 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0677 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0678 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0679 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0680 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0681 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `applicants` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0682 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0683 [WF][ALTO] Toda reapertura del proceso asignacion departamental debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0684 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0685 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0686 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0687 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de collaborators incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0688 [TST][ALTO] El area debe definir pruebas E2E de offboarding con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0689 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0690 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0691 [WF][ALTO] El workflow de actualizacion de perfil debe impedir transiciones de estado en Odoo si SPI `personnel-requests` no confirma precondiciones de negocio.
+- REQ-INT-A02-0692 [SEC][ALTO] El intercambio de datos de applicants debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0693 [AUD][ALTO] Los cambios criticos de control de asistencia deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0694 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0695 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de vacaciones.
+- REQ-INT-A02-0696 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0697 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `user-certifications` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0698 [INT][ALTO] La integracion de collaborators con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0699 [WF][ALTO] El cierre de alta de colaborador debe exigir evidencia documental `historial de asistencia` y validacion de control `consistencia jerarquica` antes de completarse.
+- REQ-INT-A02-0700 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 701-800
+- REQ-INT-A02-0701 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0702 [NFR][ALTO] El proceso de integracion del modulo `personnel-requests` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0703 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0704 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0705 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0706 [INT][ALTO] Ante evento de firma en SPI `users`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0707 [WF][ALTO] Las aprobaciones del proceso cierre de novedades deben mantenerse alineadas entre SPI `user-profile` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0708 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0709 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0710 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0711 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0712 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `permisos` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0713 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0714 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0715 [WF][ALTO] Los cambios de responsable en offboarding deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0716 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0717 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0718 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0719 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0720 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0721 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `attendance` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0722 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0723 [WF][ALTO] Toda reapertura del proceso seleccion de personal debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0724 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0725 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0726 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0727 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de talento_humano incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0728 [TST][ALTO] El area debe definir pruebas E2E de asignacion departamental con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0729 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0730 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0731 [WF][ALTO] El workflow de aprobacion de vacaciones debe impedir transiciones de estado en Odoo si SPI `collaborators` no confirma precondiciones de negocio.
+- REQ-INT-A02-0732 [SEC][ALTO] El intercambio de datos de attendance debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0733 [AUD][ALTO] Los cambios criticos de offboarding deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0734 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0735 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso alta de colaborador.
+- REQ-INT-A02-0736 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0737 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `departments` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0738 [INT][ALTO] La integracion de talento_humano con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0739 [WF][ALTO] El cierre de aprobacion de permisos debe exigir evidencia documental `expediente laboral` y validacion de control `matriz de aprobadores` antes de completarse.
+- REQ-INT-A02-0740 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0741 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0742 [NFR][ALTO] El proceso de integracion del modulo `collaborators` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0743 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0744 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0745 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0746 [INT][ALTO] Ante evento de reasignacion en SPI `personnel-requests`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0747 [WF][ALTO] Las aprobaciones del proceso control de asistencia deben mantenerse alineadas entre SPI `applicants` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0748 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0749 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0750 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0751 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0752 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `user-certifications` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0753 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0754 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0755 [WF][ALTO] Los cambios de responsable en asignacion departamental deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0756 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0757 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0758 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0759 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0760 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0761 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `users` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0762 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0763 [WF][ALTO] Toda reapertura del proceso actualizacion de perfil debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0764 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0765 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0766 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0767 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de permisos incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0768 [TST][ALTO] El area debe definir pruebas E2E de seleccion de personal con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0769 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0770 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0771 [WF][ALTO] El workflow de alta de colaborador debe impedir transiciones de estado en Odoo si SPI `talento_humano` no confirma precondiciones de negocio.
+- REQ-INT-A02-0772 [SEC][ALTO] El intercambio de datos de users debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0773 [AUD][ALTO] Los cambios criticos de asignacion departamental deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0774 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0775 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de permisos.
+- REQ-INT-A02-0776 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0777 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `vacaciones` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0778 [INT][ALTO] La integracion de permisos con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0779 [WF][ALTO] El cierre de cierre de novedades debe exigir evidencia documental `acta de ingreso` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A02-0780 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0781 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0782 [NFR][ALTO] El proceso de integracion del modulo `talento_humano` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0783 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0784 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0785 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0786 [INT][ALTO] Ante evento de actualizacion en SPI `collaborators`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0787 [WF][ALTO] Las aprobaciones del proceso offboarding deben mantenerse alineadas entre SPI `attendance` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0788 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0789 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0790 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0791 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0792 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `departments` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0793 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0794 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0795 [WF][ALTO] Los cambios de responsable en seleccion de personal deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0796 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0797 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0798 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0799 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0800 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+
+### Bloque 801-900
+- REQ-INT-A02-0801 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `personnel-requests` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0802 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0803 [WF][ALTO] Toda reapertura del proceso aprobacion de vacaciones debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0804 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0805 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0806 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0807 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de user-certifications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0808 [TST][ALTO] El area debe definir pruebas E2E de actualizacion de perfil con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0809 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0810 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0811 [WF][ALTO] El workflow de aprobacion de permisos debe impedir transiciones de estado en Odoo si SPI `permisos` no confirma precondiciones de negocio.
+- REQ-INT-A02-0812 [SEC][ALTO] El intercambio de datos de personnel-requests debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0813 [AUD][ALTO] Los cambios criticos de seleccion de personal deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0814 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0815 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de novedades.
+- REQ-INT-A02-0816 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0817 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `user-profile` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0818 [INT][ALTO] La integracion de user-certifications con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0819 [WF][ALTO] El cierre de control de asistencia debe exigir evidencia documental `historial de asistencia` y validacion de control `regla de no solapamiento` antes de completarse.
+- REQ-INT-A02-0820 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0821 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0822 [NFR][ALTO] El proceso de integracion del modulo `permisos` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0823 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0824 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0825 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0826 [INT][ALTO] Ante evento de firma en SPI `talento_humano`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0827 [WF][ALTO] Las aprobaciones del proceso asignacion departamental deben mantenerse alineadas entre SPI `users` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0828 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0829 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0830 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0831 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0832 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `vacaciones` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0833 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0834 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0835 [WF][ALTO] Los cambios de responsable en actualizacion de perfil deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0836 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0837 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0838 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0839 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0840 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0841 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `collaborators` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0842 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0843 [WF][ALTO] Toda reapertura del proceso alta de colaborador debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0844 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0845 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0846 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0847 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de departments incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0848 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de vacaciones con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0849 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0850 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0851 [WF][ALTO] El workflow de cierre de novedades debe impedir transiciones de estado en Odoo si SPI `user-certifications` no confirma precondiciones de negocio.
+- REQ-INT-A02-0852 [SEC][ALTO] El intercambio de datos de collaborators debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0853 [AUD][ALTO] Los cambios criticos de actualizacion de perfil deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0854 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0855 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso control de asistencia.
+- REQ-INT-A02-0856 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0857 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `applicants` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0858 [INT][ALTO] La integracion de departments con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0859 [WF][ALTO] El cierre de offboarding debe exigir evidencia documental `expediente laboral` y validacion de control `vigencia de certificaciones` antes de completarse.
+- REQ-INT-A02-0860 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0861 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0862 [NFR][ALTO] El proceso de integracion del modulo `user-certifications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0863 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0864 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0865 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0866 [INT][ALTO] Ante evento de reasignacion en SPI `permisos`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0867 [WF][ALTO] Las aprobaciones del proceso seleccion de personal deben mantenerse alineadas entre SPI `personnel-requests` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0868 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0869 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0870 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0871 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0872 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `user-profile` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0873 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0874 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0875 [WF][ALTO] Los cambios de responsable en aprobacion de vacaciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0876 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0877 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0878 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0879 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0880 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+- REQ-INT-A02-0881 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `talento_humano` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0882 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0883 [WF][ALTO] Toda reapertura del proceso aprobacion de permisos debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-0884 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0885 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0886 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0887 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de vacaciones incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0888 [TST][ALTO] El area debe definir pruebas E2E de alta de colaborador con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0889 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0890 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0891 [WF][ALTO] El workflow de control de asistencia debe impedir transiciones de estado en Odoo si SPI `departments` no confirma precondiciones de negocio.
+- REQ-INT-A02-0892 [SEC][ALTO] El intercambio de datos de talento_humano debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0893 [AUD][ALTO] Los cambios criticos de aprobacion de vacaciones deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0894 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0895 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso offboarding.
+- REQ-INT-A02-0896 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0897 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `attendance` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0898 [INT][ALTO] La integracion de vacaciones con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0899 [WF][ALTO] El cierre de asignacion departamental debe exigir evidencia documental `acta de ingreso` y validacion de control `politica de cupos` antes de completarse.
+- REQ-INT-A02-0900 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 901-1000
+- REQ-INT-A02-0901 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0902 [NFR][ALTO] El proceso de integracion del modulo `departments` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0903 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-0904 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-0905 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0906 [INT][ALTO] Ante evento de actualizacion en SPI `user-certifications`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0907 [WF][ALTO] Las aprobaciones del proceso actualizacion de perfil deben mantenerse alineadas entre SPI `collaborators` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0908 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0909 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0910 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0911 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0912 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `applicants` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0913 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0914 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0915 [WF][ALTO] Los cambios de responsable en alta de colaborador deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0916 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0917 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0918 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0919 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0920 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-0921 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `permisos` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0922 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0923 [WF][ALTO] Toda reapertura del proceso cierre de novedades debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-0924 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0925 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0926 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0927 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de user-profile incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0928 [TST][ALTO] El area debe definir pruebas E2E de aprobacion de permisos con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0929 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0930 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0931 [WF][ALTO] El workflow de offboarding debe impedir transiciones de estado en Odoo si SPI `vacaciones` no confirma precondiciones de negocio.
+- REQ-INT-A02-0932 [SEC][ALTO] El intercambio de datos de permisos debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0933 [AUD][ALTO] Los cambios criticos de alta de colaborador deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0934 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0935 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso asignacion departamental.
+- REQ-INT-A02-0936 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0937 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `users` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0938 [INT][ALTO] La integracion de user-profile con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0939 [WF][ALTO] El cierre de seleccion de personal debe exigir evidencia documental `historial de asistencia` y validacion de control `validacion documental` antes de completarse.
+- REQ-INT-A02-0940 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0941 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0942 [NFR][ALTO] El proceso de integracion del modulo `vacaciones` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0943 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-0944 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-0945 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0946 [INT][ALTO] Ante evento de firma en SPI `departments`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0947 [WF][ALTO] Las aprobaciones del proceso aprobacion de vacaciones deben mantenerse alineadas entre SPI `talento_humano` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0948 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0949 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0950 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0951 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0952 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `attendance` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0953 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0954 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0955 [WF][ALTO] Los cambios de responsable en aprobacion de permisos deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0956 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0957 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0958 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0959 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-0960 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-0961 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `user-certifications` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-0962 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-0963 [WF][ALTO] Toda reapertura del proceso control de asistencia debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-0964 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-0965 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-0966 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-0967 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de applicants incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-0968 [TST][ALTO] El area debe definir pruebas E2E de cierre de novedades con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-0969 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-0970 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-0971 [WF][ALTO] El workflow de asignacion departamental debe impedir transiciones de estado en Odoo si SPI `user-profile` no confirma precondiciones de negocio.
+- REQ-INT-A02-0972 [SEC][ALTO] El intercambio de datos de user-certifications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-0973 [AUD][ALTO] Los cambios criticos de aprobacion de permisos deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-0974 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-0975 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso seleccion de personal.
+- REQ-INT-A02-0976 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-0977 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `personnel-requests` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-0978 [INT][ALTO] La integracion de applicants con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-0979 [WF][ALTO] El cierre de actualizacion de perfil debe exigir evidencia documental `expediente laboral` y validacion de control `consistencia jerarquica` antes de completarse.
+- REQ-INT-A02-0980 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-0981 [AUD][ALTO] Cada evento de rechazo sobre novedades de nomina debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-0982 [NFR][ALTO] El proceso de integracion del modulo `user-profile` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-0983 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de usuarios internos entre SPI y Odoo.
+- REQ-INT-A02-0984 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A02-0985 [DAT][ALTO] El proceso de upsert para certificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-0986 [INT][ALTO] Ante evento de reasignacion en SPI `vacaciones`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-0987 [WF][ALTO] Las aprobaciones del proceso alta de colaborador deben mantenerse alineadas entre SPI `permisos` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-0988 [SEC][ALTO] Las operaciones sensibles sobre solicitudes de vacaciones deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-0989 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de solicitudes de permisos con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-0990 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-0991 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para postulantes con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-0992 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `users` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-0993 [DAT][ALTO] La carga de novedades de nomina debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-0994 [INT][ALTO] La sincronizacion de colaboradores debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-0995 [WF][ALTO] Los cambios de responsable en cierre de novedades deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-0996 [SEC][ALTO] La integracion de perfiles laborales debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-0997 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-0998 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de departamentos sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-0999 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-1000 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes de vacaciones.
+
+### Bloque 1001-1100
+- REQ-INT-A02-1001 [DAT][ALTO] El integrador debe sincronizar solicitudes de permisos del modulo SPI `departments` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-1002 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de personal debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-1003 [WF][ALTO] Toda reapertura del proceso offboarding debe generar evento compensatorio y revalidar datos integrados de postulantes.
+- REQ-INT-A02-1004 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-1005 [AUD][ALTO] La evidencia `historial de asistencia` asociada a novedades de nomina debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-1006 [NFR][ALTO] La sincronizacion de colaboradores debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-1007 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de attendance incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-1008 [TST][ALTO] El area debe definir pruebas E2E de control de asistencia con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-1009 [DAT][ALTO] Toda transferencia de certificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-1010 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de departamentos con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-1011 [WF][ALTO] El workflow de seleccion de personal debe impedir transiciones de estado en Odoo si SPI `applicants` no confirma precondiciones de negocio.
+- REQ-INT-A02-1012 [SEC][ALTO] El intercambio de datos de departments debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-1013 [AUD][ALTO] Los cambios criticos de cierre de novedades deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-1014 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-1015 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso actualizacion de perfil.
+- REQ-INT-A02-1016 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para contratos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-1017 [DAT][ALTO] El sistema debe mapear campos obligatorios de novedades de nomina entre SPI `collaborators` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-1018 [INT][ALTO] La integracion de attendance con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-1019 [WF][ALTO] El cierre de aprobacion de vacaciones debe exigir evidencia documental `acta de ingreso` y validacion de control `matriz de aprobadores` antes de completarse.
+- REQ-INT-A02-1020 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-1021 [AUD][ALTO] Cada evento de asignacion sobre certificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-1022 [NFR][ALTO] El proceso de integracion del modulo `applicants` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-1023 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de marcaciones de asistencia entre SPI y Odoo.
+- REQ-INT-A02-1024 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A02-1025 [DAT][ALTO] El proceso de upsert para solicitudes de permisos debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-1026 [INT][ALTO] Ante evento de actualizacion en SPI `user-profile`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-1027 [WF][ALTO] Las aprobaciones del proceso aprobacion de permisos deben mantenerse alineadas entre SPI `user-certifications` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-1028 [SEC][ALTO] Las operaciones sensibles sobre contratos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-1029 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de novedades de nomina con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-1030 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-1031 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para usuarios internos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-1032 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `personnel-requests` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-1033 [DAT][ALTO] La carga de certificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-1034 [INT][ALTO] La sincronizacion de departamentos debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-1035 [WF][ALTO] Los cambios de responsable en control de asistencia deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-1036 [SEC][ALTO] La integracion de solicitudes de vacaciones debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-1037 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-1038 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de personal sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-1039 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-1040 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de contratos.
+- REQ-INT-A02-1041 [DAT][ALTO] El integrador debe sincronizar novedades de nomina del modulo SPI `vacaciones` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-1042 [INT][ALTO] La interfaz SPI-Odoo para colaboradores debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-1043 [WF][ALTO] Toda reapertura del proceso asignacion departamental debe generar evento compensatorio y revalidar datos integrados de usuarios internos.
+- REQ-INT-A02-1044 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-1045 [AUD][ALTO] La evidencia `expediente laboral` asociada a certificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-1046 [NFR][ALTO] La sincronizacion de departamentos debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-1047 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de users incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-1048 [TST][ALTO] El area debe definir pruebas E2E de offboarding con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-1049 [DAT][ALTO] Toda transferencia de solicitudes de permisos debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-1050 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de personal con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-1051 [WF][ALTO] El workflow de actualizacion de perfil debe impedir transiciones de estado en Odoo si SPI `attendance` no confirma precondiciones de negocio.
+- REQ-INT-A02-1052 [SEC][ALTO] El intercambio de datos de vacaciones debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-1053 [AUD][ALTO] Los cambios criticos de control de asistencia deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-1054 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-1055 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion de vacaciones.
+- REQ-INT-A02-1056 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para perfiles laborales cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-1057 [DAT][ALTO] El sistema debe mapear campos obligatorios de certificaciones entre SPI `talento_humano` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-1058 [INT][ALTO] La integracion de users con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-1059 [WF][ALTO] El cierre de alta de colaborador debe exigir evidencia documental `historial de asistencia` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A02-1060 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A02-1061 [AUD][ALTO] Cada evento de creacion sobre solicitudes de permisos debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A02-1062 [NFR][ALTO] El proceso de integracion del modulo `attendance` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A02-1063 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de postulantes entre SPI y Odoo.
+- REQ-INT-A02-1064 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A02-1065 [DAT][ALTO] El proceso de upsert para novedades de nomina debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A02-1066 [INT][ALTO] Ante evento de firma en SPI `applicants`, la integracion debe publicar mensaje y actualizar Odoo `hr_recruitment` con trazabilidad completa.
+- REQ-INT-A02-1067 [WF][ALTO] Las aprobaciones del proceso cierre de novedades deben mantenerse alineadas entre SPI `departments` y Odoo `hr_skills` sin saltos de estado.
+- REQ-INT-A02-1068 [SEC][ALTO] Las operaciones sensibles sobre perfiles laborales deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A02-1069 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de certificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A02-1070 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A02-1071 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para marcaciones de asistencia con estado, ultimo intento y proximo reintento.
+- REQ-INT-A02-1072 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `collaborators` y Odoo `hr_attendance` con version bloqueada.
+- REQ-INT-A02-1073 [DAT][ALTO] La carga de solicitudes de permisos debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `hr_holidays`.
+- REQ-INT-A02-1074 [INT][ALTO] La sincronizacion de requerimientos de personal debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A02-1075 [WF][ALTO] Los cambios de responsable en offboarding deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A02-1076 [SEC][ALTO] La integracion de contratos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A02-1077 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A02-1078 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de colaboradores sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A02-1079 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A02-1080 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de perfiles laborales.
+- REQ-INT-A02-1081 [DAT][ALTO] El integrador debe sincronizar certificaciones del modulo SPI `user-profile` hacia Odoo `hr_holidays` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A02-1082 [INT][ALTO] La interfaz SPI-Odoo para departamentos debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A02-1083 [WF][ALTO] Toda reapertura del proceso seleccion de personal debe generar evento compensatorio y revalidar datos integrados de marcaciones de asistencia.
+- REQ-INT-A02-1084 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A02-1085 [AUD][ALTO] La evidencia `acta de ingreso` asociada a solicitudes de permisos debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A02-1086 [NFR][ALTO] La sincronizacion de requerimientos de personal debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A02-1087 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de personnel-requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A02-1088 [TST][ALTO] El area debe definir pruebas E2E de asignacion departamental con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A02-1089 [DAT][ALTO] Toda transferencia de novedades de nomina debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A02-1090 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de colaboradores con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A02-1091 [WF][ALTO] El workflow de aprobacion de vacaciones debe impedir transiciones de estado en Odoo si SPI `users` no confirma precondiciones de negocio.
+- REQ-INT-A02-1092 [SEC][ALTO] El intercambio de datos de user-profile debe cifrarse en transito y registrar controles de acceso por rol en Odoo `hr_contract`.
+- REQ-INT-A02-1093 [AUD][ALTO] Los cambios criticos de offboarding deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A02-1094 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A02-1095 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso alta de colaborador.
+- REQ-INT-A02-1096 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes de vacaciones cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A02-1097 [DAT][ALTO] El sistema debe mapear campos obligatorios de solicitudes de permisos entre SPI `permisos` y Odoo `hr_holidays` preservando historial de cambios y control de version.
+- REQ-INT-A02-1098 [INT][ALTO] La integracion de personnel-requests con `hr_recruitment` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A02-1099 [WF][ALTO] El cierre de aprobacion de permisos debe exigir evidencia documental `expediente laboral` y validacion de control `regla de no solapamiento` antes de completarse.
+- REQ-INT-A02-1100 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.

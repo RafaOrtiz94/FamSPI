@@ -1,0 +1,25 @@
+import { jsPDF } from "jspdf";
+const generateContingencyPdf = async (record) => {
+  const doc = new jsPDF();
+  const margin = 20;
+  doc.setFontSize(18); doc.setFont("helvetica", "bold");
+  doc.text("Acta de Contingencia Refrigerados", margin, 25);
+  doc.setFontSize(12); doc.setFont("helvetica", "normal");
+  doc.text(`Inicio: ${record?.outageStart ? new Date(record.outageStart).toLocaleString() : "N/A"}`, margin, 40);
+  doc.text(`Estado: ${record?.status || "active"}`, margin, 48);
+  doc.text(`Duración: ${record?.durationMinutes ? `${record.durationMinutes} min` : "N/A"}`, margin, 56);
+  doc.text(`Temp drop: ${record?.temperatureDrop ? `${record.temperatureDrop}°C` : "N/A"}`, margin, 64);
+  const qrData = JSON.stringify({ id: record?.id, ts: new Date().toISOString() });
+  doc.setFontSize(10); doc.setTextColor(100);
+  doc.text("QR:", margin, 85);
+  const qrSize = 30; doc.setFillColor(0,0,0); doc.rect(margin, 90, qrSize, qrSize, "F");
+  doc.setTextColor(0); doc.setFontSize(8);
+  doc.text("GXP", margin, qrSize + 95);
+  doc.setFontSize(8); doc.setTextColor(150);
+  doc.text(`Generado: ${new Date().toLocaleString()}`, margin, doc.internal.pageSize.getHeight() - 15);
+  doc.text("Contingencia Refrigerados GXP - FamSPI", margin, doc.internal.pageSize.getHeight() - 9);
+  return doc;
+};
+const downloadContingencyPdf = async (record, filename = "contingencia.pdf") => { const doc = await generateContingencyPdf(record); doc.save(filename); };
+const getContingencyPdfBase64 = async (record) => { const doc = await generateContingencyPdf(record); return doc.output("datauristring"); };
+export default { generateContingencyPdf, downloadContingencyPdf, getContingencyPdfBase64 };

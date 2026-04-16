@@ -1,0 +1,928 @@
+﻿# Requerimientos de Integracion - Comercial y Gestion de Demanda
+
+- Codigo de area: A03
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_03_comercial_demanda.md
+- Modulos SPI del inventario: comercial, clients, requests, business-case, equipment-purchases, private-purchases
+- Modulos/modelos Odoo objetivo: crm, sale_management, sale.order, product.pricelist, purchase, purchase.order, res.partner
+- Prioridad del area: ALTO
+- Total de requerimientos del documento: 900
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A03-0001 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `sale.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0002 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0003 [WF][ALTO] Toda reapertura del proceso aprobacion comercial debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0004 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0005 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0006 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0007 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0008 [TST][ALTO] El area debe definir pruebas E2E de gestion de solicitud con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0009 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0010 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0011 [WF][ALTO] El workflow de emision de proforma debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0012 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.partner`.
+- REQ-INT-A03-0013 [AUD][ALTO] Los cambios criticos de cierre de venta deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0014 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0015 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso captura de demanda.
+- REQ-INT-A03-0016 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0017 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `purchase` preservando historial de cambios y control de version.
+- REQ-INT-A03-0018 [INT][ALTO] La integracion de private-purchases con `purchase.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0019 [WF][ALTO] El cierre de negociacion debe exigir evidencia documental `proforma firmada` y validacion de control `validacion de margen` antes de completarse.
+- REQ-INT-A03-0020 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0021 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0022 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0023 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0024 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0025 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0026 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `res.partner` con trazabilidad completa.
+- REQ-INT-A03-0027 [WF][ALTO] Las aprobaciones del proceso evaluacion business case deben mantenerse alineadas entre SPI `requests` y Odoo `crm` sin saltos de estado.
+- REQ-INT-A03-0028 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0029 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0030 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0031 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0032 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `purchase.order` con version bloqueada.
+- REQ-INT-A03-0033 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.partner`.
+- REQ-INT-A03-0034 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0035 [WF][ALTO] Los cambios de responsable en gestion de solicitud deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0036 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0037 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0038 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0039 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0040 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0041 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `crm` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0042 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0043 [WF][ALTO] Toda reapertura del proceso calificacion comercial debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0044 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0045 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0046 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0047 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0048 [TST][ALTO] El area debe definir pruebas E2E de aprobacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0049 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0050 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0051 [WF][ALTO] El workflow de captura de demanda debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0052 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase`.
+- REQ-INT-A03-0053 [AUD][ALTO] Los cambios criticos de gestion de solicitud deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0054 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0055 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso negociacion.
+- REQ-INT-A03-0056 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0057 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `sale.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0058 [INT][ALTO] La integracion de business-case con `product.pricelist` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0059 [WF][ALTO] El cierre de transferencia a operaciones debe exigir evidencia documental `resumen de negociacion` y validacion de control `completitud de cliente` antes de completarse.
+- REQ-INT-A03-0060 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0061 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0062 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0063 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0064 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0065 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0066 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `purchase` con trazabilidad completa.
+- REQ-INT-A03-0067 [WF][ALTO] Las aprobaciones del proceso cierre de venta deben mantenerse alineadas entre SPI `comercial` y Odoo `purchase.order` sin saltos de estado.
+- REQ-INT-A03-0068 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0069 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0070 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0071 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0072 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `product.pricelist` con version bloqueada.
+- REQ-INT-A03-0073 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase`.
+- REQ-INT-A03-0074 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0075 [WF][ALTO] Los cambios de responsable en aprobacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0076 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0077 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0078 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0079 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0080 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+- REQ-INT-A03-0081 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `purchase.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0082 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0083 [WF][ALTO] Toda reapertura del proceso emision de proforma debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0084 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0085 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0086 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0087 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0088 [TST][ALTO] El area debe definir pruebas E2E de calificacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0089 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0090 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0091 [WF][ALTO] El workflow de negociacion debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0092 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale.order`.
+- REQ-INT-A03-0093 [AUD][ALTO] Los cambios criticos de aprobacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0094 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0095 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso transferencia a operaciones.
+- REQ-INT-A03-0096 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0097 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `crm` preservando historial de cambios y control de version.
+- REQ-INT-A03-0098 [INT][ALTO] La integracion de clients con `sale_management` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0099 [WF][ALTO] El cierre de evaluacion business case debe exigir evidencia documental `acta comercial` y validacion de control `no cierre sin evidencia` antes de completarse.
+- REQ-INT-A03-0100 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A03-0101 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0102 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0103 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0104 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0105 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0106 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `sale.order` con trazabilidad completa.
+- REQ-INT-A03-0107 [WF][ALTO] Las aprobaciones del proceso gestion de solicitud deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `product.pricelist` sin saltos de estado.
+- REQ-INT-A03-0108 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0109 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0110 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0111 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0112 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `sale_management` con version bloqueada.
+- REQ-INT-A03-0113 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale.order`.
+- REQ-INT-A03-0114 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0115 [WF][ALTO] Los cambios de responsable en calificacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0116 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0117 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0118 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0119 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0120 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0121 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `product.pricelist` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0122 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0123 [WF][ALTO] Toda reapertura del proceso captura de demanda debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0124 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0125 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0126 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0127 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0128 [TST][ALTO] El area debe definir pruebas E2E de emision de proforma con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0129 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0130 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0131 [WF][ALTO] El workflow de transferencia a operaciones debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0132 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `crm`.
+- REQ-INT-A03-0133 [AUD][ALTO] Los cambios criticos de calificacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0134 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0135 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso evaluacion business case.
+- REQ-INT-A03-0136 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0137 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `purchase.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0138 [INT][ALTO] La integracion de private-purchases con `res.partner` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0139 [WF][ALTO] El cierre de cierre de venta debe exigir evidencia documental `proforma firmada` y validacion de control `politica comercial` antes de completarse.
+- REQ-INT-A03-0140 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0141 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0142 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0143 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0144 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0145 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0146 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `crm` con trazabilidad completa.
+- REQ-INT-A03-0147 [WF][ALTO] Las aprobaciones del proceso aprobacion comercial deben mantenerse alineadas entre SPI `requests` y Odoo `sale_management` sin saltos de estado.
+- REQ-INT-A03-0148 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0149 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0150 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0151 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0152 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `res.partner` con version bloqueada.
+- REQ-INT-A03-0153 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `crm`.
+- REQ-INT-A03-0154 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0155 [WF][ALTO] Los cambios de responsable en emision de proforma deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0156 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0157 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0158 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0159 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0160 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0161 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `sale_management` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0162 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0163 [WF][ALTO] Toda reapertura del proceso negociacion debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0164 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0165 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0166 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0167 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0168 [TST][ALTO] El area debe definir pruebas E2E de captura de demanda con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0169 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0170 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0171 [WF][ALTO] El workflow de evaluacion business case debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0172 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase.order`.
+- REQ-INT-A03-0173 [AUD][ALTO] Los cambios criticos de emision de proforma deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0174 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0175 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de venta.
+- REQ-INT-A03-0176 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0177 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `product.pricelist` preservando historial de cambios y control de version.
+- REQ-INT-A03-0178 [INT][ALTO] La integracion de business-case con `purchase` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0179 [WF][ALTO] El cierre de gestion de solicitud debe exigir evidencia documental `resumen de negociacion` y validacion de control `consistencia de precio` antes de completarse.
+- REQ-INT-A03-0180 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0181 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0182 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0183 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0184 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0185 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0186 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `purchase.order` con trazabilidad completa.
+- REQ-INT-A03-0187 [WF][ALTO] Las aprobaciones del proceso calificacion comercial deben mantenerse alineadas entre SPI `comercial` y Odoo `res.partner` sin saltos de estado.
+- REQ-INT-A03-0188 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0189 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0190 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0191 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0192 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `purchase` con version bloqueada.
+- REQ-INT-A03-0193 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase.order`.
+- REQ-INT-A03-0194 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0195 [WF][ALTO] Los cambios de responsable en captura de demanda deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0196 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0197 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0198 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0199 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0200 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+
+### Bloque 201-300
+- REQ-INT-A03-0201 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `res.partner` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0202 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0203 [WF][ALTO] Toda reapertura del proceso transferencia a operaciones debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0204 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0205 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0206 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0207 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0208 [TST][ALTO] El area debe definir pruebas E2E de negociacion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0209 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0210 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0211 [WF][ALTO] El workflow de cierre de venta debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0212 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `product.pricelist`.
+- REQ-INT-A03-0213 [AUD][ALTO] Los cambios criticos de captura de demanda deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0214 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0215 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso gestion de solicitud.
+- REQ-INT-A03-0216 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0217 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `sale_management` preservando historial de cambios y control de version.
+- REQ-INT-A03-0218 [INT][ALTO] La integracion de clients con `sale.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0219 [WF][ALTO] El cierre de aprobacion comercial debe exigir evidencia documental `acta comercial` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A03-0220 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0221 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0222 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0223 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0224 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0225 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0226 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `product.pricelist` con trazabilidad completa.
+- REQ-INT-A03-0227 [WF][ALTO] Las aprobaciones del proceso emision de proforma deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `purchase` sin saltos de estado.
+- REQ-INT-A03-0228 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0229 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0230 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0231 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0232 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `sale.order` con version bloqueada.
+- REQ-INT-A03-0233 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `product.pricelist`.
+- REQ-INT-A03-0234 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0235 [WF][ALTO] Los cambios de responsable en negociacion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0236 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0237 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0238 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0239 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0240 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0241 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `purchase` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0242 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0243 [WF][ALTO] Toda reapertura del proceso evaluacion business case debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0244 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0245 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0246 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0247 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0248 [TST][ALTO] El area debe definir pruebas E2E de transferencia a operaciones con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0249 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0250 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0251 [WF][ALTO] El workflow de gestion de solicitud debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0252 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale_management`.
+- REQ-INT-A03-0253 [AUD][ALTO] Los cambios criticos de negociacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0254 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0255 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion comercial.
+- REQ-INT-A03-0256 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0257 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `res.partner` preservando historial de cambios y control de version.
+- REQ-INT-A03-0258 [INT][ALTO] La integracion de private-purchases con `crm` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0259 [WF][ALTO] El cierre de calificacion comercial debe exigir evidencia documental `proforma firmada` y validacion de control `flujo de aprobacion` antes de completarse.
+- REQ-INT-A03-0260 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0261 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0262 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0263 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0264 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0265 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0266 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `sale_management` con trazabilidad completa.
+- REQ-INT-A03-0267 [WF][ALTO] Las aprobaciones del proceso captura de demanda deben mantenerse alineadas entre SPI `requests` y Odoo `sale.order` sin saltos de estado.
+- REQ-INT-A03-0268 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0269 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0270 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0271 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0272 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `crm` con version bloqueada.
+- REQ-INT-A03-0273 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale_management`.
+- REQ-INT-A03-0274 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0275 [WF][ALTO] Los cambios de responsable en transferencia a operaciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0276 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0277 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0278 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0279 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0280 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0281 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `sale.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0282 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0283 [WF][ALTO] Toda reapertura del proceso cierre de venta debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0284 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0285 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0286 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0287 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0288 [TST][ALTO] El area debe definir pruebas E2E de evaluacion business case con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0289 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0290 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0291 [WF][ALTO] El workflow de aprobacion comercial debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0292 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.partner`.
+- REQ-INT-A03-0293 [AUD][ALTO] Los cambios criticos de transferencia a operaciones deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0294 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0295 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso calificacion comercial.
+- REQ-INT-A03-0296 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0297 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `purchase` preservando historial de cambios y control de version.
+- REQ-INT-A03-0298 [INT][ALTO] La integracion de business-case con `purchase.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0299 [WF][ALTO] El cierre de emision de proforma debe exigir evidencia documental `resumen de negociacion` y validacion de control `validacion de margen` antes de completarse.
+- REQ-INT-A03-0300 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A03-0301 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0302 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0303 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0304 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0305 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0306 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `res.partner` con trazabilidad completa.
+- REQ-INT-A03-0307 [WF][ALTO] Las aprobaciones del proceso negociacion deben mantenerse alineadas entre SPI `comercial` y Odoo `crm` sin saltos de estado.
+- REQ-INT-A03-0308 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0309 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0310 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0311 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0312 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `purchase.order` con version bloqueada.
+- REQ-INT-A03-0313 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.partner`.
+- REQ-INT-A03-0314 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0315 [WF][ALTO] Los cambios de responsable en evaluacion business case deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0316 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0317 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0318 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0319 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0320 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+- REQ-INT-A03-0321 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `crm` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0322 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0323 [WF][ALTO] Toda reapertura del proceso gestion de solicitud debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0324 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0325 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0326 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0327 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0328 [TST][ALTO] El area debe definir pruebas E2E de cierre de venta con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0329 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0330 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0331 [WF][ALTO] El workflow de calificacion comercial debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0332 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase`.
+- REQ-INT-A03-0333 [AUD][ALTO] Los cambios criticos de evaluacion business case deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0334 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0335 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso emision de proforma.
+- REQ-INT-A03-0336 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0337 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `sale.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0338 [INT][ALTO] La integracion de clients con `product.pricelist` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0339 [WF][ALTO] El cierre de captura de demanda debe exigir evidencia documental `acta comercial` y validacion de control `completitud de cliente` antes de completarse.
+- REQ-INT-A03-0340 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0341 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0342 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0343 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0344 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0345 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0346 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `purchase` con trazabilidad completa.
+- REQ-INT-A03-0347 [WF][ALTO] Las aprobaciones del proceso transferencia a operaciones deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `purchase.order` sin saltos de estado.
+- REQ-INT-A03-0348 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0349 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0350 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0351 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0352 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `product.pricelist` con version bloqueada.
+- REQ-INT-A03-0353 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase`.
+- REQ-INT-A03-0354 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0355 [WF][ALTO] Los cambios de responsable en cierre de venta deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0356 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0357 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0358 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0359 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0360 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0361 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `purchase.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0362 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0363 [WF][ALTO] Toda reapertura del proceso aprobacion comercial debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0364 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0365 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0366 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0367 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0368 [TST][ALTO] El area debe definir pruebas E2E de gestion de solicitud con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0369 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0370 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0371 [WF][ALTO] El workflow de emision de proforma debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0372 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale.order`.
+- REQ-INT-A03-0373 [AUD][ALTO] Los cambios criticos de cierre de venta deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0374 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0375 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso captura de demanda.
+- REQ-INT-A03-0376 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0377 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `crm` preservando historial de cambios y control de version.
+- REQ-INT-A03-0378 [INT][ALTO] La integracion de private-purchases con `sale_management` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0379 [WF][ALTO] El cierre de negociacion debe exigir evidencia documental `proforma firmada` y validacion de control `no cierre sin evidencia` antes de completarse.
+- REQ-INT-A03-0380 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0381 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0382 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0383 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0384 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0385 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0386 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `sale.order` con trazabilidad completa.
+- REQ-INT-A03-0387 [WF][ALTO] Las aprobaciones del proceso evaluacion business case deben mantenerse alineadas entre SPI `requests` y Odoo `product.pricelist` sin saltos de estado.
+- REQ-INT-A03-0388 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0389 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0390 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0391 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0392 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `sale_management` con version bloqueada.
+- REQ-INT-A03-0393 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale.order`.
+- REQ-INT-A03-0394 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0395 [WF][ALTO] Los cambios de responsable en gestion de solicitud deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0396 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0397 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0398 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0399 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0400 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+
+### Bloque 401-500
+- REQ-INT-A03-0401 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `product.pricelist` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0402 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0403 [WF][ALTO] Toda reapertura del proceso calificacion comercial debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0404 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0405 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0406 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0407 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0408 [TST][ALTO] El area debe definir pruebas E2E de aprobacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0409 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0410 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0411 [WF][ALTO] El workflow de captura de demanda debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0412 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `crm`.
+- REQ-INT-A03-0413 [AUD][ALTO] Los cambios criticos de gestion de solicitud deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0414 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0415 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso negociacion.
+- REQ-INT-A03-0416 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0417 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `purchase.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0418 [INT][ALTO] La integracion de business-case con `res.partner` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0419 [WF][ALTO] El cierre de transferencia a operaciones debe exigir evidencia documental `resumen de negociacion` y validacion de control `politica comercial` antes de completarse.
+- REQ-INT-A03-0420 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0421 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0422 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0423 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0424 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0425 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0426 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `crm` con trazabilidad completa.
+- REQ-INT-A03-0427 [WF][ALTO] Las aprobaciones del proceso cierre de venta deben mantenerse alineadas entre SPI `comercial` y Odoo `sale_management` sin saltos de estado.
+- REQ-INT-A03-0428 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0429 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0430 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0431 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0432 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `res.partner` con version bloqueada.
+- REQ-INT-A03-0433 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `crm`.
+- REQ-INT-A03-0434 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0435 [WF][ALTO] Los cambios de responsable en aprobacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0436 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0437 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0438 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0439 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0440 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+- REQ-INT-A03-0441 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `sale_management` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0442 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0443 [WF][ALTO] Toda reapertura del proceso emision de proforma debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0444 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0445 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0446 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0447 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0448 [TST][ALTO] El area debe definir pruebas E2E de calificacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0449 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0450 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0451 [WF][ALTO] El workflow de negociacion debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0452 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase.order`.
+- REQ-INT-A03-0453 [AUD][ALTO] Los cambios criticos de aprobacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0454 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0455 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso transferencia a operaciones.
+- REQ-INT-A03-0456 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0457 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `product.pricelist` preservando historial de cambios y control de version.
+- REQ-INT-A03-0458 [INT][ALTO] La integracion de clients con `purchase` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0459 [WF][ALTO] El cierre de evaluacion business case debe exigir evidencia documental `acta comercial` y validacion de control `consistencia de precio` antes de completarse.
+- REQ-INT-A03-0460 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0461 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0462 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0463 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0464 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0465 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0466 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `purchase.order` con trazabilidad completa.
+- REQ-INT-A03-0467 [WF][ALTO] Las aprobaciones del proceso gestion de solicitud deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `res.partner` sin saltos de estado.
+- REQ-INT-A03-0468 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0469 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0470 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0471 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0472 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `purchase` con version bloqueada.
+- REQ-INT-A03-0473 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase.order`.
+- REQ-INT-A03-0474 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0475 [WF][ALTO] Los cambios de responsable en calificacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0476 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0477 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0478 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0479 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0480 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0481 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `res.partner` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0482 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0483 [WF][ALTO] Toda reapertura del proceso captura de demanda debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0484 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0485 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0486 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0487 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0488 [TST][ALTO] El area debe definir pruebas E2E de emision de proforma con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0489 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0490 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0491 [WF][ALTO] El workflow de transferencia a operaciones debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0492 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `product.pricelist`.
+- REQ-INT-A03-0493 [AUD][ALTO] Los cambios criticos de calificacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0494 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0495 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso evaluacion business case.
+- REQ-INT-A03-0496 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0497 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `sale_management` preservando historial de cambios y control de version.
+- REQ-INT-A03-0498 [INT][ALTO] La integracion de private-purchases con `sale.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0499 [WF][ALTO] El cierre de cierre de venta debe exigir evidencia documental `proforma firmada` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A03-0500 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 501-600
+- REQ-INT-A03-0501 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0502 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0503 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0504 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0505 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0506 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `product.pricelist` con trazabilidad completa.
+- REQ-INT-A03-0507 [WF][ALTO] Las aprobaciones del proceso aprobacion comercial deben mantenerse alineadas entre SPI `requests` y Odoo `purchase` sin saltos de estado.
+- REQ-INT-A03-0508 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0509 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0510 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0511 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0512 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `sale.order` con version bloqueada.
+- REQ-INT-A03-0513 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `product.pricelist`.
+- REQ-INT-A03-0514 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0515 [WF][ALTO] Los cambios de responsable en emision de proforma deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0516 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0517 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0518 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0519 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0520 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0521 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `purchase` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0522 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0523 [WF][ALTO] Toda reapertura del proceso negociacion debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0524 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0525 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0526 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0527 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0528 [TST][ALTO] El area debe definir pruebas E2E de captura de demanda con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0529 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0530 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0531 [WF][ALTO] El workflow de evaluacion business case debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0532 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale_management`.
+- REQ-INT-A03-0533 [AUD][ALTO] Los cambios criticos de emision de proforma deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0534 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0535 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de venta.
+- REQ-INT-A03-0536 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0537 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `res.partner` preservando historial de cambios y control de version.
+- REQ-INT-A03-0538 [INT][ALTO] La integracion de business-case con `crm` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0539 [WF][ALTO] El cierre de gestion de solicitud debe exigir evidencia documental `resumen de negociacion` y validacion de control `flujo de aprobacion` antes de completarse.
+- REQ-INT-A03-0540 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0541 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0542 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0543 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0544 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0545 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0546 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `sale_management` con trazabilidad completa.
+- REQ-INT-A03-0547 [WF][ALTO] Las aprobaciones del proceso calificacion comercial deben mantenerse alineadas entre SPI `comercial` y Odoo `sale.order` sin saltos de estado.
+- REQ-INT-A03-0548 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0549 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0550 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0551 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0552 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `crm` con version bloqueada.
+- REQ-INT-A03-0553 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale_management`.
+- REQ-INT-A03-0554 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0555 [WF][ALTO] Los cambios de responsable en captura de demanda deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0556 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0557 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0558 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0559 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0560 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+- REQ-INT-A03-0561 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `sale.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0562 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0563 [WF][ALTO] Toda reapertura del proceso transferencia a operaciones debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0564 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0565 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0566 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0567 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0568 [TST][ALTO] El area debe definir pruebas E2E de negociacion con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0569 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0570 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0571 [WF][ALTO] El workflow de cierre de venta debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0572 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.partner`.
+- REQ-INT-A03-0573 [AUD][ALTO] Los cambios criticos de captura de demanda deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0574 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0575 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso gestion de solicitud.
+- REQ-INT-A03-0576 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0577 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `purchase` preservando historial de cambios y control de version.
+- REQ-INT-A03-0578 [INT][ALTO] La integracion de clients con `purchase.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0579 [WF][ALTO] El cierre de aprobacion comercial debe exigir evidencia documental `acta comercial` y validacion de control `validacion de margen` antes de completarse.
+- REQ-INT-A03-0580 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0581 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0582 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0583 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0584 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0585 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0586 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `res.partner` con trazabilidad completa.
+- REQ-INT-A03-0587 [WF][ALTO] Las aprobaciones del proceso emision de proforma deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `crm` sin saltos de estado.
+- REQ-INT-A03-0588 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0589 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0590 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0591 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0592 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `purchase.order` con version bloqueada.
+- REQ-INT-A03-0593 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.partner`.
+- REQ-INT-A03-0594 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0595 [WF][ALTO] Los cambios de responsable en negociacion deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0596 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0597 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0598 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0599 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0600 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+
+### Bloque 601-700
+- REQ-INT-A03-0601 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `crm` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0602 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0603 [WF][ALTO] Toda reapertura del proceso evaluacion business case debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0604 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0605 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0606 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0607 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0608 [TST][ALTO] El area debe definir pruebas E2E de transferencia a operaciones con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0609 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0610 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0611 [WF][ALTO] El workflow de gestion de solicitud debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0612 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase`.
+- REQ-INT-A03-0613 [AUD][ALTO] Los cambios criticos de negociacion deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0614 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0615 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso aprobacion comercial.
+- REQ-INT-A03-0616 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0617 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `sale.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0618 [INT][ALTO] La integracion de private-purchases con `product.pricelist` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0619 [WF][ALTO] El cierre de calificacion comercial debe exigir evidencia documental `proforma firmada` y validacion de control `completitud de cliente` antes de completarse.
+- REQ-INT-A03-0620 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0621 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0622 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0623 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0624 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0625 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0626 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `purchase` con trazabilidad completa.
+- REQ-INT-A03-0627 [WF][ALTO] Las aprobaciones del proceso captura de demanda deben mantenerse alineadas entre SPI `requests` y Odoo `purchase.order` sin saltos de estado.
+- REQ-INT-A03-0628 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0629 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0630 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0631 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0632 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `product.pricelist` con version bloqueada.
+- REQ-INT-A03-0633 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase`.
+- REQ-INT-A03-0634 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0635 [WF][ALTO] Los cambios de responsable en transferencia a operaciones deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0636 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0637 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0638 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0639 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0640 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0641 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `purchase.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0642 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0643 [WF][ALTO] Toda reapertura del proceso cierre de venta debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0644 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0645 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0646 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0647 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0648 [TST][ALTO] El area debe definir pruebas E2E de evaluacion business case con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0649 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0650 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0651 [WF][ALTO] El workflow de aprobacion comercial debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0652 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale.order`.
+- REQ-INT-A03-0653 [AUD][ALTO] Los cambios criticos de transferencia a operaciones deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0654 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0655 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso calificacion comercial.
+- REQ-INT-A03-0656 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0657 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `crm` preservando historial de cambios y control de version.
+- REQ-INT-A03-0658 [INT][ALTO] La integracion de business-case con `sale_management` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0659 [WF][ALTO] El cierre de emision de proforma debe exigir evidencia documental `resumen de negociacion` y validacion de control `no cierre sin evidencia` antes de completarse.
+- REQ-INT-A03-0660 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0661 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0662 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0663 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0664 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0665 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0666 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `sale.order` con trazabilidad completa.
+- REQ-INT-A03-0667 [WF][ALTO] Las aprobaciones del proceso negociacion deben mantenerse alineadas entre SPI `comercial` y Odoo `product.pricelist` sin saltos de estado.
+- REQ-INT-A03-0668 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0669 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0670 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0671 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0672 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `sale_management` con version bloqueada.
+- REQ-INT-A03-0673 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale.order`.
+- REQ-INT-A03-0674 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0675 [WF][ALTO] Los cambios de responsable en evaluacion business case deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0676 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0677 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0678 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0679 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0680 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+- REQ-INT-A03-0681 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `product.pricelist` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0682 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0683 [WF][ALTO] Toda reapertura del proceso gestion de solicitud debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0684 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0685 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0686 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0687 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0688 [TST][ALTO] El area debe definir pruebas E2E de cierre de venta con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0689 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0690 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0691 [WF][ALTO] El workflow de calificacion comercial debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0692 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `crm`.
+- REQ-INT-A03-0693 [AUD][ALTO] Los cambios criticos de evaluacion business case deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0694 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0695 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso emision de proforma.
+- REQ-INT-A03-0696 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0697 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `purchase.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0698 [INT][ALTO] La integracion de clients con `res.partner` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0699 [WF][ALTO] El cierre de captura de demanda debe exigir evidencia documental `acta comercial` y validacion de control `politica comercial` antes de completarse.
+- REQ-INT-A03-0700 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 701-800
+- REQ-INT-A03-0701 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0702 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0703 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0704 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0705 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0706 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `crm` con trazabilidad completa.
+- REQ-INT-A03-0707 [WF][ALTO] Las aprobaciones del proceso transferencia a operaciones deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `sale_management` sin saltos de estado.
+- REQ-INT-A03-0708 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0709 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0710 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0711 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0712 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `res.partner` con version bloqueada.
+- REQ-INT-A03-0713 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `crm`.
+- REQ-INT-A03-0714 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0715 [WF][ALTO] Los cambios de responsable en cierre de venta deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0716 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0717 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0718 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0719 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0720 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0721 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `sale_management` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0722 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0723 [WF][ALTO] Toda reapertura del proceso aprobacion comercial debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0724 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0725 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0726 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0727 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0728 [TST][ALTO] El area debe definir pruebas E2E de gestion de solicitud con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0729 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0730 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0731 [WF][ALTO] El workflow de emision de proforma debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0732 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase.order`.
+- REQ-INT-A03-0733 [AUD][ALTO] Los cambios criticos de cierre de venta deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0734 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0735 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso captura de demanda.
+- REQ-INT-A03-0736 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0737 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `product.pricelist` preservando historial de cambios y control de version.
+- REQ-INT-A03-0738 [INT][ALTO] La integracion de private-purchases con `purchase` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0739 [WF][ALTO] El cierre de negociacion debe exigir evidencia documental `proforma firmada` y validacion de control `consistencia de precio` antes de completarse.
+- REQ-INT-A03-0740 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0741 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0742 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0743 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0744 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0745 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0746 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `purchase.order` con trazabilidad completa.
+- REQ-INT-A03-0747 [WF][ALTO] Las aprobaciones del proceso evaluacion business case deben mantenerse alineadas entre SPI `requests` y Odoo `res.partner` sin saltos de estado.
+- REQ-INT-A03-0748 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0749 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0750 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0751 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0752 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `purchase` con version bloqueada.
+- REQ-INT-A03-0753 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `purchase.order`.
+- REQ-INT-A03-0754 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0755 [WF][ALTO] Los cambios de responsable en gestion de solicitud deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0756 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0757 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0758 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0759 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0760 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0761 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `res.partner` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0762 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0763 [WF][ALTO] Toda reapertura del proceso calificacion comercial debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0764 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0765 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0766 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0767 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0768 [TST][ALTO] El area debe definir pruebas E2E de aprobacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0769 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0770 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0771 [WF][ALTO] El workflow de captura de demanda debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0772 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `product.pricelist`.
+- REQ-INT-A03-0773 [AUD][ALTO] Los cambios criticos de gestion de solicitud deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0774 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0775 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso negociacion.
+- REQ-INT-A03-0776 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0777 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `sale_management` preservando historial de cambios y control de version.
+- REQ-INT-A03-0778 [INT][ALTO] La integracion de business-case con `sale.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0779 [WF][ALTO] El cierre de transferencia a operaciones debe exigir evidencia documental `resumen de negociacion` y validacion de control `control de duplicados` antes de completarse.
+- REQ-INT-A03-0780 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0781 [AUD][ALTO] Cada evento de asignacion sobre oportunidades debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0782 [NFR][ALTO] El proceso de integracion del modulo `clients` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0783 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de proformas entre SPI y Odoo.
+- REQ-INT-A03-0784 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A03-0785 [DAT][ALTO] El proceso de upsert para asignaciones de vendedor debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0786 [INT][ALTO] Ante evento de actualizacion en SPI `private-purchases`, la integracion debe publicar mensaje y actualizar Odoo `product.pricelist` con trazabilidad completa.
+- REQ-INT-A03-0787 [WF][ALTO] Las aprobaciones del proceso cierre de venta deben mantenerse alineadas entre SPI `comercial` y Odoo `purchase` sin saltos de estado.
+- REQ-INT-A03-0788 [SEC][ALTO] Las operaciones sensibles sobre ofertas publicas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0789 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de lineas de cotizacion con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0790 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0791 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para contactos comerciales con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0792 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `private-purchases` y Odoo `sale.order` con version bloqueada.
+- REQ-INT-A03-0793 [DAT][ALTO] La carga de oportunidades debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `product.pricelist`.
+- REQ-INT-A03-0794 [INT][ALTO] La sincronizacion de casos de negocio debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0795 [WF][ALTO] Los cambios de responsable en aprobacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0796 [SEC][ALTO] La integracion de listas de precio debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0797 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0798 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de requerimientos de compra sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0799 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0800 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de ofertas publicas.
+
+### Bloque 801-900
+- REQ-INT-A03-0801 [DAT][ALTO] El integrador debe sincronizar lineas de cotizacion del modulo SPI `requests` hacia Odoo `purchase` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0802 [INT][ALTO] La interfaz SPI-Odoo para clientes debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0803 [WF][ALTO] Toda reapertura del proceso emision de proforma debe generar evento compensatorio y revalidar datos integrados de contactos comerciales.
+- REQ-INT-A03-0804 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0805 [AUD][ALTO] La evidencia `proforma firmada` asociada a oportunidades debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0806 [NFR][ALTO] La sincronizacion de casos de negocio debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0807 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de requests incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0808 [TST][ALTO] El area debe definir pruebas E2E de calificacion comercial con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0809 [DAT][ALTO] Toda transferencia de asignaciones de vendedor debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0810 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de requerimientos de compra con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0811 [WF][ALTO] El workflow de negociacion debe impedir transiciones de estado en Odoo si SPI `comercial` no confirma precondiciones de negocio.
+- REQ-INT-A03-0812 [SEC][ALTO] El intercambio de datos de clients debe cifrarse en transito y registrar controles de acceso por rol en Odoo `sale_management`.
+- REQ-INT-A03-0813 [AUD][ALTO] Los cambios criticos de aprobacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0814 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0815 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso transferencia a operaciones.
+- REQ-INT-A03-0816 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para solicitudes cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0817 [DAT][ALTO] El sistema debe mapear campos obligatorios de oportunidades entre SPI `comercial` y Odoo `res.partner` preservando historial de cambios y control de version.
+- REQ-INT-A03-0818 [INT][ALTO] La integracion de clients con `crm` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0819 [WF][ALTO] El cierre de evaluacion business case debe exigir evidencia documental `acta comercial` y validacion de control `flujo de aprobacion` antes de completarse.
+- REQ-INT-A03-0820 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0821 [AUD][ALTO] Cada evento de creacion sobre asignaciones de vendedor debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0822 [NFR][ALTO] El proceso de integracion del modulo `private-purchases` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0823 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de ofertas privadas entre SPI y Odoo.
+- REQ-INT-A03-0824 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A03-0825 [DAT][ALTO] El proceso de upsert para lineas de cotizacion debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0826 [INT][ALTO] Ante evento de firma en SPI `business-case`, la integracion debe publicar mensaje y actualizar Odoo `sale_management` con trazabilidad completa.
+- REQ-INT-A03-0827 [WF][ALTO] Las aprobaciones del proceso gestion de solicitud deben mantenerse alineadas entre SPI `equipment-purchases` y Odoo `sale.order` sin saltos de estado.
+- REQ-INT-A03-0828 [SEC][ALTO] Las operaciones sensibles sobre solicitudes deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0829 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de oportunidades con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0830 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0831 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para proformas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0832 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `business-case` y Odoo `crm` con version bloqueada.
+- REQ-INT-A03-0833 [DAT][ALTO] La carga de asignaciones de vendedor debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `sale_management`.
+- REQ-INT-A03-0834 [INT][ALTO] La sincronizacion de requerimientos de compra debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0835 [WF][ALTO] Los cambios de responsable en calificacion comercial deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0836 [SEC][ALTO] La integracion de ofertas publicas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0837 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0838 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de clientes sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0839 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0840 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de solicitudes.
+- REQ-INT-A03-0841 [DAT][ALTO] El integrador debe sincronizar oportunidades del modulo SPI `comercial` hacia Odoo `sale.order` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0842 [INT][ALTO] La interfaz SPI-Odoo para casos de negocio debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0843 [WF][ALTO] Toda reapertura del proceso captura de demanda debe generar evento compensatorio y revalidar datos integrados de proformas.
+- REQ-INT-A03-0844 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0845 [AUD][ALTO] La evidencia `resumen de negociacion` asociada a asignaciones de vendedor debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0846 [NFR][ALTO] La sincronizacion de requerimientos de compra debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0847 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de comercial incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0848 [TST][ALTO] El area debe definir pruebas E2E de emision de proforma con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0849 [DAT][ALTO] Toda transferencia de lineas de cotizacion debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0850 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de clientes con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0851 [WF][ALTO] El workflow de transferencia a operaciones debe impedir transiciones de estado en Odoo si SPI `equipment-purchases` no confirma precondiciones de negocio.
+- REQ-INT-A03-0852 [SEC][ALTO] El intercambio de datos de private-purchases debe cifrarse en transito y registrar controles de acceso por rol en Odoo `res.partner`.
+- REQ-INT-A03-0853 [AUD][ALTO] Los cambios criticos de calificacion comercial deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0854 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0855 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso evaluacion business case.
+- REQ-INT-A03-0856 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para listas de precio cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0857 [DAT][ALTO] El sistema debe mapear campos obligatorios de asignaciones de vendedor entre SPI `equipment-purchases` y Odoo `purchase` preservando historial de cambios y control de version.
+- REQ-INT-A03-0858 [INT][ALTO] La integracion de private-purchases con `purchase.order` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0859 [WF][ALTO] El cierre de cierre de venta debe exigir evidencia documental `proforma firmada` y validacion de control `validacion de margen` antes de completarse.
+- REQ-INT-A03-0860 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A03-0861 [AUD][ALTO] Cada evento de rechazo sobre lineas de cotizacion debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A03-0862 [NFR][ALTO] El proceso de integracion del modulo `business-case` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A03-0863 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de contactos comerciales entre SPI y Odoo.
+- REQ-INT-A03-0864 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A03-0865 [DAT][ALTO] El proceso de upsert para oportunidades debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A03-0866 [INT][ALTO] Ante evento de reasignacion en SPI `clients`, la integracion debe publicar mensaje y actualizar Odoo `res.partner` con trazabilidad completa.
+- REQ-INT-A03-0867 [WF][ALTO] Las aprobaciones del proceso aprobacion comercial deben mantenerse alineadas entre SPI `requests` y Odoo `crm` sin saltos de estado.
+- REQ-INT-A03-0868 [SEC][ALTO] Las operaciones sensibles sobre listas de precio deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A03-0869 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de asignaciones de vendedor con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A03-0870 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A03-0871 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para ofertas privadas con estado, ultimo intento y proximo reintento.
+- REQ-INT-A03-0872 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `clients` y Odoo `purchase.order` con version bloqueada.
+- REQ-INT-A03-0873 [DAT][ALTO] La carga de lineas de cotizacion debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `res.partner`.
+- REQ-INT-A03-0874 [INT][ALTO] La sincronizacion de clientes debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A03-0875 [WF][ALTO] Los cambios de responsable en emision de proforma deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A03-0876 [SEC][ALTO] La integracion de solicitudes debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A03-0877 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A03-0878 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de casos de negocio sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A03-0879 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A03-0880 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de listas de precio.
+- REQ-INT-A03-0881 [DAT][ALTO] El integrador debe sincronizar asignaciones de vendedor del modulo SPI `equipment-purchases` hacia Odoo `crm` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A03-0882 [INT][ALTO] La interfaz SPI-Odoo para requerimientos de compra debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A03-0883 [WF][ALTO] Toda reapertura del proceso negociacion debe generar evento compensatorio y revalidar datos integrados de ofertas privadas.
+- REQ-INT-A03-0884 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A03-0885 [AUD][ALTO] La evidencia `acta comercial` asociada a lineas de cotizacion debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A03-0886 [NFR][ALTO] La sincronizacion de clientes debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A03-0887 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de equipment-purchases incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A03-0888 [TST][ALTO] El area debe definir pruebas E2E de captura de demanda con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A03-0889 [DAT][ALTO] Toda transferencia de oportunidades debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A03-0890 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de casos de negocio con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A03-0891 [WF][ALTO] El workflow de evaluacion business case debe impedir transiciones de estado en Odoo si SPI `requests` no confirma precondiciones de negocio.
+- REQ-INT-A03-0892 [SEC][ALTO] El intercambio de datos de business-case debe cifrarse en transito y registrar controles de acceso por rol en Odoo `purchase`.
+- REQ-INT-A03-0893 [AUD][ALTO] Los cambios criticos de emision de proforma deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A03-0894 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A03-0895 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso cierre de venta.
+- REQ-INT-A03-0896 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para ofertas publicas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A03-0897 [DAT][ALTO] El sistema debe mapear campos obligatorios de lineas de cotizacion entre SPI `requests` y Odoo `sale.order` preservando historial de cambios y control de version.
+- REQ-INT-A03-0898 [INT][ALTO] La integracion de business-case con `product.pricelist` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A03-0899 [WF][ALTO] El cierre de gestion de solicitud debe exigir evidencia documental `resumen de negociacion` y validacion de control `completitud de cliente` antes de completarse.
+- REQ-INT-A03-0900 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.

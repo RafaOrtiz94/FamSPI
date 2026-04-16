@@ -8,7 +8,9 @@
     "start": "node --max-http-header-size=16384 src/server.js",
     "dev": "nodemon --exec \"node --max-http-header-size=16384 src/server.js\"",
     "lint": "eslint . --fix",
-    "test": "jest"
+    "test": "jest",
+    "test:integration-off": "node scripts/run-tests-integration-off.js",
+    "integration:reconcile": "node scripts/integration-reconcile-report.js"
   },
   "keywords": [
     "express",

@@ -1,0 +1,572 @@
+﻿# Requerimientos de Integracion - Plataforma TI e Integraciones
+
+- Codigo de area: A06
+- Fuente URS area: C:\Users\Departamento de TI\Desktop\PROYECTOS\FamSPI\validacion_sistema\URS\areas\area_06_plataforma_ti_integraciones.md
+- Modulos SPI del inventario: dashboard, files, documents, notifications, gmail, integrations, schedules, calendar, support-tickets
+- Modulos/modelos Odoo objetivo: documents, mail, calendar, project.task, helpdesk, ir.cron, queue.job, base.automation
+- Prioridad del area: ALTO
+- Total de requerimientos del documento: 550
+
+## Requerimientos
+
+### Bloque 1-100
+- REQ-INT-A06-0001 [DAT][ALTO] El integrador debe sincronizar notificaciones del modulo SPI `dashboard` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0002 [INT][ALTO] La interfaz SPI-Odoo para hilos de correo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0003 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de jobs programados.
+- REQ-INT-A06-0004 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0005 [AUD][ALTO] La evidencia `reporte de disponibilidad` asociada a tickets de soporte debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0006 [NFR][ALTO] La sincronizacion de integraciones externas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0007 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de schedules incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0008 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0009 [DAT][ALTO] Toda transferencia de bitacoras tecnicas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0010 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de tableros con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0011 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `files` no confirma precondiciones de negocio.
+- REQ-INT-A06-0012 [SEC][ALTO] El intercambio de datos de documents debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0013 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0014 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0015 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0016 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de calendario cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0017 [DAT][ALTO] El sistema debe mapear campos obligatorios de tickets de soporte entre SPI `calendar` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0018 [INT][ALTO] La integracion de support-tickets con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0019 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `ticket resuelto` y validacion de control `reintentos controlados` antes de completarse.
+- REQ-INT-A06-0020 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0021 [AUD][ALTO] Cada evento de rechazo sobre bitacoras tecnicas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0022 [NFR][ALTO] El proceso de integracion del modulo `notifications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0023 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de documentos entre SPI y Odoo.
+- REQ-INT-A06-0024 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A06-0025 [DAT][ALTO] El proceso de upsert para notificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0026 [INT][ALTO] Ante evento de reasignacion en SPI `calendar`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0027 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `support-tickets` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0028 [SEC][ALTO] Las operaciones sensibles sobre eventos de calendario deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0029 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de tickets de soporte con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0030 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0031 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para colas de despacho con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0032 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `gmail` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0033 [DAT][ALTO] La carga de bitacoras tecnicas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0034 [INT][ALTO] La sincronizacion de tableros debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0035 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0036 [SEC][ALTO] La integracion de archivos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0037 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0038 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de hilos de correo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0039 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0040 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de calendario.
+- REQ-INT-A06-0041 [DAT][ALTO] El integrador debe sincronizar tickets de soporte del modulo SPI `gmail` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0042 [INT][ALTO] La interfaz SPI-Odoo para integraciones externas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0043 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de colas de despacho.
+- REQ-INT-A06-0044 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0045 [AUD][ALTO] La evidencia `adjunto versionado` asociada a bitacoras tecnicas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0046 [NFR][ALTO] La sincronizacion de tableros debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0047 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de files incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0048 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0049 [DAT][ALTO] Toda transferencia de notificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0050 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de hilos de correo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0051 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `integrations` no confirma precondiciones de negocio.
+- REQ-INT-A06-0052 [SEC][ALTO] El intercambio de datos de schedules debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0053 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0054 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0055 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0056 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para alertas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0057 [DAT][ALTO] El sistema debe mapear campos obligatorios de bitacoras tecnicas entre SPI `documents` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0058 [INT][ALTO] La integracion de notifications con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0059 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `reporte de disponibilidad` y validacion de control `control de acceso` antes de completarse.
+- REQ-INT-A06-0060 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0061 [AUD][ALTO] Cada evento de asignacion sobre notificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0062 [NFR][ALTO] El proceso de integracion del modulo `calendar` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0063 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de jobs programados entre SPI y Odoo.
+- REQ-INT-A06-0064 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A06-0065 [DAT][ALTO] El proceso de upsert para tickets de soporte debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0066 [INT][ALTO] Ante evento de actualizacion en SPI `documents`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0067 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `notifications` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0068 [SEC][ALTO] Las operaciones sensibles sobre alertas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0069 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de bitacoras tecnicas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0070 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0071 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para documentos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0072 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `support-tickets` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0073 [DAT][ALTO] La carga de notificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0074 [INT][ALTO] La sincronizacion de hilos de correo debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0075 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0076 [SEC][ALTO] La integracion de eventos de calendario debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0077 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0078 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de integraciones externas sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0079 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0080 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de alertas.
+- REQ-INT-A06-0081 [DAT][ALTO] El integrador debe sincronizar bitacoras tecnicas del modulo SPI `support-tickets` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0082 [INT][ALTO] La interfaz SPI-Odoo para tableros debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0083 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de documentos.
+- REQ-INT-A06-0084 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0085 [AUD][ALTO] La evidencia `ticket resuelto` asociada a notificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0086 [NFR][ALTO] La sincronizacion de hilos de correo debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0087 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de integrations incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0088 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0089 [DAT][ALTO] Toda transferencia de tickets de soporte debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0090 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de integraciones externas con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0091 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `dashboard` no confirma precondiciones de negocio.
+- REQ-INT-A06-0092 [SEC][ALTO] El intercambio de datos de files debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0093 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0094 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0095 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0096 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para archivos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0097 [DAT][ALTO] El sistema debe mapear campos obligatorios de notificaciones entre SPI `schedules` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0098 [INT][ALTO] La integracion de calendar con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0099 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `adjunto versionado` y validacion de control `integridad de adjuntos` antes de completarse.
+- REQ-INT-A06-0100 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 101-200
+- REQ-INT-A06-0101 [AUD][ALTO] Cada evento de creacion sobre tickets de soporte debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0102 [NFR][ALTO] El proceso de integracion del modulo `documents` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0103 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de colas de despacho entre SPI y Odoo.
+- REQ-INT-A06-0104 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A06-0105 [DAT][ALTO] El proceso de upsert para bitacoras tecnicas debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0106 [INT][ALTO] Ante evento de firma en SPI `schedules`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0107 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `calendar` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0108 [SEC][ALTO] Las operaciones sensibles sobre archivos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0109 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de notificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0110 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0111 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para jobs programados con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0112 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `notifications` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0113 [DAT][ALTO] La carga de tickets de soporte debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0114 [INT][ALTO] La sincronizacion de integraciones externas debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0115 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0116 [SEC][ALTO] La integracion de alertas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0117 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0118 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de tableros sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0119 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0120 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de archivos.
+- REQ-INT-A06-0121 [DAT][ALTO] El integrador debe sincronizar notificaciones del modulo SPI `notifications` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0122 [INT][ALTO] La interfaz SPI-Odoo para hilos de correo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0123 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de jobs programados.
+- REQ-INT-A06-0124 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0125 [AUD][ALTO] La evidencia `reporte de disponibilidad` asociada a tickets de soporte debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0126 [NFR][ALTO] La sincronizacion de integraciones externas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0127 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de dashboard incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0128 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0129 [DAT][ALTO] Toda transferencia de bitacoras tecnicas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0130 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de tableros con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0131 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `gmail` no confirma precondiciones de negocio.
+- REQ-INT-A06-0132 [SEC][ALTO] El intercambio de datos de integrations debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0133 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0134 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0135 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0136 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de calendario cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0137 [DAT][ALTO] El sistema debe mapear campos obligatorios de tickets de soporte entre SPI `files` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0138 [INT][ALTO] La integracion de documents con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0139 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `ticket resuelto` y validacion de control `observabilidad` antes de completarse.
+- REQ-INT-A06-0140 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0141 [AUD][ALTO] Cada evento de rechazo sobre bitacoras tecnicas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0142 [NFR][ALTO] El proceso de integracion del modulo `schedules` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0143 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de documentos entre SPI y Odoo.
+- REQ-INT-A06-0144 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A06-0145 [DAT][ALTO] El proceso de upsert para notificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0146 [INT][ALTO] Ante evento de reasignacion en SPI `files`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0147 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `documents` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0148 [SEC][ALTO] Las operaciones sensibles sobre eventos de calendario deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0149 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de tickets de soporte con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0150 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0151 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para colas de despacho con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0152 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `calendar` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0153 [DAT][ALTO] La carga de bitacoras tecnicas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0154 [INT][ALTO] La sincronizacion de tableros debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0155 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0156 [SEC][ALTO] La integracion de archivos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0157 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0158 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de hilos de correo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0159 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0160 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de calendario.
+- REQ-INT-A06-0161 [DAT][ALTO] El integrador debe sincronizar tickets de soporte del modulo SPI `calendar` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0162 [INT][ALTO] La interfaz SPI-Odoo para integraciones externas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0163 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de colas de despacho.
+- REQ-INT-A06-0164 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0165 [AUD][ALTO] La evidencia `adjunto versionado` asociada a bitacoras tecnicas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0166 [NFR][ALTO] La sincronizacion de tableros debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0167 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de gmail incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0168 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0169 [DAT][ALTO] Toda transferencia de notificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0170 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de hilos de correo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0171 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `support-tickets` no confirma precondiciones de negocio.
+- REQ-INT-A06-0172 [SEC][ALTO] El intercambio de datos de dashboard debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0173 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0174 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0175 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0176 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para alertas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0177 [DAT][ALTO] El sistema debe mapear campos obligatorios de bitacoras tecnicas entre SPI `integrations` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0178 [INT][ALTO] La integracion de schedules con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0179 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `reporte de disponibilidad` y validacion de control `retencion documental` antes de completarse.
+- REQ-INT-A06-0180 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0181 [AUD][ALTO] Cada evento de asignacion sobre notificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0182 [NFR][ALTO] El proceso de integracion del modulo `files` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0183 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de jobs programados entre SPI y Odoo.
+- REQ-INT-A06-0184 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A06-0185 [DAT][ALTO] El proceso de upsert para tickets de soporte debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0186 [INT][ALTO] Ante evento de actualizacion en SPI `integrations`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0187 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `schedules` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0188 [SEC][ALTO] Las operaciones sensibles sobre alertas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0189 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de bitacoras tecnicas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0190 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0191 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para documentos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0192 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `documents` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0193 [DAT][ALTO] La carga de notificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0194 [INT][ALTO] La sincronizacion de hilos de correo debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0195 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0196 [SEC][ALTO] La integracion de eventos de calendario debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0197 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0198 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de integraciones externas sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0199 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0200 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de alertas.
+
+### Bloque 201-300
+- REQ-INT-A06-0201 [DAT][ALTO] El integrador debe sincronizar bitacoras tecnicas del modulo SPI `documents` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0202 [INT][ALTO] La interfaz SPI-Odoo para tableros debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0203 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de documentos.
+- REQ-INT-A06-0204 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0205 [AUD][ALTO] La evidencia `ticket resuelto` asociada a notificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0206 [NFR][ALTO] La sincronizacion de hilos de correo debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0207 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de support-tickets incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0208 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0209 [DAT][ALTO] Toda transferencia de tickets de soporte debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0210 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de integraciones externas con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0211 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `notifications` no confirma precondiciones de negocio.
+- REQ-INT-A06-0212 [SEC][ALTO] El intercambio de datos de gmail debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0213 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0214 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0215 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0216 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para archivos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0217 [DAT][ALTO] El sistema debe mapear campos obligatorios de notificaciones entre SPI `dashboard` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0218 [INT][ALTO] La integracion de files con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0219 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `adjunto versionado` y validacion de control `continuidad operativa` antes de completarse.
+- REQ-INT-A06-0220 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0221 [AUD][ALTO] Cada evento de creacion sobre tickets de soporte debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0222 [NFR][ALTO] El proceso de integracion del modulo `integrations` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0223 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de colas de despacho entre SPI y Odoo.
+- REQ-INT-A06-0224 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A06-0225 [DAT][ALTO] El proceso de upsert para bitacoras tecnicas debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0226 [INT][ALTO] Ante evento de firma en SPI `dashboard`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0227 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `files` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0228 [SEC][ALTO] Las operaciones sensibles sobre archivos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0229 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de notificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0230 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0231 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para jobs programados con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0232 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `schedules` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0233 [DAT][ALTO] La carga de tickets de soporte debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0234 [INT][ALTO] La sincronizacion de integraciones externas debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0235 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0236 [SEC][ALTO] La integracion de alertas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0237 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0238 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de tableros sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0239 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0240 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de archivos.
+- REQ-INT-A06-0241 [DAT][ALTO] El integrador debe sincronizar notificaciones del modulo SPI `schedules` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0242 [INT][ALTO] La interfaz SPI-Odoo para hilos de correo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0243 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de jobs programados.
+- REQ-INT-A06-0244 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0245 [AUD][ALTO] La evidencia `reporte de disponibilidad` asociada a tickets de soporte debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0246 [NFR][ALTO] La sincronizacion de integraciones externas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0247 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de notifications incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0248 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0249 [DAT][ALTO] Toda transferencia de bitacoras tecnicas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0250 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de tableros con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0251 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `calendar` no confirma precondiciones de negocio.
+- REQ-INT-A06-0252 [SEC][ALTO] El intercambio de datos de support-tickets debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0253 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0254 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0255 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0256 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de calendario cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0257 [DAT][ALTO] El sistema debe mapear campos obligatorios de tickets de soporte entre SPI `gmail` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0258 [INT][ALTO] La integracion de integrations con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0259 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `ticket resuelto` y validacion de control `SLA de soporte` antes de completarse.
+- REQ-INT-A06-0260 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0261 [AUD][ALTO] Cada evento de rechazo sobre bitacoras tecnicas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0262 [NFR][ALTO] El proceso de integracion del modulo `dashboard` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0263 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de documentos entre SPI y Odoo.
+- REQ-INT-A06-0264 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A06-0265 [DAT][ALTO] El proceso de upsert para notificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0266 [INT][ALTO] Ante evento de reasignacion en SPI `gmail`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0267 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `integrations` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0268 [SEC][ALTO] Las operaciones sensibles sobre eventos de calendario deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0269 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de tickets de soporte con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0270 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0271 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para colas de despacho con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0272 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `files` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0273 [DAT][ALTO] La carga de bitacoras tecnicas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0274 [INT][ALTO] La sincronizacion de tableros debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0275 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0276 [SEC][ALTO] La integracion de archivos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0277 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0278 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de hilos de correo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0279 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0280 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de calendario.
+- REQ-INT-A06-0281 [DAT][ALTO] El integrador debe sincronizar tickets de soporte del modulo SPI `files` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0282 [INT][ALTO] La interfaz SPI-Odoo para integraciones externas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0283 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de colas de despacho.
+- REQ-INT-A06-0284 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0285 [AUD][ALTO] La evidencia `adjunto versionado` asociada a bitacoras tecnicas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0286 [NFR][ALTO] La sincronizacion de tableros debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0287 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de calendar incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0288 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0289 [DAT][ALTO] Toda transferencia de notificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0290 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de hilos de correo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0291 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `documents` no confirma precondiciones de negocio.
+- REQ-INT-A06-0292 [SEC][ALTO] El intercambio de datos de notifications debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0293 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0294 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0295 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0296 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para alertas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0297 [DAT][ALTO] El sistema debe mapear campos obligatorios de bitacoras tecnicas entre SPI `support-tickets` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0298 [INT][ALTO] La integracion de dashboard con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0299 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `reporte de disponibilidad` y validacion de control `reintentos controlados` antes de completarse.
+- REQ-INT-A06-0300 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 301-400
+- REQ-INT-A06-0301 [AUD][ALTO] Cada evento de asignacion sobre notificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0302 [NFR][ALTO] El proceso de integracion del modulo `gmail` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0303 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre diario para validar integridad de jobs programados entre SPI y Odoo.
+- REQ-INT-A06-0304 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A06-0305 [DAT][ALTO] El proceso de upsert para tickets de soporte debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0306 [INT][ALTO] Ante evento de actualizacion en SPI `support-tickets`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0307 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `dashboard` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0308 [SEC][ALTO] Las operaciones sensibles sobre alertas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0309 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de bitacoras tecnicas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0310 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0311 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para documentos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0312 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `integrations` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0313 [DAT][ALTO] La carga de notificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0314 [INT][ALTO] La sincronizacion de hilos de correo debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0315 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0316 [SEC][ALTO] La integracion de eventos de calendario debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0317 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0318 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de integraciones externas sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0319 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0320 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de alertas.
+- REQ-INT-A06-0321 [DAT][ALTO] El integrador debe sincronizar bitacoras tecnicas del modulo SPI `integrations` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0322 [INT][ALTO] La interfaz SPI-Odoo para tableros debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0323 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de documentos.
+- REQ-INT-A06-0324 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0325 [AUD][ALTO] La evidencia `ticket resuelto` asociada a notificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0326 [NFR][ALTO] La sincronizacion de hilos de correo debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0327 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de documents incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0328 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0329 [DAT][ALTO] Toda transferencia de tickets de soporte debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0330 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de integraciones externas con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0331 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `schedules` no confirma precondiciones de negocio.
+- REQ-INT-A06-0332 [SEC][ALTO] El intercambio de datos de calendar debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0333 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0334 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0335 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0336 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para archivos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0337 [DAT][ALTO] El sistema debe mapear campos obligatorios de notificaciones entre SPI `notifications` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0338 [INT][ALTO] La integracion de gmail con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0339 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `adjunto versionado` y validacion de control `control de acceso` antes de completarse.
+- REQ-INT-A06-0340 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0341 [AUD][ALTO] Cada evento de creacion sobre tickets de soporte debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0342 [NFR][ALTO] El proceso de integracion del modulo `support-tickets` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0343 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 30 minutos para validar integridad de colas de despacho entre SPI y Odoo.
+- REQ-INT-A06-0344 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A06-0345 [DAT][ALTO] El proceso de upsert para bitacoras tecnicas debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0346 [INT][ALTO] Ante evento de firma en SPI `notifications`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0347 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `gmail` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0348 [SEC][ALTO] Las operaciones sensibles sobre archivos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0349 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de notificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0350 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0351 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para jobs programados con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0352 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `dashboard` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0353 [DAT][ALTO] La carga de tickets de soporte debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0354 [INT][ALTO] La sincronizacion de integraciones externas debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0355 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0356 [SEC][ALTO] La integracion de alertas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0357 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0358 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de tableros sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0359 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0360 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de archivos.
+- REQ-INT-A06-0361 [DAT][ALTO] El integrador debe sincronizar notificaciones del modulo SPI `dashboard` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0362 [INT][ALTO] La interfaz SPI-Odoo para hilos de correo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0363 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de jobs programados.
+- REQ-INT-A06-0364 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0365 [AUD][ALTO] La evidencia `reporte de disponibilidad` asociada a tickets de soporte debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0366 [NFR][ALTO] La sincronizacion de integraciones externas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0367 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de schedules incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0368 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0369 [DAT][ALTO] Toda transferencia de bitacoras tecnicas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0370 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de tableros con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0371 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `files` no confirma precondiciones de negocio.
+- REQ-INT-A06-0372 [SEC][ALTO] El intercambio de datos de documents debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0373 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0374 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0375 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0376 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de calendario cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0377 [DAT][ALTO] El sistema debe mapear campos obligatorios de tickets de soporte entre SPI `calendar` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0378 [INT][ALTO] La integracion de support-tickets con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0379 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `ticket resuelto` y validacion de control `integridad de adjuntos` antes de completarse.
+- REQ-INT-A06-0380 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0381 [AUD][ALTO] Cada evento de rechazo sobre bitacoras tecnicas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0382 [NFR][ALTO] El proceso de integracion del modulo `notifications` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0383 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 5 minutos para validar integridad de documentos entre SPI y Odoo.
+- REQ-INT-A06-0384 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A06-0385 [DAT][ALTO] El proceso de upsert para notificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0386 [INT][ALTO] Ante evento de reasignacion en SPI `calendar`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0387 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `support-tickets` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0388 [SEC][ALTO] Las operaciones sensibles sobre eventos de calendario deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0389 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de tickets de soporte con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0390 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0391 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para colas de despacho con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0392 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `gmail` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0393 [DAT][ALTO] La carga de bitacoras tecnicas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0394 [INT][ALTO] La sincronizacion de tableros debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0395 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0396 [SEC][ALTO] La integracion de archivos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0397 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0398 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de hilos de correo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0399 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0400 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de calendario.
+
+### Bloque 401-500
+- REQ-INT-A06-0401 [DAT][ALTO] El integrador debe sincronizar tickets de soporte del modulo SPI `gmail` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0402 [INT][ALTO] La interfaz SPI-Odoo para integraciones externas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0403 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de colas de despacho.
+- REQ-INT-A06-0404 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0405 [AUD][ALTO] La evidencia `adjunto versionado` asociada a bitacoras tecnicas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0406 [NFR][ALTO] La sincronizacion de tableros debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0407 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de files incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0408 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0409 [DAT][ALTO] Toda transferencia de notificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0410 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de hilos de correo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0411 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `integrations` no confirma precondiciones de negocio.
+- REQ-INT-A06-0412 [SEC][ALTO] El intercambio de datos de schedules debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0413 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0414 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0415 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0416 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para alertas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0417 [DAT][ALTO] El sistema debe mapear campos obligatorios de bitacoras tecnicas entre SPI `documents` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0418 [INT][ALTO] La integracion de notifications con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0419 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `reporte de disponibilidad` y validacion de control `observabilidad` antes de completarse.
+- REQ-INT-A06-0420 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0421 [AUD][ALTO] Cada evento de asignacion sobre notificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0422 [NFR][ALTO] El proceso de integracion del modulo `calendar` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0423 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones al cierre semanal para validar integridad de jobs programados entre SPI y Odoo.
+- REQ-INT-A06-0424 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A06-0425 [DAT][ALTO] El proceso de upsert para tickets de soporte debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0426 [INT][ALTO] Ante evento de actualizacion en SPI `documents`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0427 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `notifications` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0428 [SEC][ALTO] Las operaciones sensibles sobre alertas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0429 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de bitacoras tecnicas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0430 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0431 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para documentos con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0432 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `support-tickets` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0433 [DAT][ALTO] La carga de notificaciones debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0434 [INT][ALTO] La sincronizacion de hilos de correo debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0435 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0436 [SEC][ALTO] La integracion de eventos de calendario debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0437 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0438 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de integraciones externas sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0439 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0440 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de alertas.
+- REQ-INT-A06-0441 [DAT][ALTO] El integrador debe sincronizar bitacoras tecnicas del modulo SPI `support-tickets` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0442 [INT][ALTO] La interfaz SPI-Odoo para tableros debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0443 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de documentos.
+- REQ-INT-A06-0444 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0445 [AUD][ALTO] La evidencia `ticket resuelto` asociada a notificaciones debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0446 [NFR][ALTO] La sincronizacion de hilos de correo debe cumplir SLA de 5 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0447 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de integrations incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0448 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0449 [DAT][ALTO] Toda transferencia de tickets de soporte debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0450 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de integraciones externas con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0451 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `dashboard` no confirma precondiciones de negocio.
+- REQ-INT-A06-0452 [SEC][ALTO] El intercambio de datos de files debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0453 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0454 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0455 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0456 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para archivos cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0457 [DAT][ALTO] El sistema debe mapear campos obligatorios de notificaciones entre SPI `schedules` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0458 [INT][ALTO] La integracion de calendar con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0459 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `adjunto versionado` y validacion de control `retencion documental` antes de completarse.
+- REQ-INT-A06-0460 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0461 [AUD][ALTO] Cada evento de creacion sobre tickets de soporte debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0462 [NFR][ALTO] El proceso de integracion del modulo `documents` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0463 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 60 minutos para validar integridad de colas de despacho entre SPI y Odoo.
+- REQ-INT-A06-0464 [TST][ALTO] Las pruebas de no regresion deben validar que el evento aprobacion no rompa flujos existentes del area.
+- REQ-INT-A06-0465 [DAT][ALTO] El proceso de upsert para bitacoras tecnicas debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0466 [INT][ALTO] Ante evento de firma en SPI `schedules`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0467 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `calendar` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0468 [SEC][ALTO] Las operaciones sensibles sobre archivos deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0469 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de notificaciones con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0470 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0471 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para jobs programados con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0472 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `notifications` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0473 [DAT][ALTO] La carga de tickets de soporte debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0474 [INT][ALTO] La sincronizacion de integraciones externas debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0475 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0476 [SEC][ALTO] La integracion de alertas debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0477 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0478 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de tableros sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0479 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0480 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de archivos.
+- REQ-INT-A06-0481 [DAT][ALTO] El integrador debe sincronizar notificaciones del modulo SPI `notifications` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0482 [INT][ALTO] La interfaz SPI-Odoo para hilos de correo debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0483 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de jobs programados.
+- REQ-INT-A06-0484 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0485 [AUD][ALTO] La evidencia `reporte de disponibilidad` asociada a tickets de soporte debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0486 [NFR][ALTO] La sincronizacion de integraciones externas debe cumplir SLA de 4 horas en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0487 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de dashboard incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0488 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0489 [DAT][ALTO] Toda transferencia de bitacoras tecnicas debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0490 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de tableros con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0491 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `gmail` no confirma precondiciones de negocio.
+- REQ-INT-A06-0492 [SEC][ALTO] El intercambio de datos de integrations debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0493 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0494 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0495 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0496 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para eventos de calendario cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0497 [DAT][ALTO] El sistema debe mapear campos obligatorios de tickets de soporte entre SPI `files` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0498 [INT][ALTO] La integracion de documents con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0499 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `ticket resuelto` y validacion de control `continuidad operativa` antes de completarse.
+- REQ-INT-A06-0500 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+
+### Bloque 501-550
+- REQ-INT-A06-0501 [AUD][ALTO] Cada evento de rechazo sobre bitacoras tecnicas debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0502 [NFR][ALTO] El proceso de integracion del modulo `schedules` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0503 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones cada 15 minutos para validar integridad de documentos entre SPI y Odoo.
+- REQ-INT-A06-0504 [TST][ALTO] Las pruebas de no regresion deben validar que el evento reapertura no rompa flujos existentes del area.
+- REQ-INT-A06-0505 [DAT][ALTO] El proceso de upsert para notificaciones debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0506 [INT][ALTO] Ante evento de reasignacion en SPI `files`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0507 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `documents` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0508 [SEC][ALTO] Las operaciones sensibles sobre eventos de calendario deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0509 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de tickets de soporte con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0510 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
+- REQ-INT-A06-0511 [OPS][ALTO] El equipo operador debe disponer tablero de monitoreo para colas de despacho con estado, ultimo intento y proximo reintento.
+- REQ-INT-A06-0512 [TST][ALTO] Cada entrega debe incluir pruebas de contrato API entre SPI `calendar` y Odoo `mail` con version bloqueada.
+- REQ-INT-A06-0513 [DAT][ALTO] La carga de bitacoras tecnicas debe ejecutar reglas de calidad de datos, deduplicacion e integridad referencial antes de confirmar en Odoo `calendar`.
+- REQ-INT-A06-0514 [INT][ALTO] La sincronizacion de tableros debe incluir confirmacion de recepcion y reconciliacion bidireccional entre SPI y Odoo.
+- REQ-INT-A06-0515 [WF][ALTO] Los cambios de responsable en escalamiento de incidentes deben propagarse en ambos sistemas con auditoria y sello temporal.
+- REQ-INT-A06-0516 [SEC][ALTO] La integracion de archivos debe aplicar autenticacion de servicio, autorizacion por alcance y rotacion segura de secretos.
+- REQ-INT-A06-0517 [AUD][ALTO] La integracion debe conservar evidencia de payload, respuesta y codigo de error para auditoria y soporte post mortem.
+- REQ-INT-A06-0518 [NFR][ALTO] La solucion debe soportar crecimiento de volumen de hilos de correo sin degradar el tiempo objetivo de sincronizacion.
+- REQ-INT-A06-0519 [OPS][ALTO] El proceso debe permitir re-procesamiento controlado de mensajes fallidos sin perdida de trazabilidad ni duplicacion.
+- REQ-INT-A06-0520 [TST][ALTO] Debe existir evidencia de pruebas de rendimiento y recuperacion para la sincronizacion de eventos de calendario.
+- REQ-INT-A06-0521 [DAT][ALTO] El integrador debe sincronizar tickets de soporte del modulo SPI `calendar` hacia Odoo `calendar` usando cola desacoplada y la llave `codigo natural del negocio` para evitar duplicados y asegurar consistencia.
+- REQ-INT-A06-0522 [INT][ALTO] La interfaz SPI-Odoo para integraciones externas debe exponer contrato de datos versionado, validado y documentado para consumo estable.
+- REQ-INT-A06-0523 [WF][ALTO] Toda reapertura del proceso escalamiento de incidentes debe generar evento compensatorio y revalidar datos integrados de colas de despacho.
+- REQ-INT-A06-0524 [SEC][ALTO] La plataforma debe bloquear operaciones de integracion cuando falle la validacion de permisos o firmas requeridas.
+- REQ-INT-A06-0525 [AUD][ALTO] La evidencia `adjunto versionado` asociada a bitacoras tecnicas debe incluir hash de integridad y referencia cruzada de negocio.
+- REQ-INT-A06-0526 [NFR][ALTO] La sincronizacion de tableros debe cumplir SLA de 30 minutos en condiciones nominales y degradar de forma controlada ante fallas.
+- REQ-INT-A06-0527 [OPS][ALTO] Deben definirse runbooks de operacion para incidentes de gmail incluyendo diagnostico, contencion y recuperacion.
+- REQ-INT-A06-0528 [TST][ALTO] El area debe definir pruebas E2E de integracion externa con datos representativos y validacion de resultados de negocio.
+- REQ-INT-A06-0529 [DAT][ALTO] Toda transferencia de notificaciones debe registrar estado de procesamiento, timestamp y resultado para conciliacion operativa del area.
+- REQ-INT-A06-0530 [INT][ALTO] La capa de integracion debe permitir observabilidad tecnica de hilos de correo con metricas de latencia, throughput y tasa de error.
+- REQ-INT-A06-0531 [WF][ALTO] El workflow de escalamiento de incidentes debe impedir transiciones de estado en Odoo si SPI `support-tickets` no confirma precondiciones de negocio.
+- REQ-INT-A06-0532 [SEC][ALTO] El intercambio de datos de dashboard debe cifrarse en transito y registrar controles de acceso por rol en Odoo `ir.cron`.
+- REQ-INT-A06-0533 [AUD][ALTO] Los cambios criticos de monitoreo operativo deben quedar vinculados a `correlation_id` para reconstruccion completa de trazabilidad.
+- REQ-INT-A06-0534 [NFR][ALTO] La integracion debe estandarizar codigos de error, mensajes y politicas de reintento para operacion continua.
+- REQ-INT-A06-0535 [OPS][ALTO] La mesa de ayuda debe contar con procedimiento de escalamiento para incidentes que afecten el proceso orquestacion de notificaciones.
+- REQ-INT-A06-0536 [TST][ALTO] Se deben ejecutar pruebas unitarias, integracion y regresion para alertas cubriendo casos exitosos y fallas esperadas.
+- REQ-INT-A06-0537 [DAT][ALTO] El sistema debe mapear campos obligatorios de bitacoras tecnicas entre SPI `integrations` y Odoo `calendar` preservando historial de cambios y control de version.
+- REQ-INT-A06-0538 [INT][ALTO] La integracion de schedules con `project.task` debe soportar colas de reintento y politica de dead-letter para errores no recuperables.
+- REQ-INT-A06-0539 [WF][ALTO] El cierre de escalamiento de incidentes debe exigir evidencia documental `reporte de disponibilidad` y validacion de control `SLA de soporte` antes de completarse.
+- REQ-INT-A06-0540 [SEC][ALTO] Todo endpoint de integracion del area debe aplicar rate limiting, trazabilidad de origen y politica de minimo privilegio.
+- REQ-INT-A06-0541 [AUD][ALTO] Cada evento de asignacion sobre notificaciones debe registrarse en bitacora de auditoria con actor, fecha, origen y resultado.
+- REQ-INT-A06-0542 [NFR][ALTO] El proceso de integracion del modulo `files` debe garantizar disponibilidad operativa y recuperacion ante errores transitorios.
+- REQ-INT-A06-0543 [OPS][ALTO] La operacion diaria debe ejecutar conciliaciones on-demand para validar integridad de jobs programados entre SPI y Odoo.
+- REQ-INT-A06-0544 [TST][ALTO] Las pruebas de no regresion deben validar que el evento escalamiento no rompa flujos existentes del area.
+- REQ-INT-A06-0545 [DAT][ALTO] El proceso de upsert para tickets de soporte debe ser idempotente y soportar reintentos sin crear registros huerfanos ni inconsistentes.
+- REQ-INT-A06-0546 [INT][ALTO] Ante evento de actualizacion en SPI `integrations`, la integracion debe publicar mensaje y actualizar Odoo `project.task` con trazabilidad completa.
+- REQ-INT-A06-0547 [WF][ALTO] Las aprobaciones del proceso escalamiento de incidentes deben mantenerse alineadas entre SPI `schedules` y Odoo `helpdesk` sin saltos de estado.
+- REQ-INT-A06-0548 [SEC][ALTO] Las operaciones sensibles sobre alertas deben exigir segregacion de funciones y doble control cuando aplique.
+- REQ-INT-A06-0549 [AUD][ALTO] El area debe disponer reporte conciliado SPI-Odoo de bitacoras tecnicas con diferencias, causa raiz y accion correctiva.
+- REQ-INT-A06-0550 [NFR][ALTO] La arquitectura del area debe facilitar mantenibilidad, versionado y despliegue seguro de cambios de integracion.
