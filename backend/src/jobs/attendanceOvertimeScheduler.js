@@ -6,6 +6,7 @@
 
 const db = require("../config/db");
 const logger = require("../config/logger");
+const { ATTENDANCE_TIMEZONE, getBusinessDate } = require("../modules/attendance/attendance.utils");
 
 /**
  * Process automatic shift closures and overtime start
@@ -31,7 +32,11 @@ const processAutomaticOvertime = async () => {
 
     logger.info(`[ATTENDANCE SCHEDULER] Starting automatic overtime processing at ${now.toISOString()}`);
 
-    // Find all active shifts that have passed their auto_shift_end_at time
+    const currentBusinessDate = getBusinessDate(now);
+
+    // Find all active shifts that must be closed automatically:
+    // 1) Shifts that exceeded auto_shift_end_at
+    // 2) Shifts from previous business dates (must not remain open into the next day)
     const result = await db.query(
       `
       SELECT
@@ -39,11 +44,16 @@ const processAutomaticOvertime = async () => {
         lunch_start_time, lunch_end_time
       FROM user_attendance_records
       WHERE exit_time IS NULL
-        AND auto_shift_end_at IS NOT NULL
-        AND auto_closed_at IS NULL
-        AND NOW() >= auto_shift_end_at
+        AND (
+          (
+            auto_shift_end_at IS NOT NULL
+            AND auto_closed_at IS NULL
+            AND NOW() >= auto_shift_end_at
+          )
+          OR date < $1::date
+        )
       `,
-      []
+      [currentBusinessDate]
     );
 
     const shiftsToClose = result.rows;
@@ -97,17 +107,33 @@ const processShiftClosure = async (shift) => {
 
   logger.info(`[ATTENDANCE SCHEDULER] Auto-closing shift ${id} for user ${user_id}`);
 
+  const closeAt = auto_shift_end_at || now;
+
   // Update the shift record to mark it as auto-closed and set overtime start
   await db.query(
     `
     UPDATE user_attendance_records
-    SET auto_closed_at = $1, overtime_start_at = $2, updated_at = NOW()
+    SET
+      exit_time = COALESCE(exit_time, $2),
+      lunch_end_time = CASE
+        WHEN lunch_start_time IS NOT NULL AND lunch_end_time IS NULL
+          THEN $2
+        ELSE lunch_end_time
+      END,
+      auto_closed_at = $1,
+      overtime_start_at = CASE
+        WHEN auto_shift_end_at IS NOT NULL THEN auto_shift_end_at
+        ELSE NULL
+      END,
+      updated_at = NOW()
     WHERE id = $3
     `,
-    [now, auto_shift_end_at, id]  // overtime_start_at = auto_shift_end_at
+    [now, closeAt, id]
   );
 
-  logger.info(`[ATTENDANCE SCHEDULER] Successfully auto-closed shift ${id}, overtime starts at ${auto_shift_end_at}`);
+  logger.info(
+    `[ATTENDANCE SCHEDULER] Successfully auto-closed shift ${id} at ${closeAt.toISOString()} (${ATTENDANCE_TIMEZONE})`
+  );
 };
 
 /**
