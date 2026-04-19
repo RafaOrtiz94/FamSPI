@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { GoogleMap, MarkerF, useJsApiLoader } from "@react-google-maps/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GoogleMap } from "@react-google-maps/api";
+import { useGoogleMaps } from "../../../core/contexts/GoogleMapsContext";
 import { FiEdit3, FiMapPin, FiPlus, FiSave, FiTrash2, FiX } from "react-icons/fi";
 import {
   addClientLocation,
@@ -10,6 +11,7 @@ import {
 
 const DEFAULT_CENTER = { lat: -1.831239, lng: -78.183406 };
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "";
+const GOOGLE_MAPS_MAP_ID = process.env.REACT_APP_GOOGLE_MAPS_MAP_ID || "";
 
 const toCoordinate = (value) => {
   if (value === null || value === undefined || value === "") return null;
@@ -30,6 +32,9 @@ const LocationManager = ({
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [showForm, setShowForm] = useState(false);
+  const [map, setMap] = useState(null);
+  const markerRef = useRef(null);
+  const markerListenerRef = useRef(null);
   const [form, setForm] = useState({
     name: "",
     address: "",
@@ -40,14 +45,11 @@ const LocationManager = ({
     is_main: false,
   });
 
-  const { isLoaded: mapLoaded } = useJsApiLoader({
-    id: "client-location-manager-map",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-  });
+  const { isLoaded: mapLoaded } = useGoogleMaps();
 
   const parsedLocationId = selectedLocationId ? Number(selectedLocationId) : null;
   const selectedLocation = useMemo(
-    () => locations.find((item) => Number(item.id) === Number(parsedLocationId)) || null,
+    () => locations.find((item) => item && Number(item.id) === Number(parsedLocationId)) || null,
     [locations, parsedLocationId],
   );
 
@@ -55,11 +57,11 @@ const LocationManager = ({
     const lat = toCoordinate(form.lat);
     const lng = toCoordinate(form.lng);
     if (lat !== null && lng !== null) return { lat, lng };
-    if (selectedLocation?.lat !== null && selectedLocation?.lng !== null) {
-      return { lat: Number(selectedLocation.lat), lng: Number(selectedLocation.lng) };
-    }
+    const selectedLat = toCoordinate(selectedLocation?.lat);
+    const selectedLng = toCoordinate(selectedLocation?.lng);
+    if (selectedLat !== null && selectedLng !== null) return { lat: selectedLat, lng: selectedLng };
     return DEFAULT_CENTER;
-  }, [form.lat, form.lng, selectedLocation?.lat, selectedLocation?.lng]);
+  }, [form.lat, form.lng, selectedLocation]);
 
   const resetForm = () => {
     setForm({
@@ -173,6 +175,84 @@ const LocationManager = ({
       setSaving(false);
     }
   };
+
+  const clearAdvancedMarker = useCallback(() => {
+    try {
+      markerListenerRef.current?.remove?.();
+      markerListenerRef.current = null;
+    } catch {
+      // noop
+    }
+    try {
+      if (markerRef.current) {
+        if (typeof markerRef.current.setMap === "function") {
+          markerRef.current.setMap(null);
+        } else {
+          markerRef.current.map = null;
+        }
+      }
+      markerRef.current = null;
+    } catch {
+      // noop
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!map || !mapLoaded || !window.google?.maps) return;
+
+    clearAdvancedMarker();
+    const hasMapId = Boolean(GOOGLE_MAPS_MAP_ID);
+    const hasAdvancedMarker = Boolean(window.google.maps.marker?.AdvancedMarkerElement);
+
+    if (hasMapId && hasAdvancedMarker) {
+      const pin = document.createElement("div");
+      pin.style.width = "16px";
+      pin.style.height = "16px";
+      pin.style.borderRadius = "9999px";
+      pin.style.background = "#1d4ed8";
+      pin.style.border = "2px solid #ffffff";
+      pin.style.boxShadow = "0 2px 6px rgba(0,0,0,0.35)";
+
+      const marker = new window.google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: mapCenter,
+        content: pin,
+        gmpDraggable: true,
+        title: "Ubicacion de sede",
+      });
+
+      const listener = marker.addListener?.("dragend", (event) => {
+        const lat = event?.latLng?.lat?.();
+        const lng = event?.latLng?.lng?.();
+        if (typeof lat !== "number" || typeof lng !== "number") return;
+        setForm((prev) => ({ ...prev, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
+      });
+
+      markerRef.current = marker;
+      markerListenerRef.current = listener || null;
+    } else {
+      const marker = new window.google.maps.Marker({
+        map,
+        position: mapCenter,
+        draggable: true,
+        title: "Ubicacion de sede",
+      });
+
+      const listener = marker.addListener?.("dragend", (event) => {
+        const lat = event?.latLng?.lat?.();
+        const lng = event?.latLng?.lng?.();
+        if (typeof lat !== "number" || typeof lng !== "number") return;
+        setForm((prev) => ({ ...prev, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
+      });
+
+      markerRef.current = marker;
+      markerListenerRef.current = listener || null;
+    }
+
+    return () => {
+      clearAdvancedMarker();
+    };
+  }, [clearAdvancedMarker, map, mapCenter, mapLoaded]);
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -346,27 +426,14 @@ const LocationManager = ({
                 mapContainerStyle={{ width: "100%", height: "240px" }}
                 center={mapCenter}
                 zoom={12}
+                onLoad={setMap}
+                onUnmount={() => {
+                  clearAdvancedMarker();
+                  setMap(null);
+                }}
+                mapId={GOOGLE_MAPS_MAP_ID || undefined}
                 options={{ mapTypeControl: false, streetViewControl: false, fullscreenControl: false }}
-              >
-                <MarkerF
-                  position={mapCenter}
-                  draggable
-                  onDragEnd={(event) => {
-                    const lat = event?.latLng?.lat?.();
-                    const lng = event?.latLng?.lng?.();
-                    if (typeof lat !== "number" || typeof lng !== "number") return;
-                    setForm((prev) => ({ ...prev, lat: lat.toFixed(6), lng: lng.toFixed(6) }));
-                  }}
-                  icon={{
-                    path: window.google?.maps?.SymbolPath?.CIRCLE,
-                    scale: 8,
-                    fillColor: "#1d4ed8",
-                    fillOpacity: 0.95,
-                    strokeColor: "#ffffff",
-                    strokeWeight: 2,
-                  }}
-                />
-              </GoogleMap>
+              />
             )}
           </div>
           <p className="flex items-center gap-2 text-[11px] text-slate-500">

@@ -4,8 +4,22 @@ const controller = require("./schedules.controller");
 
 const router = express.Router({ mergeParams: true });
 
-const advisorRoles = ["comercial", "acp_comercial", "backoffice", "backoffice_comercial"];
-const managerRoles = ["jefe_comercial", "gerencia", "gerencia_general", "admin", "administrador"];
+const advisorRoles = [
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+];
+const managerRoles = [
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "gerencia",
+  "gerencia_general",
+  "admin",
+  "administrador",
+];
 
 router.get("/", requireRole([...advisorRoles, ...managerRoles]), controller.listMySchedules);
 router.get("/holidays", requireRole([...advisorRoles, ...managerRoles]), controller.getHolidays);
@@ -24,9 +38,11 @@ router.post(
 router.put("/:id", requireRole(advisorRoles), controller.updateSchedule);
 router.delete("/:id", requireRole(advisorRoles), controller.deleteSchedule);
 router.post("/:id/submit", requireRole(advisorRoles), controller.submitForApproval);
+router.post("/:id/justify", requireRole(advisorRoles), controller.justifySchedule);
 router.post("/:id/visits", requireRole(advisorRoles), controller.addVisit);
 router.put("/:id/visits/:visitId", requireRole(advisorRoles), controller.updateVisit);
 router.delete("/:id/visits/:visitId", requireRole(advisorRoles), controller.deleteVisit);
+router.post("/:id/visits/:visitId/justify", requireRole(advisorRoles), controller.justifyVisit);
 router.post("/:id/approve", requireRole(managerRoles), controller.approveSchedule);
 router.post("/:id/reject", requireRole(managerRoles), controller.rejectSchedule);
 

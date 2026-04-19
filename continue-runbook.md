@@ -79,10 +79,10 @@ Regla:
 
 ## Estado actual
 
-- `CURRENT_MT`: `MT-132`
-- `LAST_COMPLETED_MT`: `MT-131`
-- `RUN_STATUS`: `ready`
-- `LAST_RESULT`: fetch manual movido a useAttendanceReportsQuery con refetch y mismo comportamiento visible
+- `CURRENT_MT`: `none`
+- `LAST_COMPLETED_MT`: `MT-184`
+- `RUN_STATUS`: `idle`
+- `LAST_RESULT`: boton "Restablecer" agregado para centrar vista
 - `LAST_UPDATED`: `2026-04-16`
 
 ## Registro corto
@@ -193,3 +193,32 @@ Si ya no quedan micro-tareas:
 - 2026-04-16 | MT-118 | completed | SearchableSelect reutilizable creado e integrado al AttendanceReportsToolbar
 - 2026-04-16 | MT-130 | completed | useAttendanceReportsQuery creado con queryKey basada en filtros
 - 2026-04-16 | MT-131 | completed | fetch manual movido a useAttendanceReportsQuery con refetch
+- 2026-04-16 | MT-132 | completed | cancelacion implementada con cancelRefetch + signal en API para evitar race conditions
+- 2026-04-16 | MT-133 | completed | placeholderData mantiene datos previos durante refetch evitando parpadeo de tabla
+- 2026-04-16 | MT-134 | completed | estados diferenciados expuestos (isInitialLoading, isRefetching, isError, warning) desde el hook
+- 2026-04-16 | MT-135 | completed | boton consultar ya deshabilitado durante carga - implementado previamente en codigo existente
+- 2026-04-16 | MT-136 | completed | AttendanceReportsLoadingState creado con spinner y estados diferenciados integrados
+- 2026-04-16 | MT-150 | completed | avatar con inicial agregado a la tabla con color por nombre
+- 2026-04-16 | MT-151 | completed | indicador geo agregado (badge verde cuando has_geo es true)
+- 2026-04-16 | MT-152 | completed | indicador discrepancia agregado (badge amarillo cuando has_discrepancy es true)
+- 2026-04-16 | MT-153 | completed | boton "Ver perfil" agregado en cada fila para navegar al contexto diario
+- 2026-04-16 | MT-154 | completed | boton "Mapa" agregado cuando row.has_geo es true
+- 2026-04-16 | MT-155 | completed | ordenamiento local por fecha, nombre y horas sin libreria pesada
+- 2026-04-16 | MT-156 | completed | scroll vertical con max-height 500px y scrollbar customizado
+- 2026-04-16 | MT-157 | completed | AnimatedCounter agregado con easing discreto sin impacto en performance
+- 2026-04-16 | MT-158 | completed | skeleton de carga para summary y tabla integrado con isLoading
+- 2026-04-16 | MT-170 | completed | attendanceGeo.js con helpers puros (parse, center, bounds, jitter, markers)
+- 2026-04-16 | MT-171 | completed | AttendanceMapView.jsx con placeholder y fallback sin API key
+- 2026-04-16 | MT-172 | completed | mapa con lazy loading y switch tabla/mapa en modo admin
+- 2026-04-16 | MT-173 | completed | switch tabla/mapa agregado al toolbar con toggle visual
+- 2026-04-16 | MT-174 | completed | validacion API key existente con fallback claro en AttendanceMapView
+- 2026-04-16 | MT-175 | completed | Google Maps renderizado con useJsApiLoader, MarkerF e InfoWindowF
+- 2026-04-16 | MT-176 | completed | transformToMarkers y getMarkerColor ya integrados en attendanceGeo.js
+- 2026-04-16 | MT-177 | completed | MarkerF usado (compatible React 19) con colores por tipo
+- 2026-04-16 | MT-178 | completed | colores por tipo (entry=green, lunch=yellow, exit=red)
+- 2026-04-16 | MT-179 | completed | inicial agregada en marcador
+- 2026-04-16 | MT-180 | completed | InfoWindow con nombre, tipo y hora al hacer click
+- 2026-04-16 | MT-181 | completed | link "Ver perfil diario" agregado en InfoWindow
+- 2026-04-16 | MT-182 | completed | calculateCenter ya implementado para centrar mapa
+- 2026-04-16 | MT-183 | completed | zoom dinamico segun seleccion de usuario
+- 2026-04-16 | MT-184 | completed | boton "Restablecer" para centrar vista

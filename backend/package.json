@@ -10,7 +10,9 @@
     "lint": "eslint . --fix",
     "test": "jest",
     "test:integration-off": "node scripts/run-tests-integration-off.js",
-    "integration:reconcile": "node scripts/integration-reconcile-report.js"
+    "integration:reconcile": "node scripts/integration-reconcile-report.js",
+    "clients:backfill:odoo": "node scripts/backfill_odoo_clients.js",
+    "clients:backfill:odoo:db": "node scripts/backfill_odoo_clients_from_db.js"
   },
   "keywords": [
     "express",

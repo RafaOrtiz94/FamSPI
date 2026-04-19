@@ -68,6 +68,7 @@ const assignClient = async (req, res) => {
       starts_at,
       ends_at,
       reason,
+      unassign,
     } = req.body || {};
     const result = await clientsService.assignClient({
       clientId: Number(id),
@@ -76,6 +77,7 @@ const assignClient = async (req, res) => {
       startsAt: starts_at,
       endsAt: ends_at,
       reason,
+      unassign,
       user: req.user,
     });
     return res.json({ ok: true, data: result });

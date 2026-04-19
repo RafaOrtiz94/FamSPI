@@ -12,6 +12,7 @@ import {
  FiEdit2,
  FiFileText,
  FiPhone,
+ FiAlertCircle,
 } from "react-icons/fi";
 
 import Card from "../../../core/ui/components/Card";
@@ -34,11 +35,14 @@ import ClientApprovalsWidget from "../../backoffice/components/ClientApprovalsWi
 import BackofficeClientRequestsKpiWidget from "../components/BackofficeClientRequestsKpiWidget";
 import MyClientRequestsWidget from "../components/MyClientRequestsWidget";
 import { RequestActionButton } from "../../../core/ui/components/RequestActionCards";
+import LocationManager from "../components/LocationManager";
+import { formatDateSafe } from "../../../shared/utils/dateUtils";
 
 const todayStr = new Date().toISOString().slice(0, 10);
 
 const ASSIGN_CLIENT_ROLES = new Set([
  "jefe_comercial",
+ "jefe_de_comercial",
  "gerencia",
  "gerente",
  "admin",
@@ -57,7 +61,13 @@ const FULL_ACCESS_ROLES = new Set([
  "administrador",
  "ti",
 ]);
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice"]);
+const ADVISOR_ROLES = new Set([
+ "comercial",
+ "asesor_comercial",
+ "acp_comercial",
+ "backoffice",
+ "backoffice_comercial",
+]);
 const VISIT_ALLOWED_ROLES = new Set([...FULL_ACCESS_ROLES, ...ADVISOR_ROLES]);
 const BACKOFFICE_PANEL_ROLES = new Set(["backoffice", "backoffice_comercial"]);
 const ACP_COMMERCIAL_ROLES = new Set(["acp_comercial"]);
@@ -66,7 +76,22 @@ const CHECKIN_CARDS_HIDDEN_ROLES = new Set([
  "backoffice_comercial",
  "jefe_comercial",
 ]);
-const ASSIGNABLE_ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
+const ASSIGNABLE_ADVISOR_ROLES = new Set([
+ "comercial",
+ "asesor_comercial",
+ "asesor",
+ "ejecutivo_comercial",
+ "acp_comercial",
+ "backoffice",
+ "backoffice_comercial",
+]);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
+
+const normalizeRoleToken = (value) =>
+ String(value || "")
+ .trim()
+ .toLowerCase()
+ .replace(/[\s-]+/g, "_");
 
 const normalizeStatus = (status) => {
  const value = (status || "").toLowerCase();
@@ -96,11 +121,10 @@ const STATUS_STYLES = {
 const ClientesPage = () => {
  const { showToast } = useUI();
  const { role, user } = useAuth();
- const normalizedRole =
- (role || user?.role || user?.role_name || user?.scope || "").toLowerCase();
+ const normalizedRole = normalizeRoleToken(role || user?.role || user?.role_name || user?.scope || "");
  const roleTokens = (normalizedRole || "")
- .split(/[\s,|]+/)
- .map((token) => token.trim())
+ .split(/[,\|]+/)
+ .map((token) => normalizeRoleToken(token))
  .filter(Boolean);
  const hasAnyRole = useCallback((allowedRoles) => roleTokens.some((token) => allowedRoles.has(token)), [roleTokens]);
  const canAssignClients = hasAnyRole(ASSIGN_CLIENT_ROLES);
@@ -108,7 +132,9 @@ const ClientesPage = () => {
  const canVisitClients = hasAnyRole(VISIT_ALLOWED_ROLES);
  const isBackofficeUser = hasAnyRole(BACKOFFICE_PANEL_ROLES);
  const isAcpCommercial = hasAnyRole(ACP_COMMERCIAL_ROLES);
+ const isJefeComercial = roleTokens.includes("jefe_comercial");
  const isCommercialOnly = roleTokens.includes("comercial") && !canManageAllClients;
+ const shouldStartWithScheduleFilter = !(isAcpCommercial || canManageAllClients);
  const currentEmail = user?.email?.toLowerCase?.() || "";
 
  const [clientes, setClientes] = useState([]);
@@ -129,13 +155,14 @@ const ClientesPage = () => {
  const [statusFilter, setStatusFilter] = useState("all"); // all | pending | visited
  const [assignedViewFilter, setAssignedViewFilter] = useState("assigned");
  const [assignedSearch, setAssignedSearch] = useState("");
- const [filterBySchedule, setFilterBySchedule] = useState(true);
+ const [filterBySchedule, setFilterBySchedule] = useState(shouldStartWithScheduleFilter);
  const [selectedDate, setSelectedDate] = useState(todayStr);
  const [summary, setSummary] = useState({});
  const [temporaryAssignmentsFilter, setTemporaryAssignmentsFilter] = useState("all"); // all | expiring_today | expiring_7
  const [albumSearch, setAlbumSearch] = useState("");
  const [showAllClients, setShowAllClients] = useState(false);
  const [allClientsSearch, setAllClientsSearch] = useState("");
+ const [clientSourceFilter, setClientSourceFilter] = useState("all"); // all | spi | odoo
  const [expandedTimeline, setExpandedTimeline] = useState({});
  const [reprogramModal, setReprogramModal] = useState({
  isOpen: false,
@@ -149,6 +176,7 @@ const ClientesPage = () => {
  const [editSubmitting, setEditSubmitting] = useState(false);
  const [editForm, setEditForm] = useState({});
  const [editFiles, setEditFiles] = useState({});
+ const [usersDirectoryByEmail, setUsersDirectoryByEmail] = useState({});
  const clientsCacheRef = useRef(new Map());
 
  const getStatusMeta = (status) => STATUS_STYLES[normalizeStatus(status)] || STATUS_STYLES.pendiente;
@@ -190,11 +218,33 @@ const ClientesPage = () => {
  return parts[0] || "Ciudad no especificada";
  };
 
- const getProvinceFromAddress = (address) => {
- const parts = parseAddressParts(address);
- if (parts.length >= 1) return parts[parts.length - 1];
- return "Provincia no especificada";
- };
+const getProvinceFromAddress = (address) => {
+const parts = parseAddressParts(address);
+if (parts.length >= 1) return parts[parts.length - 1];
+return "Provincia no especificada";
+};
+
+const getClientSourceMeta = (client) => {
+const createdBy = String(client?.created_by || "").trim().toLowerCase();
+const dataSource = String(client?.data_source || "").trim().toLowerCase();
+const isOdooSource = dataSource === "odoo" || createdBy === "odoo_sync@spi.local";
+if (isOdooSource) {
+return {
+label: "Origen: Odoo",
+className: "border-indigo-200 bg-indigo-50 text-indigo-700",
+};
+}
+return {
+label: "Origen: SPI",
+className: "border-slate-200 bg-slate-100 text-slate-700",
+};
+};
+
+const isClientFromOdoo = (client) => {
+const createdBy = String(client?.created_by || "").trim().toLowerCase();
+const dataSource = String(client?.data_source || "").trim().toLowerCase();
+return dataSource === "odoo" || createdBy === "odoo_sync@spi.local";
+};
 
  // Helper para normalizar asignados a un array siempre
  const normalizeAsignados = (asignados) => {
@@ -210,7 +260,7 @@ const ClientesPage = () => {
  return [];
  };
 
- const normalizeAssignmentDetails = (assignmentDetails) => {
+const normalizeAssignmentDetails = (assignmentDetails) => {
  if (Array.isArray(assignmentDetails)) return assignmentDetails;
  if (typeof assignmentDetails === "string") {
  try {
@@ -221,6 +271,28 @@ const ClientesPage = () => {
  }
  }
  return [];
+ };
+
+ const normalizeVisitLogs = (logs) => {
+ if (Array.isArray(logs)) return logs;
+ if (typeof logs === "string") {
+ try {
+ const parsed = JSON.parse(logs);
+ return Array.isArray(parsed) ? parsed : [];
+ } catch (e) {
+ return [];
+ }
+ }
+ return [];
+ };
+
+ const isUserPassiveOrInactive = (userInfo) => {
+ if (!userInfo) return false;
+ const employmentStatus = String(
+ userInfo.estatus_empleado || userInfo.employment_status || "",
+ ).trim().toLowerCase();
+ if (userInfo.active === false) return true;
+ return PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus);
  };
 
  const getTemporaryAssignmentInfo = useCallback((client) => {
@@ -255,6 +327,29 @@ const ClientesPage = () => {
  }
  return name;
  };
+
+  const getAssignmentAlerts = useCallback((client) => {
+    const details = normalizeAssignmentDetails(client?.assignment_details);
+    return details
+      .map((assignment) => {
+        const isPassive =
+          assignment.is_active_user === false ||
+          PASSIVE_EMPLOYMENT_STATUSES.has(String(assignment.employment_status || "").toLowerCase());
+        const hasPermiso = Boolean(assignment.has_active_permiso);
+        const hasVacaciones = Boolean(assignment.has_active_vacaciones);
+
+        if (!isPassive && !hasPermiso && !hasVacaciones) return null;
+
+        return {
+          email: assignment.assigned_to_email,
+          advisorName: assignment.assigned_to_name,
+          isPassive,
+          hasPermiso,
+          hasVacaciones,
+        };
+      })
+      .filter(Boolean);
+  }, []);
 
  const captureLocation = () =>
  new Promise((resolve, reject) => {
@@ -295,11 +390,19 @@ const ClientesPage = () => {
  try {
  const users = await getUsers();
  const usersArray = Array.isArray(users) ? users : [];
- const filtered = usersArray.filter((u) => ASSIGNABLE_ADVISOR_ROLES.has(u.role?.toLowerCase?.()));
+ const usersMap = usersArray.reduce((acc, item) => {
+ const email = String(item?.email || "").trim().toLowerCase();
+ if (!email) return acc;
+ acc[email] = item;
+ return acc;
+ }, {});
+ setUsersDirectoryByEmail(usersMap);
+ const filtered = usersArray.filter((u) => ASSIGNABLE_ADVISOR_ROLES.has(normalizeRoleToken(u.role)));
  setAdvisors(Array.isArray(filtered) ? filtered : []);
  } catch (error) {
  console.error(error);
  setAdvisors([]);
+ setUsersDirectoryByEmail({});
  }
  };
 
@@ -380,9 +483,7 @@ const ClientesPage = () => {
  } catch (error) {
  console.error(error);
  showToast("No pudimos cargar tus clientes", "error");
- setClientes([]);
- setRegisteredClients([]);
- setSummary({});
+ // Mantener el ultimo estado visible evita "parpadeo" a vacio por fallas temporales.
  } finally {
  setLoading(false);
  }
@@ -398,7 +499,7 @@ const ClientesPage = () => {
 
  useEffect(() => {
  if (isAcpCommercial || canManageAllClients) {
- setFilterBySchedule(false);
+ setFilterBySchedule((prev) => (prev ? false : prev));
  setStatusFilter("all");
  }
  }, [isAcpCommercial, canManageAllClients]);
@@ -493,28 +594,7 @@ const ClientesPage = () => {
  return merged;
  }, [clientes, assignedToMe, createdByMe]);
 
- const albumClients = useMemo(() => {
- if (!Array.isArray(registeredClients)) return [];
- let base = registeredClients;
-
- if (!canManageAllClients) {
- base = base.filter((c) => {
- const assigned = normalizeAsignados(c.asignados);
- const isAssigned = assigned.some((mail) => (mail || "").toLowerCase?.() === currentEmail);
- const isCreator = (c.created_by || "").toLowerCase?.() === currentEmail;
- return isAssigned || isCreator;
- });
- }
-
- if (!albumSearch) return base.slice(0, 12);
- const q = albumSearch.toLowerCase();
- return base.filter((c) => {
- const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
- return haystack.includes(q);
- });
- }, [registeredClients, canManageAllClients, currentEmail, albumSearch]);
-
- const allAlbumClients = useMemo(() => {
+ const accessibleAlbumBase = useMemo(() => {
  if (!Array.isArray(registeredClients)) return [];
  if (canManageAllClients) return registeredClients;
  return registeredClients.filter((c) => {
@@ -524,6 +604,95 @@ const ClientesPage = () => {
  return isAssigned || isCreator;
  });
  }, [registeredClients, canManageAllClients, currentEmail]);
+
+ const sourceTotals = useMemo(() => {
+ const base = Array.isArray(accessibleAlbumBase) ? accessibleAlbumBase : [];
+ let spi = 0;
+ let odoo = 0;
+ base.forEach((client) => {
+ if (isClientFromOdoo(client)) odoo += 1;
+ else spi += 1;
+ });
+ return {
+ all: base.length,
+ spi,
+ odoo,
+ };
+ }, [accessibleAlbumBase]);
+
+ const albumClients = useMemo(() => {
+ let base = Array.isArray(accessibleAlbumBase) ? [...accessibleAlbumBase] : [];
+
+ if (clientSourceFilter === "odoo") {
+ base = base.filter((c) => isClientFromOdoo(c));
+ } else if (clientSourceFilter === "spi") {
+ base = base.filter((c) => !isClientFromOdoo(c));
+ }
+
+ if (!albumSearch) return base.slice(0, 12);
+ const q = albumSearch.toLowerCase();
+ return base.filter((c) => {
+ const haystack = `${c.nombre || ""} ${c.commercial_name || ""} ${c.identificador || ""} ${c.ruc_cedula || ""} ${c.shipping_contact_name || ""}`.toLowerCase();
+ return haystack.includes(q);
+ });
+ }, [accessibleAlbumBase, clientSourceFilter, albumSearch]);
+
+ const allAlbumClients = useMemo(() => {
+ let base = Array.isArray(accessibleAlbumBase) ? [...accessibleAlbumBase] : [];
+ if (clientSourceFilter === "odoo") {
+ base = base.filter((c) => isClientFromOdoo(c));
+ } else if (clientSourceFilter === "spi") {
+ base = base.filter((c) => !isClientFromOdoo(c));
+ }
+ return base;
+ }, [accessibleAlbumBase, clientSourceFilter]);
+
+  const advisorAssignmentBoard = useMemo(() => {
+    if (!isJefeComercial) return [];
+    if (!Array.isArray(allAlbumClients)) return [];
+
+    const grouped = new Map();
+
+    allAlbumClients.forEach((client) => {
+      const details = normalizeAssignmentDetails(client?.assignment_details);
+      details.forEach((assignment) => {
+        const advisorEmail = String(assignment?.assigned_to_email || "").trim().toLowerCase();
+        if (!advisorEmail) return;
+
+        const isPassive =
+          assignment.is_active_user === false ||
+          PASSIVE_EMPLOYMENT_STATUSES.has(String(assignment.employment_status || "").toLowerCase());
+        const hasPermiso = Boolean(assignment.has_active_permiso);
+        const hasVacaciones = Boolean(assignment.has_active_vacaciones);
+
+        const existing = grouped.get(advisorEmail) || {
+          advisorEmail,
+          advisorName: assignment?.assigned_to_name || advisorEmail,
+          advisorRole: assignment?.assigned_to_role || "",
+          passive: isPassive,
+          hasPermiso: hasPermiso,
+          hasVacaciones: hasVacaciones,
+          employmentStatus: assignment.employment_status || "activo",
+          clients: [],
+        };
+
+        existing.passive = existing.passive || isPassive;
+        existing.hasPermiso = existing.hasPermiso || hasPermiso;
+        existing.hasVacaciones = existing.hasVacaciones || hasVacaciones;
+
+        existing.clients.push({
+          id: client.id,
+          name: client.commercial_name || client.nombre || `Cliente #${client.id}`,
+        });
+
+        grouped.set(advisorEmail, existing);
+      });
+    });
+
+    return [...grouped.values()].sort(
+      (a, b) => b.clients.length - a.clients.length || a.advisorName.localeCompare(b.advisorName),
+    );
+  }, [allAlbumClients, isJefeComercial]);
 
  const filteredAllAlbumClients = useMemo(() => {
  if (!Array.isArray(allAlbumClients)) return [];
@@ -580,6 +749,53 @@ const ClientesPage = () => {
  } catch (error) {
  console.error(error);
  showToast("No se pudo asignar el cliente", "error");
+ }
+ };
+
+ const handleUnassign = async (clientId) => {
+ const assignment = assignments[clientId] || {};
+ const selectedEmail = String(assignment.email || "").trim().toLowerCase();
+ const client = Array.isArray(clientes) ? clientes.find((item) => Number(item.id) === Number(clientId)) : null;
+ const assignmentDetails = normalizeAssignmentDetails(client?.assignment_details);
+ const assignedEmails = assignmentDetails
+   .map((item) => String(item?.assigned_to_email || "").trim().toLowerCase())
+   .filter(Boolean);
+
+ const email =
+   selectedEmail ||
+   (assignedEmails.length === 1 ? assignedEmails[0] : "");
+
+ if (!email) {
+   showToast(
+     assignedEmails.length > 1
+       ? "Selecciona el asesor específico a desasignar"
+       : "Selecciona un asesor para quitar la asignacion",
+     "warning",
+   );
+   return;
+ }
+ try {
+ await assignClient(clientId, {
+ assignee_email: email,
+ unassign: true,
+ reason: assignment.reason || "Desasignado por jefatura comercial",
+ });
+ showToast("Asignacion retirada correctamente", "success");
+ setAssignments((prev) => ({
+ ...prev,
+ [clientId]: {
+ ...(prev[clientId] || {}),
+ email: "",
+ temporary: false,
+ ends_at: "",
+ reason: "",
+ },
+ }));
+ invalidateClientsCache();
+ await loadClientes({ forceRefresh: true });
+ } catch (error) {
+ console.error(error);
+ showToast("No se pudo quitar la asignacion", "error");
  }
  };
 
@@ -837,19 +1053,25 @@ const ClientesPage = () => {
  const status = normalizeStatus(cliente.visit_status);
  const meta = getStatusMeta(status);
  const duration = cliente.duracion_minutos ?? calculateDuration(cliente);
- const temporaryInfo = getTemporaryAssignmentInfo(cliente);
- const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
- const asignadosArray = normalizeAsignados(cliente.asignados);
- const assigned =
- assignmentDetails.length > 0
- ? assignmentDetails.map(formatAssignment).join(", ")
+const temporaryInfo = getTemporaryAssignmentInfo(cliente);
+const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
+const asignadosArray = normalizeAsignados(cliente.asignados);
+const sourceMeta = getClientSourceMeta(cliente);
+const assignmentAlerts = getAssignmentAlerts(cliente);
+const assigned =
+assignmentDetails.length > 0
+? assignmentDetails.map(formatAssignment).join(", ")
  : asignadosArray.length > 0
  ? asignadosArray.join(", ")
  : "Sin asignar";
  const timelineOpen = Boolean(expandedTimeline[cliente.id]);
- const hasEntryCoords = cliente.lat_entrada && cliente.lng_entrada;
- const hasExitCoords = cliente.lat_salida && cliente.lng_salida;
- const isPlanned = cliente.scheduled_info?.is_planned;
+const hasEntryCoords = cliente.lat_entrada && cliente.lng_entrada;
+const hasExitCoords = cliente.lat_salida && cliente.lng_salida;
+const isCommercialPlanned = Boolean(
+  cliente.scheduled_info?.is_planned_commercial ?? cliente.scheduled_info?.is_planned,
+);
+const isTechnicalPlanned = Boolean(cliente.scheduled_info?.is_planned_technical);
+const isPlanned = isCommercialPlanned || isTechnicalPlanned;
 
  return (
  <div
@@ -857,12 +1079,22 @@ const ClientesPage = () => {
  className="relative flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-4 shadow-none backdrop-blur transition cursor-pointer sm:rounded-2xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md sm:hover:-translate-y-0.5"
  onClick={() => openReportModal(cliente)}
  >
- {isPlanned && (
- <span className="absolute top-3 left-3 px-2 py-1 bg-green-500 text-white text-xs rounded-full flex items-center gap-1">
- <FiCalendar size={12} />
- Planificado
- </span>
- )}
+{isPlanned && (
+  <div className="absolute top-3 left-3 flex flex-wrap items-center gap-1">
+    {isCommercialPlanned && (
+      <span className="px-2 py-1 bg-green-500 text-white text-xs rounded-full flex items-center gap-1">
+        <FiCalendar size={12} />
+        Cronograma comercial
+      </span>
+    )}
+    {isTechnicalPlanned && (
+      <span className="px-2 py-1 bg-blue-600 text-white text-xs rounded-full flex items-center gap-1">
+        <FiCalendar size={12} />
+        Cronograma técnico
+      </span>
+    )}
+  </div>
+)}
  {temporaryInfo && (
  <span className="absolute top-3 left-24 px-2 py-1 bg-amber-500 text-white text-xs rounded-full">
  {temporaryInfo.daysRemaining <= 0
@@ -874,7 +1106,10 @@ const ClientesPage = () => {
 
  <div className="flex items-start justify-between gap-3">
  <div className="space-y-1">
- <p className="text-sm font-semibold text-gray-900">{cliente.nombre}</p>
+<p className="text-sm font-semibold text-gray-900">{cliente.nombre}</p>
+<span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}>
+{sourceMeta.label}
+</span>
  <p className="text-xs text-gray-500 flex items-center gap-1">
  <FiMapPin className="text-gray-400" /> {cliente.shipping_address || "Sin dirección"}
  </p>
@@ -901,6 +1136,30 @@ const ClientesPage = () => {
  <p className="text-xs text-gray-600">
  <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
  </p>
+          {isJefeComercial && assignmentAlerts.length > 0 && (
+            <div className="mt-2 space-y-1 rounded-lg bg-rose-50/50 p-2 border border-rose-100">
+              {assignmentAlerts.map((alert) => (
+                <p
+                  key={alert.email}
+                  className={`text-[11px] flex items-center gap-1 font-bold ${
+                    alert.isPassive ? "text-rose-700" : "text-amber-700"
+                  }`}
+                >
+                  <FiAlertCircle size={12} className="shrink-0" />
+                  <span className="truncate">
+                    {alert.isPassive
+                      ? `${alert.advisorName} inactivo/desvinculado.`
+                      : alert.hasVacaciones
+                        ? `${alert.advisorName} en vacaciones hoy.`
+                        : `${alert.advisorName} en permiso hoy.`}
+                  </span>
+                </p>
+              ))}
+              <p className="text-[10px] text-rose-600/70 italic ml-4 font-medium">
+                Acción requerida: Reasignar cliente para asegurar continuidad.
+              </p>
+            </div>
+          )}
  </div>
 
  <div className="mt-4 flex flex-wrap gap-2">
@@ -1072,79 +1331,172 @@ const ClientesPage = () => {
  />
  )}
  <Button onClick={() => handleAssign(cliente.id)}>Asignar</Button>
- </div>
- </div>
- )}
- </div>
- );
- };
-
- const renderAlbumCard = (cliente) => {
- const clientName = cliente.commercial_name || cliente.nombre || "Cliente sin nombre";
- const identifier = cliente.identificador || cliente.ruc_cedula || "Identificador no disponible";
- const address = cliente.shipping_address || "Direccion no disponible";
- const contactName = cliente.shipping_contact_name || "Sin contacto";
- const contactPhone = cliente.shipping_phone || cliente.shipping_cellphone || "Sin telefono";
- const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
- const asignadosArray = normalizeAsignados(cliente.asignados);
- const assigned =
- assignmentDetails.length > 0
- ? assignmentDetails.map(formatAssignment).join(", ")
- : asignadosArray.length > 0
- ? asignadosArray.join(", ")
- : "Sin asignar";
-
- return (
- <div
- key={`album-${cliente.id}`}
- className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/95 p-4 shadow-none transition sm:rounded-2xl sm:border sm:bg-white/90 sm:shadow-sm"
- >
- <div className="flex items-start justify-between gap-3">
- <div className="space-y-1">
- <p className="text-sm font-semibold text-gray-900">{clientName}</p>
- <p className="text-xs text-gray-500">{identifier}</p>
- </div>
- <span className="rounded-full bg-emerald-50 px-2 py-[2px] text-xs font-semibold text-emerald-700">
- Aprobado
- </span>
- </div>
-
- <div className="mt-3 space-y-2 text-xs text-gray-700">
- <p className="flex items-center gap-1 text-gray-600">
- <FiMapPin className="text-gray-400" /> {address}
- </p>
- <p className="flex items-center gap-1 text-gray-600">
- <FiUser className="text-gray-400" /> {contactName}
- </p>
- <p className="flex items-center gap-1 text-gray-600">
- <FiPhone className="text-gray-400" /> {contactPhone}
- </p>
- <p className="text-gray-600">
- <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
- </p>
- </div>
-
- <div className="mt-4 flex flex-wrap items-center gap-2">
- <Button
- variant="secondary"
- className="px-3 py-1.5 text-xs"
- onClick={() => openEditModal(cliente)}
- >
- <FiEdit2 className="mr-1" /> Editar
+ <Button variant="ghost" onClick={() => handleUnassign(cliente.id)}>
+ Quitar
  </Button>
- {canManageAllClients && (
- <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
- <FiFileText /> Documentos disponibles
- </span>
- )}
  </div>
+ </div>
+ )}
  </div>
  );
  };
+
+const renderAlbumCard = (cliente) => {
+    const clientName = cliente.commercial_name || cliente.nombre || "Cliente sin nombre";
+    const identifier = cliente.identificador || cliente.ruc_cedula || "Identificador no disponible";
+    const address = cliente.shipping_address || "Direccion no disponible";
+    const contactName = cliente.shipping_contact_name || "Sin contacto";
+    const contactPhone = cliente.shipping_phone || cliente.shipping_cellphone || "Sin telefono";
+    const assignmentDetails = normalizeAssignmentDetails(cliente.assignment_details);
+    const asignadosArray = normalizeAsignados(cliente.asignados);
+    const sourceMeta = getClientSourceMeta(cliente);
+    const assignmentAlerts = getAssignmentAlerts(cliente);
+    const isCommercialPlanned = Boolean(
+      cliente.scheduled_info?.is_planned_commercial ?? cliente.scheduled_info?.is_planned,
+    );
+    const isTechnicalPlanned = Boolean(cliente.scheduled_info?.is_planned_technical);
+    const isPlanned = isCommercialPlanned || isTechnicalPlanned;
+    const assigned =
+      assignmentDetails.length > 0
+        ? assignmentDetails.map(formatAssignment).join(", ")
+        : asignadosArray.length > 0
+          ? asignadosArray.join(", ")
+          : "Sin asignar";
+
+    return (
+      <div
+        key={`album-${cliente.id}`}
+        className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/95 p-4 shadow-none transition sm:rounded-2xl sm:border sm:bg-white/90 sm:shadow-sm"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-gray-900">{clientName}</p>
+            <span
+              className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}
+            >
+              {sourceMeta.label}
+            </span>
+            <p className="text-xs text-gray-500">{identifier}</p>
+          </div>
+          <span className="rounded-full bg-emerald-50 px-2 py-[2px] text-xs font-semibold text-emerald-700">
+            Aprobado
+          </span>
+        </div>
+
+        <div className="mt-3 space-y-2 text-xs text-gray-700">
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiMapPin className="text-gray-400" /> {address}
+          </p>
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiUser className="text-gray-400" /> {contactName}
+          </p>
+          <p className="flex items-center gap-1 text-gray-600">
+            <FiPhone className="text-gray-400" /> {contactPhone}
+          </p>
+          <p className="text-gray-600">
+            <span className="font-semibold text-gray-700">Asignado:</span> {assigned}
+          </p>
+          {isPlanned && (
+            <p className="text-gray-600">
+              <span className="font-semibold text-gray-700">Cronograma:</span>{" "}
+              {isCommercialPlanned && isTechnicalPlanned
+                ? "Comercial y técnico"
+                : isCommercialPlanned
+                  ? "Comercial"
+                  : "Técnico"}
+            </p>
+          )}
+
+          {isJefeComercial && assignmentAlerts.length > 0 && (
+            <div className="mt-2 space-y-1 border-t border-rose-100 pt-2">
+              {assignmentAlerts.map((alert) => (
+                <p
+                  key={alert.email}
+                  className={`text-[10px] flex items-center gap-1 font-bold ${
+                    alert.isPassive ? "text-rose-700" : "text-amber-700"
+                  }`}
+                >
+                  <FiAlertCircle size={10} className="shrink-0" />
+                  <span>
+                    {alert.isPassive
+                      ? `${alert.advisorName} desvinculado.`
+                      : alert.hasVacaciones
+                        ? `${alert.advisorName} en vacaciones hoy.`
+                        : `${alert.advisorName} en permiso hoy.`}
+                  </span>
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <Button variant="secondary" className="px-3 py-1.5 text-xs" onClick={() => openEditModal(cliente)}>
+            <FiEdit2 className="mr-1" /> Editar
+          </Button>
+          {canManageAllClients && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-semibold text-blue-700">
+              <FiFileText /> Documentos disponibles
+            </span>
+          )}
+        </div>
+
+        {canAssignClients && (
+          <div className="mt-4 flex flex-col gap-2 rounded-lg bg-gray-50 p-3">
+            <p className="text-xs font-semibold text-gray-700">Asignacion comercial</p>
+            <div className="flex flex-col gap-2">
+              <select
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                value={assignments[cliente.id]?.email || ""}
+                onChange={(e) =>
+                  setAssignments((prev) => ({
+                    ...prev,
+                    [cliente.id]: {
+                      ...(prev[cliente.id] || {}),
+                      email: e.target.value,
+                    },
+                  }))
+                }
+              >
+                <option value="">Selecciona asesor</option>
+                {Array.isArray(advisors) && advisors.map((u) => (
+                  <option key={u.id} value={u.email}>
+                    {u.fullname || u.name || u.email}
+                  </option>
+                ))}
+              </select>
+
+              <div className="flex flex-wrap gap-2">
+                <Button className="px-3 py-1.5 text-xs" onClick={() => handleAssign(cliente.id)}>
+                  Asignar
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="px-3 py-1.5 text-xs"
+                  onClick={() => handleUnassign(cliente.id)}
+                >
+                  Quitar
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
 
  const showVisitFlow = canVisitClients;
  const canSeeCheckInOutCards = showVisitFlow && !hasAnyRole(CHECKIN_CARDS_HIDDEN_ROLES);
  const canSeeDailyManagedClients = showVisitFlow && roleTokens.includes("comercial");
+ const activeClientVisitLogs = useMemo(
+ () =>
+ normalizeVisitLogs(activeClient?.visit_logs).sort(
+ (a, b) =>
+ new Date(b?.hora_salida || b?.hora_entrada || b?.visit_date || 0).getTime() -
+ new Date(a?.hora_salida || a?.hora_entrada || a?.visit_date || 0).getTime(),
+ ),
+ [activeClient],
+ );
 
  return (
  <div className="space-y-4 sm:space-y-6 pb-6 px-3 sm:px-0">
@@ -1165,6 +1517,64 @@ const ClientesPage = () => {
  <BackofficeClientRequestsKpiWidget />
  <ClientApprovalsWidget />
  </>
+ ) : isJefeComercial ? (
+ <div className="space-y-3">
+ <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+ <div>
+ <h2 className="text-lg font-semibold text-gray-900">Panel de jefatura comercial</h2>
+ <p className="text-sm text-gray-500">
+ Gestiona cartera completa, asignaciones por asesor y alertas de continuidad comercial.
+ </p>
+ </div>
+ <div className="rounded-full bg-blue-50 px-3 py-1 text-[11px] font-semibold text-blue-700">
+ {advisorAssignmentBoard.length} asesores con clientes asignados
+ </div>
+ </div>
+
+ {advisorAssignmentBoard.length > 0 ? (
+ <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {advisorAssignmentBoard.map((row) => (
+                  <div key={row.advisorEmail} className="rounded-xl border border-slate-200 bg-white p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-slate-900 truncate">{row.advisorName}</p>
+                        <p className="text-xs text-slate-500 truncate">{row.advisorEmail}</p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                            row.passive ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
+                          }`}
+                        >
+                          {row.passive ? "Inactivo / Desvinculado" : "Laboralmente Activo"}
+                        </span>
+                        {row.hasPermiso && (
+                          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                            En Permiso
+                          </span>
+                        )}
+                        {row.hasVacaciones && (
+                          <span className="rounded-full bg-orange-100 px-2 py-0.5 text-[10px] font-bold text-orange-700">
+                            En Vacaciones
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mt-2 text-xs text-slate-600">
+                      <span className="font-semibold text-indigo-600">{row.clients.length}</span> clientes asignados
+                    </p>
+                    <p className="mt-1 text-[11px] text-slate-500 line-clamp-2 italic">
+                      {row.clients.map((client) => client.name).join(", ")}
+                    </p>
+                  </div>
+                ))}
+ </div>
+ ) : (
+ <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+ No hay asignaciones activas para asesores comerciales.
+ </div>
+ )}
+ </div>
  ) : isAcpCommercial ? (
  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
  <div>
@@ -1427,21 +1837,25 @@ const ClientesPage = () => {
  const ciudad = cliente.shipping_city || getCityFromAddress(cliente.shipping_address);
  const provincia = cliente.shipping_province || getProvinceFromAddress(cliente.shipping_address);
  const clienteEmail = cliente.client_email || "Correo no disponible";
- const clientTypeLabel = formatClientType(cliente.client_type);
- const status = normalizeStatus(cliente.visit_status);
- const meta = getStatusMeta(status);
- return (
+const clientTypeLabel = formatClientType(cliente.client_type);
+const status = normalizeStatus(cliente.visit_status);
+const meta = getStatusMeta(status);
+const sourceMeta = getClientSourceMeta(cliente);
+return (
  <div
  key={`mini-${cliente.id}`}
  className="flex flex-col rounded-none border border-gray-100 border-x-0 bg-white/90 p-3 shadow-none transition cursor-pointer sm:rounded-xl sm:border sm:bg-white/80 sm:shadow-sm sm:hover:shadow-md"
  onClick={() => openReportModal(cliente)}
  >
  <div className="flex items-start justify-between gap-2">
- <div className="space-y-0.5">
- <p className="text-sm font-semibold text-gray-900 line-clamp-1">
- {cliente.nombre}
- </p>
- </div>
+<div className="space-y-0.5">
+<p className="text-sm font-semibold text-gray-900 line-clamp-1">
+{cliente.nombre}
+</p>
+<span className={`inline-flex items-center rounded-full border px-2 py-[1px] text-[10px] font-semibold ${sourceMeta.className}`}>
+{sourceMeta.label}
+</span>
+</div>
  <span className={`px-2 py-[1px] text-[10px] font-semibold rounded-full ${meta.chip}`}>
  {meta.label}
  </span>
@@ -1517,6 +1931,38 @@ const ClientesPage = () => {
  </Button>
  </div>
  </div>
+
+ {(isJefeComercial || canManageAllClients) && (
+ <div className="flex flex-wrap items-center gap-2">
+ <button
+ type="button"
+ onClick={() => setClientSourceFilter("all")}
+ className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+ clientSourceFilter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700"
+ }`}
+ >
+ Todos ({sourceTotals.all})
+ </button>
+ <button
+ type="button"
+ onClick={() => setClientSourceFilter("spi")}
+ className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+ clientSourceFilter === "spi" ? "bg-slate-700 text-white" : "bg-slate-100 text-slate-700"
+ }`}
+ >
+ SPI ({sourceTotals.spi})
+ </button>
+ <button
+ type="button"
+ onClick={() => setClientSourceFilter("odoo")}
+ className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+ clientSourceFilter === "odoo" ? "bg-indigo-600 text-white" : "bg-indigo-50 text-indigo-700"
+ }`}
+ >
+ Odoo ({sourceTotals.odoo})
+ </button>
+ </div>
+ )}
 
  {Array.isArray(albumClients) && albumClients.length > 0 ? (
  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
@@ -1750,6 +2196,14 @@ const ClientesPage = () => {
  />
  </div>
  </div>
+ </div>
+
+ <div className="rounded-xl border border-gray-100 bg-white p-4">
+ <h4 className="text-xs font-semibold text-gray-500 uppercase mb-3">Ubicaciones para visitas y rutas</h4>
+ <LocationManager
+ clientId={Number(activeClient?.id || editDetail?.id || 0)}
+ canEdit
+ />
  </div>
 
  {canManageAllClients && (
@@ -2103,6 +2557,37 @@ const ClientesPage = () => {
  <div className="rounded-lg border border-gray-200 bg-white p-3 text-sm text-gray-700 min-h-[80px]">
  {activeClient?.observaciones || "Sin observaciones registradas."}
  </div>
+ </div>
+
+ <div className="space-y-2">
+ <label className="text-xs font-semibold text-gray-500 uppercase">Historial de visitas comerciales</label>
+ {activeClientVisitLogs.length > 0 ? (
+ <div className="space-y-2">
+ {activeClientVisitLogs.slice(0, 8).map((visit, index) => (
+ <div key={`${visit?.id || "visit"}-${index}`} className="rounded-lg border border-gray-200 bg-white p-3">
+ <div className="flex items-center justify-between gap-2">
+ <p className="text-sm font-semibold text-gray-900">
+ {visit?.advisor_name || visit?.advisor_email || "Asesor no identificado"}
+ </p>
+ <span className="text-xs text-gray-500">{formatDateSafe(visit?.visit_date, "dd/MM/yyyy")}</span>
+ </div>
+ <p className="mt-1 text-xs text-gray-600">
+ Rol: {visit?.advisor_role || "N/A"} · Estado: {getStatusMeta(visit?.status).label}
+ </p>
+ <p className="text-xs text-gray-600">
+ Entrada: {formatTime(visit?.hora_entrada)} · Salida: {formatTime(visit?.hora_salida)}
+ </p>
+ <p className="text-xs text-gray-600">
+ Duración: {formatDuration(visit?.duracion_minutos)} · Nota: {visit?.observaciones || "Sin nota"}
+ </p>
+ </div>
+ ))}
+ </div>
+ ) : (
+ <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3 text-sm text-gray-500">
+ No hay visitas históricas registradas para este cliente.
+ </div>
+ )}
  </div>
 
  <div className="flex justify-end pt-2">

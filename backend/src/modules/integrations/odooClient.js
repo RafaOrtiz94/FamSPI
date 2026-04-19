@@ -94,6 +94,112 @@ const createHttpsAgent = (config) => {
   return new https.Agent({ rejectUnauthorized: false });
 };
 
+const parseUid = (value) => {
+  const normalized = asTrimmedText(value, null);
+  if (!normalized) return null;
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const resolveAuthUser = async ({
+  config,
+  authSecret,
+  endpoint,
+  normalizedCorrelationId,
+  normalizedEventType,
+  httpsAgent,
+}) => {
+  const configuredUid = parseUid(config.user);
+  if (configuredUid !== null) return configuredUid;
+
+  const loginPayload = {
+    jsonrpc: "2.0",
+    method: "call",
+    params: {
+      service: "common",
+      method: "login",
+      args: [config.database, config.user, authSecret],
+    },
+    id: `${normalizedCorrelationId}:login`,
+  };
+
+  const loginResponse = await axios.post(endpoint, loginPayload, {
+    timeout: config.timeoutMs,
+    headers: {
+      "content-type": "application/json",
+      "x-correlation-id": normalizedCorrelationId,
+      "x-event-type": `${normalizedEventType}.auth`,
+    },
+    httpsAgent,
+    validateStatus: () => true,
+  });
+
+  if (loginResponse.status >= 400 || loginResponse.data?.error) {
+    throw buildTransportError({
+      response: loginResponse,
+      message:
+        loginResponse.data?.error?.message ||
+        `HTTP ${loginResponse.status} durante autenticacion Odoo`,
+    });
+  }
+
+  const uid = Number.parseInt(loginResponse.data?.result, 10);
+  if (!Number.isFinite(uid) || uid <= 0) {
+    throw new OdooClientError("Credenciales invalidas para autenticacion Odoo", {
+      code: "ODOO_AUTH_FAILED",
+      status: 401,
+      retryable: false,
+      details: { odoo_user: config.user },
+    });
+  }
+
+  return uid;
+};
+
+const buildRpcArgs = ({
+  normalizedMethod,
+  config,
+  authUser,
+  authSecret,
+  normalizedParams,
+}) => {
+  if (
+    normalizedMethod === "execute_kw" &&
+    normalizedParams &&
+    typeof normalizedParams === "object" &&
+    !Array.isArray(normalizedParams)
+  ) {
+    const model = asTrimmedText(normalizedParams.model, null);
+    const modelMethod = asTrimmedText(normalizedParams.method, null);
+    const methodArgs = Array.isArray(normalizedParams.args)
+      ? normalizedParams.args
+      : [];
+    const methodKwargs =
+      normalizedParams.kwargs &&
+      typeof normalizedParams.kwargs === "object" &&
+      !Array.isArray(normalizedParams.kwargs)
+        ? normalizedParams.kwargs
+        : null;
+
+    if (model && modelMethod) {
+      const rpcArgs = [
+        config.database,
+        authUser,
+        authSecret,
+        model,
+        modelMethod,
+        methodArgs,
+      ];
+      if (methodKwargs && Object.keys(methodKwargs).length) {
+        rpcArgs.push(methodKwargs);
+      }
+      return rpcArgs;
+    }
+  }
+
+  return [config.database, authUser, authSecret, normalizedParams];
+};
+
 async function callOdoo({
   method,
   params = {},
@@ -155,13 +261,28 @@ async function callOdoo({
 
   const startedAt = Date.now();
   const endpoint = `${config.url}/jsonrpc`;
+  const httpsAgent = createHttpsAgent(config);
+  const authUser = await resolveAuthUser({
+    config,
+    authSecret,
+    endpoint,
+    normalizedCorrelationId,
+    normalizedEventType,
+    httpsAgent,
+  });
   const rpcPayload = {
     jsonrpc: "2.0",
     method: "call",
     params: {
       service: "object",
       method: normalizedMethod,
-      args: [config.database, config.user, authSecret, normalizedParams],
+      args: buildRpcArgs({
+        normalizedMethod,
+        config,
+        authUser,
+        authSecret,
+        normalizedParams,
+      }),
       kwargs: {
         context: {
           correlation_id: normalizedCorrelationId,
@@ -180,7 +301,7 @@ async function callOdoo({
         "x-correlation-id": normalizedCorrelationId,
         "x-event-type": normalizedEventType,
       },
-      httpsAgent: createHttpsAgent(config),
+      httpsAgent,
       validateStatus: () => true,
     });
 
@@ -239,4 +360,3 @@ module.exports = {
   OdooClientError,
   callOdoo,
 };
-

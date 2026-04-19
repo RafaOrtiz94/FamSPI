@@ -1,5 +1,5 @@
 import React, { useMemo } from "react";
-import { FiCalendar, FiCheck, FiClock, FiMapPin, FiX } from "react-icons/fi";
+import { FiCalendar, FiCheck, FiClock, FiMapPin, FiX, FiInfo } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
 import { formatDateEC } from "../../../../core/utils/dateUtils";
 
@@ -108,6 +108,15 @@ const ScheduleDetailModal = ({
  </div>
  </div>
 
+ {schedule.general_justification && (
+ <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-amber-900 text-sm">
+ <p className="font-semibold flex items-center gap-2">
+ <FiInfo className="text-amber-600" /> Justificación general del mes:
+ </p>
+ <p className="mt-1 text-gray-700">{schedule.general_justification}</p>
+ </div>
+ )}
+
  <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
  {Object.entries(grouped).map(([date, visits]) => (
  <div key={date} className="border border-gray-100 rounded-lg p-3">
@@ -177,6 +186,13 @@ const ScheduleDetailModal = ({
  <span className="ml-2 text-[10px] text-amber-600">Sin detalles de visita</span>
  )}
  </div>
+
+ {visit.justification && (
+ <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs">
+ <p className="font-semibold text-amber-800">Justificación del asesor:</p>
+ <p className="text-gray-700">{visit.justification}</p>
+ </div>
+ )}
  </div>
  ))}
  </div>

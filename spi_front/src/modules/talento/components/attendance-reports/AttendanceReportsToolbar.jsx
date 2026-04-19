@@ -23,6 +23,8 @@ const AttendanceReportsToolbar = ({
   userOptions = [],
   selectedUserId = "",
   onSelectUser,
+  view = "table",
+  onViewChange,
   children,
 }) => {
   return (
@@ -32,16 +34,44 @@ const AttendanceReportsToolbar = ({
           <h3 className="text-lg font-semibold text-slate-950">{title}</h3>
           <p className="text-sm text-slate-600">{description}</p>
         </div>
-        <button
-          type="button"
-          onClick={onAction}
-          disabled={disabled}
-          className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {actionLabel}
-        </button>
+        <div className="flex items-center gap-2">
+          {onViewChange && (
+            <div className="flex rounded-lg border border-slate-200 bg-white p-1">
+              <button
+                type="button"
+                onClick={() => onViewChange("table")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  view === "table"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Tabla
+              </button>
+              <button
+                type="button"
+                onClick={() => onViewChange("map")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+                  view === "map"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Mapa
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={onAction}
+            disabled={disabled}
+            className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {actionLabel}
+          </button>
+        </div>
       </div>
-      {onClear ? (
+      {onClear && (
         <div className="flex justify-end">
           <button
             type="button"
@@ -52,8 +82,8 @@ const AttendanceReportsToolbar = ({
             {clearLabel}
           </button>
         </div>
-      ) : null}
-      {Array.isArray(quickFilters) && quickFilters.length > 0 ? (
+      )}
+      {Array.isArray(quickFilters) && quickFilters.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {quickFilters.map((item) => (
             <button
@@ -70,13 +100,13 @@ const AttendanceReportsToolbar = ({
             </button>
           ))}
         </div>
-      ) : null}
-      {warningText ? (
+      )}
+      {warningText && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
           {warningText}
         </div>
-      ) : null}
-      {typeof onToggleDiscrepancies === "function" ? (
+      )}
+      {typeof onToggleDiscrepancies === "function" && (
         <button
           type="button"
           onClick={() => onToggleDiscrepancies(!onlyDiscrepancies)}
@@ -89,8 +119,8 @@ const AttendanceReportsToolbar = ({
           <span className="h-2 w-2 rounded-full bg-current" />
           Solo discrepancias
         </button>
-      ) : null}
-      {typeof onToggleWithGeo === "function" ? (
+      )}
+      {typeof onToggleWithGeo === "function" && (
         <button
           type="button"
           onClick={() => onToggleWithGeo(!onlyWithGeo)}
@@ -103,8 +133,8 @@ const AttendanceReportsToolbar = ({
           <span className="h-2 w-2 rounded-full bg-current" />
           Solo geolocalizacion
         </button>
-      ) : null}
-      {typeof onChangeDepartment === "function" ? (
+      )}
+      {typeof onChangeDepartment === "function" && (
         <label className="block max-w-sm">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
             Departamento
@@ -122,8 +152,8 @@ const AttendanceReportsToolbar = ({
             ))}
           </select>
         </label>
-      ) : null}
-      {typeof onSelectUser === "function" ? (
+      )}
+      {typeof onSelectUser === "function" && (
         <div className="max-w-sm">
           <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Usuario</span>
           <SearchableSelect
@@ -133,8 +163,8 @@ const AttendanceReportsToolbar = ({
             placeholder="Buscar usuario por nombre o correo"
           />
         </div>
-      ) : null}
-      {children ? <div>{children}</div> : null}
+      )}
+      {children && <div>{children}</div>}
     </div>
   );
 };

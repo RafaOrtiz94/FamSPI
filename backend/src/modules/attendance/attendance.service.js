@@ -105,6 +105,36 @@ const normalizeMonthName = (date) =>
     .toLocaleString("es-EC", { month: "long" })
     .replace(/^(.)/, (c) => c.toUpperCase());
 
+const normalizeTimeOffType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "vacaciones") return "vacaciones";
+  if (normalized === "permiso") return "permiso";
+  return null;
+};
+
+const startOfDay = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+
+const endOfDay = (date) =>
+  new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999);
+
+const parseDateTime = (value) => {
+  if (!value) return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const fromDateOnly = parseDateOnly(value);
+  if (fromDateOnly) return fromDateOnly;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const buildVacationLabel = (ids = []) => `VAC-ID ${ids.join("/")}`;
+const buildPermissionLabel = (id, timeLabel = "") =>
+  `PER-ID ${id}${timeLabel ? ` ${timeLabel}` : ""}`;
+
+const uniqueNumericIds = (values = []) =>
+  [...new Set(values.map((item) => Number.parseInt(item, 10)).filter((item) => Number.isInteger(item)))];
+
 /**
  * Download signature image from Google Drive (service account)
  */
@@ -256,6 +286,143 @@ const fetchAttendanceRecords = async (userId, startDate, endDate) => {
   return query.rows;
 };
 
+const fetchApprovedTimeOffRecords = async (userEmail, startDate, endDate) => {
+  if (!userEmail) return [];
+
+  const query = await db.query(
+    `
+    SELECT
+      id,
+      tipo_solicitud,
+      fecha_inicio,
+      fecha_fin,
+      fecha_inicio_hora,
+      fecha_fin_hora
+    FROM permisos_vacaciones
+    WHERE LOWER(COALESCE(user_email, '')) = LOWER($1)
+      AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+      AND (
+        (
+          fecha_inicio_hora IS NOT NULL
+          AND fecha_fin_hora IS NOT NULL
+          AND fecha_fin_hora >= $2::timestamptz
+          AND fecha_inicio_hora <= $3::timestamptz
+        )
+        OR
+        (
+          (fecha_inicio_hora IS NULL OR fecha_fin_hora IS NULL)
+          AND COALESCE(fecha_fin, $3::date) >= $2::date
+          AND COALESCE(fecha_inicio, $2::date) <= $3::date
+        )
+      )
+    ORDER BY COALESCE(fecha_inicio_hora, fecha_inicio::timestamptz) ASC, id ASC
+    `,
+    [userEmail, startDate, endDate]
+  );
+
+  return query.rows || [];
+};
+
+const buildMonthlyTimeOffMap = (periodDate, rawTimeOffRecords = []) => {
+  const periodYear = periodDate.getFullYear();
+  const periodMonth = periodDate.getMonth();
+  const daysInMonth = new Date(periodYear, periodMonth + 1, 0).getDate();
+
+  const map = new Map();
+  const ensureDayState = (day) => {
+    if (!map.has(day)) {
+      map.set(day, {
+        vacations: new Set(),
+        permissions: [],
+      });
+    }
+    return map.get(day);
+  };
+
+  for (const row of rawTimeOffRecords) {
+    const requestId = Number.parseInt(row?.id, 10);
+    if (!Number.isInteger(requestId)) continue;
+
+    const type = normalizeTimeOffType(row?.tipo_solicitud);
+    if (!type) continue;
+
+    const startAtRaw = parseDateTime(row?.fecha_inicio_hora);
+    const endAtRaw = parseDateTime(row?.fecha_fin_hora);
+
+    const startAt = startAtRaw || parseDateOnly(row?.fecha_inicio);
+    const endAt = endAtRaw || parseDateOnly(row?.fecha_fin) || startAt;
+    if (!startAt || !endAt) continue;
+
+    let cursor = startOfDay(startAt);
+    const finalDay = startOfDay(endAt);
+    while (!isDateBefore(finalDay, cursor)) {
+      if (cursor.getFullYear() === periodYear && cursor.getMonth() === periodMonth) {
+        const day = cursor.getDate();
+        if (day >= 1 && day <= daysInMonth) {
+          const dayState = ensureDayState(day);
+
+          if (type === "vacaciones" && !startAtRaw && !endAtRaw) {
+            dayState.vacations.add(requestId);
+          } else {
+            const segmentStart = startAtRaw ? new Date(startAtRaw) : startOfDay(cursor);
+            const segmentEnd = endAtRaw ? new Date(endAtRaw) : endOfDay(cursor);
+            dayState.permissions.push({
+              id: requestId,
+              start: segmentStart,
+              end: segmentEnd,
+            });
+          }
+        }
+      }
+      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1, 0, 0, 0, 0);
+    }
+  }
+
+  return map;
+};
+
+const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff }) => {
+  const formattedTime = rawValue ? formatTime(rawValue) : "";
+  if (!dayTimeOff) return formattedTime;
+
+  const vacationIds = uniqueNumericIds([...dayTimeOff.vacations]);
+  if (vacationIds.length) {
+    return buildVacationLabel(vacationIds);
+  }
+
+  const permissions = Array.isArray(dayTimeOff.permissions) ? dayTimeOff.permissions : [];
+  if (!permissions.length) return formattedTime;
+
+  if (formattedTime) {
+    const rawDate = parseDateTime(rawValue);
+    if (rawDate) {
+      const match = permissions.find(
+        (item) =>
+          item?.start instanceof Date &&
+          item?.end instanceof Date &&
+          !Number.isNaN(item.start.getTime()) &&
+          !Number.isNaN(item.end.getTime()) &&
+          rawDate >= item.start &&
+          rawDate <= item.end
+      );
+      if (match) return buildPermissionLabel(match.id, formattedTime);
+    }
+    return formattedTime;
+  }
+
+  const sortedByStart = [...permissions].sort((a, b) => a.start - b.start);
+  if (slotName === "entry") {
+    const first = sortedByStart[0];
+    const resumeTime = first?.end ? formatTime(first.end) : "";
+    return buildPermissionLabel(first.id, resumeTime);
+  }
+
+  const permissionIds = uniqueNumericIds(sortedByStart.map((item) => item.id));
+  if (!permissionIds.length) return "";
+  if (permissionIds.length === 1) return buildPermissionLabel(permissionIds[0]);
+  return permissionIds.map((id) => buildPermissionLabel(id)).join(" / ");
+};
+
 const resolveHireDate = (user) => {
   const profileHireDate = parseDateOnly(user?.hire_date);
   if (profileHireDate) return profileHireDate;
@@ -318,6 +485,7 @@ const buildMonthlyPdfBuffer = async ({
   user,
   periodDate,
   records = [],
+  timeOffRecords = [],
   signatureBuffer = null,
   hireDate = null,
 }) => {
@@ -339,6 +507,7 @@ const buildMonthlyPdfBuffer = async ({
     if (!recordDate || !isSameMonth(recordDate, periodDate)) continue;
     recordsByDay.set(recordDate.getDate(), record);
   }
+  const timeOffByDay = buildMonthlyTimeOffMap(periodDate, timeOffRecords);
 
   for (let day = 1; day <= 31; day += 1) {
     if (day > daysInMonth) {
@@ -356,16 +525,39 @@ const buildMonthlyPdfBuffer = async ({
     const isWeekend = currentDate.getDay() === 0 || currentDate.getDay() === 6;
     const isBeforeHireDate = Boolean(hireDate && isDateBefore(currentDate, hireDate));
     const record = isBeforeHireDate ? null : recordsByDay.get(day);
+    const dayTimeOff = isBeforeHireDate ? null : timeOffByDay.get(day);
 
-    setFieldText(form, `hora_entrada_${day}`, record ? formatTime(record.entry_time) : "");
-    setFieldText(form, `hora_salida_a_${day}`, record ? formatTime(record.lunch_start_time) : "");
-    setFieldText(form, `hora_entrada_a_${day}`, record ? formatTime(record.lunch_end_time) : "");
-    setFieldText(form, `hora_salida_${day}`, record ? formatTime(record.exit_time) : "");
+    setFieldText(
+      form,
+      `hora_entrada_${day}`,
+      resolveHourlySlotValue({ rawValue: record?.entry_time, slotName: "entry", dayTimeOff })
+    );
+    setFieldText(
+      form,
+      `hora_salida_a_${day}`,
+      resolveHourlySlotValue({ rawValue: record?.lunch_start_time, slotName: "lunch_start", dayTimeOff })
+    );
+    setFieldText(
+      form,
+      `hora_entrada_a_${day}`,
+      resolveHourlySlotValue({ rawValue: record?.lunch_end_time, slotName: "lunch_end", dayTimeOff })
+    );
+    setFieldText(
+      form,
+      `hora_salida_${day}`,
+      resolveHourlySlotValue({ rawValue: record?.exit_time, slotName: "exit", dayTimeOff })
+    );
 
     const observation = isBeforeHireDate
       ? "NO LABORABA EN LA EMPRESA"
       : isWeekend
       ? "FIN DE SEMANA"
+      : dayTimeOff?.vacations?.size
+      ? buildVacationLabel(uniqueNumericIds([...dayTimeOff.vacations]))
+      : dayTimeOff?.permissions?.length
+      ? uniqueNumericIds(dayTimeOff.permissions.map((item) => item.id))
+          .map((id) => buildPermissionLabel(id))
+          .join(" / ")
       : "";
     setFieldText(form, `ra_observaciones_${day}`, observation);
 
@@ -460,6 +652,11 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
       formatDateOnly(annualStart),
       formatDateOnly(annualEnd)
     );
+    const yearTimeOffRecords = await fetchApprovedTimeOffRecords(
+      user.email,
+      formatDateOnly(annualStart),
+      formatDateOnly(annualEnd)
+    );
     const recordsByMonth = groupRecordsByMonth(yearRecords);
 
     const mergedPdf = await PDFDocument.create();
@@ -470,6 +667,7 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
         user,
         periodDate,
         records: monthRecords,
+        timeOffRecords: yearTimeOffRecords,
         signatureBuffer,
         hireDate,
       });
@@ -510,6 +708,11 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
     formatDateOnly(parsedStartDate),
     formatDateOnly(parsedEndDate)
   );
+  const monthTimeOffRecords = await fetchApprovedTimeOffRecords(
+    user.email,
+    formatDateOnly(parsedStartDate),
+    formatDateOnly(parsedEndDate)
+  );
   const monthRecords = monthRecordsRaw.filter((record) => {
     const recordDate = parseRecordDate(record?.date);
     return Boolean(recordDate && isSameMonth(recordDate, periodDate));
@@ -519,6 +722,7 @@ const generateAttendancePDF = async (userId, startDate, endDate, options = {}) =
     user,
     periodDate,
     records: monthRecords,
+    timeOffRecords: monthTimeOffRecords,
     signatureBuffer,
     hireDate,
   });

@@ -10,6 +10,7 @@ import {
  FiShoppingCart,
  FiShield,
  FiRefreshCw,
+ FiX,
 } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import Button from "../../../../core/ui/components/Button";
@@ -107,6 +108,8 @@ const JefeComercialView = ({ onRefresh, summaryData, summaryLoading, summaryErro
  const data = summaryData?.data || fallbackData;
  const isLoading = summaryLoading && !summaryError;
  const kpis = data?.kpis || fallbackData.kpis;
+ const alerts = data?.alerts || [];
+
  const stats = [
  {
  title: "Solicitudes",
@@ -145,9 +148,9 @@ const JefeComercialView = ({ onRefresh, summaryData, summaryLoading, summaryErro
  valueColor: "text-amber-900",
  },
  {
- title: "BC completados",
- value: isLoading ? "..." : (kpis.bcCompletados ?? 0),
- subtitle: "Aprobados",
+ title: "Cumplimiento",
+ value: isLoading ? "..." : `${kpis.avgCompliance ?? 0}%`,
+ subtitle: "Eficacia de visitas",
  icon: FiCheckCircle,
  colors: "from-purple-50 via-purple-100 to-purple-200",
  borderColor: "border-purple-500/30",
@@ -229,6 +232,46 @@ const JefeComercialView = ({ onRefresh, summaryData, summaryLoading, summaryErro
  <StatsCard key={item.title} {...item} className="rounded-2xl border-0 shadow-lg" />
  ))}
  </section>
+
+ {alerts.length > 0 && (
+ <section className="mb-8">
+ <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+ <div className="flex items-center gap-2 mb-4">
+ <FiShield className="text-amber-600" size={20} />
+ <h3 className="text-lg font-bold text-amber-900">Alertas de Talento Humano</h3>
+ </div>
+ <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+ {alerts.map((alert) => (
+ <div key={alert.email} className="flex flex-col p-3 rounded-xl bg-white border border-amber-100 shadow-sm">
+ <p className="font-semibold text-gray-900">{alert.name}</p>
+ <p className="text-xs text-gray-500 mb-2">{alert.email}</p>
+ {alert.status !== "activo" && (
+ <span className="inline-flex items-center gap-1 text-xs font-bold text-rose-600 uppercase mb-1">
+ <FiX size={12} /> {alert.status}
+ </span>
+ )}
+ {alert.permit && (
+ <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-600 uppercase">
+ <FiCalendar size={12} /> {alert.permit.tipo} (hasta {new Date(alert.permit.hasta).toLocaleDateString()})
+ </span>
+ )}
+ <div className="mt-3 pt-3 border-t border-gray-50">
+ <p className="text-[10px] text-gray-400 uppercase font-bold mb-2">Acción sugerida</p>
+ <Button
+ size="xs"
+ variant="secondary"
+ className="w-full text-[10px]"
+ onClick={() => navigate("/dashboard/comercial/clientes")}
+ >
+ Reasignar Clientes
+ </Button>
+ </div>
+ </div>
+ ))}
+ </div>
+ </div>
+ </section>
+ )}
 
  <section className="mb-8">
  <Card className="p-4 border-0 shadow-lg shadow-gray-100/50 rounded-2xl bg-white">

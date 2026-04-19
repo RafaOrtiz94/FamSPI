@@ -13,6 +13,8 @@ import {
  clockOutLunch,
  clockInLunch,
  clockOut,
+ marcarVisitaEntrada,
+ marcarVisitaSalida,
  markOvertime,
  registerException,
  updateExceptionStatus,
@@ -23,8 +25,10 @@ import {
 } from "../../api/attendanceApi";
 import { getMisSolicitudes } from "../../api/permisosApi";
 import { useAutoUpdate } from "../../api/index";
+import { fetchClients } from "../../api/clientsApi";
 import { formatDateSafe, formatTimeSafe, formatDateTimeSafe, toDate } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../auth/useAuth";
+import { getPreciseLocation } from "../../../shared/utils/preciseGeolocation";
 
 const EXCEPTION_PRESETS = Object.freeze({
  permiso: "Salida por permiso personal",
@@ -37,6 +41,8 @@ const RECENT_HISTORY_DAYS = 5;
 const LUNCH_REMINDER_MINUTES = 50;
 const LUNCH_SUGGESTION_AFTER_HOURS = 4;
 const EXIT_REMINDER_AFTER_HOURS = 8;
+const PUNCTUALITY_BASE_MINUTES = 9 * 60;
+const PUNCTUALITY_TOLERANCE_MINUTES = 5;
 
 const APPROVED_PERMISSION_STATUSES = new Set(["approved", "aprobado", "partially_approved"]);
 const ATTENDANCE_STATUS_LABELS = Object.freeze({
@@ -85,6 +91,25 @@ const deriveAttendanceState = (record = {}) => {
  return "working";
 };
 
+const getPunctualityState = (entryTime) => {
+ const parsed = toDate(entryTime);
+ if (!parsed) {
+  return { state: "no_entry", minutesLate: null, points: 0 };
+ }
+
+ const minutes = parsed.getHours() * 60 + parsed.getMinutes();
+ const delta = minutes - PUNCTUALITY_BASE_MINUTES;
+ if (delta <= PUNCTUALITY_TOLERANCE_MINUTES) {
+  return { state: "on_time", minutesLate: 0, points: 3 };
+ }
+
+ if (delta <= 15) {
+  return { state: "slight_late", minutesLate: delta, points: 2 };
+ }
+
+ return { state: "late", minutesLate: delta, points: 1 };
+};
+
 const mapPermisoToExceptionSuggestion = (permiso) => {
  if (!permiso || permiso.tipo_solicitud !== "permiso") return null;
  const tipoPermiso = String(permiso.tipo_permiso || "").toLowerCase();
@@ -108,6 +133,30 @@ const mapPermisoToExceptionSuggestion = (permiso) => {
  return null;
 };
 
+const getBrowserLocationFallback = () =>
+ new Promise((resolve) => {
+ if (!navigator?.geolocation) {
+ resolve(null);
+ return;
+ }
+
+ navigator.geolocation.getCurrentPosition(
+ (position) => {
+ resolve({
+ latitude: position.coords.latitude,
+ longitude: position.coords.longitude,
+ accuracy: Number(position.coords.accuracy || 0),
+ });
+ },
+ () => resolve(null),
+ {
+ enableHighAccuracy: false,
+ timeout: 6000,
+ maximumAge: 5 * 60 * 1000,
+ }
+ );
+ });
+
 const AttendanceWidget = () => {
  const { showToast } = useUI();
  const { user } = useAuth();
@@ -126,6 +175,7 @@ const AttendanceWidget = () => {
  // Geolocation state
  const [locationLoading, setLocationLoading] = useState(false);
  const [cachedLocation, setCachedLocation] = useState(null);
+ const [cachedLocationAccuracy, setCachedLocationAccuracy] = useState(null);
  const [locationTimestamp, setLocationTimestamp] = useState(null);
  const [widgetModalOpen, setWidgetModalOpen] = useState(false);
  const [showTimelineDetails, setShowTimelineDetails] = useState(false);
@@ -136,6 +186,19 @@ const AttendanceWidget = () => {
  const [overtimePrompt, setOvertimePrompt] = useState(null);
  const [overtimeReason, setOvertimeReason] = useState("");
  const [overtimeSubmitting, setOvertimeSubmitting] = useState(false);
+ const [showFieldTools, setShowFieldTools] = useState(true);
+ const [fieldVisitType, setFieldVisitType] = useState("cronograma");
+ const [selectedFieldAction, setSelectedFieldAction] = useState("office_exit");
+ const [fieldClientId, setFieldClientId] = useState("");
+ const [fieldProspectName, setFieldProspectName] = useState("");
+ const [fieldEmergencyReason, setFieldEmergencyReason] = useState("");
+ const [fieldVisitNotes, setFieldVisitNotes] = useState("");
+ const [fieldVisitSubmitting, setFieldVisitSubmitting] = useState(false);
+ const [scheduledClientsToday, setScheduledClientsToday] = useState([]);
+ const [scheduledClientsLoading, setScheduledClientsLoading] = useState(false);
+ const [emergencyClients, setEmergencyClients] = useState([]);
+ const [emergencyClientsLoading, setEmergencyClientsLoading] = useState(false);
+ const [fieldEmergencyClientId, setFieldEmergencyClientId] = useState("");
  const autoOpenSessionRef = useRef(null);
 
  useEffect(() => {
@@ -246,76 +309,137 @@ const AttendanceWidget = () => {
  setExceptionSuggestion(suggestionCandidates[0] || null);
  };
 
+ const loadScheduledClientsForToday = async () => {
+ if (!canUseFieldOperations) {
+ setScheduledClientsToday([]);
+ return;
+ }
+
+ setScheduledClientsLoading(true);
+ try {
+ const dateKey = attendance?.date || getLocalDateKey(new Date());
+ const result = await fetchClients({
+ date: dateKey,
+ include_schedule_info: true,
+ filter_by_schedule: true,
+ });
+ const clients = Array.isArray(result?.clients) ? result.clients : [];
+ const planned = clients
+ .filter((client) => !client?.is_prospect)
+ .map((client) => ({
+ id: Number(client.id),
+ name: client.commercial_name || client.nombre || `Cliente #${client.id}`,
+ city: client.shipping_city || "Sin ciudad",
+ }));
+
+ setScheduledClientsToday(planned);
+ } catch (_error) {
+ setScheduledClientsToday([]);
+ } finally {
+ setScheduledClientsLoading(false);
+ }
+ };
+
+ const loadAccessibleClientsForEmergency = async () => {
+ if (!canUseFieldOperations) {
+ setEmergencyClients([]);
+ return;
+ }
+
+ setEmergencyClientsLoading(true);
+ try {
+ const result = await fetchClients();
+ const clients = Array.isArray(result?.clients) ? result.clients : [];
+ const available = clients
+ .filter((client) => !client?.is_prospect)
+ .map((client) => ({
+ id: Number(client.id),
+ name: client.commercial_name || client.nombre || `Cliente #${client.id}`,
+ city: client.shipping_city || "Sin ciudad",
+ }));
+
+ setEmergencyClients(available);
+ } catch (_error) {
+ setEmergencyClients([]);
+ } finally {
+ setEmergencyClientsLoading(false);
+ }
+ };
+
  const refreshAll = async () => {
  await Promise.allSettled([
  loadAttendance(),
  fetchException(),
  loadRecentHistory(),
  loadExceptionSuggestion(),
+ loadScheduledClientsForToday(),
+ loadAccessibleClientsForEmergency(),
  ]);
  };
 
  /**
- * Optimized geolocation with caching, retry logic, and performance improvements
- * - Uses cached location if recent (< 10 minutes)
- * - Fast mode first (low accuracy, 5s timeout), fallback to high accuracy
- * - Non-blocking with loading indicators
- * - Allows attendance without location when geolocation fails
+ * Geolocalizacion priorizando precision:
+ * - GPS alta precision + muestreo corto
+ * - cache corta solo si la precision sigue siendo aceptable
+ * - fallback limpio sin bloquear el registro de asistencia
  */
- const getLocation = async (showErrors = true) => {
- // Check cache first (10 minutes validity)
- const CACHE_DURATION = 10 * 60 * 1000; // 10 minutes
- if (cachedLocation && locationTimestamp &&
- (Date.now() - locationTimestamp) < CACHE_DURATION) {
- return cachedLocation;
+  const getLocation = async (showErrors = true) => {
+ const CACHE_DURATION_MS = 2 * 60 * 1000;
+ const MAX_ACCEPTABLE_CACHE_ACCURACY = 50;
+ if (
+  cachedLocation &&
+  locationTimestamp &&
+  (Date.now() - locationTimestamp) < CACHE_DURATION_MS &&
+  Number.isFinite(Number(cachedLocationAccuracy)) &&
+  Number(cachedLocationAccuracy) <= MAX_ACCEPTABLE_CACHE_ACCURACY
+ ) {
+  return cachedLocation;
  }
 
- if (!navigator.geolocation) {
- if (showErrors) {
- showToast("Geolocalizacion no soportada por el navegador", "warning");
- }
- return null;
- }
+  try {
+  setLocationLoading(true);
 
- const getPosition = (options) =>
- new Promise((resolve, reject) => {
- navigator.geolocation.getCurrentPosition(resolve, reject, options);
- });
+  const precise = await getPreciseLocation({
+   desiredAccuracyMeters: 40,
+   goodAccuracyMeters: 25,
+   highAccuracyTimeoutMs: 7000,
+   sampleWindowMs: 4500,
+   sampleCount: 2,
+  });
 
- try {
- setLocationLoading(true);
+  if (!precise?.location) {
+   return null;
+  }
 
- // Try fast mode first (5 seconds, low accuracy)
- const fastOptions = {
- enableHighAccuracy: false,
- timeout: 5000,
- maximumAge: 300000 // 5 minutes cache
- };
+  setCachedLocation(precise.location);
+  setCachedLocationAccuracy(precise.accuracy ?? null);
+  setLocationTimestamp(Date.now());
 
- try {
- const pos = await getPosition(fastOptions);
- const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
- setCachedLocation(loc);
- setLocationTimestamp(Date.now());
- return loc;
- } catch (fastError) {
- console.warn("Fast geolocation failed, trying high accuracy mode:", fastError);
+  if (showErrors && Number(precise.accuracy) > 120) {
+   showToast(
+    `Ubicacion registrada con precision baja (~${Math.round(precise.accuracy)}m).`,
+    "warning"
+   );
+  }
 
- // Fallback to high accuracy mode (8 seconds timeout)
- const highAccuracyOptions = {
- enableHighAccuracy: true,
- timeout: 8000,
- maximumAge: 180000 // 3 minutes cache
- };
-
- const pos = await getPosition(highAccuracyOptions);
- const loc = `${pos.coords.latitude},${pos.coords.longitude}`;
- setCachedLocation(loc);
- setLocationTimestamp(Date.now());
- return loc;
- }
+  return precise.location;
  } catch (err) {
- console.error("Geolocation error:", err);
+ console.warn("Geolocation warning:", err);
+
+ // If precise GPS timed out/unavailable, try a faster/lower-precision browser fallback.
+ if (err?.code === 3 || err?.code === 2) {
+  const fallback = await getBrowserLocationFallback();
+  if (fallback) {
+   const normalizedLocation = {
+    latitude: fallback.latitude,
+    longitude: fallback.longitude,
+   };
+   setCachedLocation(normalizedLocation);
+   setCachedLocationAccuracy(fallback.accuracy || null);
+   setLocationTimestamp(Date.now());
+   return normalizedLocation;
+  }
+ }
 
  // Handle different error types gracefully
  if (showErrors) {
@@ -334,16 +458,25 @@ const AttendanceWidget = () => {
  } finally {
  setLocationLoading(false);
  }
- };
+  };
 
- const getLocationForAction = async () => {
- const locationPromise = getLocation(false);
- const fastFallback = new Promise((resolve) => {
- setTimeout(() => resolve(cachedLocation || null), 1500);
+  const getLocationForAction = async () => {
+ const ACTION_WAIT_LIMIT_MS = 4200;
+ const precisePromise = getLocation(false);
+ const timeoutPromise = new Promise((resolve) => {
+ setTimeout(() => resolve(cachedLocation || null), ACTION_WAIT_LIMIT_MS);
  });
 
- return Promise.race([locationPromise, fastFallback]);
- };
+ const fastResult = await Promise.race([precisePromise, timeoutPromise]);
+ if (fastResult) return fastResult;
+
+ // Continue warming precise location in background for posterior sync.
+ Promise.resolve()
+ .then(() => getLocation(false))
+ .catch(() => null);
+
+ return null;
+  };
 
  const queueLocationSync = (target) => {
  if (!target) return;
@@ -515,6 +648,167 @@ const AttendanceWidget = () => {
  showToast(msg, "error");
  } finally {
  setLoading(false);
+  }
+ };
+
+ const canUseFieldOperations = useMemo(() => {
+ const role = String(user?.role || "").toLowerCase();
+ return [
+ "comercial",
+ "acp_comercial",
+ "jefe_comercial",
+ "backoffice_comercial",
+ "backoffice",
+ "tecnico",
+ "jefe_tecnico",
+ "ti",
+ "jefe_ti",
+ "logistica",
+ "jefe_logistica",
+ ].includes(role);
+ }, [user?.role]);
+
+ useEffect(() => {
+ if (fieldVisitType !== "cronograma") return;
+ if (!scheduledClientsToday.length) {
+ setFieldClientId("");
+ return;
+ }
+ const exists = scheduledClientsToday.some((client) => String(client.id) === String(fieldClientId));
+ if (!exists) {
+ setFieldClientId(String(scheduledClientsToday[0].id));
+ }
+ }, [fieldClientId, fieldVisitType, scheduledClientsToday]);
+
+ useEffect(() => {
+ if (fieldVisitType !== "emergencia") return;
+ if (!emergencyClients.length) {
+ setFieldEmergencyClientId("");
+ return;
+ }
+ const exists = emergencyClients.some((client) => String(client.id) === String(fieldEmergencyClientId));
+ if (!exists) {
+ setFieldEmergencyClientId(String(emergencyClients[0].id));
+ }
+ }, [emergencyClients, fieldEmergencyClientId, fieldVisitType]);
+
+ const buildFieldVisitPayload = async ({ includeObservations = false } = {}) => {
+ const payload = {};
+ const location = await getLocationForAction();
+ if (location) {
+ payload.location = `${location.latitude},${location.longitude}`;
+ }
+
+ if (fieldVisitType === "cronograma") {
+ const numericClientId = Number(fieldClientId);
+ if (!Number.isInteger(numericClientId) || numericClientId <= 0) {
+ throw new Error("Debes seleccionar un cliente planificado del cronograma del dia.");
+ }
+ payload.client_id = numericClientId;
+ } else if (fieldVisitType === "prospecto") {
+ const normalizedName = String(fieldProspectName || "").trim();
+ if (!normalizedName) {
+ throw new Error("Para prospecto debes ingresar un nombre.");
+ }
+ payload.prospect_name = normalizedName;
+ } else {
+ const numericEmergencyClientId = Number(fieldEmergencyClientId);
+ if (!Number.isInteger(numericEmergencyClientId) || numericEmergencyClientId <= 0) {
+ throw new Error("Para emergencia debes seleccionar un cliente registrado o asignado.");
+ }
+ const normalizedReason = String(fieldEmergencyReason || "").trim();
+ if (!normalizedReason) {
+ throw new Error("Para emergencia debes ingresar el motivo.");
+ }
+ payload.client_id = numericEmergencyClientId;
+ payload.observations = normalizedReason;
+ }
+
+ if (includeObservations) {
+ const normalizedNotes = String(fieldVisitNotes || "").trim();
+ if (normalizedNotes) {
+ payload.observations = payload.observations
+ ? `${payload.observations}\nDetalle de cierre: ${normalizedNotes}`
+ : normalizedNotes;
+ }
+ }
+
+ return payload;
+ };
+
+ const handleFieldVisitMark = async (kind) => {
+ setFieldVisitSubmitting(true);
+ try {
+ const payload = await buildFieldVisitPayload({ includeObservations: kind === "exit" });
+ const res =
+ kind === "entry"
+ ? await marcarVisitaEntrada(payload)
+ : await marcarVisitaSalida(payload);
+
+ if (res?.ok) {
+ showToast(
+ kind === "entry"
+ ? "Entrada de cliente registrada correctamente."
+ : "Salida de cliente registrada correctamente.",
+ "success",
+ );
+ await refreshAll();
+ } else {
+ showToast("No se pudo registrar la visita de campo.", "error");
+ }
+ } catch (err) {
+ showToast(err?.response?.data?.message || err?.message || "Error registrando visita de campo", "error");
+ } finally {
+ setFieldVisitSubmitting(false);
+ }
+ };
+
+ const handleOfficeDepartureQuick = async () => {
+ if (hasActiveException) {
+ showToast("Ya tienes una salida de oficina activa.", "info");
+ return;
+ }
+
+ const emergencyDetail = String(fieldEmergencyReason || "").trim();
+ const description = emergencyDetail
+ ? `Salida de oficina para atencion: ${emergencyDetail}`
+ : "Salida de oficina para gestion de campo";
+
+ setFieldVisitSubmitting(true);
+ try {
+ const res = await registerException("otro", description, await getLocationForAction());
+ if (res?.ok) {
+ showToast("Salida de oficina registrada.", "success");
+ await refreshAll();
+ } else {
+ showToast("No se pudo registrar la salida de oficina.", "error");
+ }
+ } catch (err) {
+ showToast(err?.response?.data?.message || err?.message || "Error registrando salida de oficina", "error");
+ } finally {
+ setFieldVisitSubmitting(false);
+ }
+ };
+
+ const handleOfficeArrivalQuick = async () => {
+ if (!hasActiveException) {
+ showToast("No tienes una salida de oficina activa para cerrar.", "warning");
+ return;
+ }
+
+ setFieldVisitSubmitting(true);
+ try {
+ const res = await updateExceptionStatus("COMPLETED", await getLocationForAction());
+ if (res?.ok) {
+ showToast("Entrada a oficina registrada.", "success");
+ await refreshAll();
+ } else {
+ showToast("No se pudo registrar la entrada a oficina.", "error");
+ }
+ } catch (err) {
+ showToast(err?.response?.data?.message || err?.message || "Error registrando entrada a oficina", "error");
+ } finally {
+ setFieldVisitSubmitting(false);
  }
  };
 
@@ -552,6 +846,80 @@ const AttendanceWidget = () => {
  const status = getStatusInfo();
  const attendanceState = attendance?.attendance_status || deriveAttendanceState(attendance);
  const attendanceStateLabel = attendance?.attendance_status_label || ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado";
+ const punctualityInsights = useMemo(() => {
+ const historyRows = Array.isArray(recentHistory) ? recentHistory : [];
+ const todayKey = attendance?.date || getLocalDateKey(new Date());
+ const historyByDate = new Map(historyRows.map((row) => [normalizeDateKey(row?.date), row]));
+
+ if (!historyByDate.has(todayKey)) {
+  historyByDate.set(todayKey, {
+   date: todayKey,
+   entry_time: attendance?.entry_time || null,
+   total_hours: attendance?.total_hours || null,
+  });
+ }
+
+ const rows = [...historyByDate.values()]
+ .filter((row) => normalizeDateKey(row?.date))
+ .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+ const streak = rows.reduce((acc, row) => {
+  if (acc.broken) return acc;
+  const metrics = getPunctualityState(row?.entry_time);
+  if (metrics.state === "on_time") {
+   acc.value += 1;
+   return acc;
+  }
+  acc.broken = true;
+  return acc;
+ }, { value: 0, broken: false }).value;
+
+ const ranked = rows
+ .map((row) => {
+  const punctuality = getPunctualityState(row?.entry_time);
+  return {
+   ...row,
+   punctuality,
+   dateKey: normalizeDateKey(row?.date),
+   entryMinutes: (() => {
+    const parsed = toDate(row?.entry_time);
+    return parsed ? (parsed.getHours() * 60 + parsed.getMinutes()) : Number.POSITIVE_INFINITY;
+   })(),
+   totalHoursNumeric: Number(row?.total_hours || 0),
+  };
+ })
+ .sort((a, b) => (
+  b.punctuality.points - a.punctuality.points
+  || a.entryMinutes - b.entryMinutes
+  || b.totalHoursNumeric - a.totalHoursNumeric
+  || String(b.dateKey || "").localeCompare(String(a.dateKey || ""))
+ ));
+
+ const myIndex = ranked.findIndex((row) => row.dateKey === todayKey);
+ const position = myIndex >= 0 ? myIndex + 1 : null;
+ const total = ranked.length || 1;
+
+ let league = "Liga Enfocada";
+ let vibe = "Sigues en carrera.";
+ if (position === 1) {
+  league = "Liga Leyenda";
+  vibe = "Vas liderando con puntualidad de alto nivel.";
+ } else if (position && position <= 3) {
+  league = "Liga Pro";
+  vibe = "Top de puntualidad. Mantén la racha.";
+ } else if (streak >= 3) {
+  league = "Modo Constancia";
+  vibe = "Racha sólida, estás escalando el ranking.";
+ }
+
+ return {
+  streak,
+  position,
+  total,
+  league,
+  vibe,
+ };
+ }, [attendance?.date, attendance?.entry_time, attendance?.total_hours, recentHistory]);
  const hasActiveException = Boolean(activeException);
  const exceptionStatus = activeException?.status || "NONE";
  const exceptionStepLabel =
@@ -959,8 +1327,6 @@ const AttendanceWidget = () => {
  };
 
  const renderExceptionControls = () => {
- if (!attendance?.entry_time || attendance?.exit_time) return null;
-
  if (!hasActiveException) {
  return (
  <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 mt-2">
@@ -969,7 +1335,7 @@ const AttendanceWidget = () => {
  <span className="text-xs font-semibold uppercase">Salida inesperada</span>
  </div>
  <p className="text-xs text-amber-700 mb-3">
- Si necesitas salir por permiso, cita o emergencia, registralo aqui para dejar trazabilidad.
+ Registra una salida inesperada solo cuando aplique una excepcion fuera del flujo normal.
  </p>
  <Button
  onClick={() => setExceptionModalOpen(true)}
@@ -1029,6 +1395,158 @@ const AttendanceWidget = () => {
  </Button>
  </>
  )}
+ </div>
+ );
+ };
+
+ const renderFieldOperationsControls = () => {
+ if (!canUseFieldOperations) return null;
+ const isClientAction = selectedFieldAction === "client_entry" || selectedFieldAction === "client_exit";
+ const actionLabelMap = {
+ office_exit: "Salida de oficina o viaje",
+ office_entry: "Entrada a oficina o viaje",
+ client_entry: "Entrada cliente",
+ client_exit: "Salida cliente",
+ };
+
+ const executeSelectedFieldAction = async () => {
+ if (selectedFieldAction === "office_exit") {
+ await handleOfficeDepartureQuick();
+ return;
+ }
+ if (selectedFieldAction === "office_entry") {
+ await handleOfficeArrivalQuick();
+ return;
+ }
+ if (selectedFieldAction === "client_entry") {
+ await handleFieldVisitMark("entry");
+ return;
+ }
+ await handleFieldVisitMark("exit");
+ };
+
+ return (
+ <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50 p-3">
+ <div className="mb-2 flex items-center gap-2 text-blue-800">
+ <FiClock size={14} />
+ <span className="text-xs font-semibold uppercase">Operacion de campo</span>
+ </div>
+ <p className="mb-3 text-xs text-blue-700">
+ Marca salida/entrada de oficina o viaje y entrada/salida de cliente para cronograma, prospecto o emergencia.
+ </p>
+
+ <div className="space-y-2">
+ <label className="text-[11px] font-semibold text-blue-800">Accion a registrar</label>
+ <select
+ value={selectedFieldAction}
+ onChange={(e) => setSelectedFieldAction(e.target.value)}
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ >
+ <option value="office_exit">Salida de oficina o viaje</option>
+ <option value="office_entry">Entrada a oficina o viaje</option>
+ <option value="client_entry">Entrada cliente</option>
+ <option value="client_exit">Salida cliente</option>
+ </select>
+
+ {selectedFieldAction === "office_exit" ? (
+ <input
+ type="text"
+ value={fieldEmergencyReason}
+ onChange={(e) => setFieldEmergencyReason(e.target.value)}
+ placeholder="Motivo de salida de oficina (opcional)"
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ />
+ ) : null}
+
+ {isClientAction ? (
+ <>
+ <label className="text-[11px] font-semibold text-blue-800">Tipo de gestion</label>
+ <select
+ value={fieldVisitType}
+ onChange={(e) => setFieldVisitType(e.target.value)}
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ >
+ <option value="cronograma">Cliente de cronograma</option>
+ <option value="prospecto">Prospecto</option>
+ <option value="emergencia">Emergencia</option>
+ </select>
+
+ {fieldVisitType === "cronograma" ? (
+ <select
+ value={fieldClientId}
+ onChange={(e) => setFieldClientId(e.target.value)}
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ >
+ <option value="">
+ {scheduledClientsLoading ? "Cargando clientes del cronograma..." : "Selecciona cliente planificado"}
+ </option>
+ {scheduledClientsToday.map((client) => (
+ <option key={client.id} value={String(client.id)}>
+ {client.name} · {client.city} · ID {client.id}
+ </option>
+ ))}
+ </select>
+ ) : null}
+
+ {fieldVisitType === "prospecto" ? (
+ <input
+ type="text"
+ value={fieldProspectName}
+ onChange={(e) => setFieldProspectName(e.target.value)}
+ placeholder="Nombre del prospecto"
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ />
+ ) : null}
+
+ {fieldVisitType === "emergencia" ? (
+ <select
+ value={fieldEmergencyClientId}
+ onChange={(e) => setFieldEmergencyClientId(e.target.value)}
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ >
+ <option value="">
+ {emergencyClientsLoading
+ ? "Cargando clientes registrados/asignados..."
+ : "Selecciona cliente registrado o asignado"}
+ </option>
+ {emergencyClients.map((client) => (
+ <option key={client.id} value={String(client.id)}>
+ {client.name} · {client.city} · ID {client.id}
+ </option>
+ ))}
+ </select>
+ ) : null}
+
+ {fieldVisitType === "emergencia" ? (
+ <input
+ type="text"
+ value={fieldEmergencyReason}
+ onChange={(e) => setFieldEmergencyReason(e.target.value)}
+ placeholder="Motivo de emergencia"
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ />
+ ) : null}
+
+ <textarea
+ rows={2}
+ value={fieldVisitNotes}
+ onChange={(e) => setFieldVisitNotes(e.target.value)}
+ placeholder="Observaciones (opcional)"
+ className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm"
+ />
+ </>
+ ) : null}
+ </div>
+
+ <div className="mt-3 grid grid-cols-1">
+ <Button
+ className="text-xs"
+ onClick={executeSelectedFieldAction}
+ disabled={fieldVisitSubmitting || (isClientAction && fieldVisitType === "cronograma" && !fieldClientId)}
+ >
+ {fieldVisitSubmitting ? "Registrando..." : `Registrar ${actionLabelMap[selectedFieldAction] || "accion"}`}
+ </Button>
+ </div>
  </div>
  );
  };
@@ -1260,6 +1778,31 @@ const AttendanceWidget = () => {
  )}
  </div>
 
+ <div className="rounded-[26px] border border-blue-200 bg-gradient-to-b from-blue-50/80 to-white shadow-sm">
+ <button
+ type="button"
+ onClick={() => setShowFieldTools((prev) => !prev)}
+ className="flex w-full items-center justify-between px-4 py-4 text-left"
+ >
+ <div>
+ <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+ Operaciones de campo
+ </div>
+ <div className="text-sm text-slate-600">
+ Entrada/salida de oficina o viaje y entrada/salida cliente.
+ </div>
+ </div>
+ <span className="rounded-full border border-slate-200 bg-slate-50 p-2 text-slate-500">
+ {showFieldTools ? <FiChevronUp className="text-slate-500" /> : <FiChevronDown className="text-slate-500" />}
+ </span>
+ </button>
+ {showFieldTools && (
+ <div className="border-t border-slate-200 px-4 pb-4 pt-3">
+ {renderFieldOperationsControls()}
+ </div>
+ )}
+ </div>
+
  <div className="rounded-[26px] border border-amber-200 bg-gradient-to-b from-amber-50/80 to-white shadow-sm">
  <button
  type="button"
@@ -1283,6 +1826,46 @@ const AttendanceWidget = () => {
  {renderExceptionControls()}
  </div>
  )}
+ </div>
+
+ <div className="rounded-[26px] border border-fuchsia-200 bg-gradient-to-br from-fuchsia-50 via-pink-50 to-rose-50 p-4 shadow-sm">
+ <div className="mb-3 flex items-center justify-between gap-3">
+ <div>
+ <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-fuchsia-700">
+ Ranking de puntualidad
+ </div>
+ <div className="mt-1 text-sm font-semibold text-fuchsia-900">
+ {punctualityInsights.league}
+ </div>
+ </div>
+ <span className="rounded-full border border-fuchsia-200 bg-white px-3 py-1 text-xs font-bold text-fuchsia-700">
+ Puesto {punctualityInsights.position || "--"} / {punctualityInsights.total}
+ </span>
+ </div>
+ <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+ <div className="rounded-[20px] border border-fuchsia-200 bg-white/90 px-3 py-3">
+ <div className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-600">
+ Racha actual
+ </div>
+ <div className="mt-1 text-lg font-black text-fuchsia-900">
+ {punctualityInsights.streak} dia{punctualityInsights.streak === 1 ? "" : "s"}
+ </div>
+ <div className="text-xs text-fuchsia-700">
+ Llegadas en hora consecutivas.
+ </div>
+ </div>
+ <div className="rounded-[20px] border border-fuchsia-200 bg-white/90 px-3 py-3">
+ <div className="text-[10px] font-semibold uppercase tracking-wide text-fuchsia-600">
+ Estado del tablero
+ </div>
+ <div className="mt-1 text-sm font-bold text-fuchsia-900">
+ {punctualityInsights.vibe}
+ </div>
+ <div className="text-xs text-fuchsia-700">
+ Basado en tus ultimos {RECENT_HISTORY_DAYS} dias.
+ </div>
+ </div>
+ </div>
  </div>
 
  <div className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm">
@@ -1487,4 +2070,3 @@ const AttendanceWidget = () => {
 };
 
 export default AttendanceWidget;
-

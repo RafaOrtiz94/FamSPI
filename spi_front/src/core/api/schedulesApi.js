@@ -11,7 +11,11 @@ export const addScheduledVisit = (id, payload) => api.post(`/schedules/${id}/vis
 export const updateScheduledVisit = (id, visitId, payload) =>
  api.put(`/schedules/${id}/visits/${visitId}`, payload).then((res) => res.data?.data);
 export const deleteScheduledVisit = (id, visitId) =>
- api.delete(`/schedules/${id}/visits/${visitId}`).then((res) => res.data?.data);
+  api.delete(`/schedules/${id}/visits/${visitId}`).then((res) => res.data?.data);
+export const justifyScheduledVisit = (id, visitId, justification) =>
+  api.post(`/schedules/${id}/visits/${visitId}/justify`, { justification }).then((res) => res.data?.data);
+export const justifySchedule = (id, justification) =>
+  api.post(`/schedules/${id}/justify`, { justification }).then((res) => res.data?.data);
 export const fetchPendingSchedules = () =>
  api.get("/schedules/pending-approval").then((res) => res.data?.data || []);
 export const approveSchedule = (id, notes) =>
@@ -36,10 +40,11 @@ const schedulesApi = {
  updateSchedule,
  deleteSchedule,
  submitSchedule,
- addScheduledVisit,
- updateScheduledVisit,
- deleteScheduledVisit,
- fetchPendingSchedules,
+  addScheduledVisit,
+  updateScheduledVisit,
+  deleteScheduledVisit,
+  justifyScheduledVisit,
+  fetchPendingSchedules,
  approveSchedule,
  rejectSchedule,
  fetchTeamSchedules,

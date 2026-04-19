@@ -12,8 +12,13 @@ import {
 } from "react-icons/fi";
 import Button from "../../../../core/ui/components/Button";
 import Card from "../../../../core/ui/components/Card";
+import Modal from "../../../../core/ui/components/Modal";
+import { useUI } from "../../../../core/ui/useUI";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
-import { optimizeRoute as optimizeRouteApi } from "../../../../core/api/schedulesApi";
+import { 
+  optimizeRoute as optimizeRouteApi, 
+  justifyScheduledVisit 
+} from "../../../../core/api/schedulesApi";
 
 const groupByDate = (visits = []) =>
   visits.reduce((acc, visit) => {
@@ -117,6 +122,28 @@ const formatDuration = (seconds = 0) => {
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
+};
+
+const toDateKey = (value) => {
+  if (!value) return "";
+  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const getInitialSelectedDate = (schedule) => {
+  const month = Number(schedule?.month || 0);
+  const year = Number(schedule?.year || 0);
+  if (!month || !year) return "";
+  const today = new Date();
+  if (today.getMonth() + 1 === month && today.getFullYear() === year) {
+    return toDateKey(today);
+  }
+  return toDateKey(new Date(year, month - 1, 1));
 };
 
 const getVisitHours = (visit = {}) => {
@@ -233,7 +260,9 @@ const ScheduleCalendarView = ({
   onSelectedDateChange,
   onRouteContextChange,
 }) => {
+  const { showToast } = useUI();
   const optimizeDebounceRef = useRef(null);
+  const lastAutoOptimizeKeyRef = useRef("");
   const [selectedDate, setSelectedDate] = useState("");
   const [routeLoading, setRouteLoading] = useState(false);
   const [routeError, setRouteError] = useState("");
@@ -242,6 +271,7 @@ const ScheduleCalendarView = ({
   const [routeSegmentsByDate, setRouteSegmentsByDate] = useState({});
   const [routePointsByDate, setRoutePointsByDate] = useState({});
   const [searchByDate, setSearchByDate] = useState({});
+  const [quickAddDate, setQuickAddDate] = useState("");
 
   const findClient = useCallback(
     (id) => clients.find((client) => String(client.id) === String(id)),
@@ -263,15 +293,43 @@ const ScheduleCalendarView = ({
     [grouped],
   );
 
+  const monthNumber = Number(schedule?.month || 0);
+  const yearNumber = Number(schedule?.year || 0);
+  const periodStart = useMemo(() => {
+    if (!monthNumber || !yearNumber) return "";
+    return toDateKey(new Date(yearNumber, monthNumber - 1, 1));
+  }, [monthNumber, yearNumber]);
+  const periodEnd = useMemo(() => {
+    if (!monthNumber || !yearNumber) return "";
+    return toDateKey(new Date(yearNumber, monthNumber, 0));
+  }, [monthNumber, yearNumber]);
+
+  const calendarDays = useMemo(() => {
+    if (!monthNumber || !yearNumber) return [];
+    const daysInMonth = new Date(yearNumber, monthNumber, 0).getDate();
+    return Array.from({ length: daysInMonth }, (_, index) => {
+      const day = index + 1;
+      return toDateKey(new Date(yearNumber, monthNumber - 1, day));
+    });
+  }, [monthNumber, yearNumber]);
+
+  const firstDayOffset = useMemo(() => {
+    if (!monthNumber || !yearNumber) return 0;
+    const weekDay = new Date(yearNumber, monthNumber - 1, 1).getDay();
+    return weekDay === 0 ? 6 : weekDay - 1;
+  }, [monthNumber, yearNumber]);
+
   useEffect(() => {
-    if (!sortedDateEntries.length) {
+    const initialDate = getInitialSelectedDate(schedule);
+    if (!initialDate) {
       setSelectedDate("");
       return;
     }
-    if (!selectedDate || !grouped[selectedDate]) {
-      setSelectedDate(sortedDateEntries[0][0]);
+    const isOutOfRange = selectedDate && (selectedDate < periodStart || selectedDate > periodEnd);
+    if (!selectedDate || isOutOfRange) {
+      setSelectedDate(initialDate);
     }
-  }, [grouped, selectedDate, sortedDateEntries]);
+  }, [periodEnd, periodStart, schedule, selectedDate]);
 
   useEffect(
     () => () => {
@@ -281,6 +339,10 @@ const ScheduleCalendarView = ({
     },
     [],
   );
+
+  useEffect(() => {
+    lastAutoOptimizeKeyRef.current = "";
+  }, [schedule?.id]);
 
   const orderVisitsForDisplay = useCallback(
     (dateKey, visits = []) => {
@@ -422,11 +484,37 @@ const ScheduleCalendarView = ({
     [runRouteOptimization],
   );
 
+  const selectedDateVisitSignature = useMemo(() => {
+    if (!selectedDate) return "";
+    const visits = grouped[selectedDate] || [];
+    if (!visits.length) return "";
+    return visits
+      .map((visit) => `${visit.id || "no-id"}:${visit.client_request_id || "no-client"}:${visit.priority || 1}:${visit.planned_date || selectedDate}`)
+      .sort()
+      .join("|");
+  }, [grouped, selectedDate]);
+
   useEffect(() => {
-    if (selectedDate) {
-      requestOptimizedRoute(selectedDate);
+    if (!selectedDateVisitSignature) {
+      lastAutoOptimizeKeyRef.current = "";
+      setRouteLoading(false);
+      setRouteError("");
+      return;
     }
-  }, [selectedDate, requestOptimizedRoute]);
+
+    const optimizationKey = `${schedule?.id || "no-schedule"}|${selectedDate}|${selectedDateVisitSignature}`;
+    if (lastAutoOptimizeKeyRef.current === optimizationKey) {
+      return;
+    }
+    lastAutoOptimizeKeyRef.current = optimizationKey;
+    requestOptimizedRoute(selectedDate);
+  }, [requestOptimizedRoute, schedule?.id, selectedDate, selectedDateVisitSignature]);
+
+  const calendarEntries = useMemo(() => {
+    if (!selectedDate) return sortedDateEntries;
+    if (Object.prototype.hasOwnProperty.call(grouped, selectedDate)) return sortedDateEntries;
+    return [[selectedDate, []], ...sortedDateEntries];
+  }, [grouped, selectedDate, sortedDateEntries]);
 
   const selectedVisits = useMemo(() => {
     if (!selectedDate) return [];
@@ -480,15 +568,42 @@ const ScheduleCalendarView = ({
     onUpdateVisit?.(schedule.id, visit.id, { client_request_id: Number(value), city });
   };
 
-  const handleQuickAdd = async (date, client, closePopover) => {
+  const handleQuickAdd = async (date, client) => {
     if (!client || !date || !onQuickAdd) return;
     await onQuickAdd({
       date,
       client,
     });
     setSearchByDate((prev) => ({ ...prev, [date]: "" }));
-    closePopover?.();
+    setQuickAddDate("");
   };
+
+  const quickSearch = quickAddDate ? searchByDate[quickAddDate] || "" : "";
+  const quickAddClients = useMemo(() => {
+    if (!quickAddDate) return [];
+    return clients
+      .filter((client) => {
+        if (!quickSearch.trim()) return true;
+        const term = quickSearch.toLowerCase();
+        const fields = [
+          client.commercial_name,
+          client.nombre,
+          client.name,
+          client.email,
+          client.shipping_city,
+          client.shipping_province,
+          String(client.id || ""),
+        ]
+          .filter(Boolean)
+          .map((item) => String(item).toLowerCase());
+        return fields.some((item) => item.includes(term));
+      })
+      .slice(0, 20);
+  }, [clients, quickAddDate, quickSearch]);
+
+  const [justifyingVisit, setJustifyingVisit] = useState(null);
+  const [justificationText, setJustificationText] = useState("");
+  const [isJustifying, setIsJustifying] = useState(false);
 
   if (!schedule) {
     return (
@@ -497,6 +612,35 @@ const ScheduleCalendarView = ({
       </div>
     );
   }
+
+  const handleJustify = async () => {
+    if (!justifyingVisit || !justificationText.trim()) return;
+    setIsJustifying(true);
+    try {
+      await justifyScheduledVisit(schedule.id, justifyingVisit.id, justificationText);
+      showToast("Justificacion guardada", "success");
+      setJustifyingVisit(null);
+      setJustificationText("");
+      // Recargar detalles del cronograma si es necesario (asumiendo que viene de arriba)
+      onUpdateVisit?.(schedule.id, justifyingVisit.id, { justification: justificationText });
+    } catch (error) {
+      showToast(error?.message || "No se pudo guardar la justificacion", "error");
+    } finally {
+      setIsJustifying(false);
+    }
+  };
+
+  const getVisitStatusBadge = (visit) => {
+    const status = visit.visit_status || "pending";
+    switch (status) {
+      case "visited":
+        return <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Visitado</span>;
+      case "skipped":
+        return <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-700">Omitido</span>;
+      default:
+        return <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">Pendiente</span>;
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -526,15 +670,67 @@ const ScheduleCalendarView = ({
         <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{routeError}</div>
       ) : null}
 
-      {sortedDateEntries.length === 0 ? (
+      {calendarEntries.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-12 text-center">
           <FiCalendar className="mx-auto mb-3 text-slate-300" size={42} />
           <p className="text-sm text-slate-500">No hay visitas planificadas para este cronograma.</p>
         </div>
       ) : null}
 
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Seleccion de dia</p>
+          <input
+            type="date"
+            value={selectedDate}
+            min={periodStart}
+            max={periodEnd}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            className="rounded-lg border border-slate-200 px-2 py-1 text-sm"
+          />
+        </div>
+        <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[11px] font-semibold text-slate-500">
+          <span>Lun</span>
+          <span>Mar</span>
+          <span>Mie</span>
+          <span>Jue</span>
+          <span>Vie</span>
+          <span>Sab</span>
+          <span>Dom</span>
+        </div>
+        <div className="grid grid-cols-7 gap-1">
+          {Array.from({ length: firstDayOffset }, (_, index) => (
+            <span key={`offset-${index}`} className="h-8 rounded-md bg-transparent" />
+          ))}
+          {calendarDays.map((dateKey) => {
+            const dayNumber = Number(dateKey.slice(-2));
+            const isSelected = selectedDate === dateKey;
+            const hasVisits = Boolean((grouped[dateKey] || []).length);
+            const isHoliday = holidaysSet?.has?.(dateKey);
+            return (
+              <button
+                key={dateKey}
+                type="button"
+                onClick={() => setSelectedDate(dateKey)}
+                className={`h-8 rounded-md border text-xs transition ${
+                  isSelected
+                    ? "border-cyan-300 bg-cyan-50 font-semibold text-cyan-700"
+                    : "border-slate-200 text-slate-700 hover:border-cyan-200 hover:bg-cyan-50/40"
+                }`}
+                title={hasVisits ? `${hasVisits} visita(s)` : "Sin visitas"}
+              >
+                <span>{dayNumber}</span>
+                {hasVisits || isHoliday ? (
+                  <span className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${isHoliday ? "bg-amber-500" : "bg-emerald-500"}`} />
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {sortedDateEntries.map(([date, visits]) => {
+        {calendarEntries.map(([date, visits]) => {
           const orderedVisits = orderVisitsForDisplay(date, visits);
           const totalHours = orderedVisits.reduce((acc, visit) => acc + getVisitHours(visit), 0);
           const occupancyPct = Math.min(100, (totalHours / 8) * 100);
@@ -606,11 +802,12 @@ const ScheduleCalendarView = ({
                     {({ close }) => (
                       <>
                         <Popover.Button
+                          onClick={() => setQuickAddDate(date)}
                           className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
                         >
                           Quick add
                         </Popover.Button>
-                        <Popover.Panel className="absolute z-20 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 shadow-xl">
+                        <Popover.Panel className="hidden">
                           <p className="mb-2 text-xs font-semibold text-slate-700">Agregar visita al {date}</p>
                           <input
                             value={quickSearch}
@@ -678,12 +875,15 @@ const ScheduleCalendarView = ({
                         className={`rounded-xl border p-3 ${getPriorityColor(visit.priority || 1)}`}
                       >
                         <div className="mb-2 flex items-start justify-between gap-2">
-                          <div>
-                            <p className="flex items-center gap-1 text-sm font-semibold text-slate-900">
-                              <FiUser size={14} className="text-slate-500" />
-                              {label}
-                            </p>
-                            <p className="mt-1 flex items-center gap-3 text-xs text-slate-600">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <p className="flex items-center gap-1 text-sm font-semibold text-slate-900 truncate">
+                                <FiUser size={14} className="text-slate-500" />
+                                {label}
+                              </p>
+                              {getVisitStatusBadge(visit)}
+                            </div>
+                            <p className="flex items-center gap-3 text-xs text-slate-600">
                               <span className="inline-flex items-center gap-1">
                                 <FiMapPin size={12} />
                                 {visit.city || visit.client_city || visit.client_province || "Sin ciudad"}
@@ -695,7 +895,7 @@ const ScheduleCalendarView = ({
                             </p>
                           </div>
 
-                          <div className="flex flex-col items-end gap-1">
+                          <div className="flex flex-col items-end gap-1 shrink-0">
                             <span className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold ${getPriorityColor(visit.priority || 1)}`}>
                               {getPriorityLabel(visit.priority || 1)}
                             </span>
@@ -703,60 +903,98 @@ const ScheduleCalendarView = ({
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 gap-2">
-                          <select
-                            className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
-                            value={visit.client_request_id || ""}
-                            onChange={(event) => handleChangeClient(visit, event.target.value)}
-                            disabled={isLocked}
-                          >
-                            <option value="">Selecciona cliente</option>
-                            {clients.map((option) => {
-                              const optionLabel =
-                                option.commercial_name ||
-                                option.nombre ||
-                                option.name ||
-                                option.display_name ||
-                                option.email ||
-                                option.identificador ||
-                                `Cliente #${option.id}`;
-                              return (
-                                <option key={option.id} value={option.id}>
-                                  {optionLabel}
-                                </option>
-                              );
-                            })}
-                          </select>
-
-                          <div className="flex items-center gap-2">
+                        {/* Solo mostrar edicion si NO esta bloqueado y es borrador/rechazado */}
+                        {!isLocked && (
+                          <div className="grid grid-cols-1 gap-2 mb-2">
                             <select
-                              className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
-                              value={visit.priority || 1}
-                              onChange={(event) => handleChangePriority(visit, event.target.value)}
+                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
+                              value={visit.client_request_id || ""}
+                              onChange={(event) => handleChangeClient(visit, event.target.value)}
                               disabled={isLocked}
                             >
-                              <option value={1}>Baja</option>
-                              <option value={2}>Media</option>
-                              <option value={3}>Alta</option>
+                              <option value="">Selecciona cliente</option>
+                              {clients.map((option) => {
+                                const optionLabel =
+                                  option.commercial_name ||
+                                  option.nombre ||
+                                  option.name ||
+                                  option.display_name ||
+                                  option.email ||
+                                  option.identificador ||
+                                  `Cliente #${option.id}`;
+                                return (
+                                  <option key={option.id} value={option.id}>
+                                    {optionLabel}
+                                  </option>
+                                );
+                              })}
                             </select>
-                            {onRemoveVisit && !isLocked ? (
-                              <Button
-                                size="sm"
-                                variant="danger"
-                                icon={FiTrash2}
-                                onClick={() => onRemoveVisit(schedule.id, visit.id)}
+
+                            <div className="flex items-center gap-2">
+                              <select
+                                className="flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:opacity-60"
+                                value={visit.priority || 1}
+                                onChange={(event) => handleChangePriority(visit, event.target.value)}
+                                disabled={isLocked}
                               >
-                                Quitar
-                              </Button>
-                            ) : null}
+                                <option value={1}>Baja</option>
+                                <option value={2}>Media</option>
+                                <option value={3}>Alta</option>
+                              </select>
+                              {onRemoveVisit && (
+                                <Button
+                                  size="sm"
+                                  variant="danger"
+                                  icon={FiTrash2}
+                                  onClick={() => onRemoveVisit(schedule.id, visit.id)}
+                                >
+                                  Quitar
+                                </Button>
+                              )}
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         {visit.notes ? (
-                          <div className="mt-2 rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-xs text-slate-600">
-                            {visit.notes}
+                          <div className="mt-2 rounded-lg border border-slate-200 bg-white/70 px-2 py-1 text-xs text-slate-600 italic">
+                            Nota: {visit.notes}
                           </div>
                         ) : null}
+
+                        {/* Justificacion Section */}
+                        {(visit.visit_status === "skipped" || (visit.visit_status === "pending" && new Date(date) < new Date().setHours(0,0,0,0))) && (
+                          <div className="mt-2 space-y-2">
+                            {visit.justification ? (
+                              <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs">
+                                <p className="font-semibold text-amber-800">Justificación:</p>
+                                <p className="text-slate-700">{visit.justification}</p>
+                                {!isLocked && (
+                                  <button
+                                    onClick={() => {
+                                      setJustifyingVisit(visit);
+                                      setJustificationText(visit.justification);
+                                    }}
+                                    className="mt-1 text-cyan-700 font-medium hover:underline"
+                                  >
+                                    Editar justificación
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="warning"
+                                className="w-full text-xs"
+                                onClick={() => {
+                                  setJustifyingVisit(visit);
+                                  setJustificationText("");
+                                }}
+                              >
+                                Justificar incumplimiento
+                              </Button>
+                            )}
+                          </div>
+                        )}
                       </motion.div>
                     );
                   })}
@@ -773,6 +1011,96 @@ const ScheduleCalendarView = ({
           <p className="mt-1">Las alertas logisticas se activan cuando la distancia entre visitas supera 250 km en un mismo dia.</p>
         </div>
       </Card>
+
+      <Modal
+        open={Boolean(quickAddDate)}
+        onClose={() => setQuickAddDate("")}
+        title={quickAddDate ? `Agregar visita - ${getCurrentDateLabel(quickAddDate)}` : "Agregar visita"}
+        maxWidth="max-w-2xl"
+      >
+        <div className="space-y-3">
+          <input
+            value={quickSearch}
+            onChange={(event) =>
+              setSearchByDate((prev) => ({ ...prev, [quickAddDate]: event.target.value }))
+            }
+            placeholder="Buscar cliente por nombre, correo, ciudad o ID"
+            className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm"
+          />
+          <div className="max-h-[56vh] space-y-2 overflow-y-auto">
+            {quickAddClients.length ? (
+              quickAddClients.map((client) => {
+                const label =
+                  client.commercial_name ||
+                  client.nombre ||
+                  client.name ||
+                  client.display_name ||
+                  `Cliente #${client.id}`;
+                return (
+                  <button
+                    key={client.id}
+                    type="button"
+                    onClick={() => handleQuickAdd(quickAddDate, client)}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  >
+                    <p className="font-medium text-slate-900">{label}</p>
+                    <p className="text-xs text-slate-500">
+                      {client.shipping_city || "Sin ciudad"} · ID {client.id}
+                    </p>
+                  </button>
+                );
+              })
+            ) : (
+              <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                No se encontraron clientes.
+              </p>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        open={Boolean(justifyingVisit)}
+        onClose={() => setJustifyingVisit(null)}
+        title="Justificar incumplimiento de visita"
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+            <p className="font-semibold text-slate-800">Visita:</p>
+            <p>{justifyingVisit ? resolveVisitLabel(justifyingVisit, findClient(justifyingVisit.client_request_id)) : ""}</p>
+            <p className="mt-1 font-semibold text-slate-800">Fecha planificada:</p>
+            <p>{justifyingVisit ? getCurrentDateLabel(justifyingVisit.planned_date) : ""}</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Motivo del incumplimiento
+            </label>
+            <textarea
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+              rows={4}
+              value={justificationText}
+              onChange={(e) => setJustificationText(e.target.value)}
+              placeholder="Explique por qué no se pudo realizar la visita..."
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setJustifyingVisit(null)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleJustify}
+              loading={isJustifying}
+              disabled={!justificationText.trim()}
+            >
+              Guardar justificación
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

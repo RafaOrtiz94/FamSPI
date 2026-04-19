@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authMiddleware } = require("../../middlewares/auth");
+const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const ctrl = require("./ca0102.controller");
 
@@ -9,7 +9,7 @@ const ctrl = require("./ca0102.controller");
  * Prefijo montado en: /api/v1/calidad/cleaning
  */
 
-router.use(authMiddleware);
+router.use(verifyToken);
 
 // Gestión de Áreas (solo Calidad)
 router.post("/areas",         requireRole(["calidad"]),         ctrl.createArea);

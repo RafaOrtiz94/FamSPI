@@ -175,11 +175,15 @@ api.interceptors.response.use(
  originalRequest.headers.Authorization = `Bearer ${newAccess}`;
  return api(originalRequest); // reintenta
  } catch (refreshErr) {
- console.warn("⚠️ Token expirado, requiere login:", refreshErr.message);
- handleSessionExpiration();
+ if (refreshErr?.response?.status === 401) {
+  console.warn("⚠️ Token de refresh inválido/expirado, requiere login:", refreshErr.message);
+  handleSessionExpiration();
+ } else {
+  console.warn("⚠️ Falló refresh por red/servidor temporal. Se mantiene sesión y se puede reintentar.", refreshErr.message);
+ }
  return Promise.reject(refreshErr);
  }
- }
+}
 
  if (error.response?.status === 401 && activeAccessToken && !activeRefreshToken) {
   console.warn("⚠️ Sesión inválida sin refresh token, redirigiendo a login");

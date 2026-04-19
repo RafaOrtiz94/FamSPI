@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { authMiddleware } = require("../../middlewares/auth");
+const { verifyToken } = require("../../middlewares/auth");
 const { requireRole } = require("../../middlewares/roles");
 const ca0101Controller = require("./ca0101.controller");
 
@@ -11,7 +11,7 @@ const ca0101Controller = require("./ca0101.controller");
  */
 
 // Todos los endpoints de calidad son privados
-router.use(authMiddleware);
+router.use(verifyToken);
 
 // POST: Registrar lectura de termohigrómetro. 
 // Permitido para Calidad, Mantenimiento, o Técnicos delegados.

@@ -99,6 +99,26 @@ const rejectSchedule = (req, res) =>
     }),
   );
 
+const justifyVisit = (req, res) =>
+  respond(
+    res,
+    service.justifyVisit({
+      visitId: Number(req.params.visitId),
+      justification: req.body.justification,
+      user: req.user,
+    }),
+  );
+
+const justifySchedule = (req, res) =>
+  respond(
+    res,
+    service.justifySchedule({
+      id: Number(req.params.id),
+      justification: req.body.justification,
+      user: req.user,
+    }),
+  );
+
 const getApprovedSchedule = (req, res) =>
   respond(
     res,
@@ -155,6 +175,8 @@ module.exports = {
   deleteVisit,
   approveSchedule,
   rejectSchedule,
+  justifyVisit,
+  justifySchedule,
   analytics,
   getApprovedSchedule,
   getMyCalendarIcs,

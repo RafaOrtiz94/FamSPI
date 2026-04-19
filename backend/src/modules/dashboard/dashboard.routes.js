@@ -19,6 +19,7 @@ const COMMERCIAL_DASHBOARD_ROLES = [
   "jefe_comercial",
   "backoffice_comercial",
   "acp_comercial",
+  "analista_comercial",
   "gerencia",
 ];
 

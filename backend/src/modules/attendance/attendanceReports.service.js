@@ -170,6 +170,8 @@ const buildAttendanceSummary = (rows = []) => {
 };
 
 const buildAttendanceRangeQuery = ({
+  start,
+  end,
   isAdminScope,
   hasExplicitTarget,
   targetUserId,
@@ -186,14 +188,201 @@ const buildAttendanceRangeQuery = ({
         u.fullname,
         u.email,
         u.role,
-        d.name AS department_name
+        d.name AS department_name,
+        ex.exception_id,
+        ex.exception_type,
+        ex.exception_status,
+        ex.start_time,
+        ex.start_location,
+        ex.arrival_time,
+        ex.arrival_location,
+        ex.departure_time,
+        ex.departure_location,
+        ex.return_time,
+        ex.return_location,
+        COALESCE(field_ops.field_events, '[]'::json) AS field_events,
+        timeoff.tipo_solicitud AS time_off_type,
+        timeoff.tipo_permiso AS time_off_subtype
       FROM user_attendance_records a
       JOIN users u ON a.user_id = u.id
       LEFT JOIN departments d ON u.department_id = d.id
+      LEFT JOIN LATERAL (
+        SELECT
+          e.id AS exception_id,
+          e.type AS exception_type,
+          e.status AS exception_status,
+          e.start_time,
+          e.start_location,
+          e.arrival_time,
+          e.arrival_location,
+          e.departure_time,
+          e.departure_location,
+          e.return_time,
+          e.return_location
+        FROM attendance_exceptions e
+        WHERE e.user_id = a.user_id
+          AND e.date = a.date
+        ORDER BY COALESCE(e.start_time, e.created_at) DESC, e.id DESC
+        LIMIT 1
+      ) ex ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'type', event_rows.event_type,
+                'time', event_rows.event_time,
+                'lat', event_rows.lat,
+                'lng', event_rows.lng,
+                'source', event_rows.source,
+                'client_request_id', event_rows.client_request_id,
+                'prospect_name', event_rows.prospect_name
+              )
+              ORDER BY event_rows.event_time ASC
+            ),
+            '[]'::json
+          ) AS field_events
+        FROM (
+          SELECT
+            'client_entry'::text AS event_type,
+            cvl.hora_entrada AS event_time,
+            cvl.lat_entrada AS lat,
+            cvl.lng_entrada AS lng,
+            CASE
+              WHEN cvl.is_planned IS TRUE THEN 'cronograma_cliente'
+              ELSE 'cliente_emergencia'
+            END AS source,
+            cvl.client_request_id,
+            NULL::text AS prospect_name
+          FROM client_visit_logs cvl
+          WHERE LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE(u.email, ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_entrada IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'client_exit'::text AS event_type,
+            cvl.hora_salida AS event_time,
+            cvl.lat_salida AS lat,
+            cvl.lng_salida AS lng,
+            CASE
+              WHEN cvl.is_planned IS TRUE THEN 'cronograma_cliente'
+              ELSE 'cliente_emergencia'
+            END AS source,
+            cvl.client_request_id,
+            NULL::text AS prospect_name
+          FROM client_visit_logs cvl
+          WHERE LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE(u.email, ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_salida IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'client_entry'::text AS event_type,
+            pv.check_in_time AS event_time,
+            pv.check_in_lat AS lat,
+            pv.check_in_lng AS lng,
+            'prospecto'::text AS source,
+            NULL::integer AS client_request_id,
+            pv.prospect_name
+          FROM prospect_visits pv
+          WHERE LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE(u.email, ''))
+            AND pv.visit_date = a.date
+            AND pv.check_in_time IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'client_exit'::text AS event_type,
+            pv.check_out_time AS event_time,
+            pv.check_out_lat AS lat,
+            pv.check_out_lng AS lng,
+            'prospecto'::text AS source,
+            NULL::integer AS client_request_id,
+            pv.prospect_name
+          FROM prospect_visits pv
+          WHERE LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE(u.email, ''))
+            AND pv.visit_date = a.date
+            AND pv.check_out_time IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'office_exit'::text AS event_type,
+            e.start_time AS event_time,
+            NULL::double precision AS lat,
+            NULL::double precision AS lng,
+            'salida_campo'::text AS source,
+            NULL::integer AS client_request_id,
+            NULL::text AS prospect_name
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.start_time IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'client_entry'::text AS event_type,
+            e.arrival_time AS event_time,
+            NULL::double precision AS lat,
+            NULL::double precision AS lng,
+            'llegada_cliente'::text AS source,
+            NULL::integer AS client_request_id,
+            NULL::text AS prospect_name
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.arrival_time IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'client_exit'::text AS event_type,
+            e.departure_time AS event_time,
+            NULL::double precision AS lat,
+            NULL::double precision AS lng,
+            'salida_cliente'::text AS source,
+            NULL::integer AS client_request_id,
+            NULL::text AS prospect_name
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.departure_time IS NOT NULL
+
+          UNION ALL
+
+          SELECT
+            'office_entry'::text AS event_type,
+            e.return_time AS event_time,
+            NULL::double precision AS lat,
+            NULL::double precision AS lng,
+            'retorno_oficina'::text AS source,
+            NULL::integer AS client_request_id,
+            NULL::text AS prospect_name
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.return_time IS NOT NULL
+        ) event_rows
+      ) field_ops ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          LOWER(COALESCE(p.tipo_solicitud, '')) AS tipo_solicitud,
+          p.tipo_permiso
+        FROM permisos_vacaciones p
+        WHERE LOWER(COALESCE(p.user_email, '')) = LOWER(COALESCE(u.email, ''))
+          AND LOWER(COALESCE(p.status, '')) IN ('approved', 'aprobado')
+          AND a.date BETWEEN COALESCE(p.fecha_inicio, a.date) AND COALESCE(p.fecha_fin, a.date)
+        ORDER BY COALESCE(p.fecha_inicio_hora, p.fecha_inicio::timestamptz) DESC, p.id DESC
+        LIMIT 1
+      ) timeoff ON true
       WHERE a.date BETWEEN $1 AND $2
     `;
 
-  const params = [];
+  const params = [start, end];
   const normalizedStatus = normalizeAttendanceStateFilter(status);
   const normalizedOnlyWithGeo = Boolean(onlyWithGeo);
   const normalizedOnlyDiscrepancies = Boolean(onlyDiscrepancies);
@@ -205,19 +394,21 @@ const buildAttendanceRangeQuery = ({
     : null;
 
   if (isAdminScope && hasExplicitTarget) {
-    query += " AND a.user_id = $3";
+    query += ` AND a.user_id = $${params.length + 1}`;
     params.push(targetUserId);
   } else if (isAdminScope && normalizedUserIds.length) {
-    const placeholders = normalizedUserIds.map((_, index) => `$${index + 3}`).join(", ");
+    const placeholders = normalizedUserIds
+      .map((_, index) => `$${params.length + index + 1}`)
+      .join(", ");
     query += ` AND a.user_id IN (${placeholders})`;
     params.push(...normalizedUserIds);
   } else if (!isAdminScope) {
-    query += " AND a.user_id = $3";
+    query += ` AND a.user_id = $${params.length + 1}`;
     params.push(requesterId);
   }
 
   if (normalizedDepartmentId) {
-    query += ` AND u.department_id = $${params.length + 3}`;
+    query += ` AND u.department_id = $${params.length + 1}`;
     params.push(normalizedDepartmentId);
   }
 

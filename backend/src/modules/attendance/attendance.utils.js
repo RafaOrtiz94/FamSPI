@@ -16,7 +16,7 @@ const ensureDailyClockIn = async ({ userId, location = null, timestamp = new Dat
 
   const existing = await db.query(
     `
-    SELECT id, entry_time
+    SELECT id, entry_time, entry_location
     FROM user_attendance_records
     WHERE user_id = $1 AND date = $2
     LIMIT 1

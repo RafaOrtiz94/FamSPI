@@ -88,6 +88,31 @@ export const marcarSalida = async (location = null) => {
  return data;
 };
 
+export const marcarSalidaImprevista = async (location = null, description = null) => {
+ const payload = { location };
+ if (description) payload.description = description;
+ const { data } = await api.post("/attendance/marcar/salida-imprevista", payload);
+ return data;
+};
+
+export const marcarRegresoImprevisto = async (location = null) => {
+ const { data } = await api.post("/attendance/marcar/regreso-imprevisto", { location });
+ return data;
+};
+
+/**
+ * Field visit marks (cliente / prospecto / emergencia)
+ */
+export const marcarVisitaEntrada = async (payload = {}) => {
+ const { data } = await api.post("/attendance/marcar/visita-entrada", payload);
+ return data;
+};
+
+export const marcarVisitaSalida = async (payload = {}) => {
+ const { data } = await api.post("/attendance/marcar/visita-salida", payload);
+ return data;
+};
+
 /**
  * Attach location to an already saved attendance or exception mark
  */
@@ -156,63 +181,63 @@ export const getUserAttendance = async (userId, date) => {
  * Get Attendance Range - For reporting
  */
 export const getAttendanceRange = async (...args) => {
- const [firstArg, secondArg, thirdArg, fourthArg] = args;
- const query =
-  firstArg && typeof firstArg === "object" && !Array.isArray(firstArg)
-   ? firstArg
-   : {
-      startDate: firstArg,
-      endDate: secondArg,
-      userId: thirdArg,
-      status: fourthArg,
-     };
+  const [firstArg, secondArg, thirdArg, fourthArg] = args;
+  const query =
+   firstArg && typeof firstArg === "object" && !Array.isArray(firstArg)
+    ? firstArg
+    : {
+       startDate: firstArg,
+       endDate: secondArg,
+       userId: thirdArg,
+       status: fourthArg,
+      };
 
- const params = new URLSearchParams();
- const startDate = query?.startDate ?? query?.start ?? "";
- const endDate = query?.endDate ?? query?.end ?? "";
+  const params = new URLSearchParams();
+  const startDate = query?.startDate ?? query?.start ?? "";
+  const endDate = query?.endDate ?? query?.end ?? "";
 
- if (startDate) params.set("start", startDate);
- if (endDate) params.set("end", endDate);
+  if (startDate) params.set("start", startDate);
+  if (endDate) params.set("end", endDate);
 
- if (query?.userId !== null && query?.userId !== undefined && query?.userId !== "") {
-  params.set("userId", query.userId);
- }
+  if (query?.userId !== null && query?.userId !== undefined && query?.userId !== "") {
+   params.set("userId", query.userId);
+  }
 
- if (Array.isArray(query?.userIds) && query.userIds.length) {
-  params.set("userIds", query.userIds.join(","));
- }
+  if (Array.isArray(query?.userIds) && query.userIds.length) {
+   params.set("userIds", query.userIds.join(","));
+  }
 
- if (query?.departmentId !== null && query?.departmentId !== undefined && query?.departmentId !== "") {
-  params.set("departmentId", query.departmentId);
- }
+  if (query?.departmentId !== null && query?.departmentId !== undefined && query?.departmentId !== "") {
+   params.set("departmentId", query.departmentId);
+  }
 
- if (query?.status) {
-  params.set("status", query.status);
- }
+  if (query?.status) {
+   params.set("status", query.status);
+  }
 
- if (query?.quickRange) {
-  params.set("quickRange", query.quickRange);
- }
+  if (query?.quickRange) {
+   params.set("quickRange", query.quickRange);
+  }
 
- if (query?.onlyDiscrepancies) {
-  params.set("onlyDiscrepancies", "1");
- }
+  if (query?.onlyDiscrepancies) {
+   params.set("onlyDiscrepancies", "1");
+  }
 
- if (query?.onlyWithGeo) {
-  params.set("onlyWithGeo", "1");
- }
+  if (query?.onlyWithGeo) {
+   params.set("onlyWithGeo", "1");
+  }
 
- if (query?.mode) {
-  params.set("mode", query.mode);
- }
+  if (query?.mode) {
+   params.set("mode", query.mode);
+  }
 
- if (query?.view) {
-  params.set("view", query.view);
- }
+  if (query?.view) {
+   params.set("view", query.view);
+  }
 
- const { data } = await api.get(`/attendance/range?${params.toString()}`);
+  const { data } = await api.get(`/attendance/range?${params.toString()}`);
 
- return data;
+  return data;
 };
 
 /**

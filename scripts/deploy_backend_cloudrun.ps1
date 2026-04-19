@@ -81,6 +81,8 @@ try {
     "--set-env-vars", "NOTIFICATION_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "APP_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "TZ=America/Guayaquil",
+    "--set-env-vars", "ACCESS_TOKEN_EXPIRES_IN=8h",
+    "--set-env-vars", "REFRESH_TOKEN_EXPIRES_IN=30d",
     "--set-env-vars", "DB_BACKUP_FOLDER_NAME=Backup Base",
     "--set-env-vars", "DB_BACKUP_TIMEZONE=America/Guayaquil",
     "--set-env-vars", "DB_BACKUP_AUTO_ENABLED=false",

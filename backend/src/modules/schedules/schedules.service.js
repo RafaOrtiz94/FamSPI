@@ -145,6 +145,7 @@ async function ensureVisitScheduleReviewNotesColumn() {
 
   try {
     await db.query("ALTER TABLE visit_schedules ADD COLUMN IF NOT EXISTS review_notes TEXT");
+    await db.query("ALTER TABLE visit_schedules ADD COLUMN IF NOT EXISTS general_justification TEXT");
     metadataCache.set(cacheKey, true);
     return true;
   } catch (error) {
@@ -702,6 +703,7 @@ async function getScheduleDetail({ id, user }) {
        sv.planned_date,
        sv.priority,
        sv.notes,
+       sv.justification,
        sv.created_at,
        sv.updated_at,
        cr.commercial_name AS client_name,
@@ -949,6 +951,46 @@ async function deleteVisit({ scheduleId, visitId, user }) {
   await db.query("DELETE FROM scheduled_visits WHERE id = $1 AND schedule_id = $2", [visitId, scheduleId]);
   await triggerReapprovalIfNeeded(schedule);
   return { deleted: true };
+}
+
+async function justifyVisit({ visitId, justification, user }) {
+  assertAdvisor(user);
+  const { rows } = await db.query(
+    `SELECT sv.*, vs.user_email 
+     FROM scheduled_visits sv 
+     JOIN visit_schedules vs ON vs.id = sv.schedule_id 
+     WHERE sv.id = $1 LIMIT 1`,
+    [visitId],
+  );
+  if (!rows.length) {
+    const error = new Error("Visita no encontrada");
+    error.status = 404;
+    throw error;
+  }
+  const visit = rows[0];
+  if (visit.user_email !== user.email) {
+    const error = new Error("No tienes permiso para justificar esta visita");
+    error.status = 403;
+    throw error;
+  }
+
+  const { rows: updated } = await db.query(
+    `UPDATE scheduled_visits SET justification = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+    [justification, visitId],
+  );
+  return updated[0];
+}
+
+async function justifySchedule({ id, justification, user }) {
+  assertAdvisor(user);
+  const schedule = await findScheduleOrThrow(id);
+  ensureOwner(schedule, user);
+
+  const { rows: updated } = await db.query(
+    `UPDATE visit_schedules SET general_justification = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+    [justification, id],
+  );
+  return updated[0];
 }
 
 async function approveSchedule({ id, notes, user }) {
@@ -1471,6 +1513,7 @@ module.exports = {
   deleteVisit,
   approveSchedule,
   rejectSchedule,
+  justifyVisit,
   optimizeRoute,
   getAnalytics,
   getApprovedScheduleCurrent,

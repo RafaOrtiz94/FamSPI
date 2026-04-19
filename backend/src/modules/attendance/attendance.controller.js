@@ -33,11 +33,33 @@ const EXCEPTION_LOCATION_TARGETS = Object.freeze({
   return: { timeColumn: "return_time", locationColumn: "return_location" },
 });
 
+const normalizeLocationInput = (rawLocation) => {
+  if (rawLocation === null || rawLocation === undefined) return "";
+
+  if (typeof rawLocation === "string") {
+    return rawLocation.trim();
+  }
+
+  if (typeof rawLocation === "object") {
+    const latitude = Number(rawLocation.latitude ?? rawLocation.lat);
+    const longitude = Number(rawLocation.longitude ?? rawLocation.lng);
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return `${latitude},${longitude}`;
+    }
+  }
+
+  return String(rawLocation).trim();
+};
+
 const ATTENDANCE_STATUS_LABELS = Object.freeze({
   no_entry: "Sin entrada",
   working: "Jornada abierta",
   lunch_open: "Almuerzo abierto",
   completed: "Jornada cerrada",
+});
+const TIME_OFF_LABELS = Object.freeze({
+  permiso: "Permiso aprobado",
+  vacaciones: "Vacaciones aprobadas",
 });
 
 const TALENTO_HUMANO_ALERT_ROLES = Object.freeze([
@@ -95,10 +117,21 @@ const deriveAttendanceState = (record = {}) => {
 
 const enrichAttendanceRow = (record = {}) => {
   const attendanceState = deriveAttendanceState(record);
+  const timeOffType = normalizeTimeOffType(record?.time_off_type);
+  const timeOffLabel = getTimeOffLabel(record);
+  const hasTimeOff = Boolean(timeOffType);
+  const attendanceLabel =
+    hasTimeOff && attendanceState === "no_entry"
+      ? timeOffLabel
+      : ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado";
+
   return {
     ...record,
     attendance_status: attendanceState,
-    attendance_status_label: ATTENDANCE_STATUS_LABELS[attendanceState] || "Sin estado",
+    attendance_status_label: attendanceLabel,
+    has_time_off: hasTimeOff,
+    time_off_type: timeOffType,
+    time_off_label: timeOffLabel,
   };
 };
 
@@ -256,6 +289,83 @@ const notifyTalentoHumanoAttendanceIrregularity = async ({
   }
 };
 
+const normalizeTimeOffType = (value) => {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "vacaciones") return "vacaciones";
+  if (normalized === "permiso") return "permiso";
+  return null;
+};
+
+const getTimeOffLabel = (record = {}) => {
+  const normalizedType = normalizeTimeOffType(record?.time_off_type);
+  if (!normalizedType) return null;
+  return TIME_OFF_LABELS[normalizedType] || "Tiempo no laborable aprobado";
+};
+
+const findActiveTimeOffForMarking = async ({ userEmail, now, businessDate }) => {
+  const normalizedEmail = String(userEmail || "").trim().toLowerCase();
+  if (!normalizedEmail) return null;
+
+  const { rows } = await db.query(
+    `
+    SELECT
+      id,
+      tipo_solicitud,
+      tipo_permiso,
+      fecha_inicio,
+      fecha_fin,
+      fecha_inicio_hora,
+      fecha_fin_hora,
+      status
+    FROM permisos_vacaciones
+    WHERE LOWER(COALESCE(user_email, '')) = $1
+      AND LOWER(COALESCE(status, '')) IN ('approved', 'aprobado')
+      AND (
+        (
+          fecha_inicio_hora IS NOT NULL
+          AND fecha_fin_hora IS NOT NULL
+          AND $2::timestamptz BETWEEN fecha_inicio_hora AND fecha_fin_hora
+        )
+        OR
+        (
+          (fecha_inicio_hora IS NULL OR fecha_fin_hora IS NULL)
+          AND $3::date BETWEEN COALESCE(fecha_inicio, $3::date) AND COALESCE(fecha_fin, $3::date)
+        )
+      )
+    ORDER BY COALESCE(fecha_inicio_hora, fecha_inicio::timestamptz) DESC, id DESC
+    LIMIT 1
+    `,
+    [normalizedEmail, now, businessDate]
+  );
+
+  return rows?.[0] || null;
+};
+
+const enforceNoActiveTimeOffForMarking = async ({ res, userEmail, now }) => {
+  const businessDate = getBusinessDate(now);
+  const activeTimeOff = await findActiveTimeOffForMarking({ userEmail, now, businessDate });
+  if (!activeTimeOff) return true;
+
+  const type = normalizeTimeOffType(activeTimeOff.tipo_solicitud) || "permiso";
+  const label = TIME_OFF_LABELS[type] || "Tiempo no laborable aprobado";
+
+  res.status(409).json({
+    ok: false,
+    code: "TIME_OFF_ACTIVE",
+    message: `No puedes marcar asistencia mientras tengas ${label.toLowerCase()} activo.`,
+    data: {
+      timeOffType: type,
+      timeOffLabel: label,
+      startDate: activeTimeOff.fecha_inicio || null,
+      endDate: activeTimeOff.fecha_fin || null,
+      startAt: activeTimeOff.fecha_inicio_hora || null,
+      endAt: activeTimeOff.fecha_fin_hora || null,
+      tipoPermiso: activeTimeOff.tipo_permiso || null,
+    },
+  });
+  return false;
+};
+
 /**
  * 🕐 Clock In - Record entry time
  * POST /api/attendance/clock-in
@@ -271,9 +381,38 @@ const clockIn = async (req, res) => {
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const ensured = await ensureDailyClockIn({ userId, location: location || null, timestamp: now });
+    const normalizedLocation = String(location || "").trim();
 
     if (!ensured.created) {
+      if (normalizedLocation && !ensured.data?.entry_location) {
+        const today = getBusinessDate(now);
+        const syncResult = await db.query(
+          `
+          UPDATE user_attendance_records
+          SET entry_location = COALESCE(NULLIF(entry_location, ''), $3),
+              updated_at = NOW()
+          WHERE user_id = $1
+            AND date = $2
+            AND entry_time IS NOT NULL
+          RETURNING *;
+          `,
+          [userId, today, normalizedLocation]
+        );
+
+        if (syncResult.rows[0]) {
+          logger.info(`[ATTENDANCE] Clock in location synced: ${email} at ${now.toISOString()} loc: ${normalizedLocation}`);
+          return res.status(200).json({
+            ok: true,
+            message: "Entrada ya registrada; ubicación sincronizada correctamente",
+            data: syncResult.rows[0],
+          });
+        }
+      }
+
       return res.status(400).json({
         ok: false,
         message: "Ya has marcado entrada hoy",
@@ -312,6 +451,9 @@ const clockOutLunch = async (req, res) => {
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const today = getBusinessDate(now);
 
     // Check if record exists
@@ -377,6 +519,9 @@ const clockInLunch = async (req, res) => {
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const today = getBusinessDate(now);
 
     // Check if record exists
@@ -442,6 +587,9 @@ const clockOut = async (req, res) => {
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const today = getBusinessDate(now);
 
     // Check if record exists
@@ -932,23 +1080,30 @@ const getRange = async (req, res) => {
       });
     }
 
-      const { query, params } = buildAttendanceRangeQuery({
+      const { query, params, filterRows } = buildAttendanceRangeQuery({
+        start,
+        end,
         isAdminScope,
         hasExplicitTarget,
         targetUserId,
+        userIds,
+        departmentId,
         requesterId,
+        status: normalizedStatus,
+        onlyDiscrepancies,
+        onlyWithGeo,
       });
 
-      const result = await db.query(query, params);
+    const result = await db.query(query, params);
     const normalizedRows = enrichAttendanceRows(result.rows);
-    const filteredRows = normalizedStatus
-      ? normalizedRows.filter((row) => row.attendance_status === normalizedStatus)
-      : normalizedRows;
+    const filteredRows = (filterRows(result.rows) || []).map((row) => enrichAttendanceRow(row));
 
-    const summary = normalizedRows.reduce(
+    const summary = filteredRows.reduce(
       (acc, row) => {
         acc.total += 1;
         acc.byStatus[row.attendance_status] = (acc.byStatus[row.attendance_status] || 0) + 1;
+        if (row.has_geo) acc.withGeo += 1;
+        if (row.has_discrepancy) acc.withDiscrepancy += 1;
         return acc;
       },
       {
@@ -959,6 +1114,8 @@ const getRange = async (req, res) => {
           lunch_open: 0,
           completed: 0,
         },
+        withGeo: 0,
+        withDiscrepancy: 0,
       }
     );
 
@@ -1043,7 +1200,7 @@ const syncLocation = async (req, res) => {
   try {
     const { id: userId, email } = req.user || {};
     const target = String(req.body?.target || "").trim().toLowerCase();
-    const location = String(req.body?.location || "").trim();
+    const location = normalizeLocationInput(req.body?.location);
 
     if (!userId) {
       return res.status(401).json({ ok: false, message: "No autorizado" });
@@ -1056,10 +1213,38 @@ const syncLocation = async (req, res) => {
     if (ATTENDANCE_LOCATION_TARGETS[target]) {
       const { timeColumn, locationColumn } = ATTENDANCE_LOCATION_TARGETS[target];
       const today = getBusinessDate();
+      const existing = await db.query(
+        `
+        SELECT id, ${locationColumn} AS current_location
+          FROM user_attendance_records
+         WHERE user_id = $1
+           AND date = $2
+           AND ${timeColumn} IS NOT NULL
+         LIMIT 1;
+        `,
+        [userId, today]
+      );
+
+      if (!existing.rows[0]) {
+        return res.status(404).json({
+          ok: false,
+          message: "No existe un registro de asistencia compatible para sincronizar ubicacion",
+        });
+      }
+
+      const currentLocation = String(existing.rows[0].current_location || "").trim();
+      if (currentLocation) {
+        return res.status(200).json({
+          ok: true,
+          message: "Ubicacion ya registrada, no se requieren cambios",
+          data: existing.rows[0],
+        });
+      }
+
       const result = await db.query(
         `
         UPDATE user_attendance_records
-           SET ${locationColumn} = COALESCE(NULLIF(${locationColumn}, ''), $3),
+           SET ${locationColumn} = $3,
                updated_at = NOW()
          WHERE user_id = $1
            AND date = $2
@@ -1087,10 +1272,38 @@ const syncLocation = async (req, res) => {
 
     if (EXCEPTION_LOCATION_TARGETS[target]) {
       const { timeColumn, locationColumn } = EXCEPTION_LOCATION_TARGETS[target];
+      const existing = await db.query(
+        `
+        SELECT id, ${locationColumn} AS current_location
+          FROM attendance_exceptions
+         WHERE user_id = $1
+           AND ${timeColumn} IS NOT NULL
+         ORDER BY COALESCE(${timeColumn}, created_at) DESC, id DESC
+         LIMIT 1;
+        `,
+        [userId]
+      );
+
+      if (!existing.rows[0]) {
+        return res.status(404).json({
+          ok: false,
+          message: "No existe una salida inesperada compatible para sincronizar ubicacion",
+        });
+      }
+
+      const currentLocation = String(existing.rows[0].current_location || "").trim();
+      if (currentLocation) {
+        return res.status(200).json({
+          ok: true,
+          message: "Ubicacion ya registrada, no se requieren cambios",
+          data: existing.rows[0],
+        });
+      }
+
       const result = await db.query(
         `
         UPDATE attendance_exceptions
-           SET ${locationColumn} = COALESCE(NULLIF(${locationColumn}, ''), $2),
+           SET ${locationColumn} = $2,
                updated_at = NOW()
          WHERE id = (
            SELECT id
@@ -1136,21 +1349,81 @@ const syncLocation = async (req, res) => {
 const clockInField = async (req, res) => {
   try {
     const { id: userId, email, role } = req.user || {};
-    const { location, client_id, prospect_name } = req.body;
+    const { location, client_id, prospect_name, observations } = req.body;
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    const isCommercial = ["comercial", "acp_comercial", "jefe_comercial"].includes(role?.toLowerCase());
-    const isTech = ["tecnico", "jefe_tecnico"].includes(role?.toLowerCase());
+    const normalizedRole = String(role || "").toLowerCase();
+    const isCommercial = ["comercial", "acp_comercial", "jefe_comercial"].includes(normalizedRole);
+    const isTech = [
+      "tecnico",
+      "jefe_tecnico",
+      "ti",
+      "jefe_ti",
+      "logistica",
+      "jefe_logistica",
+    ].includes(normalizedRole);
 
     if (!isCommercial && !isTech) {
       return res.status(403).json({ ok: false, message: "Solo personal de campo puede marcar visitas" });
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     let result;
 
     if (client_id) {
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      const isClientScopeManager = [
+        "jefe_comercial",
+        "acp_comercial",
+        "backoffice",
+        "backoffice_comercial",
+        "jefe_ti",
+        "jefe_logistica",
+        "gerencia",
+        "gerente",
+        "admin",
+        "administrador",
+        "ti",
+        "logistica",
+      ].includes(normalizedRole);
+
+      const clientAccessParams = [Number(client_id)];
+      let clientAccessQuery = `
+        SELECT cr.id
+        FROM client_requests cr
+        WHERE cr.id = $1
+          AND cr.status = 'approved'
+      `;
+
+      if (!isClientScopeManager) {
+        clientAccessParams.push(normalizedEmail);
+        clientAccessQuery += `
+          AND (
+            LOWER(COALESCE(cr.created_by, '')) = $2
+            OR EXISTS (
+              SELECT 1
+              FROM client_assignments ca
+              WHERE ca.client_request_id = cr.id
+                AND ca.is_active = TRUE
+                AND (ca.starts_at IS NULL OR ca.starts_at <= NOW())
+                AND (ca.ends_at IS NULL OR ca.ends_at >= NOW())
+                AND LOWER(COALESCE(ca.assigned_to_email, '')) = $2
+            )
+          )
+        `;
+      }
+
+      const clientAccess = await db.query(clientAccessQuery, clientAccessParams);
+      if (!clientAccess.rows.length) {
+        return res.status(403).json({
+          ok: false,
+          message: "No tienes acceso al cliente seleccionado para registrar esta visita.",
+        });
+      }
       // 🕵️ Cotejar con cronograma (Schedules)
       const scheduleCheck = await db.query(
         `SELECT id FROM schedules 
@@ -1163,12 +1436,24 @@ const clockInField = async (req, res) => {
       const isPlanned = scheduleCheck.rows.length > 0;
 
       result = await db.query(
-        `INSERT INTO client_visit_logs (client_request_id, user_email, visit_date, status, hora_entrada, lat_entrada, lng_entrada, is_planned)
-         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5, $6)
+        `INSERT INTO client_visit_logs (client_request_id, user_email, visit_date, status, hora_entrada, lat_entrada, lng_entrada, is_planned, observaciones)
+         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5, $6, $7)
          ON CONFLICT (client_request_id, user_email, visit_date) 
-         DO UPDATE SET status = 'in_visit', hora_entrada = COALESCE(client_visit_logs.hora_entrada, EXCLUDED.hora_entrada), is_planned = EXCLUDED.is_planned
+         DO UPDATE SET
+           status = 'in_visit',
+           hora_entrada = COALESCE(client_visit_logs.hora_entrada, EXCLUDED.hora_entrada),
+           is_planned = EXCLUDED.is_planned,
+           observaciones = COALESCE(EXCLUDED.observaciones, client_visit_logs.observaciones)
          RETURNING *`,
-        [client_id, email, now, location?.split(',')[0], location?.split(',')[1], isPlanned]
+        [
+          client_id,
+          email,
+          now,
+          location?.split(',')[0],
+          location?.split(',')[1],
+          isPlanned,
+          String(observations || "").trim() || null,
+        ]
       );
 
       // Actualizar estado del cronograma si existe
@@ -1215,12 +1500,15 @@ const clockOutField = async (req, res) => {
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     let result;
 
     if (client_id) {
       result = await db.query(
         `UPDATE client_visit_logs 
-         SET status = 'visited', hora_salida = $1, lat_salida = $2, lng_salida = $3, observaciones = $4,
+         SET status = 'visited', hora_salida = $1, lat_salida = $2, lng_salida = $3, observaciones = COALESCE($4, observaciones),
              duracion_minutos = EXTRACT(EPOCH FROM ($1 - hora_entrada))/60
          WHERE user_email = $5 AND client_request_id = $6 AND visit_date = CURRENT_DATE AND status = 'in_visit'
          RETURNING *`,
@@ -1272,6 +1560,10 @@ const clockOutUnexpected = async (req, res) => {
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now: new Date() }))) {
+      return;
+    }
+
     // Check if there is already an active exception
     const active = await db.query(
       "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
@@ -1316,6 +1608,9 @@ const clockInUnexpected = async (req, res) => {
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const result = await db.query(
       `UPDATE attendance_exceptions 
        SET status = 'COMPLETED', end_time = $1, end_location = $2
@@ -1362,6 +1657,9 @@ const markOvertime = async (req, res) => {
     }
 
     const now = new Date();
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
+      return;
+    }
     const today = getBusinessDate(now);
 
     // Insert overtime record

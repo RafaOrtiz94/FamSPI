@@ -13,8 +13,34 @@ const calculationTemplatesCtrl = require("./calculationTemplates.controller");
 const observabilityService = require("./businessCaseObservability.service");
 const sheetGenerationCtrl = require("./businessCaseSheetGeneration.controller");
 
-const businessCaseRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
-const investmentRoles = ["comercial", "acp_comercial", "backoffice_comercial", "jefe_comercial", "jefe_operaciones", "jefe_tecnico", "gerencia", "gerencia_general"];
+const businessCaseRoles = [
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "jefe_operaciones",
+  "jefe_tecnico",
+  "gerencia",
+  "gerencia_general",
+];
+const investmentRoles = [
+  "comercial",
+  "asesor_comercial",
+  "analista_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "jefe_operaciones",
+  "jefe_tecnico",
+  "gerencia",
+  "gerencia_general",
+];
 const adminRoles = ["admin", "gerencia", "jefe_tecnico"];
 const determinationsCatalogWriteRoles = [
   "admin",

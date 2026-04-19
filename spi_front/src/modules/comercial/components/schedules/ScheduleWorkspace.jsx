@@ -1,5 +1,6 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { GoogleMap, MarkerF, PolylineF, useJsApiLoader } from "@react-google-maps/api";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { GoogleMap, PolylineF } from "@react-google-maps/api";
+import { useGoogleMaps } from "../../../../core/contexts/GoogleMapsContext";
 import {
   FiBarChart2,
   FiMap,
@@ -15,8 +16,11 @@ import ScheduleCalendarView from "./ScheduleCalendarView";
 import ScheduleStatusBadge from "./ScheduleStatusBadge";
 import ExecutiveMonthlyReport from "./ExecutiveMonthlyReport";
 import ScheduleMapErrorBoundary from "./ScheduleMapErrorBoundary";
+import Modal from "../../../../core/ui/components/Modal";
+import { justifySchedule } from "../../../../core/api/schedulesApi";
 
 const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY || "";
+const GOOGLE_MAPS_MAP_ID = process.env.REACT_APP_GOOGLE_MAPS_MAP_ID || "DEMO_MAP_ID";
 const DEFAULT_MAP_CENTER = { lat: -1.831239, lng: -78.183406 };
 const MONTHS = [
   "Enero",
@@ -72,12 +76,14 @@ const statusTone = (status) => {
 };
 
 const RouteContextPanel = ({ routeContext }) => {
-  const { isLoaded: mapsLoaded, loadError } = useJsApiLoader({
-    id: "schedule-workspace-map",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-  });
+  const { isLoaded: mapsLoaded, loadError } = useGoogleMaps();
+  const [map, setMap] = useState(null);
+  const advancedMarkersRef = useRef([]);
 
-  const markers = Array.isArray(routeContext?.mapMarkers) ? routeContext.mapMarkers : [];
+  const markers = useMemo(
+    () => (Array.isArray(routeContext?.mapMarkers) ? routeContext.mapMarkers : []),
+    [routeContext?.mapMarkers],
+  );
   const polylinePath = markers.map((point) => ({ lat: point.lat, lng: point.lng }));
   const mapCenter = polylinePath[0] || DEFAULT_MAP_CENTER;
   const mapZoom = polylinePath.length > 1 ? 9 : 6;
@@ -95,6 +101,57 @@ const RouteContextPanel = ({ routeContext }) => {
     routeContext?.routeSummary?.estimated_distance_label || formatDistanceKm(fallbackDistanceKm);
   const summaryTime =
     routeContext?.routeSummary?.estimated_travel_time_label || formatDurationFromHours(fallbackDistanceKm / 55);
+
+  useEffect(() => {
+    if (!map || !mapsLoaded) return;
+    if (!window.google?.maps?.marker?.AdvancedMarkerElement) return;
+
+    advancedMarkersRef.current.forEach((item) => {
+      try {
+        item.marker.map = null;
+      } catch {
+        // noop
+      }
+    });
+    advancedMarkersRef.current = [];
+
+    markers.forEach((point) => {
+      const badge = document.createElement("div");
+      badge.style.minWidth = "22px";
+      badge.style.height = "22px";
+      badge.style.padding = "0 6px";
+      badge.style.borderRadius = "9999px";
+      badge.style.display = "flex";
+      badge.style.alignItems = "center";
+      badge.style.justifyContent = "center";
+      badge.style.background = "#0f172a";
+      badge.style.color = "#ffffff";
+      badge.style.fontSize = "11px";
+      badge.style.fontWeight = "700";
+      badge.style.border = "2px solid #ffffff";
+      badge.style.boxShadow = "0 2px 6px rgba(0,0,0,0.3)";
+      badge.textContent = String(point.route_order || "");
+
+      const marker = new window.google.maps.marker.AdvancedMarkerElement({
+        map,
+        position: { lat: point.lat, lng: point.lng },
+        title: `${point.route_order}. ${point.client_name}`,
+        content: badge,
+      });
+      advancedMarkersRef.current.push({ marker });
+    });
+
+    return () => {
+      advancedMarkersRef.current.forEach((item) => {
+        try {
+          item.marker.map = null;
+        } catch {
+          // noop
+        }
+      });
+      advancedMarkersRef.current = [];
+    };
+  }, [map, mapsLoaded, markers]);
 
   return (
     <div className="flex h-full flex-col gap-4">
@@ -130,16 +187,21 @@ const RouteContextPanel = ({ routeContext }) => {
             mapContainerStyle={{ width: "100%", height: "100%" }}
             center={mapCenter}
             zoom={mapZoom}
+            onLoad={setMap}
+            onUnmount={() => {
+              advancedMarkersRef.current.forEach((item) => {
+                try {
+                  item.marker.map = null;
+                } catch {
+                  // noop
+                }
+              });
+              advancedMarkersRef.current = [];
+              setMap(null);
+            }}
+            mapId={GOOGLE_MAPS_MAP_ID}
             options={{ mapTypeControl: false, streetViewControl: false, fullscreenControl: false }}
           >
-            {markers.map((point) => (
-              <MarkerF
-                key={`${point.visit_id}-${point.route_order}`}
-                position={{ lat: point.lat, lng: point.lng }}
-                title={`${point.route_order}. ${point.client_name}`}
-                label={{ text: String(point.route_order || "") }}
-              />
-            ))}
             {polylinePath.length >= 2 ? (
               <PolylineF
                 path={polylinePath}
@@ -198,6 +260,7 @@ const ScheduleWorkspace = ({
   const [unlockedScheduleId, setUnlockedScheduleId] = useState(null);
   const [showExecutiveReport, setShowExecutiveReport] = useState(false);
   const [busyAction, setBusyAction] = useState("");
+  const [modalJustifySchedule, setModalJustifySchedule] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -385,6 +448,32 @@ const ScheduleWorkspace = ({
     [displayedSchedule?.id, addVisit, editingLocked, holidaySet, showToast],
   );
 
+  const [justificationMonthly, setJustificationMonthly] = useState("");
+  const [isJustifyingMonthly, setIsJustifyingMonthly] = useState(false);
+
+  useEffect(() => {
+    if (displayedSchedule?.general_justification) {
+      setJustificationMonthly(displayedSchedule.general_justification);
+    } else {
+      setJustificationMonthly("");
+    }
+  }, [displayedSchedule?.id, displayedSchedule?.general_justification]);
+
+  const handleJustifySchedule = async () => {
+    if (!displayedSchedule?.id || !justificationMonthly.trim()) return;
+    setIsJustifyingMonthly(true);
+    try {
+      await justifySchedule(displayedSchedule.id, justificationMonthly);
+      showToast("Justificacion mensual guardada", "success");
+      setModalJustifySchedule(false);
+      loadScheduleDetail(displayedSchedule.id);
+    } catch (error) {
+      showToast(error?.message || "No se pudo guardar la justificacion", "error");
+    } finally {
+      setIsJustifyingMonthly(false);
+    }
+  };
+
   return (
     <div className="grid grid-cols-12 h-screen overflow-hidden">
       <aside className="col-span-12 lg:col-span-3 bg-white border-r border-slate-200 p-6 overflow-y-auto space-y-4">
@@ -560,6 +649,31 @@ const ScheduleWorkspace = ({
               <p className="text-sm font-semibold text-slate-900">{businessMetrics.highPriorityVisits}</p>
             </div>
           </div>
+          {businessMetrics.efficiencyRate < 100 && displayedSchedule?.status === "approved" && (
+            <div className="mt-2">
+              {displayedSchedule.general_justification ? (
+                <div className="rounded-lg bg-amber-50 p-2 text-[10px] border border-amber-100">
+                  <p className="font-bold text-amber-800">Justificación mensual:</p>
+                  <p className="text-slate-600 line-clamp-2">{displayedSchedule.general_justification}</p>
+                  <button 
+                    onClick={() => setModalJustifySchedule(true)}
+                    className="mt-1 text-cyan-700 hover:underline"
+                  >
+                    Editar
+                  </button>
+                </div>
+              ) : (
+                <Button
+                  size="xs"
+                  variant="warning"
+                  className="w-full text-[10px]"
+                  onClick={() => setModalJustifySchedule(true)}
+                >
+                  Justificar bajo cumplimiento mensual
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       </aside>
 
@@ -616,6 +730,47 @@ const ScheduleWorkspace = ({
           year={selectedYear}
         />
       ) : null}
+
+      <Modal
+        open={modalJustifySchedule}
+        onClose={() => setModalJustifySchedule(false)}
+        title={`Justificar cumplimiento mensual - ${MONTHS[selectedMonth - 1]} ${selectedYear}`}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-800">
+            <p className="font-semibold">Bajo cumplimiento detectado ({businessMetrics.efficiencyRate}%).</p>
+            <p className="mt-1">Use este espacio para justificar el motivo global por el cual no se cumplió la meta de visitas del mes.</p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">
+              Justificación general
+            </label>
+            <textarea
+              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+              rows={5}
+              value={justificationMonthly}
+              onChange={(e) => setJustificationMonthly(e.target.value)}
+              placeholder="Ej: Problemas logísticos nacionales, feriados extendidos, cambio de estrategia comercial..."
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => setModalJustifySchedule(false)}>
+              Cancelar
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleJustifySchedule}
+              loading={isJustifyingMonthly}
+              disabled={!justificationMonthly.trim()}
+            >
+              Guardar justificación
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 };

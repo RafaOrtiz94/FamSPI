@@ -121,7 +121,9 @@ export const refreshAccessToken = async () => {
  }
  } catch (err) {
  console.error("❌ Error al refrescar token:", err.message);
+ if (err?.response?.status === 401) {
  clearTokens();
+ }
  throw err;
  }
 };

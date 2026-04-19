@@ -32,6 +32,8 @@ const gmailService = require("../../services/gmail.service");
 const { createClientFolder, moveClientFolderToApproved } = require("../../utils/driveClientManager");
 const notificationManager = require("../notifications/notificationManager");
 const crypto = require("crypto");
+const { enqueueIntegrationEvent } = require("../integrations/integrationOutbox.service");
+const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 const { captureSerial, cambiarEstadoUnidad, assignUnidad, normalizeDetalleValue } = require("../inventario/inventario.service");
@@ -100,6 +102,20 @@ async function ensureClientRequestFileColumns() {
   await db.query(`
     ALTER TABLE client_requests
       ADD COLUMN IF NOT EXISTS bpadt_certification_file_id VARCHAR(255);
+  `);
+  await db.query(`
+    ALTER TABLE client_requests
+      ADD COLUMN IF NOT EXISTS external_source TEXT,
+      ADD COLUMN IF NOT EXISTS external_id TEXT,
+      ADD COLUMN IF NOT EXISTS external_updated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ;
+  `);
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_client_requests_external_source
+      ON client_requests (external_source);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_client_requests_external_identity
+      ON client_requests (external_source, external_id)
+      WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
   `);
   await db.query(`
     ALTER TABLE client_requests
@@ -421,6 +437,151 @@ function getClientRequestAttachments(request = {}) {
       };
     })
     .filter(Boolean);
+}
+
+function normalizeOdooText(value, fallback = null) {
+  const normalized = String(value || "").trim();
+  return normalized || fallback;
+}
+
+function buildOdooPartnerPayloadFromClientRequest(request = {}) {
+  const name =
+    normalizeOdooText(request.commercial_name) ||
+    normalizeOdooText(request.legal_person_business_name) ||
+    normalizeOdooText(request.establishment_name) ||
+    `Cliente SPI #${request.id}`;
+
+  const email =
+    normalizeOdooText(request.client_email) ||
+    normalizeOdooText(request.consent_recipient_email) ||
+    normalizeOdooText(request.legal_rep_email);
+
+  const phone = normalizeOdooText(request.shipping_phone) || normalizeOdooText(request.establishment_phone);
+  const mobile = normalizeOdooText(request.shipping_cellphone) || normalizeOdooText(request.establishment_cellphone);
+  const street = normalizeOdooText(request.shipping_address) || normalizeOdooText(request.establishment_address);
+  const city = normalizeOdooText(request.shipping_city) || normalizeOdooText(request.establishment_city);
+  const vat = normalizeOdooText(request.ruc_cedula);
+
+  return {
+    name,
+    email: email || false,
+    phone: phone || false,
+    mobile: mobile || false,
+    street: street || false,
+    city: city || false,
+    vat: vat || false,
+    customer_rank: 1,
+    type: "contact",
+    comment: `Creado desde SPI (client_request_id=${request.id})`,
+  };
+}
+
+async function syncApprovedClientToOdoo(request = {}) {
+  if (!request?.id) return { synced: false, reason: "invalid_request" };
+
+  const payload = buildOdooPartnerPayloadFromClientRequest(request);
+  const idempotencyKey = `client_request:${request.id}:approved_to_odoo`;
+  const correlationId = `client_request_${request.id}`;
+
+  try {
+    const existingExternalId = Number.parseInt(String(request.external_id || ""), 10);
+
+    if (Number.isFinite(existingExternalId) && existingExternalId > 0) {
+      await callOdoo({
+        method: "execute_kw",
+        eventType: "clients.spi.approved.update_partner",
+        correlationId,
+        params: {
+          model: "res.partner",
+          fn: "write",
+          args: [[existingExternalId], payload],
+        },
+      });
+
+      await db.query(
+        `
+          UPDATE client_requests
+          SET
+            external_source = 'odoo',
+            external_id = $2,
+            external_updated_at = NOW(),
+            last_synced_at = NOW(),
+            updated_at = NOW()
+          WHERE id = $1
+        `,
+        [request.id, String(existingExternalId)],
+      );
+
+      return { synced: true, mode: "update", external_id: String(existingExternalId) };
+    }
+
+    const createdPartnerId = await callOdoo({
+      method: "execute_kw",
+      eventType: "clients.spi.approved.create_partner",
+      correlationId,
+      params: {
+        model: "res.partner",
+        fn: "create",
+        args: [payload],
+      },
+    });
+
+    const normalizedExternalId = Number.parseInt(String(createdPartnerId || ""), 10);
+    if (!Number.isFinite(normalizedExternalId) || normalizedExternalId <= 0) {
+      throw new Error("Odoo no devolvio un partner_id valido");
+    }
+
+    await db.query(
+      `
+        UPDATE client_requests
+        SET
+          external_source = 'odoo',
+          external_id = $2,
+          external_updated_at = NOW(),
+          last_synced_at = NOW(),
+          updated_at = NOW()
+        WHERE id = $1
+      `,
+      [request.id, String(normalizedExternalId)],
+    );
+
+    return { synced: true, mode: "create", external_id: String(normalizedExternalId) };
+  } catch (error) {
+    if (error instanceof IntegrationDisabledError || error?.code === "ODOO_INTEGRATION_DISABLED") {
+      return { synced: false, reason: "integration_disabled" };
+    }
+
+    try {
+      await enqueueIntegrationEvent({
+        eventType: "client.approved.sync_to_odoo",
+        idempotencyKey,
+        correlationId,
+        payload: {
+          client_request_id: request.id,
+          action: "upsert_partner",
+          client: payload,
+        },
+      });
+    } catch (enqueueError) {
+      logger.warn(
+        {
+          request_id: request.id,
+          enqueue_error: enqueueError?.message || String(enqueueError),
+        },
+        "No se pudo encolar evento de sincronizacion de cliente aprobado a Odoo",
+      );
+    }
+
+    logger.warn(
+      {
+        request_id: request.id,
+        error: error?.message || String(error),
+      },
+      "Fallo sincronizando cliente aprobado hacia Odoo",
+    );
+
+    return { synced: false, reason: "odoo_sync_failed", error: error?.message || String(error) };
+  }
 }
 
 async function getBackofficeCommercialEmails() {
@@ -2741,6 +2902,7 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
   );
   const updatedRequest = updatedRows[0];
   let approvalLetter = null;
+  let odooSync = null;
   if (newStatus === 'approved') {
     await moveClientFolderToApproved(request.drive_folder_id);
     await ensureOwnerClientAssignment({
@@ -2759,6 +2921,11 @@ async function processClientRequest({ id, user, action, rejection_reason }) {
         [approvalLetter.id, id],
       );
       updatedRequest.approval_letter_file_id = approvalLetter.id;
+    }
+    odooSync = await syncApprovedClientToOdoo(updatedRequest);
+    if (odooSync?.external_id) {
+      updatedRequest.external_source = "odoo";
+      updatedRequest.external_id = odooSync.external_id;
     }
   }
   const outcome = newStatus === 'approved' ? 'Aprobada' : 'Rechazada';

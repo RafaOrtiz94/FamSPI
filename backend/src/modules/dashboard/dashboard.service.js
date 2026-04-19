@@ -122,6 +122,8 @@ async function getCommercialSummary(options = {}) {
             requestsStatusResult,
             newClientsResult,
             monthlyTrendResult,
+            complianceResult,
+            thAlertsResult,
         ] = await Promise.all([
             // KPI: Business Case por estado (usando vista si existe, sino tabla directa)
             client.query(`
@@ -159,6 +161,57 @@ async function getCommercialSummary(options = {}) {
                 ORDER BY 1
                 LIMIT 6
             `),
+
+            // KPI: Promedio de cumplimiento de cronogramas (mes actual)
+            client.query(`
+                SELECT
+                  AVG(CASE WHEN visits_count > 0 THEN (visits_visited::float / visits_count) * 100 ELSE 0 END) as avg_compliance
+                FROM (
+                  SELECT
+                    vs.id,
+                    COUNT(DISTINCT sv.id) AS visits_count,
+                    COUNT(vl.id) FILTER (WHERE vl.status = 'visited') AS visits_visited
+                  FROM visit_schedules vs
+                  LEFT JOIN scheduled_visits sv ON sv.schedule_id = vs.id
+                  LEFT JOIN client_visit_logs vl
+                    ON vl.client_request_id = sv.client_request_id
+                   AND vl.user_email = vs.user_email
+                   AND vl.visit_date = sv.planned_date
+                  WHERE vs.status = 'approved'
+                    AND vs.month = EXTRACT(MONTH FROM NOW())
+                    AND vs.year = EXTRACT(YEAR FROM NOW())
+                  GROUP BY vs.id
+                ) as subquery
+            `),
+
+            // ALERTAS: Colaboradores comerciales con novedades de TH
+            client.query(`
+                SELECT
+                  u.fullname,
+                  u.email,
+                  COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo') as estatus,
+                  (
+                    SELECT json_build_object('tipo', s.tipo_permiso, 'hasta', s.fecha_fin)
+                    FROM permisos_vacaciones s
+                    WHERE LOWER(s.user_email) = LOWER(u.email)
+                      AND s.status = 'approved'
+                      AND CURRENT_DATE BETWEEN s.fecha_inicio AND s.fecha_fin
+                    LIMIT 1
+                  ) as active_permit
+                FROM users u
+                JOIN collaborator_profiles cp ON cp.user_id = u.id
+                WHERE (LOWER(u.role) LIKE '%comercial%' OR LOWER(u.role) LIKE '%backoffice%')
+                  AND (
+                    LOWER(cp.profile->'laboral'->>'estatus_empleado') IN ('pasivo', 'desvinculado', 'inactivo')
+                    OR EXISTS (
+                      SELECT 1 FROM permisos_vacaciones s
+                      WHERE LOWER(s.user_email) = LOWER(u.email)
+                        AND s.status = 'approved'
+                        AND CURRENT_DATE BETWEEN s.fecha_inicio AND s.fecha_fin
+                    )
+                  )
+                LIMIT 20
+            `),
         ]);
 
         // Calcular métricas agregadas con mappings reales
@@ -175,6 +228,13 @@ async function getCommercialSummary(options = {}) {
             .reduce((sum, row) => sum + parseInt(row.total), 0);
 
         const clientesNuevos30d = parseInt(newClientsResult.rows[0]?.nuevos_30d || 0);
+        const avgCompliance = Math.round(Number(complianceResult.rows[0]?.avg_compliance || 0));
+        const thAlerts = thAlertsResult.rows.map(row => ({
+            name: row.fullname,
+            email: row.email,
+            status: row.estatus,
+            permit: row.active_permit
+        }));
 
         // Normalizar labels para charts (máximo 8 items, agrupar resto en "Otros")
         const normalizeChartData = (rows, maxItems = 8) => {
@@ -204,7 +264,9 @@ async function getCommercialSummary(options = {}) {
                 bcCompletados,
                 solicitudesPendientes,
                 clientesNuevos30d,
+                avgCompliance,
             },
+            alerts: thAlerts,
             charts: {
                 bcStatus: normalizeChartData(bcStatusResult.rows),
                 requestsMonthly: {

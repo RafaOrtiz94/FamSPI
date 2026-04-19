@@ -23,18 +23,29 @@ const normalizeFiltersForKey = (filters = {}) => {
   };
 };
 
-const useAttendanceReportsQuery = ({ filters = {}, enabled = false } = {}) => {
+const useAttendanceReportsQuery = ({ filters = {}, enabled = false, signal } = {}) => {
   const normalizedFilters = useMemo(() => normalizeFiltersForKey(filters), [filters]);
 
   const query = useQuery({
     queryKey: ["attendance-reports", "range", normalizedFilters],
-    queryFn: async () => getAttendanceRange(normalizedFilters),
+    queryFn: async ({ signal: querySignal }) => getAttendanceRange(normalizedFilters, querySignal),
     enabled: Boolean(enabled && normalizedFilters.startDate && normalizedFilters.endDate),
     staleTime: 1000 * 30,
+    cancelRefetch: true,
+    placeholderData: (previousData) => previousData,
   });
+
+  const isInitialLoading = query.isLoading && !query.data;
+  const isRefetching = query.isFetching && query.data;
+  const isError = query.isError;
+  const warning = query.data?.meta?.warnings?.[0] || null;
 
   return {
     ...query,
+    isInitialLoading,
+    isRefetching,
+    isError,
+    warning,
     rows: Array.isArray(query.data?.data) ? query.data.data : [],
     summary: query.data?.summary || null,
     meta: query.data?.meta || null,

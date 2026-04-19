@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { CircleF, GoogleMap, useJsApiLoader } from "@react-google-maps/api";
+import { CircleF, GoogleMap } from "@react-google-maps/api";
+import { useGoogleMaps } from "../../../../core/contexts/GoogleMapsContext";
 import {
   FiPrinter,
   FiUsers,
@@ -56,10 +57,7 @@ const ExecutiveMonthlyReport = ({ open, onClose, month, year }) => {
   const [topClients, setTopClients] = useState([]);
   const [heatPoints, setHeatPoints] = useState([]);
 
-  const { isLoaded: mapsLoaded, loadError } = useJsApiLoader({
-    id: "executive-report-map",
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
-  });
+   const { isLoaded: mapsLoaded, loadError } = useGoogleMaps();
 
   const loadReport = useCallback(async () => {
     if (!open) return;

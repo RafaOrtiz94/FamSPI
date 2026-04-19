@@ -12,6 +12,9 @@ const ROLE_GROUPS = {
     "jefe_de_comercial",
     "backoffice_comercial",
     "asesor_comercial",
+    "analista_comercial",
+    "acp_comercial",
+    "backoffice",
   ],
   tecnico: [
     "tecnico",

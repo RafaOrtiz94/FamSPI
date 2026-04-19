@@ -3,6 +3,8 @@ const logger = require("../../config/logger");
 const schedulesService = require("../schedules/schedules.service");
 const { uploadBase64File } = require("../../utils/drive");
 const axios = require("axios");
+const crypto = require("crypto");
+const { callOdoo, IntegrationDisabledError } = require("../integrations/odooClient");
 
 const FULL_ACCESS_ROLES = new Set([
   "jefe_comercial",
@@ -25,13 +27,35 @@ const ASSIGNER_ROLES = new Set([
   "ti",
 ]);
 
-const ADVISOR_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
-const ASSIGNABLE_ADVISOR_ROLES = new Set([
+const ADVISOR_ROLES = new Set([
   "comercial",
+  "asesor_comercial",
+  "asesor",
+  "ejecutivo_comercial",
   "acp_comercial",
   "backoffice",
   "backoffice_comercial",
 ]);
+const ASSIGNABLE_ADVISOR_ROLES = new Set([
+  "comercial",
+  "asesor_comercial",
+  "asesor",
+  "ejecutivo_comercial",
+  "acp_comercial",
+  "backoffice",
+  "backoffice_comercial",
+]);
+const ODOO_SYNC_ALLOWED_ROLES = new Set([
+  "jefe_comercial",
+  "jefe_de_comercial",
+  "gerencia",
+  "gerente",
+  "admin",
+  "administrador",
+  "ti",
+]);
+const PASSIVE_EMPLOYMENT_STATUSES = new Set(["pasivo", "desvinculado", "inactivo"]);
+const ODOO_SYNC_USER_EMAIL = "odoo_sync@spi.local";
 
 const ACTIVE_ASSIGNMENT_CONDITION = `
   ca.is_active = TRUE
@@ -46,7 +70,7 @@ const VALID_INTERACTION_TYPES = new Set(["call", "visit"]);
 const GOOGLE_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json";
 
 function hasRole(user, allowedRoles) {
-  return allowedRoles.has(user?.role?.toLowerCase?.() || "");
+  return allowedRoles.has(normalizeRole(user?.role));
 }
 
 function isManager(user) {
@@ -58,7 +82,18 @@ function canAssignClients(user) {
 }
 
 function isAdvisor(user) {
-  return isManager(user) || ADVISOR_ROLES.has(user?.role?.toLowerCase?.() || "");
+  return isManager(user) || ADVISOR_ROLES.has(normalizeRole(user?.role));
+}
+
+function canSyncOdooClients(user) {
+  return ODOO_SYNC_ALLOWED_ROLES.has(normalizeRole(user?.role));
+}
+
+function normalizeRole(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
 }
 
 function normalizeInteractionType(type) {
@@ -183,6 +218,25 @@ function getClientRequestAttachments(request = {}) {
 
 async function ensureTables() {
   await db.query(`
+    ALTER TABLE client_requests
+      ADD COLUMN IF NOT EXISTS external_source TEXT,
+      ADD COLUMN IF NOT EXISTS external_id TEXT,
+      ADD COLUMN IF NOT EXISTS external_updated_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS last_synced_at TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS bpadt_certification_file_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS approval_letter_file_id VARCHAR(255),
+      ADD COLUMN IF NOT EXISTS consent_record_file_id VARCHAR(255);
+  `);
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_client_requests_external_source
+      ON client_requests (external_source);
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_client_requests_external_identity
+      ON client_requests (external_source, external_id)
+      WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
+  `);
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS client_assignments (
       id SERIAL PRIMARY KEY,
       client_request_id INTEGER NOT NULL REFERENCES client_requests(id) ON DELETE CASCADE,
@@ -257,7 +311,29 @@ async function ensureTables() {
     WHERE cr.status = 'approved'
       AND cr.created_by IS NOT NULL
       AND TRIM(cr.created_by) <> ''
+      AND LOWER(COALESCE(cr.created_by, '')) <> LOWER('${ODOO_SYNC_USER_EMAIL}')
+      AND LOWER(COALESCE(cr.external_source, '')) <> 'odoo'
     ON CONFLICT (client_request_id, assigned_to_email) DO NOTHING;
+  `);
+
+  // Los clientes migrados desde Odoo deben quedar disponibles para reasignacion real
+  // por jefatura comercial, no asignados al usuario tecnico de sincronizacion.
+  await db.query(`
+    UPDATE client_assignments ca
+       SET is_active = FALSE,
+           ends_at = COALESCE(ca.ends_at, NOW()),
+           reason = COALESCE(
+             NULLIF(ca.reason, ''),
+             'Asignacion tecnica desactivada para habilitar asignacion comercial'
+           )
+      FROM client_requests cr
+     WHERE ca.client_request_id = cr.id
+       AND ca.is_active = TRUE
+       AND LOWER(COALESCE(ca.assigned_to_email, '')) = LOWER('${ODOO_SYNC_USER_EMAIL}')
+       AND (
+         LOWER(COALESCE(cr.external_source, '')) = 'odoo'
+         OR LOWER(COALESCE(cr.created_by, '')) = LOWER('${ODOO_SYNC_USER_EMAIL}')
+       );
   `);
 
   await db.query(`
@@ -275,6 +351,7 @@ async function ensureTables() {
       lng_salida DOUBLE PRECISION,
       observaciones TEXT,
       duracion_minutos INTEGER,
+      is_planned BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ DEFAULT NOW(),
       updated_at TIMESTAMPTZ DEFAULT NOW(),
       UNIQUE(client_request_id, user_email, visit_date)
@@ -291,7 +368,8 @@ async function ensureTables() {
       ADD COLUMN IF NOT EXISTS lat_salida DOUBLE PRECISION,
       ADD COLUMN IF NOT EXISTS lng_salida DOUBLE PRECISION,
       ADD COLUMN IF NOT EXISTS observaciones TEXT,
-      ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER;
+      ADD COLUMN IF NOT EXISTS duracion_minutos INTEGER,
+      ADD COLUMN IF NOT EXISTS is_planned BOOLEAN DEFAULT FALSE;
     `);
 
   await db.query(`
@@ -891,13 +969,365 @@ async function syncMainLocationFromShippingAddress({
   }
 }
 
+function normalizeText(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function normalizeEmail(value) {
+  return normalizeText(value).toLowerCase();
+}
+
+function extractProvinceFromStateId(stateId) {
+  if (!stateId) return "";
+  if (Array.isArray(stateId) && stateId.length > 1) {
+    return normalizeText(stateId[1]);
+  }
+  return normalizeText(stateId);
+}
+
+function isGenericOdooClientName(name) {
+  const normalized = normalizeText(name).toUpperCase();
+  if (!normalized) return true;
+  return /^CLIENTE( ID)?\s+[0-9]{1,13}$/.test(normalized);
+}
+
+function isLikelyTaxId(value) {
+  const normalized = normalizeText(value).replace(/\s+/g, "");
+  return /^[0-9]{10,13}$/.test(normalized);
+}
+
+function mapOdooPartnerToClientDraft(partner = {}) {
+  const rawCandidates = [
+    partner.commercial_company_name,
+    partner.company_name,
+    partner.display_name,
+    partner.name,
+  ];
+  const rawName = rawCandidates
+    .map((item) => normalizeText(item))
+    .find((item) => item && !isGenericOdooClientName(item)) || "";
+  const vat = normalizeText(partner.vat);
+  const email = normalizeText(partner.email);
+  const name = rawName || (isLikelyTaxId(vat) ? `RUC ${vat}` : email ? email : "");
+  const phone = normalizeText(partner.phone);
+  const mobile = normalizeText(partner.mobile);
+  const city = normalizeText(partner.city);
+  const province = extractProvinceFromStateId(partner.state_id);
+  const contactAddress =
+    normalizeText(partner.contact_address) || normalizeText(partner.street) || "Direccion no registrada";
+
+  return {
+    external_source: "odoo",
+    external_id: normalizeText(partner.id),
+    external_updated_at: normalizeText(partner.write_date) || null,
+    commercial_name: name,
+    ruc_cedula: vat || null,
+    client_email: email || null,
+    consent_recipient_email: email || null,
+    shipping_contact_name: name,
+    shipping_address: contactAddress,
+    shipping_city: city || "Ciudad no especificada",
+    shipping_province: province || "Provincia no especificada",
+    shipping_phone: phone || null,
+    shipping_cellphone: mobile || null,
+  };
+}
+
+async function fetchOdooCommercialPartnersPage({ offset = 0, limit = 500 } = {}) {
+  const requestedFields = [
+    "id",
+    "name",
+    "display_name",
+    "commercial_company_name",
+    "company_name",
+    "write_date",
+    "vat",
+    "email",
+    "phone",
+    "mobile",
+    "street",
+    "city",
+    "state_id",
+    "contact_address",
+  ];
+
+  let partnerFields = requestedFields;
+  try {
+    const fieldsMeta = await callOdoo({
+      method: "execute_kw",
+      eventType: "clients.sync.odoo.fields",
+      params: {
+        model: "res.partner",
+        method: "fields_get",
+        args: [],
+        kwargs: {
+          attributes: ["type"],
+        },
+      },
+    });
+
+    if (fieldsMeta && typeof fieldsMeta === "object" && !Array.isArray(fieldsMeta)) {
+      const availableFieldNames = new Set(Object.keys(fieldsMeta));
+      partnerFields = requestedFields.filter((fieldName) => availableFieldNames.has(fieldName));
+    }
+  } catch (_error) {
+    partnerFields = requestedFields.filter((fieldName) => fieldName !== "mobile");
+  }
+
+  const result = await callOdoo({
+    method: "execute_kw",
+    eventType: "clients.sync.odoo",
+    params: {
+      model: "res.partner",
+      method: "search_read",
+      args: [[["active", "=", true], ["customer_rank", ">", 0]]],
+      kwargs: {
+        fields: partnerFields,
+        order: "write_date desc",
+        limit,
+        offset,
+      },
+    },
+  });
+
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.records)) return result.records;
+  if (Array.isArray(result?.data)) return result.data;
+  return [];
+}
+
+async function fetchOdooCommercialPartners() {
+  const batchSize = 500;
+  const maxRows = Number.parseInt(process.env.ODOO_CLIENTS_SYNC_MAX_ROWS || "50000", 10);
+  const safeMaxRows = Number.isFinite(maxRows) && maxRows > 0 ? maxRows : 50000;
+
+  const allPartners = [];
+  let offset = 0;
+
+  while (allPartners.length < safeMaxRows) {
+    const page = await fetchOdooCommercialPartnersPage({
+      offset,
+      limit: Math.min(batchSize, safeMaxRows - allPartners.length),
+    });
+    if (!page.length) break;
+    allPartners.push(...page);
+    if (page.length < batchSize) break;
+    offset += page.length;
+  }
+
+  return allPartners;
+}
+
+async function syncOdooPartnersIntoClientRequests({ user }) {
+  if (!canSyncOdooClients(user)) return;
+
+  let partners = [];
+  try {
+    partners = await fetchOdooCommercialPartners();
+  } catch (error) {
+    if (error instanceof IntegrationDisabledError || error?.code === "ODOO_INTEGRATION_DISABLED") {
+      return;
+    }
+    logger.warn(
+      { error: error.message, code: error.code || null, role: user?.role || null },
+      "No se pudo sincronizar clientes desde Odoo",
+    );
+    return;
+  }
+
+  if (!partners.length) return;
+
+  for (const partner of partners) {
+    const draft = mapOdooPartnerToClientDraft(partner);
+    const externalId = normalizeText(draft.external_id);
+    if (!externalId) continue;
+    if (!normalizeText(draft.commercial_name)) continue;
+
+    const rucKey = normalizeText(draft.ruc_cedula).toLowerCase();
+    const emailKey = normalizeEmail(draft.client_email);
+    const nameKey = normalizeText(draft.commercial_name).toLowerCase();
+
+    try {
+      const candidateParams = [];
+      const candidatePredicates = [];
+
+      if (rucKey) {
+        candidateParams.push(rucKey);
+        candidatePredicates.push(`LOWER(TRIM(COALESCE(ruc_cedula, ''))) = $${candidateParams.length + 2}`);
+      }
+      if (emailKey) {
+        candidateParams.push(emailKey);
+        const emailParam = candidateParams.length + 2;
+        candidatePredicates.push(
+          `(
+            LOWER(TRIM(COALESCE(client_email, ''))) = $${emailParam}
+            OR LOWER(TRIM(COALESCE(consent_recipient_email, ''))) = $${emailParam}
+          )`,
+        );
+      }
+      if (nameKey) {
+        candidateParams.push(nameKey);
+        candidatePredicates.push(`LOWER(TRIM(COALESCE(commercial_name, ''))) = $${candidateParams.length + 2}`);
+      }
+
+      if (candidatePredicates.length) {
+        const { rows: linkedRows } = await db.query(
+          `
+            UPDATE client_requests
+            SET
+              external_source = 'odoo',
+              external_id = $1,
+              external_updated_at = COALESCE($2::timestamptz, external_updated_at),
+              last_synced_at = NOW()
+            WHERE id = (
+              SELECT id
+              FROM client_requests
+              WHERE status = 'approved'
+                AND (external_source IS NULL OR external_source = '')
+                AND (${candidatePredicates.join(" OR ")})
+              ORDER BY created_at ASC
+              LIMIT 1
+            )
+            RETURNING id
+          `,
+          [externalId, draft.external_updated_at, ...candidateParams],
+        );
+
+        if (linkedRows.length) continue;
+      }
+
+      await db.query(
+        `
+          INSERT INTO client_requests (
+            created_by,
+            status,
+            approved_at,
+            external_source,
+            external_id,
+            external_updated_at,
+            last_synced_at,
+            lopdp_token,
+            client_type,
+            data_processing_consent,
+            lopdp_consent_status,
+            consent_capture_method,
+            consent_capture_details,
+            lopdp_consent_method,
+            lopdp_consent_details,
+            lopdp_consent_at,
+            client_sector,
+            commercial_name,
+            ruc_cedula,
+            client_email,
+            consent_recipient_email,
+            shipping_contact_name,
+            shipping_address,
+            shipping_city,
+            shipping_province,
+            shipping_phone,
+            shipping_cellphone
+          )
+          VALUES (
+            $1,
+            'approved',
+            NOW(),
+            $2,
+            $3,
+            $4::timestamptz,
+            NOW(),
+            $5,
+            'persona_juridica',
+            TRUE,
+            'granted',
+            'odoo_sync',
+            'Cliente importado automáticamente desde Odoo',
+            'odoo_sync',
+            'Consentimiento heredado de sistema externo Odoo',
+            NOW(),
+            'privado',
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            $15
+          )
+          ON CONFLICT (external_source, external_id)
+          DO UPDATE SET
+            status = 'approved',
+            approved_at = COALESCE(client_requests.approved_at, NOW()),
+            external_updated_at = COALESCE(EXCLUDED.external_updated_at, client_requests.external_updated_at),
+            last_synced_at = NOW(),
+            commercial_name = COALESCE(NULLIF(EXCLUDED.commercial_name, ''), client_requests.commercial_name),
+            ruc_cedula = COALESCE(NULLIF(EXCLUDED.ruc_cedula, ''), client_requests.ruc_cedula),
+            client_email = COALESCE(NULLIF(EXCLUDED.client_email, ''), client_requests.client_email),
+            consent_recipient_email = COALESCE(
+              NULLIF(EXCLUDED.consent_recipient_email, ''),
+              client_requests.consent_recipient_email
+            ),
+            shipping_contact_name = COALESCE(
+              NULLIF(EXCLUDED.shipping_contact_name, ''),
+              client_requests.shipping_contact_name
+            ),
+            shipping_address = COALESCE(NULLIF(EXCLUDED.shipping_address, ''), client_requests.shipping_address),
+            shipping_city = COALESCE(NULLIF(EXCLUDED.shipping_city, ''), client_requests.shipping_city),
+            shipping_province = COALESCE(NULLIF(EXCLUDED.shipping_province, ''), client_requests.shipping_province),
+            shipping_phone = COALESCE(NULLIF(EXCLUDED.shipping_phone, ''), client_requests.shipping_phone),
+            shipping_cellphone = COALESCE(NULLIF(EXCLUDED.shipping_cellphone, ''), client_requests.shipping_cellphone)
+        `,
+        [
+          ODOO_SYNC_USER_EMAIL,
+          "odoo",
+          externalId,
+          draft.external_updated_at,
+          crypto.randomBytes(24).toString("hex"),
+          draft.commercial_name,
+          draft.ruc_cedula,
+          draft.client_email,
+          draft.consent_recipient_email,
+          draft.shipping_contact_name,
+          draft.shipping_address,
+          draft.shipping_city,
+          draft.shipping_province,
+          draft.shipping_phone,
+          draft.shipping_cellphone,
+        ],
+      );
+    } catch (error) {
+      if (error?.code === "23505") continue;
+      logger.warn(
+        {
+          error: error.message,
+          external_id: externalId,
+          commercial_name: draft.commercial_name,
+          ruc: draft.ruc_cedula,
+          email: draft.client_email,
+        },
+        "No se pudo insertar cliente de Odoo en client_requests",
+      );
+    }
+  }
+}
+
+async function syncOdooClientsBackfill({ user }) {
+  await ensureTables();
+  await syncOdooPartnersIntoClientRequests({ user });
+}
+
 async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo = false, filterBySchedule = false }) {
   await ensureTables();
+  await syncOdooPartnersIntoClientRequests({ user });
   const dateParam = visitDate || new Date().toISOString().slice(0, 10);
 
   const normalizedEmail = (user?.email || "").toLowerCase();
   let approvedSchedule = null;
   let plannedVisits = [];
+  let plannedTechnicalByClient = {};
 
   if (includeScheduleInfo || filterBySchedule) {
     approvedSchedule = await schedulesService.findApprovedScheduleForMonth({
@@ -915,14 +1345,69 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       );
       plannedVisits = rows || [];
     }
+
+    try {
+      const { rows: technicalScheduleRows } = await db.query(
+        `
+        SELECT DISTINCT
+          COALESCE(epr.client_id, ppr.client_request_id) AS client_request_id
+        FROM servicio.cronograma_actividades_tecnicas cat
+        LEFT JOIN equipment_purchase_requests epr
+          ON epr.id::text = cat.source_id
+        LEFT JOIN private_purchase_requests ppr
+          ON ppr.id::text = cat.source_id
+        WHERE cat.activity_date = $1
+          AND COALESCE(epr.client_id, ppr.client_request_id) IS NOT NULL
+        `,
+        [dateParam],
+      );
+
+      plannedTechnicalByClient = (technicalScheduleRows || []).reduce((acc, row) => {
+        const key = Number(row?.client_request_id);
+        if (!Number.isFinite(key)) return acc;
+        acc[key] = { is_planned_technical: true, technical_date: dateParam };
+        return acc;
+      }, {});
+    } catch (technicalError) {
+      logger.warn(
+        { error: technicalError.message, dateParam },
+        "No se pudo consultar cronograma técnico para clientes",
+      );
+    }
   }
 
   const params = [user.email, dateParam];
   const clauses = ["cr.status = 'approved'"]; // base status filter
+  clauses.push(`
+    NOT (
+      LOWER(COALESCE(cr.external_source, '')) = 'odoo'
+      AND LOWER(COALESCE(cr.created_by, '')) = LOWER('${ODOO_SYNC_USER_EMAIL}')
+      AND (
+        TRIM(COALESCE(cr.commercial_name, '')) = ''
+        OR UPPER(TRIM(COALESCE(cr.commercial_name, ''))) ~ '^(CLIENTE( ID)? [0-9]{1,13}|RUC ODOO-.+)$'
+      )
+    )
+  `);
+
+  const requestedLimit = Number.parseInt(String(process.env.CLIENTS_LIST_LIMIT || "5000"), 10);
+  const safeLimit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(requestedLimit, 200), 20000)
+    : 5000;
 
   if (!isManager(user)) {
     params.push(user.email, user.email);
-    clauses.push(`(LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1}) OR LOWER(COALESCE(ca.assigned_to_email, '')) = LOWER($${params.length}))`);
+    clauses.push(`(
+      LOWER(COALESCE(cr.created_by, '')) = LOWER($${params.length - 1})
+      OR EXISTS (
+        SELECT 1
+        FROM client_assignments ca_filter
+        WHERE ca_filter.client_request_id = cr.id
+          AND ca_filter.is_active = TRUE
+          AND (ca_filter.starts_at IS NULL OR ca_filter.starts_at <= NOW())
+          AND (ca_filter.ends_at IS NULL OR ca_filter.ends_at >= NOW())
+          AND LOWER(COALESCE(ca_filter.assigned_to_email, '')) = LOWER($${params.length})
+      )
+    )`);
   }
 
   if (q) {
@@ -980,6 +1465,10 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       cr.commercial_name AS nombre,
       cr.ruc_cedula AS identificador,
       cr.created_by,
+      CASE
+        WHEN LOWER(COALESCE(cr.created_by, '')) = LOWER('${ODOO_SYNC_USER_EMAIL}') THEN 'odoo'
+        ELSE 'spi'
+      END AS data_source,
       COALESCE(NULLIF(cr.client_email, ''), NULLIF(cr.consent_recipient_email, '')) AS client_email,
       COALESCE(
         NULLIF(cr.client_type, ''),
@@ -996,28 +1485,9 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       cr.shipping_phone,
       cr.shipping_address,
       cr.drive_folder_id,
-      COALESCE(
-        json_agg(DISTINCT LOWER(ca.assigned_to_email))
-          FILTER (WHERE ca.assigned_to_email IS NOT NULL),
-        '[]'
-      ) AS asignados,
-      COALESCE(
-        json_agg(
-          DISTINCT jsonb_build_object(
-            'assigned_to_email', LOWER(ca.assigned_to_email),
-            'assigned_to_name', COALESCE(au.fullname, au.name, ca.assigned_to_email),
-            'assigned_to_role', au.role,
-            'assignment_type', ca.assignment_type,
-            'is_temporary', ca.is_temporary,
-            'starts_at', ca.starts_at,
-            'ends_at', ca.ends_at,
-            'is_active', ca.is_active,
-            'assigned_by_email', ca.assigned_by_email,
-            'reason', ca.reason
-          )
-        ) FILTER (WHERE ca.assigned_to_email IS NOT NULL),
-        '[]'
-      ) AS assignment_details,
+      COALESCE(assignment_history.asignados, '[]'::json) AS asignados,
+      COALESCE(assignment_history.assignment_details, '[]'::json) AS assignment_details,
+      COALESCE(visit_history.visit_logs, '[]'::json) AS visit_logs,
       vl.status AS visit_status,
       vl.hora_entrada,
       vl.hora_salida,
@@ -1028,27 +1498,104 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       vl.observaciones,
       vl.duracion_minutos
     FROM client_requests cr
-    LEFT JOIN client_assignments ca
-      ON ca.client_request_id = cr.id
-     AND ${ACTIVE_ASSIGNMENT_CONDITION}
-    LEFT JOIN users au
-      ON LOWER(au.email) = LOWER(ca.assigned_to_email)
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE(
+          json_agg(DISTINCT LOWER(ca.assigned_to_email))
+            FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+          '[]'::json
+        ) AS asignados,
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object(
+              'assigned_to_email', LOWER(ca.assigned_to_email),
+              'assigned_to_name', COALESCE(au.fullname, au.name, ca.assigned_to_email),
+              'assigned_to_role', au.role,
+              'is_active_user', COALESCE(au.active, false),
+              'employment_status', COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo'),
+              'has_active_permiso', (
+                SELECT COUNT(*) > 0
+                FROM permisos_vacaciones s
+                WHERE LOWER(s.user_email) = LOWER(ca.assigned_to_email)
+                  AND s.status = 'approved'
+                  AND LOWER(COALESCE(s.tipo_solicitud, '')) = 'permiso'
+                  AND CURRENT_DATE BETWEEN s.fecha_inicio AND s.fecha_fin
+              ),
+              'has_active_vacaciones', (
+                SELECT COUNT(*) > 0
+                FROM permisos_vacaciones s
+                WHERE LOWER(s.user_email) = LOWER(ca.assigned_to_email)
+                  AND s.status = 'approved'
+                  AND LOWER(COALESCE(s.tipo_solicitud, '')) = 'vacaciones'
+                  AND CURRENT_DATE BETWEEN s.fecha_inicio AND s.fecha_fin
+              ),
+              'assignment_type', ca.assignment_type,
+              'is_temporary', ca.is_temporary,
+              'starts_at', ca.starts_at,
+              'ends_at', ca.ends_at,
+              'is_active', ca.is_active,
+              'assigned_by_email', ca.assigned_by_email,
+              'reason', ca.reason
+            )
+          ) FILTER (WHERE ca.assigned_to_email IS NOT NULL),
+          '[]'::json
+        ) AS assignment_details
+      FROM client_assignments ca
+      LEFT JOIN users au
+        ON LOWER(COALESCE(au.email, '')) = LOWER(COALESCE(ca.assigned_to_email, ''))
+      LEFT JOIN collaborator_profiles cp
+        ON cp.user_id = au.id
+      WHERE ca.client_request_id = cr.id
+        AND ca.is_active = TRUE
+        AND (ca.starts_at IS NULL OR ca.starts_at <= NOW())
+        AND (ca.ends_at IS NULL OR ca.ends_at >= NOW())
+    ) assignment_history ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', logs.id,
+              'advisor_email', logs.user_email,
+              'advisor_name', logs.advisor_name,
+              'advisor_role', logs.advisor_role,
+              'visit_date', logs.visit_date,
+              'status', logs.status,
+              'hora_entrada', logs.hora_entrada,
+              'hora_salida', logs.hora_salida,
+              'observaciones', logs.observaciones,
+              'duracion_minutos', logs.duracion_minutos
+            )
+            ORDER BY logs.sort_ts DESC
+          ),
+          '[]'::json
+        ) AS visit_logs
+      FROM (
+        SELECT
+          cvl.id,
+          LOWER(COALESCE(cvl.user_email, '')) AS user_email,
+          COALESCE(vu.fullname, vu.name, cvl.user_email) AS advisor_name,
+          vu.role AS advisor_role,
+          cvl.visit_date,
+          cvl.status,
+          cvl.hora_entrada,
+          cvl.hora_salida,
+          cvl.observaciones,
+          cvl.duracion_minutos,
+          COALESCE(cvl.hora_salida, cvl.hora_entrada, cvl.visit_date::timestamp) AS sort_ts
+        FROM client_visit_logs cvl
+        LEFT JOIN users vu
+          ON LOWER(COALESCE(vu.email, '')) = LOWER(COALESCE(cvl.user_email, ''))
+        WHERE cvl.client_request_id = cr.id
+        ORDER BY COALESCE(cvl.hora_salida, cvl.hora_entrada, cvl.visit_date::timestamp) DESC
+        LIMIT 20
+      ) logs
+    ) visit_history ON TRUE
     LEFT JOIN client_visit_logs vl
       ON vl.client_request_id = cr.id AND vl.user_email = $1 AND vl.visit_date = $2
     ${whereClause}
-    GROUP BY
-      cr.id,
-      vl.status,
-      vl.hora_entrada,
-      vl.hora_salida,
-      vl.lat_entrada,
-      vl.lng_entrada,
-      vl.lat_salida,
-      vl.lng_salida,
-      vl.observaciones,
-      vl.duracion_minutos
     ORDER BY cr.created_at DESC
-    LIMIT 400
+    LIMIT ${safeLimit}
   `;
 
   const { rows } = await db.query(query, params);
@@ -1090,9 +1637,29 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
     if (!Array.isArray(assignmentDetails)) {
       assignmentDetails = [];
     }
+    let visitLogs = row.visit_logs;
+    if (typeof visitLogs === "string") {
+      try {
+        visitLogs = JSON.parse(visitLogs);
+      } catch (e) {
+        visitLogs = [];
+      }
+    }
+    if (!Array.isArray(visitLogs)) {
+      visitLogs = [];
+    }
+    const commercialPlan = plannedByClient[row.id] || { is_planned_commercial: false };
+    const technicalPlan = plannedTechnicalByClient[row.id] || { is_planned_technical: false };
     const scheduled_info = includeScheduleInfo
       ? {
-        ...(plannedByClient[row.id] || { is_planned: false, schedule_id: approvedSchedule?.id || null }),
+        ...commercialPlan,
+        ...technicalPlan,
+        is_planned_commercial: Boolean(commercialPlan?.is_planned || commercialPlan?.is_planned_commercial),
+        is_planned_technical: Boolean(technicalPlan?.is_planned_technical),
+        is_planned:
+          Boolean(commercialPlan?.is_planned || commercialPlan?.is_planned_commercial) ||
+          Boolean(technicalPlan?.is_planned_technical),
+        schedule_id: commercialPlan?.schedule_id || approvedSchedule?.id || null,
       }
       : undefined;
 
@@ -1100,6 +1667,7 @@ async function listAccessibleClients({ user, q, visitDate, includeScheduleInfo =
       ...row,
       asignados,
       assignment_details: assignmentDetails,
+      visit_logs: visitLogs,
       visit_status: row.visit_status || "pending",
       scheduled_info,
     };
@@ -1214,8 +1782,11 @@ async function updateClient({ clientId, user, rawData = {}, rawFiles = {} }) {
     if (fileIds.legal_rep_appointment_file_id) fieldsToUpdate.push("legal_rep_appointment_file_id");
     if (fileIds.ruc_file_id) fieldsToUpdate.push("ruc_file_id");
     if (fileIds.id_file_id) fieldsToUpdate.push("id_file_id");
+    if (fileIds.bpadt_certification_file_id) fieldsToUpdate.push("bpadt_certification_file_id");
     if (fileIds.operating_permit_file_id) fieldsToUpdate.push("operating_permit_file_id");
     if (fileIds.consent_evidence_file_id) fieldsToUpdate.push("consent_evidence_file_id");
+    if (fileIds.approval_letter_id) fieldsToUpdate.push("approval_letter_file_id");
+    if (fileIds.consent_record_id) fieldsToUpdate.push("consent_record_file_id");
   }
 
   const values = [];
@@ -1290,6 +1861,7 @@ async function assignClient({
   startsAt = null,
   endsAt = null,
   reason = null,
+  unassign = false,
 }) {
   if (!canAssignClients(user)) {
     const error = new Error("Solo los jefes pueden asignar clientes");
@@ -1306,8 +1878,52 @@ async function assignClient({
     throw error;
   }
 
+  if (Boolean(unassign)) {
+    const { rowCount } = await db.query(
+      `UPDATE client_assignments
+          SET is_active = FALSE,
+              ends_at = COALESCE(ends_at, NOW()),
+              reason = COALESCE($3, reason)
+        WHERE client_request_id = $1
+          AND LOWER(COALESCE(assigned_to_email, '')) = LOWER($2)
+          AND is_active = TRUE`,
+      [clientId, normalizedEmail, reason ? String(reason).trim() : null],
+    );
+
+    return {
+      ok: true,
+      client: clientId,
+      assignee: normalizedEmail,
+      unassigned: true,
+      affected_rows: rowCount,
+    };
+  }
+
   const { rows: assigneeRows } = await db.query(
-    "SELECT id, email, role, active FROM users WHERE LOWER(email) = $1 LIMIT 1",
+    `
+    SELECT
+      u.id,
+      u.email,
+      u.role,
+      u.active,
+      COALESCE(cp.profile->'laboral'->>'estatus_empleado', 'activo') AS employment_status,
+      COALESCE(time_off.has_active_permiso, FALSE) AS has_active_permiso,
+      COALESCE(time_off.has_active_vacaciones, FALSE) AS has_active_vacaciones
+    FROM users u
+    LEFT JOIN collaborator_profiles cp
+      ON cp.user_id = u.id
+    LEFT JOIN LATERAL (
+      SELECT
+        COUNT(*) FILTER (WHERE LOWER(COALESCE(p.tipo_solicitud, '')) = 'permiso') > 0 AS has_active_permiso,
+        COUNT(*) FILTER (WHERE LOWER(COALESCE(p.tipo_solicitud, '')) = 'vacaciones') > 0 AS has_active_vacaciones
+      FROM permisos_vacaciones p
+      WHERE LOWER(p.user_email) = LOWER(u.email)
+        AND p.status = 'approved'
+        AND CURRENT_DATE BETWEEN p.fecha_inicio AND p.fecha_fin
+    ) time_off ON TRUE
+    WHERE LOWER(u.email) = $1
+    LIMIT 1
+    `,
     [normalizedEmail],
   );
   const assignee = assigneeRows[0];
@@ -1317,9 +1933,28 @@ async function assignClient({
     throw error;
   }
 
-  const assigneeRole = (assignee.role || "").toLowerCase();
+  const assigneeRole = normalizeRole(assignee.role);
   if (!ASSIGNABLE_ADVISOR_ROLES.has(assigneeRole)) {
     const error = new Error("Solo se pueden asignar clientes a usuarios comerciales");
+    error.status = 400;
+    throw error;
+  }
+
+  const employmentStatus = String(assignee.employment_status || "").trim().toLowerCase();
+  if (PASSIVE_EMPLOYMENT_STATUSES.has(employmentStatus)) {
+    const error = new Error("No puedes asignar clientes a un colaborador desvinculado o inactivo");
+    error.status = 400;
+    throw error;
+  }
+
+  if (assignee.has_active_vacaciones) {
+    const error = new Error("No puedes asignar clientes a un colaborador con vacaciones activas");
+    error.status = 400;
+    throw error;
+  }
+
+  if (assignee.has_active_permiso) {
+    const error = new Error("No puedes asignar clientes a un colaborador con permiso activo");
     error.status = 400;
     throw error;
   }
@@ -1657,6 +2292,7 @@ async function getClientHistory({ clientId, user, limit = 100 }) {
 }
 
 module.exports = {
+  syncOdooClientsBackfill,
   listAccessibleClients,
   getClientDetail,
   listClientLocations,

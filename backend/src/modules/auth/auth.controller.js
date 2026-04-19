@@ -2,7 +2,7 @@
  * src/modules/auth/auth.controller.js
  * ------------------------------------
  * 🔐 Autenticación Google OAuth2 → JWT Header-Based
- * - Tokens: accessToken (8h), refreshToken (30d)
+ * - Tokens: accessToken (configurable), refreshToken (configurable)
  * - Frontend: recibe tokens vía fragment #accessToken=&refreshToken=
  * - Endpoints:
  *    /auth/google        → Redirige a Google OAuth
@@ -105,6 +105,8 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 const isProd = process.env.NODE_ENV === "production";
+const ACCESS_TOKEN_EXPIRES_IN = String(process.env.ACCESS_TOKEN_EXPIRES_IN || "8h").trim();
+const REFRESH_TOKEN_EXPIRES_IN = String(process.env.REFRESH_TOKEN_EXPIRES_IN || "30d").trim();
 
 /* ============================================================
    Helpers seguros para firmar tokens
@@ -118,7 +120,7 @@ const signAccess = (payload) =>
       sub: payload.id?.toString(),
     },
     process.env.SECRET_KEY,
-    { expiresIn: "8h" }
+    { expiresIn: ACCESS_TOKEN_EXPIRES_IN }
   );
 
 const signRefresh = (payload) =>
@@ -130,7 +132,7 @@ const signRefresh = (payload) =>
       sub: payload.id?.toString(),
     },
     process.env.REFRESH_SECRET_KEY,
-    { expiresIn: "30d" }
+    { expiresIn: REFRESH_TOKEN_EXPIRES_IN }
   );
 
 const INTERNAL_LOPDP_FOLDER = "Aprobaciones LODPD TIC";
