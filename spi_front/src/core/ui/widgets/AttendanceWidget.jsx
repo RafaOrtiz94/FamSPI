@@ -200,6 +200,10 @@ const AttendanceWidget = () => {
  const [emergencyClientsLoading, setEmergencyClientsLoading] = useState(false);
  const [fieldEmergencyClientId, setFieldEmergencyClientId] = useState("");
  const autoOpenSessionRef = useRef(null);
+ const FIELD_OPERATION_EXCEPTION_TYPES = useMemo(
+ () => new Set(["operacion_campo", "operacion_de_campo", "salida_oficina", "viaje", "campo"]),
+ [],
+ );
 
  useEffect(() => {
  const timer = setInterval(() => setCurrentTime(new Date()), 1000);
@@ -752,6 +756,11 @@ const AttendanceWidget = () => {
  : "Salida de cliente registrada correctamente.",
  "success",
  );
+ if (kind === "entry") {
+ setSelectedFieldAction("client_exit");
+ } else {
+ setSelectedFieldAction("office_entry");
+ }
  await refreshAll();
  } else {
  showToast("No se pudo registrar la visita de campo.", "error");
@@ -765,7 +774,7 @@ const AttendanceWidget = () => {
 
  const handleOfficeDepartureQuick = async () => {
  if (hasActiveException) {
- showToast("Ya tienes una salida de oficina activa.", "info");
+ showToast("Ya tienes una operacion de campo activa.", "info");
  return;
  }
 
@@ -776,9 +785,10 @@ const AttendanceWidget = () => {
 
  setFieldVisitSubmitting(true);
  try {
- const res = await registerException("otro", description, await getLocationForAction());
+ const res = await registerException("operacion_campo", description, await getLocationForAction());
  if (res?.ok) {
  showToast("Salida de oficina registrada.", "success");
+ setSelectedFieldAction("client_entry");
  await refreshAll();
  } else {
  showToast("No se pudo registrar la salida de oficina.", "error");
@@ -801,6 +811,7 @@ const AttendanceWidget = () => {
  const res = await updateExceptionStatus("COMPLETED", await getLocationForAction());
  if (res?.ok) {
  showToast("Entrada a oficina registrada.", "success");
+ setSelectedFieldAction("office_exit");
  await refreshAll();
  } else {
  showToast("No se pudo registrar la entrada a oficina.", "error");
@@ -921,7 +932,18 @@ const AttendanceWidget = () => {
  };
  }, [attendance?.date, attendance?.entry_time, attendance?.total_hours, recentHistory]);
  const hasActiveException = Boolean(activeException);
+ const normalizedActiveExceptionType = String(activeException?.type || "").trim().toLowerCase();
+ const isFieldOperationFlow = hasActiveException && FIELD_OPERATION_EXCEPTION_TYPES.has(normalizedActiveExceptionType);
  const exceptionStatus = activeException?.status || "NONE";
+
+ useEffect(() => {
+ if (isFieldOperationFlow && selectedFieldAction === "office_exit") {
+ setSelectedFieldAction("client_entry");
+ }
+ if (!isFieldOperationFlow && exceptionStatus === "NONE" && selectedFieldAction === "office_entry") {
+ setSelectedFieldAction("office_exit");
+ }
+ }, [exceptionStatus, isFieldOperationFlow, selectedFieldAction]);
  const exceptionStepLabel =
  {
  ACTIVE: "En ruta",
@@ -1276,6 +1298,7 @@ const AttendanceWidget = () => {
  : "bg-emerald-100 text-emerald-900 border-emerald-200";
 
  const renderExceptionBanner = () => {
+ if (isFieldOperationFlow) return null;
  if (!hasActiveException) return null;
  const items = [
  { label: "Salida de oficina", value: activeException.start_time, icon: "1" },
@@ -1327,6 +1350,7 @@ const AttendanceWidget = () => {
  };
 
  const renderExceptionControls = () => {
+ if (isFieldOperationFlow) return null;
  if (!hasActiveException) {
  return (
  <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 mt-2">
@@ -1437,6 +1461,11 @@ const AttendanceWidget = () => {
 
  <div className="space-y-2">
  <label className="text-[11px] font-semibold text-blue-800">Accion a registrar</label>
+ {isFieldOperationFlow ? (
+ <div className="w-full rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-900">
+ {actionLabelMap[selectedFieldAction] || "Operacion de campo activa"}
+ </div>
+ ) : (
  <select
  value={selectedFieldAction}
  onChange={(e) => setSelectedFieldAction(e.target.value)}
@@ -1447,6 +1476,7 @@ const AttendanceWidget = () => {
  <option value="client_entry">Entrada cliente</option>
  <option value="client_exit">Salida cliente</option>
  </select>
+ )}
 
  {selectedFieldAction === "office_exit" ? (
  <input

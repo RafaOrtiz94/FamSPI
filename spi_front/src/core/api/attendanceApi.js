@@ -1,6 +1,26 @@
 // src/core/api/attendanceApi.js
 import api from "./index";
 
+const normalizeLocation = (location) => {
+  if (!location) return null;
+
+  if (typeof location === "string") {
+    const trimmed = location.trim();
+    return trimmed || null;
+  }
+
+  if (typeof location === "object") {
+    const latitude = Number(location.latitude ?? location.lat);
+    const longitude = Number(location.longitude ?? location.lng);
+
+    if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      return `${latitude},${longitude}`;
+    }
+  }
+
+  return null;
+};
+
 /**
  * ==========================================================
  * 📋 Attendance API Client
@@ -16,9 +36,10 @@ import api from "./index";
  * Clock In - Record entry time
  */
 export const clockIn = async (location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/clock-in",
- { location }
+ { location: normalizedLocation }
  );
 
  return data;
@@ -28,9 +49,10 @@ export const clockIn = async (location = null) => {
  * Clock Out for Lunch - Record lunch start time
  */
 export const clockOutLunch = async (location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/clock-out-lunch",
- { location }
+ { location: normalizedLocation }
  );
 
  return data;
@@ -40,9 +62,10 @@ export const clockOutLunch = async (location = null) => {
  * Clock In from Lunch - Record lunch end time
  */
 export const clockInLunch = async (location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/clock-in-lunch",
- { location }
+ { location: normalizedLocation }
  );
 
  return data;
@@ -52,9 +75,10 @@ export const clockInLunch = async (location = null) => {
  * Clock Out - Record exit time
  */
 export const clockOut = async (location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/clock-out",
- { location }
+ { location: normalizedLocation }
  );
 
  return data;
@@ -69,34 +93,34 @@ export const clockOut = async (location = null) => {
  */
 
 export const marcarEntrada = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/entrada", { location });
+ const { data } = await api.post("/attendance/marcar/entrada", { location: normalizeLocation(location) });
  return data;
 };
 
 export const marcarAlmuerzoSalida = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/almuerzo-salida", { location });
+ const { data } = await api.post("/attendance/marcar/almuerzo-salida", { location: normalizeLocation(location) });
  return data;
 };
 
 export const marcarAlmuerzoEntrada = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/almuerzo-entrada", { location });
+ const { data } = await api.post("/attendance/marcar/almuerzo-entrada", { location: normalizeLocation(location) });
  return data;
 };
 
 export const marcarSalida = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/salida", { location });
+ const { data } = await api.post("/attendance/marcar/salida", { location: normalizeLocation(location) });
  return data;
 };
 
 export const marcarSalidaImprevista = async (location = null, description = null) => {
- const payload = { location };
+ const payload = { location: normalizeLocation(location) };
  if (description) payload.description = description;
  const { data } = await api.post("/attendance/marcar/salida-imprevista", payload);
  return data;
 };
 
 export const marcarRegresoImprevisto = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/regreso-imprevisto", { location });
+ const { data } = await api.post("/attendance/marcar/regreso-imprevisto", { location: normalizeLocation(location) });
  return data;
 };
 
@@ -117,9 +141,10 @@ export const marcarVisitaSalida = async (payload = {}) => {
  * Attach location to an already saved attendance or exception mark
  */
 export const syncAttendanceLocation = async (target, location) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/location-sync",
- { target, location }
+ { target, location: normalizedLocation }
  );
 
  return data;
@@ -130,9 +155,10 @@ export const syncAttendanceLocation = async (target, location) => {
  */
 export const registerException = async (type, description, location = null, options = {}) => {
  const { isJustified } = options || {};
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/exception",
- { type, description, location, ...(isJustified !== undefined ? { isJustified } : {}) }
+ { type, description, location: normalizedLocation, ...(isJustified !== undefined ? { isJustified } : {}) }
  );
 
  return data;
@@ -142,9 +168,10 @@ export const registerException = async (type, description, location = null, opti
  * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
  */
 export const updateExceptionStatus = async (status, location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/exception/status",
- { status, location }
+ { status, location: normalizedLocation }
  );
 
  return data;
@@ -298,9 +325,10 @@ export const downloadAttendancePDF = async (userId, startDate, endDate, options 
  * Body: { hours: number, reason: string, location: string }
  */
 export const markOvertime = async (hours, reason, location = null) => {
+ const normalizedLocation = normalizeLocation(location);
  const { data } = await api.post(
  "/attendance/overtime",
- { hours, reason, location }
+ { hours, reason, location: normalizedLocation }
  );
 
  return data;
