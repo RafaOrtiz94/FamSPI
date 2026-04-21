@@ -42,15 +42,22 @@ const processAutomaticOvertime = async () => {
       SELECT
         id, user_id, date, entry_time, auto_shift_end_at,
         lunch_start_time, lunch_end_time
-      FROM user_attendance_records
-      WHERE exit_time IS NULL
+      FROM user_attendance_records ar
+      WHERE ar.exit_time IS NULL
         AND (
           (
-            auto_shift_end_at IS NOT NULL
-            AND auto_closed_at IS NULL
-            AND NOW() >= auto_shift_end_at
+            ar.auto_shift_end_at IS NOT NULL
+            AND ar.auto_closed_at IS NULL
+            AND NOW() >= ar.auto_shift_end_at
           )
-          OR date < $1::date
+          OR ar.date < $1::date
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM attendance_exceptions ex
+          WHERE ex.user_id = ar.user_id
+            AND ex.date = ar.date
+            AND UPPER(COALESCE(ex.status, '')) <> 'COMPLETED'
         )
       `,
       [currentBusinessDate]
@@ -145,11 +152,18 @@ const getSchedulerStatus = async () => {
     const pendingResult = await db.query(
       `
       SELECT COUNT(*) as pending_count
-      FROM user_attendance_records
-      WHERE exit_time IS NULL
-        AND auto_shift_end_at IS NOT NULL
-        AND auto_closed_at IS NULL
-        AND NOW() >= auto_shift_end_at
+      FROM user_attendance_records ar
+      WHERE ar.exit_time IS NULL
+        AND ar.auto_shift_end_at IS NOT NULL
+        AND ar.auto_closed_at IS NULL
+        AND NOW() >= ar.auto_shift_end_at
+        AND NOT EXISTS (
+          SELECT 1
+          FROM attendance_exceptions ex
+          WHERE ex.user_id = ar.user_id
+            AND ex.date = ar.date
+            AND UPPER(COALESCE(ex.status, '')) <> 'COMPLETED'
+        )
       `,
       []
     );
