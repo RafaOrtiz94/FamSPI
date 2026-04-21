@@ -733,9 +733,12 @@ const registerException = async (req, res) => {
       return res.status(400).json({ ok: false, message: "Tipo y descripción requeridos" });
     }
 
+    const now = new Date();
+    const today = getBusinessDate(now);
+
     // Check if there is already an active exception
     const active = await db.query(
-      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED'",
       [userId]
     );
 
@@ -754,10 +757,10 @@ const registerException = async (req, res) => {
         start_time, start_location, 
         status
       )
-      VALUES ($1, CURRENT_DATE, $2, $3, NOW(), $4, 'ACTIVE')
+      VALUES ($1, $2, $3, $4, $5, $6, 'ACTIVE')
       RETURNING *;
       `,
-      [userId, type, descriptionText, location || null]
+      [userId, today, type, descriptionText, now, location || null]
     );
 
     if (!exceptionIsJustified) {
@@ -767,7 +770,7 @@ const registerException = async (req, res) => {
         collaboratorEmail: email || null,
         exceptionType: "EXCEPCION_NO_JUSTIFICADA",
         detail: `${descriptionText} (Tipo: ${String(type || "GENERAL").toUpperCase()})`,
-        occurredAt: new Date(),
+        occurredAt: now,
         meta: {
           exception_id: result.rows[0]?.id || null,
           exception_status: result.rows[0]?.status || "ACTIVE",
@@ -809,12 +812,12 @@ const updateExceptionStatus = async (req, res) => {
 
     // Get active exception
     const active = await db.query(
-      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED' ORDER BY id DESC LIMIT 1",
       [userId]
     );
 
     if (active.rows.length === 0) {
-      return res.status(404).json({ ok: false, message: "No tieens ninguna salida en curso" });
+      return res.status(404).json({ ok: false, message: "No tienes ninguna salida en curso" });
     }
 
     const exceptionId = active.rows[0].id;
@@ -873,7 +876,7 @@ const updateExceptionStatus = async (req, res) => {
 
     // Get active exception (not completed)
     const result = await db.query(
-      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED' ORDER BY id DESC LIMIT 1",
+      "SELECT * FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED' ORDER BY id DESC LIMIT 1",
       [userId]
     );
 
@@ -1369,6 +1372,7 @@ const clockInField = async (req, res) => {
     }
 
     const now = new Date();
+    const today = getBusinessDate(now);
     if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
@@ -1428,8 +1432,8 @@ const clockInField = async (req, res) => {
       const scheduleCheck = await db.query(
         `SELECT id FROM schedules 
          WHERE user_email = $1 AND client_request_id = $2 
-         AND visit_date = CURRENT_DATE AND status IN ('pending', 'approved')`,
-        [email, client_id]
+         AND visit_date = $3 AND status IN ('pending', 'approved')`,
+        [email, client_id, today]
       );
 
       // Si no existe en cronograma, registrar como visita no planificada pero permitir el marcado
@@ -1437,7 +1441,7 @@ const clockInField = async (req, res) => {
 
       result = await db.query(
         `INSERT INTO client_visit_logs (client_request_id, user_email, visit_date, status, hora_entrada, lat_entrada, lng_entrada, is_planned, observaciones)
-         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5, $6, $7)
+         VALUES ($1, $2, $3, 'in_visit', $4, $5, $6, $7, $8)
          ON CONFLICT (client_request_id, user_email, visit_date) 
          DO UPDATE SET
            status = 'in_visit',
@@ -1448,6 +1452,7 @@ const clockInField = async (req, res) => {
         [
           client_id,
           email,
+          today,
           now,
           location?.split(',')[0],
           location?.split(',')[1],
@@ -1468,9 +1473,9 @@ const clockInField = async (req, res) => {
       // Logic for prospect visit
       result = await db.query(
         `INSERT INTO prospect_visits (user_email, prospect_name, visit_date, status, check_in_time, check_in_lat, check_in_lng)
-         VALUES ($1, $2, CURRENT_DATE, 'in_visit', $3, $4, $5)
+         VALUES ($1, $2, $3, 'in_visit', $4, $5, $6)
          RETURNING *`,
-        [email, prospect_name, now, location?.split(',')[0], location?.split(',')[1]]
+        [email, prospect_name, today, now, location?.split(',')[0], location?.split(',')[1]]
       );
     } else {
       return res.status(400).json({ ok: false, message: "ID de cliente o nombre de prospecto requerido" });
@@ -1500,6 +1505,7 @@ const clockOutField = async (req, res) => {
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
     const now = new Date();
+    const today = getBusinessDate(now);
     if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
@@ -1510,26 +1516,26 @@ const clockOutField = async (req, res) => {
         `UPDATE client_visit_logs 
          SET status = 'visited', hora_salida = $1, lat_salida = $2, lng_salida = $3, observaciones = COALESCE($4, observaciones),
              duracion_minutos = EXTRACT(EPOCH FROM ($1 - hora_entrada))/60
-         WHERE user_email = $5 AND client_request_id = $6 AND visit_date = CURRENT_DATE AND status = 'in_visit'
+         WHERE user_email = $5 AND client_request_id = $6 AND visit_date = $7 AND status = 'in_visit'
          RETURNING *`,
-        [now, location?.split(',')[0], location?.split(',')[1], observations, email, client_id]
+        [now, location?.split(',')[0], location?.split(',')[1], observations, email, client_id, today]
       );
 
       // Actualizar cronograma a completado
       if (result.rows.length > 0) {
         await db.query(
           `UPDATE schedules SET status = 'completed', actual_end_time = $1 
-           WHERE user_email = $2 AND client_request_id = $3 AND visit_date = CURRENT_DATE`,
-          [now, email, client_id]
+           WHERE user_email = $2 AND client_request_id = $3 AND visit_date = $4`,
+          [now, email, client_id, today]
         );
       }
     } else if (prospect_name) {
       result = await db.query(
         `UPDATE prospect_visits 
          SET status = 'visited', check_out_time = $1, check_out_lat = $2, check_out_lng = $3, observations = $4
-         WHERE user_email = $5 AND prospect_name = $6 AND visit_date = CURRENT_DATE AND status = 'in_visit'
+         WHERE user_email = $5 AND prospect_name = $6 AND visit_date = $7 AND status = 'in_visit'
          RETURNING *`,
-        [now, location?.split(',')[0], location?.split(',')[1], observations, email, prospect_name]
+        [now, location?.split(',')[0], location?.split(',')[1], observations, email, prospect_name, today]
       );
     }
 
@@ -1560,13 +1566,15 @@ const clockOutUnexpected = async (req, res) => {
 
     if (!userId) return res.status(401).json({ ok: false, message: "No autorizado" });
 
-    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now: new Date() }))) {
+    const now = new Date();
+    const today = getBusinessDate(now);
+    if (!(await enforceNoActiveTimeOffForMarking({ res, userEmail: email, now }))) {
       return;
     }
 
     // Check if there is already an active exception
     const active = await db.query(
-      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND status != 'COMPLETED'",
+      "SELECT id FROM attendance_exceptions WHERE user_id = $1 AND UPPER(COALESCE(status, '')) <> 'COMPLETED'",
       [userId]
     );
 
@@ -1579,9 +1587,9 @@ const clockOutUnexpected = async (req, res) => {
 
     const result = await db.query(
       `INSERT INTO attendance_exceptions (user_id, date, type, description, start_time, start_location, status)
-       VALUES ($1, CURRENT_DATE, 'IMPREVISTO', $2, NOW(), $3, 'ACTIVE')
+       VALUES ($1, $2, 'IMPREVISTO', $3, $4, $5, 'ACTIVE')
        RETURNING *`,
-      [userId, description || "Salida imprevista vía atajo", location]
+      [userId, today, description || "Salida imprevista vía atajo", now, location]
     );
 
     return res.status(200).json({
@@ -1614,7 +1622,7 @@ const clockInUnexpected = async (req, res) => {
     const result = await db.query(
       `UPDATE attendance_exceptions 
        SET status = 'COMPLETED', end_time = $1, end_location = $2
-       WHERE user_id = $3 AND status != 'COMPLETED'
+       WHERE user_id = $3 AND UPPER(COALESCE(status, '')) <> 'COMPLETED'
        RETURNING *`,
       [now, location, userId]
     );
@@ -1840,4 +1848,3 @@ module.exports = {
   markOvertime,
   getOvertimeRecords,
 };
-

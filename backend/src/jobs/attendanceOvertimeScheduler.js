@@ -148,15 +148,22 @@ const processShiftClosure = async (shift) => {
  */
 const getSchedulerStatus = async () => {
   try {
+    const currentBusinessDate = getBusinessDate(new Date());
+
     // Count pending auto-closures
     const pendingResult = await db.query(
       `
       SELECT COUNT(*) as pending_count
       FROM user_attendance_records ar
       WHERE ar.exit_time IS NULL
-        AND ar.auto_shift_end_at IS NOT NULL
-        AND ar.auto_closed_at IS NULL
-        AND NOW() >= ar.auto_shift_end_at
+        AND (
+          (
+            ar.auto_shift_end_at IS NOT NULL
+            AND ar.auto_closed_at IS NULL
+            AND NOW() >= ar.auto_shift_end_at
+          )
+          OR ar.date < $1::date
+        )
         AND NOT EXISTS (
           SELECT 1
           FROM attendance_exceptions ex
@@ -165,7 +172,7 @@ const getSchedulerStatus = async () => {
             AND UPPER(COALESCE(ex.status, '')) <> 'COMPLETED'
         )
       `,
-      []
+      [currentBusinessDate]
     );
 
     // Count recently auto-closed shifts (last 24 hours)
