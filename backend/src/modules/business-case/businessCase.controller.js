@@ -166,6 +166,12 @@ const BUSINESS_CASE_PROCESS_MAIL_ROLES = [
   "tecnico",
   "jefe_operaciones",
 ];
+const DETERMINATIONS_REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
+const DETERMINATIONS_TECH_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
+const DETERMINATIONS_REACTIVO_EDIT_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
+const DETERMINATIONS_TECH_EDIT_ROLES = new Set(["tecnico", "jefe_comercial"]);
+const DETERMINATIONS_TECH_WINDOW_TRIGGER_ROLES = new Set(["acp_comercial", "backoffice_comercial"]);
+const DETERMINATIONS_TECH_WINDOW_NOTIFY_ROLES = ["tecnico", "jefe_comercial"];
 const AUTOSAVE_FLAG_ADMIN_ROLES = new Set([
   "admin",
   "administrador",
@@ -301,6 +307,47 @@ async function failIdempotentWrite(session, error) {
 
 function resolveRequestRole(req) {
   return String(req.user?.role || req.user?.scope || req.user?.role_name || "").toLowerCase();
+}
+
+function normalizePurchaseTypeForGate(value = "") {
+  const raw = String(value || "").trim().toLowerCase();
+  if (["private_comodato", "comodato_privado"].includes(raw)) return "private_comodato";
+  if (["public", "comodato_publico"].includes(raw)) return "public";
+  if (raw.startsWith("private")) return "private_comodato";
+  return "public";
+}
+
+function normalizeConsumptionType(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "determinacion") return "reactivo";
+  return normalized || "consumible";
+}
+
+function classifyConsumptionItemsByType(items = []) {
+  const normalized = (Array.isArray(items) ? items : [])
+    .map((item) => normalizeConsumptionType(item?.type))
+    .filter(Boolean);
+  const hasReactivoFamily = normalized.some((type) => DETERMINATIONS_REACTIVO_TYPES.has(type));
+  const hasTechFamily = normalized.some((type) => DETERMINATIONS_TECH_TYPES.has(type));
+  return { hasReactivoFamily, hasTechFamily };
+}
+
+function assertConsumptionRolePolicyOrThrow({ role = "", hasReactivoFamily = false, hasTechFamily = false }) {
+  const normalizedRole = String(role || "").trim().toLowerCase();
+
+  if (hasTechFamily && !DETERMINATIONS_TECH_EDIT_ROLES.has(normalizedRole)) {
+    const error = new Error("Solo tecnico y jefe_comercial pueden registrar controles, calibradores y consumibles.");
+    error.status = 403;
+    error.code = "DETERMINATIONS_TECH_ROLE_REQUIRED";
+    throw error;
+  }
+
+  if (hasReactivoFamily && !DETERMINATIONS_REACTIVO_EDIT_ROLES.has(normalizedRole) && !DETERMINATIONS_TECH_EDIT_ROLES.has(normalizedRole)) {
+    const error = new Error("No tienes permisos para registrar reactivos en determinaciones.");
+    error.status = 403;
+    error.code = "DETERMINATIONS_REACTIVO_ROLE_REQUIRED";
+    throw error;
+  }
 }
 
 function normalizeSectionList(sections = []) {
@@ -2017,6 +2064,109 @@ async function promoteStage(req, res) {
   }
 }
 
+// Audit log de accesos a secciones sensibles (admin/gerencia)
+async function getSectionAccessLog(req, res) {
+  try {
+    const { id } = req.params;
+    const { section } = req.query;
+    const auditService = require('./businessCaseSectionAccessAudit.service');
+    const rows = await auditService.getAccessLog(id, { section: section || null });
+    res.json({ businessCaseId: id, entries: rows, total: rows.length });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error obteniendo access log BC');
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Historial de transiciones de estado (timeline)
+async function getStateHistory(req, res) {
+  try {
+    const { id } = req.params;
+    const db = require('../../config/db');
+    const { rows } = await db.query(
+      `SELECT
+         t.id,
+         t.from_state,
+         t.to_state,
+         t.transition_reason AS reason,
+         t.transitioned_at,
+         t.metadata,
+         u.fullname AS transitioned_by_name,
+         u.email   AS transitioned_by_email
+       FROM business_case_state_transitions t
+       LEFT JOIN users u ON u.id::text = t.transitioned_by::text
+       WHERE t.business_case_id = $1
+       ORDER BY t.transitioned_at ASC`,
+      [id]
+    );
+    res.json({ businessCaseId: id, history: rows });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error obteniendo historial de estados BC');
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Completitud por sección para el estado actual del BC
+async function getSectionCompleteness(req, res) {
+  try {
+    const { id } = req.params;
+    const { rows } = await require('../../config/db').query(
+      `SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ success: false, message: 'BC no encontrado' });
+    const { BusinessCaseStateReadiness } = require('./businessCaseStateReadiness');
+    const completeness = await BusinessCaseStateReadiness.getSectionCompleteness(rows[0]);
+    res.json({ businessCaseId: id, sections: completeness });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error obteniendo completitud de secciones BC');
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// SLA status para un BC
+async function getBcSlaStatus(req, res) {
+  try {
+    const { id } = req.params;
+    const slaService = require('./businessCaseSla.service');
+    const status = await slaService.getSlaStatus(id);
+    res.json(status);
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error obteniendo SLA status BC');
+    res.status(error.status || 500).json({ success: false, message: error.message });
+  }
+}
+
+// SLA dashboard — BCs at_risk o overdue
+async function getSlaAtRisk(req, res) {
+  try {
+    const slaService = require('./businessCaseSla.service');
+    const list = await slaService.getAtRiskBcs();
+    res.json({ items: list, total: list.length });
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error obteniendo BCs at-risk SLA');
+    res.status(500).json({ success: false, message: error.message });
+  }
+}
+
+// Transición de emergencia (solo gerencia_general)
+async function emergencyTransition(req, res) {
+  try {
+    const { id } = req.params;
+    const { toState, reason } = req.body;
+    if (!toState || !reason?.trim()) {
+      return res.status(400).json({ success: false, message: 'toState y reason son obligatorios' });
+    }
+    const result = await BusinessCaseStateMachine.emergencyTransition(
+      id, toState, String(req.user?.id || req.user?.email || 'system'), reason.trim()
+    );
+    res.json(result);
+  } catch (error) {
+    logger.error({ error: error.message }, 'Error en transición de emergencia BC');
+    res.status(error.status || 500).json({ success: false, message: error.message, code: error.code });
+  }
+}
+
 // Obtener BC Completo (con todos los módulos)
 async function getCompleteBCMaster(req, res) {
   try {
@@ -3124,6 +3274,12 @@ module.exports = {
   recalculateWithOperational,
   validateBC,
   promoteStage,
+  emergencyTransition,
+  getStateHistory,
+  getSectionAccessLog,
+  getSectionCompleteness,
+  getBcSlaStatus,
+  getSlaAtRisk,
   getCompleteBCMaster,
   // Equipment compatibility endpoints
   getCompatibleBackupCandidates,

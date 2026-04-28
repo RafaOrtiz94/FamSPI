@@ -4,6 +4,7 @@ const notificationManager = require("../modules/notifications/notificationManage
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.BC_PREFLOW_EXPIRY_INTERVAL_MINUTES || 60);
 const SYSTEM_ACTOR_UUID = "00000000-0000-0000-0000-000000000001";
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 async function runOnce() {
   const { rows } = await db.query(
@@ -80,7 +81,7 @@ function startBusinessCasePreflowExpiryJob() {
   if (interval) return;
   const everyMs = Math.max(15, DEFAULT_INTERVAL_MINUTES) * 60 * 1000;
   logger.info(`Business Case preflow expiry job configurado cada ${Math.round(everyMs / 60000)} min`);
-  if (process.env.ENABLE_JOBS === 'true') {
+  if (process.env.ENABLE_JOBS === 'true' && SHOULD_RUN_ON_START) {
     runOnce().catch((error) => logger.error({ error }, "Error inicial preflow expiry job"));
   }
   interval = setInterval(() => {

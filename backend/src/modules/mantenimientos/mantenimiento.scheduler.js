@@ -11,6 +11,7 @@ const REMINDER_STATUS = {
 const DEFAULT_INTERVAL_MINUTES = Number(
   process.env.MANTENIMIENTO_REMINDER_INTERVAL_MINUTES || 60
 );
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 const formatHumanDate = (value) => {
   if (!value) return "";
@@ -174,7 +175,7 @@ function startReminderScheduler() {
   );
 
   // Ejecutar una vez en el arranque (solo si ENABLE_JOBS=true)
-  if (process.env.ENABLE_JOBS === 'true') {
+  if (process.env.ENABLE_JOBS === 'true' && SHOULD_RUN_ON_START) {
     processReminders().catch((err) =>
       logger.error({ err }, "Error inicial al disparar recordatorios")
     );

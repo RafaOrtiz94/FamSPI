@@ -76,7 +76,7 @@ export default function NotificationBell() {
  const containerRef = useRef(null);
  const navigate = useNavigate();
  const location = useLocation();
- const containerClassName = "fixed bottom-4 right-4 z-[60] sm:bottom-6 sm:right-6";
+ const containerClassName = "fixed bottom-4 right-4 z-[90] sm:bottom-6 sm:right-6";
 
  useEffect(() => {
  if (!open) return undefined;

@@ -12,7 +12,9 @@
     "test:integration-off": "node scripts/run-tests-integration-off.js",
     "integration:reconcile": "node scripts/integration-reconcile-report.js",
     "clients:backfill:odoo": "node scripts/backfill_odoo_clients.js",
-    "clients:backfill:odoo:db": "node scripts/backfill_odoo_clients_from_db.js"
+    "clients:backfill:odoo:db": "node scripts/backfill_odoo_clients_from_db.js",
+    "attendance:geo:sanitize": "node src/scripts/attendance_maintenance.js --action=geo-sanitize",
+    "attendance:purge:range": "node src/scripts/attendance_maintenance.js --action=purge-range"
   },
   "keywords": [
     "express",
@@ -26,6 +28,7 @@
   "author": "Rafael Ortiz",
   "license": "ISC",
   "dependencies": {
+    "adm-zip": "^0.5.14",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "axios": "^1.13.1",

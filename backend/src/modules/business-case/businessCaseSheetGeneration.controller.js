@@ -1,5 +1,7 @@
 const logger = require("../../config/logger");
 const sheetGenerationService = require("./businessCaseSheetGeneration.service");
+const { generateBusinessCaseExcel } = require("./excelExporter.service");
+const db = require("../../config/db");
 
 function resolveIdempotencyKey(req) {
   const headerKey = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
@@ -46,6 +48,20 @@ async function enqueueSheetGeneration(req, res) {
 
     if (result?.replay) {
       return res.status(result.replayStatus || 202).json(result.replayPayload || { ok: true });
+    }
+
+    // Fail-safe: process one queue batch immediately after enqueue.
+    // This avoids jobs getting stuck when scheduler env is misconfigured in Cloud Run.
+    try {
+      await sheetGenerationService.processPendingJobsBatch({ limit: 1 });
+    } catch (inlineError) {
+      logger.warn(
+        {
+          error: inlineError?.message || String(inlineError),
+          business_case_id: id,
+        },
+        "[BC_SHEET] Inline queue processing after enqueue failed",
+      );
     }
 
     return res.status(202).json(result.responseBody);
@@ -111,10 +127,58 @@ async function getSheetGenerationMetrics(_req, res) {
   }
 }
 
+/**
+ * Fallback: download local Excel when Google Sheets generation fails (REQ-BC-13).
+ * Returns xlsx binary directly — no queue, no Sheets API dependency.
+ */
+async function downloadFallbackExcel(req, res) {
+  try {
+    const { id } = req.params;
+    const { rows } = await db.query(
+      `SELECT * FROM v_business_cases_complete WHERE business_case_id = $1`,
+      [id]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ ok: false, message: 'Business Case no encontrado' });
+    }
+    const buffer = await generateBusinessCaseExcel(rows[0]);
+    const filename = `BC_${id}_fallback_${Date.now()}.xlsx`;
+    sheetGenerationService.recordDocumentVersion({
+      businessCaseId: id,
+      documentType: 'excel_fallback',
+      documentUrl: null,
+      sheetId: null,
+      fileName: filename,
+      canonicalState: rows[0].canonical_state || null,
+      generatedBy: req.user?.id || null,
+      metadata: { source: 'fallback_download' },
+    }).catch(() => null);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Fallback-Excel', 'true');
+    return res.send(buffer);
+  } catch (error) {
+    return sendError(res, error, 'No se pudo generar el Excel local de fallback');
+  }
+}
+
+async function getDocumentVersionHistory(req, res) {
+  try {
+    const { id } = req.params;
+    const limit = Number(req.query.limit) || 20;
+    const response = await sheetGenerationService.getDocumentVersions({ businessCaseId: id, limit });
+    return res.json(response);
+  } catch (error) {
+    return sendError(res, error, 'No se pudo obtener el historial de versiones del documento');
+  }
+}
+
 module.exports = {
   enqueueSheetGeneration,
   getSheetGenerationPreview,
   getSheetGenerationJobStatus,
   getLatestSheetGenerationJobStatus,
   getSheetGenerationMetrics,
+  downloadFallbackExcel,
+  getDocumentVersionHistory,
 };

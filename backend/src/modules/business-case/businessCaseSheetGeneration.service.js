@@ -185,7 +185,7 @@ async function assertBusinessCaseExists(businessCaseId) {
   const { rows } = await db.query(
     `SELECT id, request_type, uses_modern_system, client_name, bc_purchase_type, drive_folder_id,
             bc_equipment_cost,
-            process_code, contract_object, modern_bc_metadata, extra
+            process_code, contract_object, modern_bc_metadata, extra, canonical_state
        FROM equipment_purchase_requests
       WHERE id = $1
       LIMIT 1`,
@@ -1276,6 +1276,16 @@ async function processSingleJob(job) {
       jobId: job.id,
       webAppResponse,
     });
+    await recordDocumentVersion({
+      businessCaseId: job.business_case_id,
+      documentType: "sheets",
+      documentUrl: webAppResponse.url,
+      sheetId: webAppResponse.sheetId,
+      fileName: null,
+      canonicalState: bcRow.canonical_state || null,
+      generatedBy: job.created_by || null,
+      metadata: { job_id: Number(job.id), mapping_version: job.mapping_version },
+    });
 
     return { ok: true, jobId: Number(job.id) };
   } catch (error) {
@@ -1426,6 +1436,49 @@ async function getQueueMetrics() {
   };
 }
 
+async function recordDocumentVersion({ businessCaseId, documentType, documentUrl, sheetId, fileName, canonicalState, generatedBy, metadata = {} }) {
+  try {
+    await db.query(
+      `SELECT insert_bc_document_version($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [businessCaseId, documentType, documentUrl || null, sheetId || null, fileName || null, canonicalState || null, generatedBy || null, JSON.stringify(metadata)],
+    );
+  } catch (error) {
+    logger.warn({ error: error?.message, businessCaseId }, "[BC_SHEET] Failed to record document version (non-fatal)");
+  }
+}
+
+async function getDocumentVersions({ businessCaseId, limit = 20 }) {
+  const safeLimit = Math.max(1, Math.min(50, Number(limit || 20)));
+  const { rows } = await db.query(
+    `SELECT id, business_case_id, version_number, document_type, document_url,
+            sheet_id, file_name, canonical_state, generated_by, generated_at, is_current, metadata
+       FROM bc_document_versions
+      WHERE business_case_id = $1
+      ORDER BY generated_at DESC
+      LIMIT $2`,
+    [businessCaseId, safeLimit],
+  );
+  return {
+    ok: true,
+    data: {
+      business_case_id: businessCaseId,
+      versions: rows.map((r) => ({
+        id: r.id,
+        version_number: Number(r.version_number),
+        document_type: r.document_type,
+        document_url: r.document_url || null,
+        sheet_id: r.sheet_id || null,
+        file_name: r.file_name || null,
+        canonical_state: r.canonical_state || null,
+        generated_by: r.generated_by || null,
+        generated_at: r.generated_at,
+        is_current: Boolean(r.is_current),
+        metadata: r.metadata || {},
+      })),
+    },
+  };
+}
+
 module.exports = {
   enqueueGenerationJob,
   getGenerationPreview,
@@ -1434,4 +1487,6 @@ module.exports = {
   getLatestJobStatus,
   getQueueMetrics,
   ensureQueueTable,
+  recordDocumentVersion,
+  getDocumentVersions,
 };

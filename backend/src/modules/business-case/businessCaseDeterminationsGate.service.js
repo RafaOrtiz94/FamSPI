@@ -26,8 +26,8 @@ function getRoleConfig(businessCase = {}) {
   if (normalizedType === "private_comodato") {
     return {
       type: "private_comodato",
-      editors: ["backoffice_comercial", "jefe_comercial"],
-      notify: ["backoffice_comercial", "jefe_comercial"],
+      editors: ["tecnico", "jefe_comercial"],
+      notify: ["tecnico", "jefe_comercial"],
       label: "Compra privada comodato",
     };
   }

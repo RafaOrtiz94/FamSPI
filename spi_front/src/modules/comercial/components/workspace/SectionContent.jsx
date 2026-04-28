@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { FiLock, FiInfo } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { lockSection, unlockSection } from "../../../../core/api/businessCaseApi";
 import { useUI } from "../../../../core/ui/UIContext";
@@ -229,9 +230,35 @@ const SectionContent = ({
 
  const sectionContent = renderSection();
 
+ // Determine read-only reason for banner (REQ-BC-17)
+ const canonicalState = businessCase?.canonical_state || uiGuidance?.workflowState?.currentState;
+ const isTerminalState = ['CANCELADO', 'RECHAZADO_POR_GERENCIA', 'CERRADO_PARA_APROBACION'].includes(canonicalState);
+ const isStateLocked = sectionRule.isLocked;
+ const isPermissionLocked = !permissions.canEdit && !isInvestments;
+
+ const readOnlyReason = isTerminalState
+   ? `BC en estado "${canonicalState === 'CANCELADO' ? 'Cancelado' : canonicalState === 'RECHAZADO_POR_GERENCIA' ? 'Rechazado por Gerencia' : 'Cerrado para Aprobación'}" — edición deshabilitada`
+   : isStateLocked
+   ? `Sección cerrada por ${sectionRule.lockedByRole || 'un supervisor'} — solo lectura`
+   : isPermissionLocked
+   ? `Tu rol no tiene permiso de edición en esta sección`
+   : null;
+
  if (sectionContent) {
  return (
  <div className="space-y-5 lg:space-y-6">
+ {readOnlyReason && (
+ <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+ <FiLock className="flex-shrink-0 text-slate-500" size={16} />
+ <span>{readOnlyReason}</span>
+ </div>
+ )}
+ {!readOnlyReason && isTerminalState === false && (canonicalState === 'OBSERVADO_POR_VIABILIDAD') && (
+ <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+ <FiInfo className="flex-shrink-0" size={16} />
+ <span>BC observado por viabilidad — revisa los comentarios antes de editar</span>
+ </div>
+ )}
  {(canLock || canUnlock) && (
  <div className="flex flex-wrap items-center justify-end gap-2">
  {canLock && (

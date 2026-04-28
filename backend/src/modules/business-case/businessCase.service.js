@@ -878,7 +878,7 @@ function normalizeConsumptionItemsForComparison(items = []) {
     const key = String(item.key || "").trim();
     if (!key) continue;
 
-    const annualQtyRaw = item.annualQty ?? item.annual_qty ?? 0;
+    const annualQtyRaw = item.annualQty ?? item.annualQuantity ?? item.annual_qty ?? 0;
     const annualQty = Number(annualQtyRaw);
 
     byKey.set(key, {
@@ -1011,7 +1011,7 @@ async function syncConsumptionData(businessCaseId, metadata = {}) {
     item_type: item.type || "consumible",
     source: item.source || "catalog",
     catalog_id: Number.isFinite(Number(item.catalogId)) ? Number(item.catalogId) : null,
-    annual_qty: Math.max(0, Number(item.annualQty || 0)),
+    annual_qty: Math.max(0, Number(item.annualQty ?? item.annualQuantity ?? 0)),
     equipment_id: Number.isFinite(Number(item.equipmentId)) ? Number(item.equipmentId) : null,
     equipment_name: item.equipmentName || null,
   }));

@@ -25,6 +25,7 @@ const { startExpiredReservationsJob } = require("./jobs/checkExpiredReservations
 const { startBusinessCasePreflowExpiryJob } = require("./jobs/businessCasePreflowExpiryScheduler");
 const { startBusinessCaseDeterminationsGateExpiryJob } = require("./jobs/businessCaseDeterminationsGateExpiryScheduler");
 const { startBusinessCaseSheetGenerationQueueJob } = require("./jobs/businessCaseSheetGenerationQueueScheduler");
+const { start: startBcNotificationQueueJob } = require("./jobs/businessCaseNotificationQueueScheduler");
 const { startDatabaseBackupJob } = require("./jobs/databaseBackupToDrive");
 const { startPermisosPendingExpiryJob } = require("./jobs/permisosPendingExpiryScheduler");
 const { startPermisosRecoveryCoordinationExpiryJob } = require("./jobs/permisosRecoveryCoordinationExpiryScheduler");
@@ -34,6 +35,7 @@ const PORT = Number(process.env.PORT) || 8080;
 const ENV = process.env.NODE_ENV || "development";
 const ENABLE_JOBS = process.env.ENABLE_JOBS === "true" || ENV !== "production";
 const JOB_EXECUTION_MODE = ENABLE_JOBS ? "in_process" : "external_scheduler";
+const JOB_BOOTSTRAP_STAGGER_MS = Math.max(1000, Number(process.env.JOBS_BOOTSTRAP_STAGGER_MS || 15000));
 
 console.log(`Intentando escuchar en el puerto ${PORT}...`);
 
@@ -43,15 +45,30 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
 
   if (ENABLE_JOBS) {
     logger.info("Jobs internos habilitados");
-    startReminderScheduler();
-    startExpiredReservationsJob();
-    startBusinessCasePreflowExpiryJob();
-    startBusinessCaseDeterminationsGateExpiryJob();
-    startBusinessCaseSheetGenerationQueueJob();
-    startPermisosPendingExpiryJob();
-    startPermisosRecoveryCoordinationExpiryJob();
-    startDatabaseBackupJob();
-    startExternalCaseSyncJob();
+    const jobs = [
+      { name: "mantenimiento_reminder", fn: startReminderScheduler },
+      { name: "expired_reservations", fn: startExpiredReservationsJob },
+      { name: "bc_preflow_expiry", fn: startBusinessCasePreflowExpiryJob },
+      { name: "bc_determinations_gate_expiry", fn: startBusinessCaseDeterminationsGateExpiryJob },
+      { name: "bc_sheet_generation_queue", fn: startBusinessCaseSheetGenerationQueueJob },
+      { name: "bc_notification_queue", fn: startBcNotificationQueueJob },
+      { name: "permisos_pending_expiry", fn: startPermisosPendingExpiryJob },
+      { name: "permisos_recovery_coordination_expiry", fn: startPermisosRecoveryCoordinationExpiryJob },
+      { name: "db_backup", fn: startDatabaseBackupJob },
+      { name: "external_case_sync", fn: startExternalCaseSyncJob },
+    ];
+
+    jobs.forEach((job, index) => {
+      const delayMs = index * JOB_BOOTSTRAP_STAGGER_MS;
+      setTimeout(() => {
+        try {
+          logger.info({ job: job.name, delay_ms: delayMs }, "Iniciando job interno");
+          job.fn();
+        } catch (error) {
+          logger.error({ job: job.name, error: error?.message || String(error) }, "Error iniciando job interno");
+        }
+      }, delayMs);
+    });
   } else {
     logger.info("Jobs internos deshabilitados; usar scheduler externo");
   }

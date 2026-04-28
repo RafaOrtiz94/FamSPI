@@ -546,3 +546,28 @@ export const updateAutosaveFeatureFlags = async (payload) => {
  const { data } = await api.put("/business-case/feature-flags/autosave", payload);
  return data.data || data;
 };
+
+export const getBusinessCaseStateHistory = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/state-history`);
+ return data;
+};
+
+export const getBusinessCaseSlaStatus = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/sla`);
+ return data;
+};
+
+export const getBusinessCaseSectionCompleteness = async (businessCaseId) => {
+ const { data } = await api.get(`/business-case/${businessCaseId}/section-completeness`);
+ return data;
+};
+
+export const emergencyTransition = async (businessCaseId, toState, reason) => {
+ const { data } = await api.post(`/business-case/${businessCaseId}/orchestrator/emergency-transition`, { toState, reason });
+ return data;
+};
+
+export const getBusinessCaseDocumentVersions = async (businessCaseId, limit = 20) => {
+ const { data } = await api.get(`/business-cases/${businessCaseId}/sheets/document-versions`, { params: { limit } });
+ return data;
+};

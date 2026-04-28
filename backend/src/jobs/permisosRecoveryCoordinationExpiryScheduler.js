@@ -2,6 +2,7 @@ const logger = require("../config/logger");
 const { processExpiredRecoveryCoordinations } = require("../modules/permisos/permisos.service");
 
 const DEFAULT_INTERVAL_MINUTES = Number(process.env.PERMISOS_RECOVERY_EXPIRY_INTERVAL_MINUTES || 60);
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 async function runOnce() {
   const result = await processExpiredRecoveryCoordinations();
@@ -19,7 +20,7 @@ function startPermisosRecoveryCoordinationExpiryJob() {
   logger.info(
     `Permisos recovery coordination expiry job configurado cada ${Math.round(everyMs / 60000)} min`
   );
-  if (process.env.ENABLE_JOBS === "true") {
+  if (process.env.ENABLE_JOBS === "true" && SHOULD_RUN_ON_START) {
     runOnce().catch((error) => logger.error({ error }, "Error inicial recovery coordination expiry job"));
   }
   interval = setInterval(() => {

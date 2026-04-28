@@ -53,6 +53,25 @@ const determinationsCatalogWriteRoles = [
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
+// Audit middleware factory for sensitive section access (REQ-BC-12)
+const auditAccessService = require('./businessCaseSectionAccessAudit.service');
+const auditSection = (section, accessType = 'read') => (req, _res, next) => {
+  const businessCaseId = req.params.id;
+  const userId = req.user?.id;
+  if (businessCaseId && userId) {
+    auditAccessService.logAccess({
+      businessCaseId,
+      userId,
+      userRole: req.user?.role,
+      section,
+      accessType,
+      ipAddress: req.ip,
+      userAgent: req.headers?.['user-agent']
+    });
+  }
+  next();
+};
+
 router.use((req, res, next) => {
   const startedAt = Date.now();
   res.on("finish", () => {
@@ -150,6 +169,8 @@ router.post(
 router.put("/:id/economic-data", verifyToken, requireRole(businessCaseRoles), ctrl.updateEconomicData);
 router.get("/:id/sheets/preview", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationPreview);
 router.post("/:id/sheets/generate", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.enqueueSheetGeneration);
+router.get("/:id/sheets/fallback-excel", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.downloadFallbackExcel);
+router.get("/:id/sheets/document-versions", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getDocumentVersionHistory);
 router.get("/:id/sheets/jobs/latest", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getLatestSheetGenerationJobStatus);
 router.get("/:id/sheets/jobs/:jobId", verifyToken, requireRole(businessCaseRoles), sheetGenerationCtrl.getSheetGenerationJobStatus);
 router.get("/sheets/metrics", verifyToken, requireRole(adminRoles), sheetGenerationCtrl.getSheetGenerationMetrics);
@@ -168,11 +189,11 @@ router.post(
   ctrl.resolvePreflowReopen,
 );
 
-// Investment routes
-router.get("/:id/investments", verifyToken, requireRole(businessCaseRoles), ctrl.getInvestments);
-router.post("/:id/investments", verifyToken, requireRole(businessCaseRoles), ctrl.addInvestment);
-router.put("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), ctrl.updateInvestment);
-router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), ctrl.deleteInvestment);
+// Investment routes (audited — REQ-BC-12)
+router.get("/:id/investments", verifyToken, requireRole(businessCaseRoles), auditSection('investments', 'read'), ctrl.getInvestments);
+router.post("/:id/investments", verifyToken, requireRole(businessCaseRoles), auditSection('investments', 'write'), ctrl.addInvestment);
+router.put("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), auditSection('investments', 'write'), ctrl.updateInvestment);
+router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRoles), auditSection('investments', 'write'), ctrl.deleteInvestment);
 router.get("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.getInvestmentCatalog);
 router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.createInvestmentCatalogItem);
 router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
@@ -219,6 +240,12 @@ router.get("/:id/deliveries", verifyToken, requireRole(businessCaseRoles), ctrl.
   router.post("/:id/orchestrator/validate", verifyToken, requireRole(businessCaseRoles), ctrl.validateBC);
   router.post("/:id/orchestrator/promote-stage", verifyToken, requireRole(businessCaseRoles), ctrl.promoteStage);
   router.get("/:id/orchestrator/complete", verifyToken, requireRole(businessCaseRoles), ctrl.getCompleteBCMaster);
+  router.post("/:id/orchestrator/emergency-transition", verifyToken, requireRole(["gerencia_general"]), ctrl.emergencyTransition);
+  router.get("/:id/state-history", verifyToken, requireRole(businessCaseRoles), ctrl.getStateHistory);
+  router.get("/:id/section-access-log", verifyToken, requireRole(["admin", "gerencia", "gerencia_general", "jefe_comercial"]), ctrl.getSectionAccessLog);
+  router.get("/:id/section-completeness", verifyToken, requireRole(businessCaseRoles), ctrl.getSectionCompleteness);
+  router.get("/:id/sla", verifyToken, requireRole(businessCaseRoles), ctrl.getBcSlaStatus);
+  router.get("/sla/at-risk", verifyToken, requireRole(["admin", "gerencia", "gerencia_general", "jefe_comercial", "jefe_operaciones"]), ctrl.getSlaAtRisk);
 
   // Equipment compatibility routes (NEW - Automatic backup selection)
   router.get("/equipment/:equipmentId/compatibility/backups", verifyToken, requireRole(businessCaseRoles), ctrl.getCompatibleBackupCandidates);

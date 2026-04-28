@@ -12,16 +12,25 @@ import {
   marcarSalida,
   marcarSalidaImprevista,
   marcarRegresoImprevisto,
+  marcarLlegadaImprevista,
+  marcarRetornoImprevisto,
+  marcarSalidaOficina,
+  marcarEntradaOficina,
+  marcarSalidaCampo,
+  marcarEntradaCampo,
+  marcarLlegadaDestino,
+  marcarCierreViaje,
   marcarVisitaEntrada,
   marcarVisitaSalida,
-  registerException,
-  updateExceptionStatus,
-  syncAttendanceLocation,
+  getTodayAttendance,
+  getActiveException,
 } from "../../../core/api/attendanceApi";
 import { getPreciseLocation } from "../../../shared/utils/preciseGeolocation";
 import { fetchClients } from "../../../core/api/clientsApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
+import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
+import { isOperationalFlow } from "../../../core/ui/attendanceFlowUtils";
 
 const PRECISE_LOCATION_OPTIONS = Object.freeze({
   desiredAccuracyMeters: 40,
@@ -32,11 +41,34 @@ const PRECISE_LOCATION_OPTIONS = Object.freeze({
 });
 
 const getActionLocation = async () => {
-  const locationPromise = getPreciseLocation(PRECISE_LOCATION_OPTIONS).then(
-    (result) => result?.location || null
-  );
-  const timeoutPromise = new Promise((resolve) => setTimeout(() => resolve(null), 4200));
-  return Promise.race([locationPromise, timeoutPromise]);
+  let lastError = null;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      const result = await getPreciseLocation(PRECISE_LOCATION_OPTIONS);
+      const latitude = Number(result?.latitude);
+      const longitude = Number(result?.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Sin coordenadas validas");
+      }
+      if (Math.abs(latitude) <= 0.0005 && Math.abs(longitude) <= 0.0005) {
+        throw new Error("Coordenadas invalidas");
+      }
+      return {
+        latitude,
+        longitude,
+        accuracy: Number(result?.accuracy || 0),
+        timestamp: Number(result?.timestamp || Date.now()),
+        source: result?.source || "gps",
+      };
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+    }
+  }
+
+  const finalError = new Error("Ubicacion obligatoria. No se pudo completar la marcacion por timeout de GPS.");
+  finalError.cause = lastError;
+  throw finalError;
 };
 
 const resolveShortcutParam = (params, keys = []) => {
@@ -54,7 +86,31 @@ const parseActionParams = (search) => {
     prospectName: resolveShortcutParam(params, ["prospect_name", "prospecto", "prospectName"]),
     description: resolveShortcutParam(params, ["motivo", "descripcion", "description"]),
     observations: resolveShortcutParam(params, ["observaciones", "observacion", "observations", "obs"]),
+    returnToOffice: ["1", "true", "si", "yes"].includes(
+      resolveShortcutParam(params, ["return_to_office", "retorno_oficina", "returnToOffice"]).toLowerCase()
+    ),
   };
+};
+
+const normalizeText = (value) =>
+  String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+
+const buildClientDisplayLabel = (client = {}) => {
+  const rawName = String(
+    client?.commercial_name ||
+    client?.business_name ||
+    client?.name ||
+    client?.nombre ||
+    client?.razon_social ||
+    ""
+  ).trim();
+  const safeName = rawName.length >= 3 ? rawName : `Cliente #${client?.id || ""}`;
+  const city = String(client?.city || client?.ciudad || "").trim();
+  return city ? `${safeName} - ${city} (#${client?.id})` : `${safeName} (#${client?.id})`;
 };
 
 const AttendanceAction = () => {
@@ -70,6 +126,7 @@ const AttendanceAction = () => {
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
+  const [manualClientSearch, setManualClientSearch] = useState("");
   const [manualProspectName, setManualProspectName] = useState("");
   const [manualReason, setManualReason] = useState("");
   const [manualObservations, setManualObservations] = useState("");
@@ -77,6 +134,54 @@ const AttendanceAction = () => {
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
   const processedRef = useRef(false);
   const actionParams = parseActionParams(location.search);
+  const ensureExceptionFlow = async (expectedFlow) => {
+    const activeResponse = await getActiveException();
+    const activeException = activeResponse?.data;
+    const operationalFlow = isOperationalFlow(activeException);
+
+    if (expectedFlow === "operational") {
+      if (!activeException) {
+        throw new Error("No tienes una salida operacional activa para cerrar.");
+      }
+      if (!operationalFlow) {
+        throw new Error("La salida activa actual es inesperada. Usa el flujo de regreso imprevisto.");
+      }
+      return;
+    }
+
+    if (!activeException) {
+      throw new Error("No tienes una salida inesperada activa para completar este paso.");
+    }
+    if (operationalFlow) {
+      throw new Error("La salida activa actual es operacional. Usa el flujo operacional para continuar.");
+    }
+  };
+
+  const resolveVisitExitPayload = async (params = {}) => {
+    const directClientId = params.clientId ? Number(params.clientId) : null;
+    const directProspectName = String(params.prospectName || "").trim();
+    if (directClientId || directProspectName) {
+      return {
+        client_id: Number.isFinite(directClientId) && directClientId > 0 ? directClientId : undefined,
+        prospect_name: directProspectName || undefined,
+      };
+    }
+
+    try {
+      const today = await getTodayAttendance();
+      const activeVisit = today?.active_field_visit || null;
+      const activeClientId = Number(activeVisit?.client_id);
+      const activeProspectName = String(activeVisit?.prospect_name || "").trim();
+
+      return {
+        client_id: Number.isFinite(activeClientId) && activeClientId > 0 ? activeClientId : undefined,
+        prospect_name: activeProspectName || undefined,
+      };
+    } catch {
+      // Allow backend auto-resolution of latest active visit.
+      return {};
+    }
+  };
 
   const ACTION_MAP = {
     entrada: {
@@ -144,21 +249,30 @@ const AttendanceAction = () => {
       icon: <FiClock className="text-rose-500" />,
     },
     "regreso-imprevisto": {
-      fn: async (currentLoc) => marcarRegresoImprevisto(currentLoc),
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("unexpected");
+        return marcarRegresoImprevisto(currentLoc);
+      },
       label: "Entrada inesperada",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-rose-500" />,
     },
     "llegada-imprevista": {
-      fn: async (currentLoc) => updateExceptionStatus("ON_SITE", currentLoc),
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("unexpected");
+        return marcarLlegadaImprevista(currentLoc);
+      },
       label: "Llegada al lugar inesperado",
       syncTarget: "onsite",
       requiresParams: false,
       icon: <FiClock className="text-rose-500" />,
     },
     "retorno-imprevisto": {
-      fn: async (currentLoc) => updateExceptionStatus("RETURNING", currentLoc),
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("unexpected");
+        return marcarRetornoImprevisto(currentLoc);
+      },
       label: "Salida del lugar (retorno oficina)",
       syncTarget: "returning",
       requiresParams: false,
@@ -166,14 +280,17 @@ const AttendanceAction = () => {
     },
     "salida-oficina": {
       fn: async (currentLoc, params) =>
-        registerException("otro", params.description || "Salida de oficina o viaje via atajo", currentLoc),
+        marcarSalidaOficina(currentLoc, params.description || "Salida de oficina o viaje via atajo"),
       label: "Salida oficina o viaje",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-oficina": {
-      fn: async (currentLoc) => updateExceptionStatus("COMPLETED", currentLoc),
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return marcarEntradaOficina(currentLoc);
+      },
       label: "Entrada oficina o viaje",
       syncTarget: "return",
       requiresParams: false,
@@ -181,18 +298,41 @@ const AttendanceAction = () => {
     },
     "salida-campo": {
       fn: async (currentLoc, params) =>
-        registerException("otro", params.description || "Salida de campo via atajo", currentLoc),
+        marcarSalidaCampo(currentLoc, params.description || "Salida de campo via atajo"),
       label: "Salida de campo",
       syncTarget: "start",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
     },
     "entrada-campo": {
-      fn: async (currentLoc) => updateExceptionStatus("COMPLETED", currentLoc),
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return marcarEntradaCampo(currentLoc);
+      },
       label: "Entrada de campo",
       syncTarget: "return",
       requiresParams: false,
       icon: <FiClock className="text-amber-500" />,
+    },
+    "llegada-destino": {
+      fn: async (currentLoc) => {
+        await ensureExceptionFlow("operational");
+        return marcarLlegadaDestino(currentLoc);
+      },
+      label: "Llegada a destino",
+      syncTarget: "arrival",
+      requiresParams: false,
+      icon: <FiMapPin className="text-amber-500" />,
+    },
+    "cierre-viaje": {
+      fn: async (currentLoc, params) => {
+        await ensureExceptionFlow("operational");
+        return marcarCierreViaje(currentLoc, params.description || "Cierre de viaje via atajo");
+      },
+      label: "Cierre de viaje",
+      syncTarget: "return",
+      requiresParams: false,
+      icon: <FiCheckCircle className="text-amber-500" />,
     },
     "cliente-entrada": {
       fn: async (currentLoc, params) => {
@@ -230,36 +370,32 @@ const AttendanceAction = () => {
     },
     "cliente-salida": {
       fn: async (currentLoc, params) => {
-        if (!params.clientId && !params.prospectName) {
-          throw new Error("Para salida cliente debes enviar client_id o prospect_name en la URL.");
-        }
+        const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
-          client_id: params.clientId ? Number(params.clientId) : undefined,
-          prospect_name: params.prospectName || undefined,
+          ...visitScopePayload,
           observations: params.observations || params.description || undefined,
+          return_to_office: params.returnToOffice,
         });
       },
       label: "Salida cliente",
       syncTarget: "departure",
-      requiresParams: true,
+      requiresParams: false,
       icon: <FiClock className="text-violet-500" />,
     },
     "salida-cliente": {
       fn: async (currentLoc, params) => {
-        if (!params.clientId && !params.prospectName) {
-          throw new Error("Para salida cliente debes enviar client_id o prospect_name en la URL.");
-        }
+        const visitScopePayload = await resolveVisitExitPayload(params);
         return marcarVisitaSalida({
           location: currentLoc,
-          client_id: params.clientId ? Number(params.clientId) : undefined,
-          prospect_name: params.prospectName || undefined,
+          ...visitScopePayload,
           observations: params.observations || params.description || undefined,
+          return_to_office: params.returnToOffice,
         });
       },
       label: "Salida cliente",
       syncTarget: "departure",
-      requiresParams: true,
+      requiresParams: false,
       icon: <FiClock className="text-violet-500" />,
     },
   };
@@ -274,18 +410,46 @@ const AttendanceAction = () => {
       prospectName: actionParams.prospectName || manualProspectName,
       description: actionParams.description || manualReason,
       observations: actionParams.observations || manualObservations,
+      returnToOffice: actionParams.returnToOffice,
     }),
     [
       actionParams.clientId,
       actionParams.prospectName,
       actionParams.description,
       actionParams.observations,
+      actionParams.returnToOffice,
       manualClientId,
       manualProspectName,
       manualReason,
       manualObservations,
     ]
   );
+
+  const filteredClients = useMemo(() => {
+    const term = normalizeText(manualClientSearch);
+    if (!term) return availableClients.slice(0, 80);
+    return availableClients.filter((client) => {
+      const label = normalizeText(buildClientDisplayLabel(client));
+      const idText = String(client?.id || "");
+      return label.includes(term) || idText.includes(term);
+    }).slice(0, 120);
+  }, [availableClients, manualClientSearch]);
+
+  const resolveClientIdFromSearch = (value) => {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    if (/^\d+$/.test(raw)) return raw;
+
+    const normalized = normalizeText(raw);
+    const exact = availableClients.find((client) => normalizeText(buildClientDisplayLabel(client)) === normalized);
+    if (exact?.id) return String(exact.id);
+
+    const startsWith = availableClients.find((client) =>
+      normalizeText(buildClientDisplayLabel(client)).startsWith(normalized)
+    );
+    if (startsWith?.id) return String(startsWith.id);
+    return "";
+  };
 
   useEffect(() => {
     if (!needsManualClientStep || !user || authLoading) return;
@@ -325,27 +489,11 @@ const AttendanceAction = () => {
       processedRef.current = true;
       setStatus("geolocating");
       
-      let currentLoc = null;
       try {
-        currentLoc = await getActionLocation();
-      } catch (err) {
-        console.warn("Geolocalizacion fallida o denegada:", err.message);
-      }
-
-      setStatus("processing");
-      try {
+        const currentLoc = await getActionLocation();
+        setStatus("processing");
         const response = await config.fn(currentLoc, effectiveActionParams);
         if (response.ok) {
-          if (config.syncTarget && !currentLoc) {
-            Promise.resolve()
-              .then(() => getPreciseLocation(PRECISE_LOCATION_OPTIONS))
-              .then((result) => {
-                if (!result?.location) return null;
-                return syncAttendanceLocation(config.syncTarget, result.location);
-              })
-              .catch(() => null);
-          }
-
           setStatus("success");
           setMessage(response.message || `${config.label} registrada correctamente.`);
           showToast(response.message || `${config.label} registrada`, "success");
@@ -358,15 +506,38 @@ const AttendanceAction = () => {
           throw new Error(response.message || "Error al procesar la solicitud.");
         }
       } catch (err) {
+        const statusCode = Number(err?.response?.status || 0);
+        const backendCode = String(err?.response?.data?.code || "").trim();
+        const backendMessage = String(err?.response?.data?.message || "").trim();
+        const isClientExitAction = action === "cliente-salida" || action === "salida-cliente";
+        if (
+          isClientExitAction &&
+          statusCode === 404 &&
+          (
+            backendCode === "NO_ACTIVE_VISIT" ||
+            /no se encontr[oó] una visita activa/i.test(backendMessage)
+          )
+        ) {
+          setStatus("success");
+          setMessage("La salida cliente ya estaba cerrada o no tenía una visita activa pendiente.");
+          setErrorDetails("");
+          showToast("No había visita activa pendiente. Estado sincronizado.", "info");
+          setTimeout(() => {
+            navigate("/dashboard", { replace: true });
+          }, 2500);
+          return;
+        }
+        const info = getAttendanceErrorInfo(err, "No se pudo completar la marcacion.", "error");
         setStatus("error");
         setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
-        setErrorDetails(err.response?.data?.message || err.message || "Error desconocido");
-        showToast(err.response?.data?.message || err.message || "Error de red", "error");
+        setErrorDetails(info.message || "Error desconocido");
+        showToast(info.message || "Error de red", info.type || "error");
       }
     };
 
     performAction();
   }, [
+    action,
     authLoading,
     user,
     config,
@@ -415,32 +586,37 @@ const AttendanceAction = () => {
           </p>
 
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Cliente asignado
+            Buscar cliente por coincidencia
           </label>
-          <select
-            value={manualClientId}
+          <input
+            type="text"
+            value={manualClientSearch}
+            list="attendance-shortcut-clients-list"
             onChange={(e) => {
-              setManualClientId(e.target.value);
-              if (e.target.value) setManualProspectName("");
+              const value = e.target.value;
+              setManualClientSearch(value);
+              const resolvedId = resolveClientIdFromSearch(value);
+              setManualClientId(resolvedId);
+              if (resolvedId) setManualProspectName("");
             }}
-            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-4"
+            placeholder={loadingClients ? "Cargando clientes..." : "Escribe nombre, ciudad o ID del cliente"}
+            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 mb-2"
             disabled={loadingClients}
-          >
-            <option value="">{loadingClients ? "Cargando clientes..." : "Selecciona un cliente"}</option>
-            {availableClients.map((client) => {
-              const label =
-                client?.name ||
-                client?.business_name ||
-                client?.nombre ||
-                client?.razon_social ||
-                `Cliente ${client?.id}`;
-              return (
-                <option key={client.id} value={String(client.id)}>
-                  {label}
-                </option>
-              );
-            })}
-          </select>
+          />
+          <datalist id="attendance-shortcut-clients-list">
+            {filteredClients.map((client) => (
+              <option key={client.id} value={buildClientDisplayLabel(client)}>{buildClientDisplayLabel(client)}</option>
+            ))}
+          </datalist>
+          {manualClientId ? (
+            <p className="mb-4 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+              Cliente seleccionado: #{manualClientId}
+            </p>
+          ) : (
+            <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+              {loadingClients ? "Cargando clientes..." : "Selecciona una coincidencia de la lista sugerida."}
+            </p>
+          )}
 
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
             O prospecto manual (si no existe en la lista)

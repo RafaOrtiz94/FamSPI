@@ -28,6 +28,18 @@ function Assert-Command {
   }
 }
 
+function Invoke-GcloudChecked {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Args
+  )
+
+  & gcloud @Args
+  if ($LASTEXITCODE -ne 0) {
+    throw "gcloud fallo (exit $LASTEXITCODE): gcloud $($Args -join ' ')"
+  }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $backendPath = Join-Path $repoRoot "backend"
 $image = "us-central1-docker.pkg.dev/$ProjectId/cloud-run-source-deploy/${ServiceName}:${ImageTag}"
@@ -41,13 +53,15 @@ if (-not (Test-Path (Join-Path $backendPath "Dockerfile"))) {
 Push-Location $backendPath
 try {
   Write-Step "Validando entorno" 5
-  gcloud config set project $ProjectId | Out-Null
+  Invoke-GcloudChecked -Args @("config", "set", "project", $ProjectId)
 
   if (-not $SkipBuild) {
     Write-Step "Construyendo imagen $image" 20
-    & gcloud builds submit `
-      --tag $image `
-      --project $ProjectId
+    Invoke-GcloudChecked -Args @(
+      "builds", "submit",
+      "--tag", $image,
+      "--project", $ProjectId
+    )
   }
 
   Write-Step "Desplegando servicio $ServiceName" 65
@@ -61,6 +75,11 @@ try {
     "--memory", "512Mi",
     "--cpu", "1",
     "--set-env-vars", "NODE_ENV=production",
+    "--set-env-vars", "ENABLE_JOBS=true",
+    "--set-env-vars", "JOBS_RUN_ON_START=false",
+    "--set-env-vars", "JOBS_BOOTSTRAP_STAGGER_MS=20000",
+    "--set-env-vars", "DB_POOL_MAX=20",
+    "--set-env-vars", "DB_CONN_TIMEOUT_MS=15000",
     "--set-env-vars", "DB_SSL=true",
     "--set-env-vars", "FRONTEND_URL=https://fam-spi-front.web.app",
     "--set-env-vars", "GOOGLE_REDIRECT_URI=https://spi-backend-983537733948.us-central1.run.app/api/v1/auth/google/callback",
@@ -105,13 +124,16 @@ try {
     "--set-secrets", "/secrets/gsa-key.json=GSA_KEY_JSON:latest"
   )
 
-  & gcloud @deployArgs
+  Invoke-GcloudChecked -Args $deployArgs
 
   Write-Step "Verificando revision activa" 90
   $serviceInfo = & gcloud run services describe $ServiceName `
     --region $Region `
     --project $ProjectId `
     --format "value(status.latestReadyRevisionName,status.url)"
+  if ($LASTEXITCODE -ne 0) {
+    throw "No se pudo describir el servicio desplegado"
+  }
 
   Write-Step "Completado" 100
   Write-Host ""

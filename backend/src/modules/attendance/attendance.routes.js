@@ -8,7 +8,16 @@ const router = require("express").Router();
 const rateLimit = require("express-rate-limit");
 const { verifyToken } = require("../../middlewares/auth");
 const controller = require("./attendance.controller");
-const { requireAttendanceReportAccess } = require("./attendance.auth");
+const { requireAttendanceReportAccess, hasReportingAccess } = require("./attendance.auth");
+
+const requireAttendanceOpsAccess = (req, res, next) => {
+  if (hasReportingAccess(req.user || {})) return next();
+  return res.status(403).json({
+    ok: false,
+    code: "ATTENDANCE_OPS_FORBIDDEN",
+    message: "No tienes permisos para consultar salud operacional de asistencia",
+  });
+};
 
 const attendanceReportLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -27,6 +36,7 @@ router.post("/clock-in", verifyToken, controller.clockIn);
 router.post("/clock-out-lunch", verifyToken, controller.clockOutLunch);
 router.post("/clock-in-lunch", verifyToken, controller.clockInLunch);
 router.post("/clock-out", verifyToken, controller.clockOut);
+router.post("/late-justification", verifyToken, controller.justifyLateArrival);
 
 // Spanish aliases for iPhone shortcuts
 router.post("/marcar/entrada", verifyToken, controller.clockIn);
@@ -43,10 +53,15 @@ router.post("/marcar/cliente-salida", verifyToken, controller.clockOutField);
 // 🚨 Unexpected Exit Aliases (iPhone Shortcut compatible)
 router.post("/marcar/salida-imprevista", verifyToken, controller.clockOutUnexpected);
 router.post("/marcar/regreso-imprevisto", verifyToken, controller.clockInUnexpected);
-router.post("/marcar/salida-oficina", verifyToken, controller.clockOutUnexpected);
-router.post("/marcar/entrada-oficina", verifyToken, controller.clockInUnexpected);
-router.post("/marcar/salida-campo", verifyToken, controller.clockOutUnexpected);
-router.post("/marcar/entrada-campo", verifyToken, controller.clockInUnexpected);
+router.post("/marcar/entrada-imprevista", verifyToken, controller.clockInUnexpected);
+router.post("/marcar/llegada-imprevista", verifyToken, controller.clockUnexpectedArrival);
+router.post("/marcar/retorno-imprevisto", verifyToken, controller.clockUnexpectedReturn);
+router.post("/marcar/salida-oficina", verifyToken, controller.clockOutOperational);
+router.post("/marcar/entrada-oficina", verifyToken, controller.clockInOperational);
+router.post("/marcar/salida-campo", verifyToken, controller.clockOutOperational);
+router.post("/marcar/entrada-campo", verifyToken, controller.clockInOperational);
+router.post("/marcar/llegada-destino", verifyToken, controller.clockInDestino);
+router.post("/marcar/cierre-viaje", verifyToken, controller.clockCloseTrip);
 
 router.post("/location-sync", verifyToken, controller.syncLocation);
 router.post("/exception", verifyToken, controller.registerException);
@@ -67,6 +82,7 @@ router.get(
   attendanceReportLimiter,
   controller.getRange
 );
+router.get("/operational-health", verifyToken, requireAttendanceOpsAccess, controller.getOperationalHealth);
 
 // PDF generation
 router.get("/pdf/:userId", verifyToken, requireAttendanceReportAccess("param", { allowAll: true }), controller.generatePDF);

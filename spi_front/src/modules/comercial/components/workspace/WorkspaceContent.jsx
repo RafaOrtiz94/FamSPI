@@ -9,7 +9,8 @@ const WorkspaceContent = ({
  businessCase,
  uiGuidance,
  onSectionSelect,
- onSectionSave
+ onSectionSave,
+ sectionCompleteness = {}
 }) => {
  const workspace = useBusinessCaseWorkspaceOptional();
  const resolvedSelectedSection = selectedSection ?? workspace?.selectedSection;
@@ -17,6 +18,7 @@ const WorkspaceContent = ({
  const resolvedGuidance = uiGuidance ?? workspace?.uiGuidance;
  const resolvedSelect = onSectionSelect ?? workspace?.setSelectedSection;
  const resolvedSave = onSectionSave ?? workspace?.onSectionSave;
+ const resolvedCompleteness = sectionCompleteness ?? workspace?.sectionCompleteness ?? {};
  const observationData = resolvedGuidance?.observationData;
 
  return (
@@ -32,6 +34,7 @@ const WorkspaceContent = ({
  uiGuidance={resolvedGuidance}
  observationData={observationData}
  onSectionSelect={resolvedSelect}
+ sectionCompleteness={resolvedCompleteness}
  />
  </div>
 

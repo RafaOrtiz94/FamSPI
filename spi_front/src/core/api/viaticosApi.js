@@ -34,3 +34,68 @@ export const getViaticoReport = async (viaticoId) => {
  const { data } = await api.get(`/viaticos/${viaticoId}/report`);
  return data?.data || data;
 };
+
+export const uploadViaticoInvoicesXml = async (viaticoId, payload) => {
+  const { data } = await api.post(`/viaticos/${viaticoId}/invoices/xml`, payload);
+  return data?.data || [];
+};
+
+export const uploadViaticoInvoicesZip = async (viaticoId, payload) => {
+  const { data } = await api.post(`/viaticos/${viaticoId}/invoices/zip`, payload);
+  return data?.data || data;
+};
+
+export const patchViaticoInvoice = async (invoiceId, payload) => {
+ const { data } = await api.patch(`/viaticos/invoices/${invoiceId}`, payload);
+ return data?.data || data;
+};
+
+export const upsertViaticoZone = async (payload) => {
+ const { data } = await api.post("/viaticos/config/zones", payload);
+ return data?.data || data;
+};
+
+export const upsertViaticoFixedProfile = async (payload) => {
+ const { data } = await api.post("/viaticos/config/fixed-profiles", payload);
+ return data?.data || data;
+};
+
+export const listViaticoFixedProfiles = async (params = {}) => {
+ const { data } = await api.get("/viaticos/config/fixed-profiles", { params });
+ return data?.data || [];
+};
+
+export const updateViaticoPolicy = async (payload) => {
+ const { data } = await api.patch("/viaticos/config/policy", payload);
+ return data?.data || data;
+};
+
+export const getViaticoSummaryReport = async (params = {}) => {
+ const { data } = await api.get("/viaticos/reports/summary", { params });
+ return data?.data || { rows: [] };
+};
+
+export const getViaticoAtsXml = async (params = {}) => {
+ const { data } = await api.get("/viaticos/ats/xml", { params });
+ return data?.data || data;
+};
+
+export const syncViaticoSri = async (payload) => {
+ const { data } = await api.post("/viaticos/sync-sri", payload);
+ return data?.data || data;
+};
+
+export const uploadViaticoInvoicesTxt = async (viaticoId, txtContent) => {
+ const { data } = await api.post(`/viaticos/${viaticoId}/invoices/txt`, { txt_content: txtContent });
+ return data?.data || data;
+};
+
+export const deleteViaticoInvoice = async (invoiceId) => {
+ const { data } = await api.delete(`/viaticos/invoices/${invoiceId}`);
+ return data?.data || data;
+};
+
+export const listViaticoInvoices = async (viaticoId) => {
+ const { data } = await api.get(`/viaticos/${viaticoId}/invoices`);
+ return data?.data || [];
+};

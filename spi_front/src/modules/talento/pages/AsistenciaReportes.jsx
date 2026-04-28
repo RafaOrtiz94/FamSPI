@@ -10,6 +10,7 @@ import { DashboardLayout, DashboardHeader } from "../../../core/ui/layouts/Dashb
 import { getUsers } from "../../../core/api/usersApi";
 import { downloadAttendancePDF } from "../../../core/api/attendanceApi";
 import AttendanceReportsSummaryCards from "../components/attendance-reports/AttendanceReportsSummaryCards";
+import AttendanceOvertimeSummary from "../components/attendance-reports/AttendanceOvertimeSummary";
 import AttendanceReportsEmptyState from "../components/attendance-reports/AttendanceReportsEmptyState";
 import AttendanceReportsTableView from "../components/attendance-reports/AttendanceReportsTableView";
 import AttendanceReportsLoadingState from "../components/attendance-reports/AttendanceReportsLoadingState";
@@ -37,21 +38,34 @@ const OFFICIAL_PDF_PERIOD_OPTIONS = [
  { label: "Anual (12 meses)", value: "annual" },
 ];
 
+const getEcuadorDateParts = (baseDate = new Date()) => {
+ const parts = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/Guayaquil",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+ }).formatToParts(baseDate);
+
+ const map = parts.reduce((acc, part) => {
+  if (part.type !== "literal") acc[part.type] = part.value;
+  return acc;
+ }, {});
+
+ return {
+  year: map.year,
+  month: map.month,
+  day: map.day,
+ };
+};
+
 const getTodayInputDate = () => {
- const today = new Date();
- const year = today.getFullYear();
- const month = String(today.getMonth() + 1).padStart(2, "0");
- const day = String(today.getDate()).padStart(2, "0");
+ const { year, month, day } = getEcuadorDateParts();
  return `${year}-${month}-${day}`;
 };
 
 const getMonthStartInputDate = () => {
- const today = new Date();
- const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
- const year = firstDay.getFullYear();
- const month = String(firstDay.getMonth() + 1).padStart(2, "0");
- const day = String(firstDay.getDate()).padStart(2, "0");
- return `${year}-${month}-${day}`;
+ const { year, month } = getEcuadorDateParts();
+ return `${year}-${month}-01`;
 };
 
 const getIsoWeekInputValue = (baseDate = new Date()) => {
@@ -161,6 +175,8 @@ const parseCoord = (value) => {
  const lat = Number(latRaw?.trim());
  const lng = Number(lngRaw?.trim());
  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+ if (Math.abs(lat) <= 0.0005 && Math.abs(lng) <= 0.0005) return null;
+ if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
  return { lat, lng };
 };
 
@@ -210,16 +226,22 @@ const parseFieldEventType = (value) =>
   .toLowerCase()
   .replace(/[\s-]+/g, "_");
 
+const isValidGpsCoordinate = (lat, lng) => {
+ if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+ if (Math.abs(lat) <= 0.0005 && Math.abs(lng) <= 0.0005) return false;
+ return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+};
+
 const buildMapGeoPoints = (row = {}) => {
  const basePoints = Array.isArray(row?.geo_points) ? row.geo_points : [];
- const normalizedBase = basePoints
-  .map((point = {}) => {
-   const lat = Number(point?.lat);
-   const lng = Number(point?.lng);
-   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-   return {
-    type: point?.type || "entry",
-    label: point?.label || point?.type || "Marca",
+  const normalizedBase = basePoints
+   .map((point = {}) => {
+    const lat = Number(point?.lat);
+    const lng = Number(point?.lng);
+    if (!isValidGpsCoordinate(lat, lng)) return null;
+    return {
+     type: point?.type || "entry",
+     label: point?.label || point?.type || "Marca",
     time: point?.time || point?.timestamp || null,
     lat,
     lng,
@@ -228,14 +250,14 @@ const buildMapGeoPoints = (row = {}) => {
   .filter(Boolean);
 
  const fieldEvents = Array.isArray(row?.field_events) ? row.field_events : [];
- const normalizedField = fieldEvents
-  .map((event = {}) => {
-   const lat = Number(event?.lat);
-   const lng = Number(event?.lng);
-   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const normalizedField = fieldEvents
+   .map((event = {}) => {
+    const lat = Number(event?.lat);
+    const lng = Number(event?.lng);
+    if (!isValidGpsCoordinate(lat, lng)) return null;
 
-   const type = parseFieldEventType(event?.type || event?.event_type);
-   return {
+    const type = parseFieldEventType(event?.type || event?.event_type);
+    return {
     type,
     label: FIELD_EVENT_LABELS[type] || "Evento de campo",
     time: event?.time || event?.timestamp || event?.occurred_at || null,
@@ -261,16 +283,17 @@ const toDateOrNull = (value) => {
 };
 
 const buildFieldOpsEvents = (row = {}) => {
- const normalizeEvent = (event = {}, index = 0) => {
+  const normalizeEvent = (event = {}, index = 0) => {
   const type = parseFieldEventType(event.type || event.event_type || event.kind);
   const label = FIELD_EVENT_LABELS[type];
   if (!label) return null;
 
   const rawTime = event.time || event.timestamp || event.occurred_at || event.at;
   const parsedDate = toDateOrNull(rawTime);
-  const coord =
-   Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng))
-    ? { lat: Number(event.lat), lng: Number(event.lng) }
+   const eventLat = Number(event.lat);
+   const eventLng = Number(event.lng);
+   const coord = isValidGpsCoordinate(eventLat, eventLng)
+    ? { lat: eventLat, lng: eventLng }
     : parseCoord(event.coord || event.location);
 
   return {
@@ -403,6 +426,7 @@ const {
  const [userOptions, setUserOptions] = useState([]);
  const [reportRows, setReportRows] = useState([]);
  const [reportSummary, setReportSummary] = useState(null);
+ const [reportMeta, setReportMeta] = useState(null);
  const [adminDayFilter, setAdminDayFilter] = useState("");
  const [adminPeriodMode, setAdminPeriodMode] = useState("month");
  const [adminDayValue, setAdminDayValue] = useState(getTodayInputDate());
@@ -583,6 +607,7 @@ const selectedStatusLabel = useMemo(() => {
  const rows = Array.isArray(res?.data) ? res.data : [];
  setReportRows(rows);
  setReportSummary(res?.summary || null);
+ setReportMeta(res?.meta || null);
  if (!silent) {
   toast.success(`Consulta cargada: ${rows.length} registros`);
  }
@@ -1304,6 +1329,9 @@ const statusCounters = useMemo(() => {
  ) : null}
 
  <AttendanceReportsSummaryCards items={statusCounters} />
+ {mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
+  <AttendanceOvertimeSummary rows={adminFilteredRows} meta={reportMeta} />
+ ) : null}
 
  <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
@@ -1316,6 +1344,8 @@ const statusCounters = useMemo(() => {
  ? `Periodo anual: ${annualYear || "anio"}`
  : `Periodo: ${startDate || "fecha inicio"} a ${endDate || "fecha fin"}`}
  </span>
+ <span className="text-slate-400">|</span>
+ <span>Hora visible: Ecuador (UTC-5, 24h)</span>
  </div>
  </div>
 
@@ -1335,6 +1365,7 @@ const statusCounters = useMemo(() => {
    setSelectedUserId("all");
    setIsMapDayFilterEnabled(false);
    setMapDayFilter("");
+   setReportMeta(null);
   }}
    clearDisabled={loadingQuery}
     warningText={rangeWarningText}

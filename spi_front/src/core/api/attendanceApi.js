@@ -6,7 +6,16 @@ const normalizeLocation = (location) => {
 
   if (typeof location === "string") {
     const trimmed = location.trim();
-    return trimmed || null;
+    if (!trimmed) return null;
+    const parts = trimmed.split(",");
+    if (parts.length === 2) {
+      const lat = Number(parts[0]?.trim());
+      const lng = Number(parts[1]?.trim());
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+      if (Math.abs(lat) <= 0.0005 && Math.abs(lng) <= 0.0005) return null;
+    }
+    return trimmed;
   }
 
   if (typeof location === "object") {
@@ -14,11 +23,27 @@ const normalizeLocation = (location) => {
     const longitude = Number(location.longitude ?? location.lng);
 
     if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) return null;
+      if (Math.abs(latitude) <= 0.0005 && Math.abs(longitude) <= 0.0005) return null;
       return `${latitude},${longitude}`;
     }
   }
 
   return null;
+};
+
+const ensureLocationOrThrow = (location) => {
+  const normalized = normalizeLocation(location);
+  if (!normalized) {
+    throw new Error("Ubicacion obligatoria para marcar asistencia");
+  }
+  return normalized;
+};
+
+const extractLocationAccuracy = (location) => {
+  if (!location || typeof location !== "object") return null;
+  const accuracy = Number(location.accuracy ?? location.location_accuracy);
+  return Number.isFinite(accuracy) && accuracy >= 0 ? accuracy : null;
 };
 
 /**
@@ -36,10 +61,11 @@ const normalizeLocation = (location) => {
  * Clock In - Record entry time
  */
 export const clockIn = async (location = null) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/clock-in",
- { location: normalizedLocation }
+ { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;
@@ -49,10 +75,11 @@ export const clockIn = async (location = null) => {
  * Clock Out for Lunch - Record lunch start time
  */
 export const clockOutLunch = async (location = null) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/clock-out-lunch",
- { location: normalizedLocation }
+ { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;
@@ -62,10 +89,11 @@ export const clockOutLunch = async (location = null) => {
  * Clock In from Lunch - Record lunch end time
  */
 export const clockInLunch = async (location = null) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/clock-in-lunch",
- { location: normalizedLocation }
+ { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;
@@ -75,10 +103,11 @@ export const clockInLunch = async (location = null) => {
  * Clock Out - Record exit time
  */
 export const clockOut = async (location = null) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/clock-out",
- { location: normalizedLocation }
+ { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;
@@ -93,34 +122,108 @@ export const clockOut = async (location = null) => {
  */
 
 export const marcarEntrada = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/entrada", { location: normalizeLocation(location) });
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/entrada", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
  return data;
 };
 
 export const marcarAlmuerzoSalida = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/almuerzo-salida", { location: normalizeLocation(location) });
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/almuerzo-salida", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
  return data;
 };
 
 export const marcarAlmuerzoEntrada = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/almuerzo-entrada", { location: normalizeLocation(location) });
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/almuerzo-entrada", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
  return data;
 };
 
 export const marcarSalida = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/salida", { location: normalizeLocation(location) });
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/salida", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
  return data;
 };
 
 export const marcarSalidaImprevista = async (location = null, description = null) => {
- const payload = { location: normalizeLocation(location) };
+ const payload = { location: ensureLocationOrThrow(location) };
+ const accuracy = extractLocationAccuracy(location);
+ if (accuracy !== null) payload.location_accuracy = accuracy;
  if (description) payload.description = description;
  const { data } = await api.post("/attendance/marcar/salida-imprevista", payload);
  return data;
 };
 
 export const marcarRegresoImprevisto = async (location = null) => {
- const { data } = await api.post("/attendance/marcar/regreso-imprevisto", { location: normalizeLocation(location) });
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/regreso-imprevisto", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarLlegadaImprevista = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/llegada-imprevista", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarRetornoImprevisto = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/retorno-imprevisto", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarSalidaOficina = async (location = null, description = null) => {
+ const payload = { location: ensureLocationOrThrow(location) };
+ const accuracy = extractLocationAccuracy(location);
+ if (accuracy !== null) payload.location_accuracy = accuracy;
+ if (description) payload.description = description;
+ const { data } = await api.post("/attendance/marcar/salida-oficina", payload);
+ return data;
+};
+
+export const marcarEntradaOficina = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/entrada-oficina", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarSalidaCampo = async (location = null, description = null) => {
+ const payload = { location: ensureLocationOrThrow(location) };
+ const accuracy = extractLocationAccuracy(location);
+ if (accuracy !== null) payload.location_accuracy = accuracy;
+ if (description) payload.description = description;
+ const { data } = await api.post("/attendance/marcar/salida-campo", payload);
+ return data;
+};
+
+export const marcarEntradaCampo = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/entrada-campo", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarLlegadaDestino = async (location = null) => {
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
+ const { data } = await api.post("/attendance/marcar/llegada-destino", { location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) });
+ return data;
+};
+
+export const marcarCierreViaje = async (location = null, reason = null) => {
+ const payload = { location: ensureLocationOrThrow(location) };
+ const accuracy = extractLocationAccuracy(location);
+ if (accuracy !== null) payload.location_accuracy = accuracy;
+ if (reason) payload.closure_reason = reason;
+ const { data } = await api.post("/attendance/marcar/cierre-viaje", payload);
  return data;
 };
 
@@ -128,12 +231,29 @@ export const marcarRegresoImprevisto = async (location = null) => {
  * Field visit marks (cliente / prospecto / emergencia)
  */
 export const marcarVisitaEntrada = async (payload = {}) => {
- const { data } = await api.post("/attendance/marcar/visita-entrada", payload);
+ const normalizedPayload = { ...payload };
+ const accuracy = extractLocationAccuracy(normalizedPayload.location);
+ normalizedPayload.location = ensureLocationOrThrow(normalizedPayload.location);
+ if (accuracy !== null) normalizedPayload.location_accuracy = accuracy;
+ const { data } = await api.post("/attendance/marcar/visita-entrada", normalizedPayload);
+ return data;
+};
+
+export const justifyLateArrival = async ({ reason, date } = {}) => {
+ const payload = {
+  reason: String(reason || "").trim(),
+ };
+ if (date) payload.date = date;
+ const { data } = await api.post("/attendance/late-justification", payload);
  return data;
 };
 
 export const marcarVisitaSalida = async (payload = {}) => {
- const { data } = await api.post("/attendance/marcar/visita-salida", payload);
+ const normalizedPayload = { ...payload };
+ const accuracy = extractLocationAccuracy(normalizedPayload.location);
+ normalizedPayload.location = ensureLocationOrThrow(normalizedPayload.location);
+ if (accuracy !== null) normalizedPayload.location_accuracy = accuracy;
+ const { data } = await api.post("/attendance/marcar/visita-salida", normalizedPayload);
  return data;
 };
 
@@ -141,10 +261,11 @@ export const marcarVisitaSalida = async (payload = {}) => {
  * Attach location to an already saved attendance or exception mark
  */
 export const syncAttendanceLocation = async (target, location) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/location-sync",
- { target, location: normalizedLocation }
+ { target, location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;
@@ -154,11 +275,18 @@ export const syncAttendanceLocation = async (target, location) => {
  * Register Exception (Salida Inesperada)
  */
 export const registerException = async (type, description, location = null, options = {}) => {
- const { isJustified } = options || {};
- const normalizedLocation = normalizeLocation(location);
- const { data } = await api.post(
- "/attendance/exception",
- { type, description, location: normalizedLocation, ...(isJustified !== undefined ? { isJustified } : {}) }
+  const { isJustified } = options || {};
+  const normalizedLocation = ensureLocationOrThrow(location);
+  const accuracy = extractLocationAccuracy(location);
+  const { data } = await api.post(
+  "/attendance/exception",
+  {
+   type,
+   description,
+   location: normalizedLocation,
+   ...(accuracy !== null ? { location_accuracy: accuracy } : {}),
+   ...(isJustified !== undefined ? { isJustified } : {}),
+  }
  );
 
  return data;
@@ -168,10 +296,11 @@ export const registerException = async (type, description, location = null, opti
  * Update Exception Status (ON_SITE, RETURNING, COMPLETED)
  */
 export const updateExceptionStatus = async (status, location = null) => {
- const normalizedLocation = normalizeLocation(location);
+ const normalizedLocation = ensureLocationOrThrow(location);
+ const accuracy = extractLocationAccuracy(location);
  const { data } = await api.post(
  "/attendance/exception/status",
- { status, location: normalizedLocation }
+ { status, location: normalizedLocation, ...(accuracy !== null ? { location_accuracy: accuracy } : {}) }
  );
 
  return data;

@@ -5,6 +5,24 @@ const logger = require('../../config/logger');
  * LIS Integration Service
  * Manages LIS (Laboratory Information System) integration data
  */
+const LIS_PROVIDER_ALLOWED = new Set(['orion', 'cobas_infiniti', 'other']);
+
+function normalizeLisProvider(value) {
+    if (value === null || value === undefined) return null;
+    const raw = String(value).trim();
+    if (!raw) return null;
+
+    const normalized = raw
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[\s-]+/g, '_');
+
+    if (LIS_PROVIDER_ALLOWED.has(normalized)) return normalized;
+    if (normalized.includes('orion')) return 'orion';
+    if (normalized.includes('cobas') || normalized.includes('infiniti')) return 'cobas_infiniti';
+    return 'other';
+}
 
 async function createLisIntegration(businessCaseId, data) {
     const {
@@ -41,10 +59,12 @@ async function createLisIntegration(businessCaseId, data) {
     RETURNING *;
   `;
 
+    const normalizedLisProvider = normalizeLisProvider(lis_provider);
+
     const { rows } = await db.query(query, [
         businessCaseId,
         includes_lis,
-        lis_provider,
+        normalizedLisProvider,
         includes_hardware,
         monthly_patients,
         current_system_name,
@@ -78,21 +98,55 @@ async function deleteLisIntegration(businessCaseId) {
 // Equipment Interfaces
 async function addEquipmentInterface(lisIntegrationId, data) {
     const { model, provider } = data;
-
-    const { rows } = await db.query(
-        `INSERT INTO bc_lis_equipment_interfaces (lis_integration_id, model, provider)
-     VALUES ($1, $2, $3) RETURNING *`,
-        [lisIntegrationId, model, provider]
-    );
+    const fkColumn = await resolveInterfaceFkColumn();
+    let rows;
+    try {
+        const result = await db.query(
+            `INSERT INTO bc_lis_equipment_interfaces (${fkColumn}, model, provider)
+             VALUES ($1, $2, $3) RETURNING *`,
+            [lisIntegrationId, model, provider]
+        );
+        rows = result.rows;
+    } catch (error) {
+        if (error?.code === '42703') {
+            const fallbackColumn = fkColumn === 'lis_integration_id' ? 'business_case_id' : 'lis_integration_id';
+            cachedInterfaceFkColumn = fallbackColumn;
+            const result = await db.query(
+                `INSERT INTO bc_lis_equipment_interfaces (${fallbackColumn}, model, provider)
+                 VALUES ($1, $2, $3) RETURNING *`,
+                [lisIntegrationId, model, provider]
+            );
+            rows = result.rows;
+        } else {
+            throw error;
+        }
+    }
 
     return rows[0];
 }
 
 async function getEquipmentInterfaces(lisIntegrationId) {
-    const { rows } = await db.query(
-        'SELECT * FROM bc_lis_equipment_interfaces WHERE lis_integration_id = $1 ORDER BY created_at',
-        [lisIntegrationId]
-    );
+    const fkColumn = await resolveInterfaceFkColumn();
+    let rows;
+    try {
+        const result = await db.query(
+            `SELECT * FROM bc_lis_equipment_interfaces WHERE ${fkColumn} = $1 ORDER BY created_at`,
+            [lisIntegrationId]
+        );
+        rows = result.rows;
+    } catch (error) {
+        if (error?.code === '42703') {
+            const fallbackColumn = fkColumn === 'lis_integration_id' ? 'business_case_id' : 'lis_integration_id';
+            cachedInterfaceFkColumn = fallbackColumn;
+            const result = await db.query(
+                `SELECT * FROM bc_lis_equipment_interfaces WHERE ${fallbackColumn} = $1 ORDER BY created_at`,
+                [lisIntegrationId]
+            );
+            rows = result.rows;
+        } else {
+            throw error;
+        }
+    }
     return rows;
 }
 
@@ -113,3 +167,29 @@ module.exports = {
     getEquipmentInterfaces,
     deleteEquipmentInterface
 };
+let cachedInterfaceFkColumn = null;
+
+async function resolveInterfaceFkColumn() {
+    if (cachedInterfaceFkColumn) return cachedInterfaceFkColumn;
+    try {
+        const { rows } = await db.query(
+            `
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = 'bc_lis_equipment_interfaces'
+              AND column_name IN ('lis_integration_id', 'business_case_id')
+            ORDER BY CASE column_name
+              WHEN 'lis_integration_id' THEN 1
+              WHEN 'business_case_id' THEN 2
+              ELSE 99
+            END
+            LIMIT 1
+            `
+        );
+        cachedInterfaceFkColumn = rows[0]?.column_name || 'lis_integration_id';
+    } catch (error) {
+        cachedInterfaceFkColumn = 'lis_integration_id';
+    }
+    return cachedInterfaceFkColumn;
+}

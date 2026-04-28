@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTriangle, FiUnlock } from "react-icons/fi";
+import { FiRefreshCw, FiDownload, FiFileText, FiCheckCircle, FiClock, FiAlertTriangle, FiUnlock, FiXCircle, FiSlash } from "react-icons/fi";
 import Card from "../../../../core/ui/components/Card";
 import { useBusinessCaseWorkspaceOptional } from "./BusinessCaseWorkspaceContext";
 
@@ -74,17 +74,21 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  const { currentState, availableTransitions } = workflowState || {};
  const { completionSummary } = sectionOwnership || {};
  const preflow = resolvedGuidance?.preflow || null;
+ const slaStatus = resolvedGuidance?.slaStatus || null;
  const feasibility = resolvedGuidance?.workspaceData?.feasibility || null;
  const feasibilityDecision = feasibility?.decision || null;
  const [nowMs, setNowMs] = useState(Date.now());
 
- // Mock state display mapping
  const stateDisplay = {
- 'DRAFT_INICIAL': { label: 'Borrador Inicial', color: 'bg-gray-100 text-gray-700', icon: FiClock },
- 'DATOS_BASE_COMPLETOS': { label: 'Datos Completos', color: 'bg-blue-100 text-blue-700', icon: FiCheckCircle },
- 'EN_EVALUACION_VIABILIDAD': { label: 'En Evaluación', color: 'bg-yellow-100 text-yellow-700', icon: FiAlertTriangle },
- 'VIABLE': { label: 'Viable', color: 'bg-green-100 text-green-700', icon: FiCheckCircle },
- 'CERRADO_PARA_APROBACION': { label: 'Para Aprobación', color: 'bg-purple-100 text-purple-700', icon: FiFileText }
+ 'DRAFT_INICIAL':               { label: 'Borrador Inicial',      color: 'bg-gray-100 text-gray-700',      icon: FiClock },
+ 'DATOS_BASE_COMPLETOS':        { label: 'Datos Completos',        color: 'bg-blue-100 text-blue-700',      icon: FiCheckCircle },
+ 'EN_EVALUACION_VIABILIDAD':    { label: 'En Evaluación',          color: 'bg-yellow-100 text-yellow-700',  icon: FiAlertTriangle },
+ 'OBSERVADO_POR_VIABILIDAD':    { label: 'Observado',              color: 'bg-orange-100 text-orange-700',  icon: FiAlertTriangle },
+ 'VIABLE':                      { label: 'Viable',                 color: 'bg-green-100 text-green-700',    icon: FiCheckCircle },
+ 'AJUSTES_OPERATIVOS':          { label: 'Ajustes Operativos',     color: 'bg-indigo-100 text-indigo-700',  icon: FiClock },
+ 'CERRADO_PARA_APROBACION':     { label: 'Para Aprobación',        color: 'bg-purple-100 text-purple-700',  icon: FiFileText },
+ 'RECHAZADO_POR_GERENCIA':      { label: 'Rechazado',              color: 'bg-red-100 text-red-700',        icon: FiXCircle },
+ 'CANCELADO':                   { label: 'Cancelado',              color: 'bg-slate-100 text-slate-500',    icon: FiSlash },
  };
 
  const currentStateDisplay = stateDisplay[currentState] || stateDisplay['DRAFT_INICIAL'];
@@ -260,6 +264,23 @@ const CaseHeader = ({ uiGuidance, onRefresh, onOpenReopenRequest, onOpenReopenDe
  <FiCheckCircle className={feasibilityDecision?.is_feasible ? "text-emerald-600" : "text-rose-600"} />
  <span>
  BC cerrado como {feasibilityDecision?.is_feasible ? "factible" : "no factible"}
+ </span>
+ </div>
+ )}
+ {slaStatus?.hasSla && (
+ <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${
+   slaStatus.status === 'overdue'
+     ? 'border-red-200 bg-red-50 text-red-700'
+     : slaStatus.status === 'at_risk'
+     ? 'border-amber-200 bg-amber-50 text-amber-700'
+     : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+ }`}>
+ <FiClock size={12} />
+ <span>SLA{slaStatus.status === 'overdue'
+   ? ` vencido (${slaStatus.elapsedDays}d/${slaStatus.slaDays}d)`
+   : slaStatus.status === 'at_risk'
+   ? ` en riesgo — ${slaStatus.remainingDays}d restantes`
+   : ` en tiempo — ${slaStatus.remainingDays}d restantes`}
  </span>
  </div>
  )}

@@ -3,6 +3,7 @@ const sheetGenerationService = require("../modules/business-case/businessCaseShe
 
 const DEFAULT_INTERVAL_MS = Number(process.env.BC_SHEET_JOB_INTERVAL_MS || 15000);
 const DEFAULT_BATCH_LIMIT = Number(process.env.BC_SHEET_JOB_BATCH_LIMIT || 10);
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 let intervalRef = null;
 let isRunning = false;
@@ -44,7 +45,7 @@ function startBusinessCaseSheetGenerationQueueJob() {
   };
 
   logger.info({ interval_ms: everyMs }, "[BC_SHEET] Scheduler de cola iniciado");
-  if (process.env.ENABLE_JOBS === "true") {
+  if (process.env.ENABLE_JOBS === "true" && SHOULD_RUN_ON_START) {
     tick().catch(() => null);
   }
   intervalRef = setInterval(() => {

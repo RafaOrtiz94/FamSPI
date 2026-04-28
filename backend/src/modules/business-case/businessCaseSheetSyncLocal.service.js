@@ -4,9 +4,30 @@ const XLSX = require("xlsx");
 const { drive, sheets, jwtClient } = require("../../config/google");
 const logger = require("../../config/logger");
 
-const TEMPLATE_PATH = process.env.BC_SHEET_TEMPLATE_PATH
-  ? path.resolve(process.env.BC_SHEET_TEMPLATE_PATH)
-  : path.resolve(__dirname, "../../../../Mapeador_Sheets/FORMATO BC - 15-01-2026 (2).xlsx");
+const TEMPLATE_FILENAME = "FORMATO_BC.xlsx";
+
+function resolveTemplatePath() {
+  const envPath = String(process.env.BC_SHEET_TEMPLATE_PATH || "").trim();
+  const candidatePaths = [];
+
+  if (envPath) {
+    candidatePaths.push(path.resolve(envPath));
+  }
+
+  // Common layouts:
+  // 1) monorepo root: /<repo>/Mapeador_Sheets/FORMATO_BC.xlsx
+  // 2) backend root:  /<repo>/backend/Mapeador_Sheets/FORMATO_BC.xlsx
+  // 3) legacy fallback with one extra parent
+  candidatePaths.push(path.resolve(__dirname, "../../../Mapeador_Sheets", TEMPLATE_FILENAME));
+  candidatePaths.push(path.resolve(__dirname, "../../../../Mapeador_Sheets", TEMPLATE_FILENAME));
+  candidatePaths.push(path.resolve(__dirname, "../../../../../Mapeador_Sheets", TEMPLATE_FILENAME));
+
+  const found = candidatePaths.find((candidate) => fs.existsSync(candidate));
+  return {
+    path: found || candidatePaths[0],
+    tried: candidatePaths,
+  };
+}
 
 const GENERIC_SHEET_TOKENS = new Set([
   "cliente",
@@ -238,20 +259,23 @@ function parseEquipmentSheetDefinition(name, ws) {
 
 function loadTemplateDefinition() {
   if (templateCache) return templateCache;
-  if (!fs.existsSync(TEMPLATE_PATH)) {
-    const error = new Error(`No existe la plantilla de Sheets: ${TEMPLATE_PATH}`);
+  const templateResolution = resolveTemplatePath();
+  const templatePath = templateResolution.path;
+  if (!fs.existsSync(templatePath)) {
+    const error = new Error(`No existe la plantilla de Sheets: ${templatePath}`);
     error.code = "BC_SHEET_TEMPLATE_MISSING";
     error.retryable = false;
     error.status = 500;
+    error.details = { triedPaths: templateResolution.tried };
     throw error;
   }
 
-  const workbook = XLSX.readFile(TEMPLATE_PATH, { raw: false, cellFormula: true });
+  const workbook = XLSX.readFile(templatePath, { raw: false, cellFormula: true });
   const bcSheet = workbook.Sheets.BC;
   const equipmentSheets = workbook.SheetNames.filter((name) => name !== "BC").map((name) => parseEquipmentSheetDefinition(name, workbook.Sheets[name]));
 
   templateCache = {
-    templatePath: TEMPLATE_PATH,
+    templatePath,
     bc: parseBCDefinition(bcSheet),
     equipmentSheets,
     allSheetNames: workbook.SheetNames.slice(),
@@ -299,9 +323,17 @@ function buildValueRange(range, values) {
 
 async function createSpreadsheetFromTemplate({ outputFolderId, businessCaseName }) {
   const name = businessCaseName || `BC-${Date.now()}`;
+  const { path: templatePath } = resolveTemplatePath();
+  if (!fs.existsSync(templatePath)) {
+    const error = new Error(`No existe la plantilla de Sheets: ${templatePath}`);
+    error.code = "BC_SHEET_TEMPLATE_MISSING";
+    error.retryable = false;
+    error.status = 500;
+    throw error;
+  }
   const media = {
     mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    body: fs.createReadStream(TEMPLATE_PATH),
+    body: fs.createReadStream(templatePath),
   };
 
   const { data } = await drive.files.create({

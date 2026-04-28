@@ -17,6 +17,12 @@ const EMPTY_SCHEMA = {
  currentSystemHardware: false,
 };
 
+const LIS_PROVIDER_OPTIONS = [
+ { value: "orion", label: "Orion" },
+ { value: "cobas_infiniti", label: "Cobas Infiniti" },
+ { value: "other", label: "Otro" },
+];
+
 /**
  * LISSection - Workspace section for Laboratory Information System integration
  */
@@ -205,14 +211,24 @@ const LISSection = ({ businessCase, permissions = {}, ownership = {}, onSave }) 
  <label className="text-sm font-medium text-gray-700 ml-1">
  Proveedor del sistema a trabajar
  </label>
- <input
- type="text"
- value={formData.lisProvider}
+ <div className="relative">
+ <select
+ value={formData.lisProvider || ""}
  onChange={(e) => handleChange("lisProvider", e.target.value)}
  disabled={!canEdit}
- className="w-full border border-gray-200 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500"
- placeholder="Ej: Cerner, Epic, LabWare..."
- />
+ className="w-full appearance-none border border-gray-200 rounded-xl px-4 py-3 pr-10 focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all disabled:bg-gray-50 disabled:text-gray-500 bg-white"
+ >
+ <option value="">Selecciona proveedor</option>
+ {LIS_PROVIDER_OPTIONS.map((option) => (
+ <option key={option.value} value={option.value}>
+ {option.label}
+ </option>
+ ))}
+ </select>
+ <div className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none text-gray-400">
+ <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+ </div>
+ </div>
  </div>
 
  {/* Monthly Patients */}

@@ -5,6 +5,7 @@ const DEFAULT_INTERVAL_MS = Math.max(
   5000,
   Number(process.env.EXTERNAL_CASE_SYNC_INTERVAL_MS || 30000),
 );
+const SHOULD_RUN_ON_START = String(process.env.JOBS_RUN_ON_START || "false").trim().toLowerCase() === "true";
 
 let intervalRef = null;
 let running = false;
@@ -52,7 +53,7 @@ function startExternalCaseSyncJob() {
   };
 
   logger.info({ interval_ms: everyMs }, "[EXTERNAL_CASE_SYNC_JOB] Scheduler iniciado");
-  if (process.env.ENABLE_JOBS === "true") {
+  if (process.env.ENABLE_JOBS === "true" && SHOULD_RUN_ON_START) {
     tick().catch(() => null);
   }
   intervalRef = setInterval(() => {

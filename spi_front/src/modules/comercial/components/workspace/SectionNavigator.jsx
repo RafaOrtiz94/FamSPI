@@ -10,7 +10,8 @@ const SectionNavigator = ({
  selectedSection,
  uiGuidance,
  onSectionSelect,
- observationData
+ observationData,
+ sectionCompleteness = {}
 }) => {
  const { user } = useAuth();
  const [, setNowTick] = React.useState(Date.now());
@@ -247,6 +248,31 @@ const SectionNavigator = ({
  <p className="text-xs text-gray-500 mb-2 line-clamp-2 leading-relaxed">
  {section.description}
  </p>
+
+ {sectionCompleteness[section.id] != null && (
+ <div className="mb-2">
+ <div className="flex items-center justify-between mb-0.5">
+ <span className="text-[10px] text-gray-400 font-medium">Completitud</span>
+ <span className={`text-[10px] font-semibold ${
+   sectionCompleteness[section.id].percent === 100 ? 'text-emerald-600'
+   : sectionCompleteness[section.id].percent >= 50 ? 'text-amber-600'
+   : 'text-red-500'
+ }`}>
+ {sectionCompleteness[section.id].percent}%
+ </span>
+ </div>
+ <div className="h-1 w-full rounded-full bg-gray-100">
+ <div
+ className={`h-1 rounded-full transition-all ${
+   sectionCompleteness[section.id].percent === 100 ? 'bg-emerald-500'
+   : sectionCompleteness[section.id].percent >= 50 ? 'bg-amber-400'
+   : 'bg-red-400'
+ }`}
+ style={{ width: `${sectionCompleteness[section.id].percent}%` }}
+ />
+ </div>
+ </div>
+ )}
 
  {isDeterminations && (
  <div className="mt-2 flex flex-wrap gap-1.5">

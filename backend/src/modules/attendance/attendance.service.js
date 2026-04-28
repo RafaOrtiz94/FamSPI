@@ -13,6 +13,7 @@ const db = require("../../config/db");
 const logger = require("../../config/logger");
 const { drive } = require("../../config/google");
 const { securePdfForm } = require("../../utils/pdfFormSecurity");
+const { buildAttendanceRegularization } = require("./attendanceReports.service");
 const {
   HASH_ALGORITHM,
   computeSha256HexFromBuffer,
@@ -274,16 +275,119 @@ const fetchAttendanceUser = async (userId) => {
 };
 
 const fetchAttendanceRecords = async (userId, startDate, endDate) => {
-  const query = await db.query(
-    `
-    SELECT *
-    FROM user_attendance_records
-    WHERE user_id = $1 AND date BETWEEN $2 AND $3
-    ORDER BY date ASC
-    `,
-    [userId, startDate, endDate]
-  );
-  return query.rows;
+  const baseSelect = `
+      SELECT
+        a.*,
+        ex.exception_type,
+        ex.exception_status,
+        COALESCE(field_ops.field_events, '[]'::json) AS field_events
+      FROM user_attendance_records a
+      LEFT JOIN LATERAL (
+        SELECT
+          e.type AS exception_type,
+          e.status AS exception_status
+        FROM attendance_exceptions e
+        WHERE e.user_id = a.user_id
+          AND (
+            e.date = a.date
+            OR (
+              LOWER(COALESCE(e.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
+              AND a.date BETWEEN e.date AND COALESCE(e.return_time::date, e.date)
+            )
+          )
+        ORDER BY COALESCE(e.start_time, e.created_at) DESC, e.id DESC
+        LIMIT 1
+      ) ex ON true
+      LEFT JOIN LATERAL (
+        SELECT
+          COALESCE(
+            json_agg(
+              json_build_object(
+                'type', event_rows.event_type,
+                'time', event_rows.event_time
+              )
+              ORDER BY event_rows.event_time ASC
+            ),
+            '[]'::json
+          ) AS field_events
+        FROM (
+          SELECT 'client_entry'::text AS event_type, cvl.hora_entrada AS event_time
+          FROM client_visit_logs cvl
+          WHERE cvl.user_email IS NOT NULL
+            AND LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_entrada IS NOT NULL
+          UNION ALL
+          SELECT 'client_exit'::text AS event_type, cvl.hora_salida AS event_time
+          FROM client_visit_logs cvl
+          WHERE cvl.user_email IS NOT NULL
+            AND LOWER(COALESCE(cvl.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND cvl.visit_date = a.date
+            AND cvl.hora_salida IS NOT NULL
+          UNION ALL
+          SELECT 'client_entry'::text AS event_type, pv.check_in_time AS event_time
+          FROM prospect_visits pv
+          WHERE pv.user_email IS NOT NULL
+            AND LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND pv.visit_date = a.date
+            AND pv.check_in_time IS NOT NULL
+          UNION ALL
+          SELECT 'client_exit'::text AS event_type, pv.check_out_time AS event_time
+          FROM prospect_visits pv
+          WHERE pv.user_email IS NOT NULL
+            AND LOWER(COALESCE(pv.user_email, '')) = LOWER(COALESCE((SELECT email FROM users WHERE id = a.user_id LIMIT 1), ''))
+            AND pv.visit_date = a.date
+            AND pv.check_out_time IS NOT NULL
+          UNION ALL
+          SELECT 'office_exit'::text AS event_type, e.start_time AS event_time
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.start_time IS NOT NULL
+          UNION ALL
+          SELECT 'office_entry'::text AS event_type, e.return_time AS event_time
+          FROM attendance_exceptions e
+          WHERE e.user_id = a.user_id
+            AND e.date = a.date
+            AND e.return_time IS NOT NULL
+        ) event_rows
+      ) field_ops ON true
+      WHERE a.user_id = $1
+        AND a.date BETWEEN $2 AND $3
+  `;
+  try {
+    const query = await db.query(
+      `
+      SELECT
+        a.*,
+        lj.status AS late_justification_status,
+        lj.regularized_entry_time AS late_regularized_entry_time,
+        base.exception_type,
+        base.exception_status,
+        base.field_events
+      FROM (${baseSelect}) base
+      JOIN user_attendance_records a ON a.id = base.id
+      LEFT JOIN attendance_late_justifications lj
+        ON lj.user_id = a.user_id
+       AND lj.attendance_date = a.date
+      ORDER BY a.date ASC
+      `,
+      [userId, startDate, endDate]
+    );
+    return query.rows.map((row) => ({ ...row, ...buildAttendanceRegularization(row) }));
+  } catch (err) {
+    if (err?.code !== "42P01") throw err;
+    const query = await db.query(
+      `
+      SELECT a.*, base.exception_type, base.exception_status, base.field_events
+      FROM (${baseSelect}) base
+      JOIN user_attendance_records a ON a.id = base.id
+      ORDER BY date ASC
+      `,
+      [userId, startDate, endDate]
+    );
+    return query.rows.map((row) => ({ ...row, ...buildAttendanceRegularization(row) }));
+  }
 };
 
 const fetchApprovedTimeOffRecords = async (userEmail, startDate, endDate) => {
@@ -381,7 +485,14 @@ const buildMonthlyTimeOffMap = (periodDate, rawTimeOffRecords = []) => {
   return map;
 };
 
-const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff }) => {
+const resolveHourlySlotValue = ({ rawValue, slotName, dayTimeOff, regularizedEntryTime = null, lateJustificationStatus = null }) => {
+  if (slotName === "entry" && lateJustificationStatus === "approved") {
+    const regularized = String(regularizedEntryTime || "").trim();
+    if (regularized) {
+      return regularized.slice(0, 5);
+    }
+  }
+
   const formattedTime = rawValue ? formatTime(rawValue) : "";
   if (!dayTimeOff) return formattedTime;
 
@@ -530,22 +641,28 @@ const buildMonthlyPdfBuffer = async ({
     setFieldText(
       form,
       `hora_entrada_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.entry_time, slotName: "entry", dayTimeOff })
+      resolveHourlySlotValue({
+        rawValue: record?.acta_entry_time || record?.entry_time,
+        slotName: "entry",
+        dayTimeOff,
+        regularizedEntryTime: record?.late_regularized_entry_time || null,
+        lateJustificationStatus: record?.late_justification_status || null,
+      })
     );
     setFieldText(
       form,
       `hora_salida_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.lunch_start_time, slotName: "lunch_start", dayTimeOff })
+      resolveHourlySlotValue({ rawValue: record?.acta_lunch_start_time || record?.lunch_start_time, slotName: "lunch_start", dayTimeOff })
     );
     setFieldText(
       form,
       `hora_entrada_a_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.lunch_end_time, slotName: "lunch_end", dayTimeOff })
+      resolveHourlySlotValue({ rawValue: record?.acta_lunch_end_time || record?.lunch_end_time, slotName: "lunch_end", dayTimeOff })
     );
     setFieldText(
       form,
       `hora_salida_${day}`,
-      resolveHourlySlotValue({ rawValue: record?.exit_time, slotName: "exit", dayTimeOff })
+      resolveHourlySlotValue({ rawValue: record?.acta_exit_time || record?.exit_time, slotName: "exit", dayTimeOff })
     );
 
     const observation = isBeforeHireDate

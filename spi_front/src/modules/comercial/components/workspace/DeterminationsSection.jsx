@@ -73,6 +73,158 @@ const normalizeExcludedAgainstItems = (items = [], excluded = []) => {
  });
  return safeExcluded.filter((key) => !protectedKeys.has(String(key || "").trim()));
 };
+
+const normalizeTextKey = (value) => String(value || "").trim().toLowerCase();
+
+const getInformationScore = (item = {}) => {
+ let score = 0;
+ const weightedKeys = [
+ "roche_code",
+ "category",
+ "unit",
+ "presentation",
+ "brand",
+ "supplier",
+ "metadata",
+ "notes",
+ "valid_from",
+ "valid_to",
+ "calculation_formula",
+ ];
+ weightedKeys.forEach((key) => {
+ const value = item?.[key];
+ if (value == null) return;
+ if (typeof value === "string" && value.trim() === "") return;
+ if (Array.isArray(value) && value.length === 0) return;
+ if (typeof value === "object" && !Array.isArray(value) && Object.keys(value || {}).length === 0) return;
+ score += 2;
+ });
+
+ if (item?.status === "activo") score += 3;
+ if (item?.updated_at) score += 1;
+ if (item?.created_at) score += 1;
+
+ return score;
+};
+
+const pickMostCompleteByBusinessKey = (items = [], typeFallback = "") => {
+ const picked = new Map();
+
+ items.forEach((item) => {
+ const businessKey = [
+ normalizeTextKey(item?.equipment_id),
+ normalizeTextKey(item?.type || item?.category || typeFallback),
+ normalizeTextKey(item?.name),
+ ].join("|");
+
+ const current = picked.get(businessKey);
+ if (!current) {
+ picked.set(businessKey, item);
+ return;
+ }
+
+ const currentScore = getInformationScore(current);
+ const incomingScore = getInformationScore(item);
+ if (incomingScore > currentScore) {
+ picked.set(businessKey, item);
+ return;
+ }
+
+ if (incomingScore === currentScore) {
+ const currentUpdated = new Date(current?.updated_at || current?.created_at || 0).getTime();
+ const incomingUpdated = new Date(item?.updated_at || item?.created_at || 0).getTime();
+ if (incomingUpdated > currentUpdated) {
+ picked.set(businessKey, item);
+ }
+ }
+ });
+
+ return Array.from(picked.values());
+};
+
+const getTypeFamily = (type) => {
+ const normalized = normalizeTextKey(type);
+ if (normalized === "reactivo" || normalized === "determinacion") return "reactivo_determinacion";
+ return normalized || "consumible";
+};
+
+const getCatalogRowCompletenessScore = (row = {}) => {
+ let score = 0;
+ if (String(row?.name || "").trim()) score += 2;
+ if (String(row?.itemId || "").trim()) score += 2;
+ if (String(row?.manufacturerId || "").trim()) score += 2;
+ if (String(row?.equipmentName || "").trim()) score += 1;
+ if (row?.catalogId != null) score += 1;
+ if (normalizeTextKey(row?.type) === "determinacion") score += 1;
+ return score;
+};
+
+const dedupeCatalogRowsForUI = (items = []) => {
+ const picked = new Map();
+ items.forEach((row) => {
+ const key = [normalizeTextKey(row?.equipmentId), normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
+ const current = picked.get(key);
+ if (!current) {
+ picked.set(key, row);
+ return;
+ }
+ const currentScore = getCatalogRowCompletenessScore(current);
+ const incomingScore = getCatalogRowCompletenessScore(row);
+ if (incomingScore > currentScore) {
+ picked.set(key, row);
+ }
+ });
+ return Array.from(picked.values());
+};
+
+const toUiType = (type) => {
+ const family = getTypeFamily(type);
+ if (family === "reactivo_determinacion") return "reactivo";
+ return family || "consumible";
+};
+
+const dedupeVisibleRowsForUI = (items = []) => {
+ const picked = new Map();
+ items.forEach((row) => {
+ const key = [normalizeTextKey(row?.equipmentId), normalizeTextKey(row?.name), getTypeFamily(row?.type)].join("|");
+ const current = picked.get(key);
+ if (!current) {
+ picked.set(key, row);
+ return;
+ }
+
+ const score = (candidate) => {
+ let total = 0;
+ if (String(candidate?.manufacturerId || "").trim()) total += 2;
+ if (String(candidate?.itemId || "").trim()) total += 2;
+ if (String(candidate?.name || "").trim()) total += 1;
+ if (String(candidate?.source || "").toLowerCase() === "custom") total += 1;
+ return total;
+ };
+
+ if (score(row) > score(current)) {
+ picked.set(key, row);
+ }
+ });
+ return Array.from(picked.values());
+};
+
+const normalizePersistedItemForUI = (item = {}) => {
+ const normalizedType = toUiType(item?.type || "consumible");
+ const rawQty = item?.annualQty ?? item?.annualQuantity ?? 0;
+ const parsedQty = Number(rawQty);
+ const annualQty = Number.isFinite(parsedQty) ? parsedQty : 0;
+ return {
+ ...item,
+ type: normalizedType,
+ annualQty,
+ annualQuantity: annualQty,
+ };
+};
+
+const normalizePersistedItemsForUI = (items = []) =>
+ (Array.isArray(items) ? items : []).map((item) => normalizePersistedItemForUI(item));
+
 const DETERMINATION_CATEGORY_CONFIG = [
  {
  key: "reactivos",
@@ -274,20 +426,10 @@ const DeterminationsSection = ({
  );
  })
  );
- const uniqueDeterminaciones = new Map();
- determinationsList.forEach((det) => {
- if (!uniqueDeterminaciones.has(det.id)) {
- uniqueDeterminaciones.set(det.id, det);
- }
- });
- const uniqueConsumables = new Map();
- consumablesList.forEach((item) => {
- if (!uniqueConsumables.has(item.id)) {
- uniqueConsumables.set(item.id, item);
- }
- });
- setCatalogDeterminations(Array.from(uniqueDeterminaciones.values()));
- setCatalogConsumables(Array.from(uniqueConsumables.values()));
+ const dedupedDeterminations = pickMostCompleteByBusinessKey(determinationsList, "determinacion");
+ const dedupedConsumables = pickMostCompleteByBusinessKey(consumablesList, "consumible");
+ setCatalogDeterminations(dedupedDeterminations);
+ setCatalogConsumables(dedupedConsumables);
  setEquipmentMeta((prev) => ({ ...prev, ...nextEquipmentMeta }));
  recordBusinessCaseTelemetry({
  section: "determinations",
@@ -317,7 +459,8 @@ const DeterminationsSection = ({
  const data = res?.data?.data || {};
  const items = Array.isArray(data?.items) ? data.items : [];
  const excludedRaw = Array.isArray(data?.excluded) ? data.excluded : [];
- const excluded = normalizeExcludedAgainstItems(items, excludedRaw);
+ const normalizedItems = normalizePersistedItemsForUI(items);
+ const excluded = normalizeExcludedAgainstItems(normalizedItems, excludedRaw);
  const version = data?.version || null;
  pendingQtyChangesRef.current = {};
  editedRowsRef.current = {};
@@ -327,13 +470,13 @@ const DeterminationsSection = ({
  autosaveTimeoutRef.current = null;
  }
  consumptionVersionRef.current = version;
- setSavedItems(items);
+ setSavedItems(normalizedItems);
  setExcludedKeys(excluded);
  setQuantityDrafts(() => {
  const next = {};
- items.forEach((item) => {
+ normalizedItems.forEach((item) => {
  if (!item?.key) return;
- next[item.key] = String(item.annualQty ?? 0);
+ next[item.key] = String(item.annualQty ?? item.annualQuantity ?? 0);
  });
  quantityDraftsRef.current = next;
  return next;
@@ -370,13 +513,13 @@ const DeterminationsSection = ({
  editedRowsRef.current = {};
  setPendingChangesCount(0);
  consumptionVersionRef.current = null;
- setSavedItems(safeStored);
+ setSavedItems(normalizePersistedItemsForUI(safeStored));
  setExcludedKeys(safeExcluded);
  setQuantityDrafts(() => {
  const next = {};
- safeStored.forEach((item) => {
+ normalizePersistedItemsForUI(safeStored).forEach((item) => {
  if (!item?.key) return;
- next[item.key] = String(item.annualQty ?? 0);
+ next[item.key] = String(item.annualQty ?? item.annualQuantity ?? 0);
  });
  quantityDraftsRef.current = next;
  return next;
@@ -459,7 +602,7 @@ const DeterminationsSection = ({
  const determinations = (catalogDeterminations || []).map((det) => ({
  key: `det:${det.equipment_id}:${det.id}`,
  legacyKey: `det:${det.id}`,
- type: "determinacion",
+ type: toUiType("determinacion"),
  name: det.name,
  itemId: det.roche_code || null,
  manufacturerId: det.roche_code || null,
@@ -471,7 +614,7 @@ const DeterminationsSection = ({
  const consumables = (catalogConsumables || []).map((item) => ({
  key: `cons:${item.equipment_id}:${item.id}`,
  legacyKey: `cons:${item.id}`,
- type: item.type || "consumible",
+ type: toUiType(item.type || "consumible"),
  name: item.name,
  itemId: item.supplier_code || null,
  manufacturerId: item.supplier_code || null,
@@ -480,7 +623,8 @@ const DeterminationsSection = ({
  equipmentId: item.equipment_id,
  equipmentName: item.equipment_name,
  }));
- return [...determinations, ...consumables].sort((a, b) => a.name.localeCompare(b.name));
+ const dedupedRows = dedupeCatalogRowsForUI([...determinations, ...consumables]);
+ return dedupedRows.sort((a, b) => a.name.localeCompare(b.name));
  }, [catalogDeterminations, catalogConsumables]);
 
  const savedMap = useMemo(() => {
@@ -505,11 +649,12 @@ const DeterminationsSection = ({
  });
  const enrichedCustom = customItems.map((item) => ({
  ...item,
+ type: toUiType(item?.type),
  manufacturerId: item.manufacturerId || item.itemId || null,
  equipmentName: item.equipmentName || "Manual",
  equipmentId: item.equipmentId || null,
  }));
- return [...catalogVisible, ...enrichedCustom];
+ return dedupeVisibleRowsForUI([...catalogVisible, ...enrichedCustom]);
  }, [catalogItems, savedItems, excludedKeys]);
 
  const groupedByEquipment = useMemo(() => {
@@ -632,18 +777,19 @@ const DeterminationsSection = ({
  return parsed > 0 ? parsed : 0;
  };
 
- const syncQuantityDrafts = useCallback((items = []) => {
+const syncQuantityDrafts = useCallback((items = []) => {
  const next = {};
  (Array.isArray(items) ? items : []).forEach((item) => {
  if (!item?.key) return;
- next[item.key] = String(item.annualQty ?? 0);
+ next[item.key] = String(item.annualQty ?? item.annualQuantity ?? 0);
  });
  quantityDraftsRef.current = next;
  setQuantityDrafts(next);
  }, []);
 
- const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallbackExcluded = []) => {
- const persistedItems = Array.isArray(persisted?.items) ? persisted.items : fallbackItems;
+const applyPersistedSnapshot = useCallback((persisted, fallbackItems = [], fallbackExcluded = []) => {
+ const persistedItemsRaw = Array.isArray(persisted?.items) ? persisted.items : fallbackItems;
+ const persistedItems = normalizePersistedItemsForUI(persistedItemsRaw);
  const rawExcluded = Array.isArray(persisted?.excluded) ? persisted.excluded : fallbackExcluded;
  const persistedExcluded = normalizeExcludedAgainstItems(persistedItems, rawExcluded);
  consumptionVersionRef.current = persisted?.version || consumptionVersionRef.current;
@@ -716,11 +862,17 @@ const DeterminationsSection = ({
  : null,
  });
  const payload = {
- items: nextItems,
+ items: (nextItems || []).map((item) => ({
+ ...item,
+ annualQuantity: item?.annualQty ?? item?.annualQuantity ?? 0,
+ })),
  excluded: nextExcluded,
  version: consumptionVersionRef.current,
  idempotency_key: getIdempotencyKey("bc.consumption.save", {
- items: nextItems,
+ items: (nextItems || []).map((item) => ({
+ ...item,
+ annualQuantity: item?.annualQty ?? item?.annualQuantity ?? 0,
+ })),
  excluded: nextExcluded,
  version: consumptionVersionRef.current,
  }),
@@ -826,10 +978,14 @@ const DeterminationsSection = ({
 
  visibleRowMap.forEach((row) => {
  const saved = getSavedRow(row);
- const rawQty = quantityDrafts[row.key]
+ const rawQty = quantityDraftsRef.current[row.key]
+ ?? quantityDrafts[row.key]
  ?? (row?.legacyKey ? quantityDraftsRef.current[row.legacyKey] : undefined)
+ ?? (row?.legacyKey ? quantityDrafts[row.legacyKey] : undefined)
  ?? saved?.annualQty
+ ?? saved?.annualQuantity
  ?? row?.annualQty
+ ?? row?.annualQuantity
  ?? 0;
  const annualQty = toPositiveNumber(rawQty);
  const isCatalog = String(row?.source || saved?.source || "").toLowerCase() === "catalog";
@@ -859,6 +1015,7 @@ const DeterminationsSection = ({
  source: String(row?.source || saved?.source || "custom").trim().toLowerCase(),
  catalogId: row?.catalogId ?? saved?.catalogId ?? null,
  annualQty,
+ annualQuantity: annualQty,
  equipmentId: row?.equipmentId ?? saved?.equipmentId ?? null,
  equipmentName: row?.equipmentName ?? saved?.equipmentName ?? null,
  });

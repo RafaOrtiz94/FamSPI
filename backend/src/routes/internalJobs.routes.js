@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const db = require('../config/db');
 const { runOnce: runMantenimiento } = require('../modules/mantenimientos/mantenimiento.scheduler');
 const { runOnce: runExpiredReservations } = require('../jobs/checkExpiredReservations');
 const { runOnce: processAttendanceOvertime } = require('../jobs/attendanceOvertimeScheduler');
@@ -135,6 +136,160 @@ router.post('/permisos/recovery/expiry', async (_req, res) => {
         res.status(500).json({
             error: 'Fallo el procesamiento de expiracion de coordinacion de recuperacion',
             details: error.message
+        });
+    }
+});
+
+router.post('/attendance/geo-sanitize', async (req, res) => {
+    const apply = String(req.body?.apply ?? req.query?.apply ?? 'true').toLowerCase() === 'true';
+    const timezone = String(process.env.APP_TIMEZONE || process.env.TZ || 'America/Guayaquil');
+    const cutoffDate = String(req.body?.cutoffDate || req.query?.cutoffDate || '').trim();
+
+    const textTargets = [
+        ['user_attendance_records', 'entry_location', 'date'],
+        ['user_attendance_records', 'lunch_start_location', 'date'],
+        ['user_attendance_records', 'lunch_end_location', 'date'],
+        ['user_attendance_records', 'exit_location', 'date'],
+        ['attendance_exceptions', 'start_location', 'date'],
+        ['attendance_exceptions', 'arrival_location', 'date'],
+        ['attendance_exceptions', 'departure_location', 'date'],
+        ['attendance_exceptions', 'return_location', 'date'],
+    ];
+
+    const numericTargets = [
+        ['client_visit_logs', 'lat_entrada', 'lng_entrada', 'visit_date'],
+        ['client_visit_logs', 'lat_salida', 'lng_salida', 'visit_date'],
+        ['prospect_visits', 'check_in_lat', 'check_in_lng', 'visit_date'],
+        ['prospect_visits', 'check_out_lat', 'check_out_lng', 'visit_date'],
+    ];
+
+    const isValidIsoDate = /^\d{4}-\d{2}-\d{2}$/.test(cutoffDate);
+    let cutoff = cutoffDate;
+
+    try {
+        if (!isValidIsoDate) {
+            const cutoffResult = await db.query(
+                `SELECT ((NOW() AT TIME ZONE $1)::date - INTERVAL '2 day')::date AS cutoff`,
+                [timezone]
+            );
+            cutoff = cutoffResult.rows?.[0]?.cutoff;
+        }
+
+        await db.query('BEGIN');
+        const report = { apply, timezone, cutoff, textTargets: [], numericTargets: [] };
+
+        for (const [table, column, dateColumn] of textTargets) {
+            const countSql = `
+                WITH parsed AS (
+                    SELECT id, regexp_match(
+                        btrim(${column}),
+                        '^([+-]?\\d+(?:\\.\\d+)?)\\s*,\\s*([+-]?\\d+(?:\\.\\d+)?)$'
+                    ) AS m
+                    FROM ${table}
+                    WHERE ${dateColumn} <= $1::date
+                      AND ${column} IS NOT NULL
+                      AND btrim(${column}) <> ''
+                )
+                SELECT COUNT(*)::int AS total
+                FROM parsed
+                WHERE m IS NULL
+                   OR abs((m)[1]::double precision) > 90
+                   OR abs((m)[2]::double precision) > 180
+                   OR (abs((m)[1]::double precision) <= 0.0005 AND abs((m)[2]::double precision) <= 0.0005)
+            `;
+            const before = await db.query(countSql, [cutoff]);
+            const invalidCount = Number(before.rows?.[0]?.total || 0);
+            let updated = 0;
+
+            if (apply && invalidCount > 0) {
+                const updateSql = `
+                    WITH invalid_rows AS (
+                        SELECT id
+                        FROM (
+                            SELECT id, regexp_match(
+                                btrim(${column}),
+                                '^([+-]?\\d+(?:\\.\\d+)?)\\s*,\\s*([+-]?\\d+(?:\\.\\d+)?)$'
+                            ) AS m
+                            FROM ${table}
+                            WHERE ${dateColumn} <= $1::date
+                              AND ${column} IS NOT NULL
+                              AND btrim(${column}) <> ''
+                        ) s
+                        WHERE m IS NULL
+                           OR abs((m)[1]::double precision) > 90
+                           OR abs((m)[2]::double precision) > 180
+                           OR (abs((m)[1]::double precision) <= 0.0005 AND abs((m)[2]::double precision) <= 0.0005)
+                    )
+                    UPDATE ${table} t
+                    SET ${column} = NULL, updated_at = NOW()
+                    FROM invalid_rows i
+                    WHERE t.id = i.id
+                `;
+                const updateResult = await db.query(updateSql, [cutoff]);
+                updated = updateResult.rowCount || 0;
+            }
+
+            report.textTargets.push({ table, column, invalidCount, updated });
+        }
+
+        for (const [table, lat, lng, dateColumn] of numericTargets) {
+            const countResult = await db.query(
+                `
+                SELECT COUNT(*)::int AS total
+                FROM ${table}
+                WHERE ${dateColumn} <= $1::date
+                  AND ${lat} IS NOT NULL
+                  AND ${lng} IS NOT NULL
+                  AND (
+                    abs(${lat}) > 90
+                    OR abs(${lng}) > 180
+                    OR (abs(${lat}) <= 0.0005 AND abs(${lng}) <= 0.0005)
+                  )
+                `,
+                [cutoff]
+            );
+            const invalidCount = Number(countResult.rows?.[0]?.total || 0);
+            let updated = 0;
+
+            if (apply && invalidCount > 0) {
+                const updateResult = await db.query(
+                    `
+                    UPDATE ${table}
+                    SET ${lat} = NULL, ${lng} = NULL, updated_at = NOW()
+                    WHERE ${dateColumn} <= $1::date
+                      AND ${lat} IS NOT NULL
+                      AND ${lng} IS NOT NULL
+                      AND (
+                        abs(${lat}) > 90
+                        OR abs(${lng}) > 180
+                        OR (abs(${lat}) <= 0.0005 AND abs(${lng}) <= 0.0005)
+                      )
+                    `,
+                    [cutoff]
+                );
+                updated = updateResult.rowCount || 0;
+            }
+
+            report.numericTargets.push({ table, lat, lng, invalidCount, updated });
+        }
+
+        if (apply) {
+            await db.query('COMMIT');
+        } else {
+            await db.query('ROLLBACK');
+        }
+
+        return res.json({
+            success: true,
+            message: apply ? 'Saneamiento geo aplicado' : 'Saneamiento geo simulado (dry-run)',
+            data: report,
+        });
+    } catch (error) {
+        await db.query('ROLLBACK').catch(() => null);
+        console.error('Error en job de saneamiento geo de asistencia:', error);
+        return res.status(500).json({
+            error: 'Falló el saneamiento geo de asistencia',
+            details: error.message,
         });
     }
 });
