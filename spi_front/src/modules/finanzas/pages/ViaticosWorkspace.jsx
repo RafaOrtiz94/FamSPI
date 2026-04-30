@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FiRefreshCw, FiUpload, FiTrash2, FiCheckCircle, FiXCircle,
   FiMapPin, FiCalendar, FiFileText, FiChevronDown, FiChevronUp, FiAlertTriangle,
@@ -50,12 +50,12 @@ const normalizeRoles = (user) =>
     .map((r) => r.trim().toLowerCase())
     .filter(Boolean);
 
-const FINANCE_ROLES = ["finanzas", "jefe_finanzas", "jefe_financiero", "gerencia", "gerencia_general"];
+const FINANCE_ROLES = ["finanzas", "jefe_finanzas", "jefe_financiero", "gerencia", "gerencia_general", "admin"];
 
 const STATUS_BADGE = {
-  pending:  "bg-amber-100 text-amber-800",
+  pending: "bg-amber-100 text-amber-800",
   approved: "bg-emerald-100 text-emerald-800",
-  paid:     "bg-blue-100 text-blue-800",
+  paid: "bg-blue-100 text-blue-800",
   rejected: "bg-rose-100 text-rose-800",
 };
 const STATUS_LABEL = { pending: "Pendiente", approved: "Aprobado", paid: "Pagado", rejected: "Rechazado" };
@@ -135,7 +135,7 @@ const ViaticosWorkspace = () => {
       setAllowances(Array.isArray(avData) ? avData : []);
       setCandidates(Array.isArray(candData) ? candData : []);
     } catch (err) {
-      showToast(err?.response?.data?.message || "Error cargando viáticos", "error");
+      showToast(err?.response?.data?.message || "Error cargando vi�ticos", "error");
     } finally {
       if (!silent) setLoading(false);
     }
@@ -229,13 +229,9 @@ const ViaticosWorkspace = () => {
 
   // ── create viatico from candidate ─────────────────────────────────────
   const handleCreateFromCandidate = async (item, outsideLaborArea) => {
-    if (!outsideLaborArea) {
-      showToast("Marca el viaje como fuera del área para crear el viático", "info");
-      return;
-    }
     const key = `cand-${item.source_type}-${item.source_id}`;
     setSaving((p) => ({ ...p, [key]: true }));
-    showLoader("Registrando viático...");
+    showLoader("Guardando clasificacion...");
     try {
       await upsertViatico({
         source_type: item.source_type,
@@ -243,14 +239,14 @@ const ViaticosWorkspace = () => {
         visit_date: item.visit_date,
         city: item.city || "",
         amount: 0,
-        outside_labor_area: true,
+        outside_labor_area: Boolean(outsideLaborArea),
         notes: item.reference_name || "",
       });
-      showToast("Viático creado", "success");
-      setCandidateDrafts((p) => ({ ...p, [key]: { outside_labor_area: true } }));
+      showToast("Clasificacion guardada", "success");
+      setCandidateDrafts((p) => ({ ...p, [key]: { outside_labor_area: Boolean(outsideLaborArea) } }));
       await loadData();
     } catch (err) {
-      showToast(err?.response?.data?.message || "Error creando viático", "error");
+      showToast(err?.response?.data?.message || "Error guardando clasificacion", "error");
     } finally {
       hideLoader();
       setSaving((p) => ({ ...p, [key]: false }));
@@ -305,7 +301,7 @@ const ViaticosWorkspace = () => {
 
   // ── operational candidates not yet converted ──────────────────────────
   const operationalCandidates = useMemo(
-    () => candidates.filter((c) => c.source_type === "operational_exit" && !c.allowance_id),
+    () => candidates.filter((c) => c.source_type === "operational_exit"),
     [candidates]
   );
   const myAllowances = useMemo(
@@ -319,15 +315,15 @@ const ViaticosWorkspace = () => {
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Viáticos</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Vi�ticos</h1>
           <p className="mt-0.5 text-sm text-slate-500">
-            {isFinance ? "Revisión y procesamiento de solicitudes de viáticos" : "Solicitudes y comprobantes de tus salidas operacionales"}
+            {isFinance ? "Revisi�n y procesamiento de solicitudes de vi�ticos" : "Solicitudes y comprobantes de tus salidas operacionales"}
           </p>
         </div>
         <div className="flex items-center gap-2">
           <input type="date" value={filters.start} onChange={(e) => setFilters((p) => ({ ...p, start: e.target.value }))}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
-          <span className="text-slate-400 text-sm">—</span>
+          <span className="text-slate-400 text-sm"></span>
           <input type="date" value={filters.end} onChange={(e) => setFilters((p) => ({ ...p, end: e.target.value }))}
             className="rounded-lg border border-slate-300 px-3 py-2 text-sm" />
           <button type="button" onClick={() => loadData()}
@@ -354,15 +350,15 @@ const ViaticosWorkspace = () => {
       </div>
 
       {/* ── STEP 1: Operational trip candidates (non-finance) ─────────────── */}
-      {!isFinance && operationalCandidates.length > 0 && (
-        <Section title="Salidas operacionales pendientes de clasificar" badge={operationalCandidates.length} defaultOpen>
+      {operationalCandidates.length > 0 && (
+        <Section title="Salidas operacionales" badge={operationalCandidates.length} defaultOpen>
           <p className="mb-4 text-sm text-slate-500">
-            Estas salidas operacionales ya finalizaron. Marca si fueron fuera del área de labores para generar la solicitud de viático correspondiente.
+            Clasifica cada salida como dentro o fuera del area de labores. Las salidas fuera del area aplican a viatico.
           </p>
           <div className="space-y-3">
             {operationalCandidates.map((item) => {
               const key = `cand-${item.source_type}-${item.source_id}`;
-              const draft = candidateDrafts[key] || {};
+              const draft = candidateDrafts[key] || { outside_labor_area: Boolean(item.outside_labor_area) };
               const isSaving = Boolean(saving[key]);
               return (
                 <div key={key} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -386,16 +382,16 @@ const ViaticosWorkspace = () => {
                           <span className={`absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform ${draft.outside_labor_area ? "translate-x-5" : ""}`} />
                         </div>
                         <span className={draft.outside_labor_area ? "font-semibold text-blue-700" : "text-slate-500"}>
-                          {draft.outside_labor_area ? "Fuera del área → Viático" : "Dentro del área (no aplica)"}
+                          {draft.outside_labor_area ? "Fuera del area (aplica viatico)" : "Dentro del area"}
                         </span>
                       </label>
                       <button
                         type="button"
-                        disabled={!draft.outside_labor_area || isSaving}
+                        disabled={isSaving}
                         onClick={() => handleCreateFromCandidate(item, draft.outside_labor_area)}
                         className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
                       >
-                        {isSaving ? "Creando..." : "Crear solicitud"}
+                        {isSaving ? "Guardando..." : (item.allowance_id ? "Actualizar clasificacion" : "Guardar clasificacion")}
                       </button>
                     </div>
                   </div>
@@ -409,12 +405,12 @@ const ViaticosWorkspace = () => {
       {/* ── STEP 2 / FINANCE VIEW: Allowances list ────────────────────────── */}
       <div className="space-y-4">
         {loading ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Cargando viáticos...</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-400">Cargando vi�ticos...</div>
         ) : myAllowances.length === 0 ? (
           <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
-            <p className="text-slate-500 text-sm">No hay viáticos en el período seleccionado.</p>
+            <p className="text-slate-500 text-sm">No hay vi�ticos en el per�odo seleccionado.</p>
             {!isFinance && (
-              <p className="mt-2 text-xs text-slate-400">Los viáticos se crean desde las salidas operacionales completadas y clasificadas como "fuera del área".</p>
+              <p className="mt-2 text-xs text-slate-400">Los vi�ticos se crean desde las salidas operacionales completadas y clasificadas como "fuera del �rea".</p>
             )}
           </div>
         ) : (
@@ -693,3 +689,4 @@ const ViaticosWorkspace = () => {
 };
 
 export default ViaticosWorkspace;
+

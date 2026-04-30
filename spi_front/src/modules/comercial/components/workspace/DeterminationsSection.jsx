@@ -21,8 +21,9 @@ const ITEM_TYPES = [
 
 const REACTIVO_TYPES = new Set(["reactivo", "determinacion"]);
 const TECNICO_TYPES = new Set(["control", "calibrador", "consumible", "material"]);
-const REACTIVO_ROLES = new Set(["comercial", "acp_comercial", "backoffice", "backoffice_comercial"]);
-const TECNICO_ROLES = new Set(["jefe_tecnico", "tecnico"]);
+// Public BC: only acp_comercial. Private BC: only backoffice.
+const PUBLIC_BC_TYPES = new Set(["public", "comodato_publico"]);
+const TECNICO_ROLES = new Set(["tecnico", "jefe_tecnico"]);
 const ADMIN_ROLES = new Set(["administrador", "super_admin"]);
 const ROW_WINDOW_STEP = 24;
 const IDEMPOTENCY_TTL_MS = 60 * 1000;
@@ -307,11 +308,14 @@ const DeterminationsSection = ({
  const canEditByGate = gateInfo?.permissions?.canEditDeterminations === true;
  const canEditFinal = gateActive ? (canEditBase && canEditByGate) : canEditBase;
 
+ const isPublicBC = PUBLIC_BC_TYPES.has(businessCase?.bc_purchase_type);
+
  const canEditType = (type) => {
  if (!canEditFinal) return false;
- if (gateActive) return true;
  if (ADMIN_ROLES.has(currentRole)) return true;
- if (REACTIVO_TYPES.has(type)) return REACTIVO_ROLES.has(currentRole);
+ if (REACTIVO_TYPES.has(type)) {
+   return isPublicBC ? currentRole === "acp_comercial" : currentRole === "backoffice";
+ }
  if (TECNICO_TYPES.has(type)) return TECNICO_ROLES.has(currentRole);
  return false;
  };

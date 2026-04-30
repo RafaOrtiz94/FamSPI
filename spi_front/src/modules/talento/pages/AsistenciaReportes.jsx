@@ -18,6 +18,7 @@ import AttendanceReportsToolbar from "../components/attendance-reports/Attendanc
 import useAttendanceFilters, { ATTENDANCE_REPORT_MODES, ATTENDANCE_REPORT_VIEWS } from "../hooks/useAttendanceFilters";
 import useAttendanceReportsQuery from "../hooks/useAttendanceReportsQuery";
 import { formatDateSafe, formatTimeSafe } from "../../../shared/utils/dateUtils";
+import { useAuth } from "../../../core/auth/AuthContext";
 
 const AttendanceMapView = lazy(() =>
   import("../components/attendance-reports/AttendanceMapView").catch(() => ({
@@ -394,6 +395,9 @@ const extractRowGeoPoints = (row = {}) => {
 };
 
 const TalentoAsistenciaReportes = () => {
+const { user } = useAuth();
+const normalizedRole = String(user?.role || user?.role_name || user?.scope || "").toLowerCase().replace(/[\s-]+/g, "_");
+const canViewTeamAttendance = normalizedRole.includes("jefe");
 const {
    startDate,
    endDate,
@@ -414,11 +418,13 @@ const {
    setOnlyDiscrepancies,
    setOnlyWithGeo,
    setDepartmentId,
-   clearFilters,
+  clearFilters,
   } = useAttendanceFilters({
   mode: ATTENDANCE_REPORT_MODES.OFFICIAL,
   view: "table",
  });
+ const isTeamMode = mode === ATTENDANCE_REPORT_MODES.TEAM;
+ const isAdminLikeMode = mode === ATTENDANCE_REPORT_MODES.ADMIN || isTeamMode;
  const [loadingPdf, setLoadingPdf] = useState(false);
  const [selectedUserId, setSelectedUserId] = useState("");
  const [officialPdfPeriod, setOfficialPdfPeriod] = useState("monthly");
@@ -442,7 +448,7 @@ const {
   () => ({
    startDate,
    endDate,
-   userId: selectedUserId === "all" ? "all" : selectedUserId,
+   userId: isTeamMode ? "" : (selectedUserId === "all" ? "all" : selectedUserId),
    userIds,
    departmentId,
    status: selectedStatus || "",
@@ -452,7 +458,7 @@ const {
    mode,
    view,
   }),
-  [departmentId, endDate, mode, onlyDiscrepancies, onlyWithGeo, quickRange, selectedStatus, selectedUserId, startDate, userIds, view]
+  [departmentId, endDate, isTeamMode, mode, onlyDiscrepancies, onlyWithGeo, quickRange, selectedStatus, selectedUserId, startDate, userIds, view]
  );
 const { refetch: refetchAttendanceReports, isFetching: loadingQuery, isInitialLoading, isRefetching } = useAttendanceReportsQuery({
    filters: reportQueryFilters,
@@ -484,10 +490,10 @@ const { refetch: refetchAttendanceReports, isFetching: loadingQuery, isInitialLo
  if (mode === ATTENDANCE_REPORT_MODES.ADMIN && !selectedUserId) {
  setSelectedUserId("all");
  }
- if (mode === ATTENDANCE_REPORT_MODES.OFFICIAL && selectedUserId === "all") {
+ if ((mode === ATTENDANCE_REPORT_MODES.OFFICIAL || isTeamMode) && selectedUserId === "all") {
  setSelectedUserId("");
  }
- }, [mode, selectedUserId]);
+ }, [isTeamMode, mode, selectedUserId]);
 
  const userSelectOptions = useMemo(() => {
  const baseOptions = userOptions.map((u) => ({ label: u.nombre, value: String(u.id) }));
@@ -500,7 +506,7 @@ const { refetch: refetchAttendanceReports, isFetching: loadingQuery, isInitialLo
  const statusSelectOptions = useMemo(() => STATUS_OPTIONS, []);
 
  const applyAdminPeriod = useCallback(() => {
-  if (mode !== ATTENDANCE_REPORT_MODES.ADMIN) return;
+  if (!isAdminLikeMode) return;
 
   if (adminPeriodMode === "day") {
    if (!adminDayValue) return;
@@ -533,7 +539,7 @@ const { refetch: refetchAttendanceReports, isFetching: loadingQuery, isInitialLo
   adminPeriodMode,
   adminWeekValue,
   adminYearValue,
-  mode,
+  isAdminLikeMode,
   setEndDate,
   setStartDate,
  ]);
@@ -593,7 +599,7 @@ const selectedStatusLabel = useMemo(() => {
  return;
  }
 
- if (!selectedUserId) {
+ if (!isTeamMode && !selectedUserId) {
  if (!silent) toast.error("Selecciona un usuario especifico.");
  return;
  }
@@ -617,11 +623,11 @@ const selectedStatusLabel = useMemo(() => {
   toast.error(err.response?.data?.message || "No se pudo consultar el rango.");
  }
  }
- }, [endDate, refetchAttendanceReports, selectedUserId, startDate]);
+ }, [endDate, isTeamMode, refetchAttendanceReports, selectedUserId, startDate]);
 
  useEffect(() => {
-  if (mode !== ATTENDANCE_REPORT_MODES.ADMIN) return;
-  if (!selectedUserId || !startDate || !endDate) return;
+  if (!isAdminLikeMode) return;
+  if ((!isTeamMode && !selectedUserId) || !startDate || !endDate) return;
 
   const timeoutId = window.setTimeout(() => {
    handleConsultRange({ silent: true });
@@ -632,7 +638,8 @@ const selectedStatusLabel = useMemo(() => {
   departmentId,
   endDate,
   handleConsultRange,
-  mode,
+  isAdminLikeMode,
+  isTeamMode,
   onlyDiscrepancies,
   onlyWithGeo,
   selectedStatus,
@@ -972,7 +979,7 @@ const statusCounters = useMemo(() => {
  <DashboardLayout includeWidgets={false}>
  <DashboardHeader
  title="Reportes de Asistencia"
- subtitle="Separacion entre reporte oficial del colaborador y consulta administrativa del area"
+ subtitle="Reporte oficial RH-09, consulta administrativa y consulta por equipo"
  />
 
  <Card className="space-y-6 p-6">
@@ -981,11 +988,11 @@ const statusCounters = useMemo(() => {
  Reportes de asistencia
  </h2>
  <p className="mt-1 text-sm text-slate-600">
- El modo oficial descarga el RH-09 por usuario. El modo administrativo consulta rangos, estados y resuelve incidencias operativas.
+ El modo oficial descarga el RH-09 por usuario. El modo administrativo y de equipo consultan rangos y estados operativos.
  </p>
  </div>
 
-<div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+<div className={`grid grid-cols-1 gap-3 ${canViewTeamAttendance ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
   <button
   type="button"
   onClick={() => setMode(ATTENDANCE_REPORT_MODES.OFFICIAL)}
@@ -1017,6 +1024,24 @@ const statusCounters = useMemo(() => {
   <div className="text-xs opacity-75">Usuario, rango y estado derivado de jornada.</div>
   </div>
   </button>
+
+  {canViewTeamAttendance ? (
+    <button
+    type="button"
+    onClick={() => setMode(ATTENDANCE_REPORT_MODES.TEAM)}
+    className={`flex items-center gap-3 rounded-2xl border px-4 py-4 text-left transition ${
+     mode === ATTENDANCE_REPORT_MODES.TEAM
+      ? "border-amber-200 bg-amber-50 text-amber-900"
+      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+    }`}
+    >
+    <FiTarget className="text-xl" />
+    <div>
+    <div className="text-sm font-semibold">Consulta de mi equipo</div>
+    <div className="text-xs opacity-75">Solo colaboradores de tu área (sin horas extra).</div>
+    </div>
+    </button>
+  ) : null}
  </div>
 
  {mode === ATTENDANCE_REPORT_MODES.OFFICIAL ? (
@@ -1071,12 +1096,16 @@ const statusCounters = useMemo(() => {
  </div>
  ) : null}
 
- {mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
+ {isAdminLikeMode ? (
  <div className="space-y-4 rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-cyan-50 p-4 md:p-5">
  <div className="flex flex-wrap items-center justify-between gap-3">
  <div>
  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-emerald-800">Filtro unificado de consulta</p>
- <p className="mt-1 text-sm text-emerald-900/85">Selecciona colaborador y periodo (dia, semana, mes o anio) desde un solo panel.</p>
+ <p className="mt-1 text-sm text-emerald-900/85">
+  {isTeamMode
+   ? "Consulta por periodo para colaboradores de tu área. El alcance se aplica automáticamente por rol."
+   : "Selecciona colaborador y periodo (dia, semana, mes o anio) desde un solo panel."}
+ </p>
  </div>
  <div className="inline-flex rounded-xl border border-emerald-300 bg-white p-1 text-xs font-semibold">
  {[
@@ -1102,6 +1131,7 @@ const statusCounters = useMemo(() => {
  </div>
 
  <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+ {!isTeamMode ? (
  <div className="md:col-span-2">
  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Colaborador</label>
  <Select
@@ -1111,6 +1141,8 @@ const statusCounters = useMemo(() => {
  className="w-full"
  />
  </div>
+ ) : null}
+ {!isTeamMode ? (
  <div>
  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Departamento</label>
  <select
@@ -1126,6 +1158,7 @@ const statusCounters = useMemo(() => {
   ))}
  </select>
  </div>
+ ) : null}
  <div>
  <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Estado</label>
  <Select
@@ -1337,7 +1370,7 @@ const statusCounters = useMemo(() => {
  <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
  <FiFilter className="text-slate-500" />
  <span className="font-semibold">Filtro activo:</span>
- <span>{mode === ATTENDANCE_REPORT_MODES.ADMIN ? selectedStatusLabel : "PDF oficial por usuario"}</span>
+ <span>{isAdminLikeMode ? selectedStatusLabel : "PDF oficial por usuario"}</span>
  <span className="text-slate-400">|</span>
  <span>
  {mode === ATTENDANCE_REPORT_MODES.OFFICIAL && officialPdfPeriod === "annual"
@@ -1349,7 +1382,7 @@ const statusCounters = useMemo(() => {
  </div>
  </div>
 
-{mode === ATTENDANCE_REPORT_MODES.ADMIN ? (
+{isAdminLikeMode ? (
    <AttendanceReportsToolbar
     onAction={() => handleConsultRange({ silent: false })}
    disabled={loadingQuery}

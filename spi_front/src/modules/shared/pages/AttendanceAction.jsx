@@ -1,14 +1,14 @@
 // src/modules/shared/pages/AttendanceAction.jsx
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { FiClock, FiCheckCircle, FiAlertCircle, FiLoader, FiMapPin } from "react-icons/fi";
 import { useAuth } from "../../../core/auth/AuthContext";
 import { useUI } from "../../../core/ui/UIContext";
-import { 
-  marcarEntrada, 
-  marcarAlmuerzoSalida, 
-  marcarAlmuerzoEntrada, 
+import {
+  marcarEntrada,
+  marcarAlmuerzoSalida,
+  marcarAlmuerzoEntrada,
   marcarSalida,
   marcarSalidaImprevista,
   marcarRegresoImprevisto,
@@ -25,51 +25,13 @@ import {
   getTodayAttendance,
   getActiveException,
 } from "../../../core/api/attendanceApi";
-import { getPreciseLocation } from "../../../shared/utils/preciseGeolocation";
+import { getLocationForAction } from "../../../shared/utils/attendanceLocationCache";
 import { fetchClients } from "../../../core/api/clientsApi";
 import Card from "../../../core/ui/components/Card";
 import Button from "../../../core/ui/components/Button";
 import { getAttendanceErrorInfo } from "../../../core/ui/attendanceErrorUtils";
 import { isOperationalFlow } from "../../../core/ui/attendanceFlowUtils";
 
-const PRECISE_LOCATION_OPTIONS = Object.freeze({
-  desiredAccuracyMeters: 40,
-  goodAccuracyMeters: 25,
-  highAccuracyTimeoutMs: 7000,
-  sampleWindowMs: 4500,
-  sampleCount: 2,
-});
-
-const getActionLocation = async () => {
-  let lastError = null;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const result = await getPreciseLocation(PRECISE_LOCATION_OPTIONS);
-      const latitude = Number(result?.latitude);
-      const longitude = Number(result?.longitude);
-      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
-        throw new Error("Sin coordenadas validas");
-      }
-      if (Math.abs(latitude) <= 0.0005 && Math.abs(longitude) <= 0.0005) {
-        throw new Error("Coordenadas invalidas");
-      }
-      return {
-        latitude,
-        longitude,
-        accuracy: Number(result?.accuracy || 0),
-        timestamp: Number(result?.timestamp || Date.now()),
-        source: result?.source || "gps",
-      };
-    } catch (error) {
-      lastError = error;
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-    }
-  }
-
-  const finalError = new Error("Ubicacion obligatoria. No se pudo completar la marcacion por timeout de GPS.");
-  finalError.cause = lastError;
-  throw finalError;
-};
 
 const resolveShortcutParam = (params, keys = []) => {
   for (const key of keys) {
@@ -89,6 +51,7 @@ const parseActionParams = (search) => {
     returnToOffice: ["1", "true", "si", "yes"].includes(
       resolveShortcutParam(params, ["return_to_office", "retorno_oficina", "returnToOffice"]).toLowerCase()
     ),
+    returnUrl: resolveShortcutParam(params, ["return_url", "returnUrl", "redirect"]),
   };
 };
 
@@ -113,16 +76,33 @@ const buildClientDisplayLabel = (client = {}) => {
   return city ? `${safeName} - ${city} (#${client?.id})` : `${safeName} (#${client?.id})`;
 };
 
+const withTimeout = (promise, ms, timeoutMessage) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutMessage || "Operacion agotada por tiempo"));
+    }, ms);
+    Promise.resolve(promise)
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+
 const AttendanceAction = () => {
   const { action } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading: authLoading } = useAuth();
   const { showToast } = useUI();
-  
-  const [status, setStatus] = useState("initializing"); // initializing, geolocating, processing, success, error
+
+  const [status, setStatus] = useState("initializing"); // initializing, geolocating, ready, processing, success, error
   const [message, setMessage] = useState("");
   const [errorDetails, setErrorDetails] = useState("");
+  const [resolvedLocation, setResolvedLocation] = useState(null);
   const [availableClients, setAvailableClients] = useState([]);
   const [loadingClients, setLoadingClients] = useState(false);
   const [manualClientId, setManualClientId] = useState("");
@@ -133,7 +113,9 @@ const AttendanceAction = () => {
   const [manualStepError, setManualStepError] = useState("");
   const [manualSubmitNonce, setManualSubmitNonce] = useState(0);
   const processedRef = useRef(false);
+  const executionKeyRef = useRef("");
   const actionParams = parseActionParams(location.search);
+  const executionKey = `${action || ""}|${location.search || ""}|${location.key || ""}|${user?.id || ""}`;
   const ensureExceptionFlow = async (expectedFlow) => {
     const activeResponse = await getActiveException();
     const activeException = activeResponse?.data;
@@ -401,6 +383,52 @@ const AttendanceAction = () => {
   };
 
   const config = ACTION_MAP[action];
+
+  const getNextStepHint = useCallback((currentAction) => {
+    const hints = {
+      entrada: "Continúa con salida a almuerzo cuando corresponda.",
+      "salida-almuerzo": "Continúa con entrada de almuerzo cuando regreses.",
+      "almuerzo-salida": "Continúa con entrada de almuerzo cuando regreses.",
+      almuerzo: "Continúa con entrada de almuerzo cuando regreses.",
+      "entrada-almuerzo": "Continúa con salida final al cerrar tu jornada.",
+      "almuerzo-entrada": "Continúa con salida final al cerrar tu jornada.",
+      salida: "Tu jornada ya está cerrada.",
+      "salida-final": "Tu jornada ya está cerrada.",
+      "salida-imprevista": "Continúa con llegada y regreso imprevisto para cerrar el ciclo.",
+      "llegada-imprevista": "Continúa con retorno imprevisto al salir del lugar.",
+      "retorno-imprevisto": "Continúa con regreso imprevisto al volver a oficina.",
+      "regreso-imprevisto": "Ciclo imprevisto cerrado correctamente.",
+      "salida-oficina": "Continúa con llegada a destino y luego entrada oficina para cerrar.",
+      "salida-campo": "Continúa con llegada a destino y luego entrada campo para cerrar.",
+      "llegada-destino": "Continúa con salida/entrada de cliente o cierre de viaje.",
+      "entrada-oficina": "Ciclo operacional cerrado correctamente.",
+      "entrada-campo": "Ciclo operacional cerrado correctamente.",
+      "cierre-viaje": "Viaje cerrado correctamente.",
+      "cliente-entrada": "Continúa con salida de cliente al terminar la visita.",
+      "entrada-cliente": "Continúa con salida de cliente al terminar la visita.",
+      "cliente-salida": "Visita cerrada correctamente.",
+      "salida-cliente": "Visita cerrada correctamente.",
+    };
+    return hints[currentAction] || "Continúa con la siguiente marcación de tu flujo.";
+  }, []);
+
+  const resolveFriendlyDuplicateMessage = useCallback(({ currentAction, statusCode, backendCode, backendMessage }) => {
+    const msg = String(backendMessage || "").toLowerCase();
+    const hasAlreadyMarked =
+      msg.includes("ya has marcado") ||
+      msg.includes("ya tienes una salida") ||
+      msg.includes("ya se encontraba cerrada") ||
+      msg.includes("ya estaba cerrada");
+    const noActiveButLikelyCompleted =
+      (statusCode === 404 && backendCode === "NO_ACTIVE_OPERATIONAL") ||
+      (statusCode === 404 && /no se encontro una salida imprevista activa/.test(msg));
+
+    if (!hasAlreadyMarked && !noActiveButLikelyCompleted) {
+      return null;
+    }
+
+    return `Esta marcación ya estaba registrada. ${getNextStepHint(currentAction)}`;
+  }, [getNextStepHint]);
   const needsManualClientStep = Boolean(
     config?.requiresParams && !actionParams.clientId && !actionParams.prospectName
   );
@@ -482,60 +510,62 @@ const AttendanceAction = () => {
   }, [needsManualClientStep, user, authLoading]);
 
   useEffect(() => {
+    if (executionKeyRef.current !== executionKey) {
+      executionKeyRef.current = executionKey;
+      processedRef.current = false;
+      setStatus("initializing");
+      setMessage("");
+      setErrorDetails("");
+      setResolvedLocation(null);
+    }
+  }, [executionKey]);
+
+  useEffect(() => {
+    if (status !== "geolocating") return undefined;
+    const timer = setTimeout(() => {
+      if (status === "geolocating") {
+        processedRef.current = false;
+        setStatus("error");
+        setMessage("No se pudo obtener tu ubicación a tiempo.");
+        setErrorDetails("El GPS tardó demasiado. Reintenta y verifica permisos de ubicación para este sitio.");
+      }
+    }, 22000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  useEffect(() => {
     if (authLoading || !user || processedRef.current || !config) return;
     if (needsManualClientStep && manualSubmitNonce === 0) return;
-    
-    const performAction = async () => {
+
+    let cancelled = false;
+    const resolveLocationOnly = async () => {
       processedRef.current = true;
       setStatus("geolocating");
-      
       try {
-        const currentLoc = await getActionLocation();
-        setStatus("processing");
-        const response = await config.fn(currentLoc, effectiveActionParams);
-        if (response.ok) {
-          setStatus("success");
-          setMessage(response.message || `${config.label} registrada correctamente.`);
-          showToast(response.message || `${config.label} registrada`, "success");
-          
-          // Redirect after 3 seconds
-          setTimeout(() => {
-            navigate("/dashboard", { replace: true });
-          }, 3500);
-        } else {
-          throw new Error(response.message || "Error al procesar la solicitud.");
-        }
+        const currentLoc = await withTimeout(
+          getLocationForAction(),
+          20000,
+          "GPS tardó demasiado en responder. Verifica permisos de ubicación y vuelve a intentar."
+        );
+        if (cancelled) return;
+        setResolvedLocation(currentLoc);
+        setStatus("ready");
+        setMessage("Ubicación lista. Confirma para marcar.");
+        setErrorDetails("");
       } catch (err) {
-        const statusCode = Number(err?.response?.status || 0);
-        const backendCode = String(err?.response?.data?.code || "").trim();
-        const backendMessage = String(err?.response?.data?.message || "").trim();
-        const isClientExitAction = action === "cliente-salida" || action === "salida-cliente";
-        if (
-          isClientExitAction &&
-          statusCode === 404 &&
-          (
-            backendCode === "NO_ACTIVE_VISIT" ||
-            /no se encontr[oó] una visita activa/i.test(backendMessage)
-          )
-        ) {
-          setStatus("success");
-          setMessage("La salida cliente ya estaba cerrada o no tenía una visita activa pendiente.");
-          setErrorDetails("");
-          showToast("No había visita activa pendiente. Estado sincronizado.", "info");
-          setTimeout(() => {
-            navigate("/dashboard", { replace: true });
-          }, 2500);
-          return;
+        if (!cancelled) {
+          const info = getAttendanceErrorInfo(err, "No se pudo obtener la ubicacion.", "error");
+          setStatus("error");
+          setMessage("No se pudo obtener tu ubicación.");
+          setErrorDetails(info.message || "Error desconocido");
+          showToast(info.message || "Error de red", info.type || "error");
+          processedRef.current = false;
         }
-        const info = getAttendanceErrorInfo(err, "No se pudo completar la marcacion.", "error");
-        setStatus("error");
-        setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
-        setErrorDetails(info.message || "Error desconocido");
-        showToast(info.message || "Error de red", info.type || "error");
       }
     };
 
-    performAction();
+    resolveLocationOnly();
+    return () => { cancelled = true; };
   }, [
     action,
     authLoading,
@@ -546,8 +576,71 @@ const AttendanceAction = () => {
     needsManualClientStep,
     manualSubmitNonce,
     effectiveActionParams,
+    actionParams.returnUrl,
+    resolveFriendlyDuplicateMessage,
   ]);
 
+
+  const handleConfirmMark = async () => {
+    if (!resolvedLocation || !config) return;
+    setStatus("processing");
+    try {
+      const response = await config.fn(resolvedLocation, effectiveActionParams);
+      if (response?.ok) {
+        setStatus("success");
+        setMessage(response.message || `${config.label} registrada correctamente.`);
+        showToast(response.message || `${config.label} registrada`, "success");
+        const destination = actionParams.returnUrl || "/dashboard";
+        setTimeout(() => {
+          navigate(destination, { replace: true });
+        }, 3500);
+        return;
+      }
+      throw new Error(response?.message || "Error al procesar la solicitud.");
+    } catch (err) {
+      const statusCode = Number(err?.response?.status || 0);
+      const backendCode = String(err?.response?.data?.code || "").trim();
+      const backendMessage = String(err?.response?.data?.message || "").trim();
+      const isClientExitAction = action === "cliente-salida" || action === "salida-cliente";
+      if (
+        isClientExitAction &&
+        statusCode === 404 &&
+        (backendCode === "NO_ACTIVE_VISIT" || /no se encontró una visita activa/i.test(backendMessage))
+      ) {
+        setStatus("success");
+        setMessage("La salida cliente ya estaba cerrada o no tenía una visita activa pendiente.");
+        setErrorDetails("");
+        showToast("No había visita activa pendiente. Estado sincronizado.", "info");
+        setTimeout(() => {
+          navigate(actionParams.returnUrl || "/dashboard", { replace: true });
+        }, 2500);
+        return;
+      }
+
+      const duplicateMessage = resolveFriendlyDuplicateMessage({
+        currentAction: action,
+        statusCode,
+        backendCode,
+        backendMessage,
+      });
+      if (duplicateMessage) {
+        setStatus("success");
+        setMessage(duplicateMessage);
+        setErrorDetails("");
+        showToast("Marcación ya registrada. Continuando flujo.", "info");
+        setTimeout(() => {
+          navigate(actionParams.returnUrl || "/dashboard", { replace: true });
+        }, 2500);
+        return;
+      }
+
+      const info = getAttendanceErrorInfo(err, "No se pudo completar la marcacion.", "error");
+      setStatus("error");
+      setMessage(`No se pudo registrar la ${config.label.toLowerCase()}.`);
+      setErrorDetails(info.message || "Error desconocido");
+      showToast(info.message || "Error de red", info.type || "error");
+    }
+  };
   const handleManualClientSubmit = () => {
     setManualStepError("");
     if (!manualClientId && !manualProspectName.trim()) {
@@ -679,6 +772,20 @@ const AttendanceAction = () => {
       >
         <Card className="text-center py-12 px-8 overflow-hidden relative">
           <AnimatePresence mode="wait">
+            {(status === "initializing") && (
+              <motion.div
+                key="initializing"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex flex-col items-center"
+              >
+                <FiLoader className="text-5xl text-gray-400 animate-spin mb-6" />
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Verificando sesión</h2>
+                <p className="text-gray-500 dark:text-gray-400 italic">Un momento...</p>
+              </motion.div>
+            )}
+
             {status === "geolocating" && (
               <motion.div
                 key="geolocating"
@@ -710,6 +817,29 @@ const AttendanceAction = () => {
               </motion.div>
             )}
 
+            {status === "ready" && (
+              <motion.div
+                key="ready"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="flex flex-col items-center"
+              >
+                <div className="bg-blue-100 dark:bg-blue-900/30 p-4 rounded-full mb-6">
+                  <FiMapPin className="text-6xl text-blue-500" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ubicación lista</h2>
+                <p className="text-gray-600 dark:text-gray-300 mb-6">
+                  Se obtuvo tu ubicación correctamente. Presiona para confirmar la marcación.
+                </p>
+                <div className="flex gap-3">
+                  <Button onClick={handleConfirmMark} variant="primary">Marcar ahora</Button>
+                  <Button onClick={() => navigate(actionParams.returnUrl || "/dashboard", { replace: true })} variant="ghost">
+                    Cancelar
+                  </Button>
+                </div>
+              </motion.div>
+            )}
             {status === "success" && (
               <motion.div
                 key="success"
@@ -737,7 +867,7 @@ const AttendanceAction = () => {
                 <div className="bg-red-100 dark:bg-red-900/30 p-4 rounded-full mb-6">
                   <FiAlertCircle className="text-6xl text-red-500" />
                 </div>
-                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ups, algo salió mal</h2>
+                <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-2">Ups, algo salio mal</h2>
                 <p className="text-red-600 dark:text-red-400 font-medium mb-4">{message}</p>
                 <div className="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg text-xs text-gray-500 dark:text-gray-400 mb-8 w-full">
                   {errorDetails}

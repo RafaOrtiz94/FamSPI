@@ -77,16 +77,16 @@ const SectionNavigator = ({
  icon: "EXP"
  },
  {
- id: "dispatch_workspace",
- title: "Cantidades Maximas",
- description: "Cantidades maximas comerciales y control operativo por elemento",
- icon: "OPS"
- },
- {
  id: "feasibility",
  title: "Factibilidad",
  description: "Decision final del BC para cierre y continuidad en compras",
  icon: "FAC"
+ },
+ {
+ id: "dispatch_workspace",
+ title: "Cantidades Maximas",
+ description: "Verificacion y control operativo — disponible solo si el BC es factible",
+ icon: "OPS"
  }
  ];
 

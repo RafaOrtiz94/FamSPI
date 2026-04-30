@@ -1,10 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FiCheckCircle, FiClock, FiSave } from "react-icons/fi";
 import api from "../../../../../core/api";
 import { useParams } from "react-router-dom";
 import { useUI } from "../../../../../core/ui/UIContext";
-import { useAuth } from "../../../../../core/auth/AuthContext";
-
 const makeTempId = () => `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const isTempId = (id) => String(id).startsWith("tmp-");
 
@@ -22,23 +20,19 @@ const dedupeItemsById = (rows = []) => {
 const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  const { id: bcId } = useParams();
  const { showToast } = useUI();
- const { user } = useAuth();
  const [items, setItems] = useState([]);
  const [loading, setLoading] = useState(true);
  const [savingCart, setSavingCart] = useState(false);
  const [searchTerm, setSearchTerm] = useState("");
+ const [showOnlySelected, setShowOnlySelected] = useState(false);
  const [newName, setNewName] = useState("");
  const [newCategory, setNewCategory] = useState("");
  const [newQuantity, setNewQuantity] = useState("");
  const [newCharacteristics, setNewCharacteristics] = useState("");
  const [newNotes, setNewNotes] = useState("");
- const [newPrice, setNewPrice] = useState("");
  const [dirtyMap, setDirtyMap] = useState({});
 
  const canEdit = permissions.canEdit !== false && ownership?.canUserEdit !== false;
- const role = (user?.role || user?.scope || user?.role_name || "").toLowerCase();
- const canSeePrice = role === "jefe_operaciones" || role === "jefe_de_operaciones";
- const canEditPrice = canEdit && canSeePrice;
 
  const loadCatalog = useCallback(async () => {
  if (!bcId) return;
@@ -145,7 +139,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  notes: row.notes || null,
  quantity: row.quantity ?? null,
  characteristics: row.characteristics || null,
- unit_price: canEditPrice ? (row.unit_price ?? null) : undefined,
  })),
  };
 
@@ -163,7 +156,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  notes: saved.notes,
  quantity: saved.quantity,
  characteristics: saved.characteristics,
- unit_price: saved.unit_price,
  updated_by_role: saved.updated_by_role,
  updated_by_email: saved.updated_by_email,
  };
@@ -191,7 +183,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
 
  const tempId = makeTempId();
  const normalizedQuantity = newQuantity === "" ? null : Number(newQuantity);
- const normalizedPrice = canEditPrice && newPrice !== "" ? Number(newPrice) : null;
  const localItem = {
  id: tempId,
  code: null,
@@ -202,7 +193,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  quantity: Number.isFinite(normalizedQuantity) ? normalizedQuantity : null,
  characteristics: newCharacteristics.trim() || null,
  notes: newNotes.trim() || null,
- unit_price: Number.isFinite(normalizedPrice) ? normalizedPrice : null,
  updated_by_role: null,
  updated_by_email: null,
  _pendingCreate: true,
@@ -215,15 +205,15 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  setNewQuantity("");
  setNewCharacteristics("");
  setNewNotes("");
- setNewPrice("");
 
  showToast("Inversion agregada al carrito local. Guarda para persistir.", "success");
  };
 
  const normalizedSearch = searchTerm.trim().toLowerCase();
  const filteredItems = useMemo(() => {
- if (!normalizedSearch) return items;
- return items.filter((item) => {
+ let base = showOnlySelected ? items.filter((i) => i.selected) : items;
+ if (!normalizedSearch) return base;
+ return base.filter((item) => {
  const name = String(item.name || "").toLowerCase();
  const category = String(item.category || "").toLowerCase();
  const notes = String(item.notes || "").toLowerCase();
@@ -235,7 +225,7 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  characteristics.includes(normalizedSearch)
  );
  });
- }, [items, normalizedSearch]);
+ }, [items, normalizedSearch, showOnlySelected]);
 
  const selectedCount = useMemo(() => items.filter((i) => i.selected).length, [items]);
  const dirtyCount = useMemo(() => Object.keys(dirtyMap).length, [dirtyMap]);
@@ -310,22 +300,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  />
  </div>
 
- {canSeePrice && (
- <div className="flex flex-col gap-2">
- <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
- <input
- type="number"
- min={0}
- step="0.01"
- value={item.unit_price ?? ""}
- onChange={(e) => updateItem(item.id, { unit_price: e.target.value === "" ? null : Number(e.target.value) })}
- disabled={!canEditPrice || !item.selected || savingCart}
- placeholder="0.00"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400 disabled:bg-gray-50"
- />
- </div>
- )}
-
  <div className="flex flex-col gap-2 md:col-span-2">
  <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
  <input
@@ -387,6 +361,17 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  {pendingCreateCount} nuevos por crear
  </div>
  )}
+ {canEdit && (
+ <button
+ type="button"
+ onClick={handleSaveCart}
+ disabled={savingCart || dirtyCount === 0}
+ className="inline-flex items-center justify-center gap-2 px-4 py-1.5 rounded-full bg-blue-600 text-white text-xs sm:text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500 transition-colors"
+ >
+ <FiSave size={13} />
+ {savingCart ? "Guardando..." : "Guardar cambios"}
+ </button>
+ )}
  </div>
  </div>
 
@@ -434,21 +419,6 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  disabled={!canEdit || savingCart}
  />
  </div>
- {canSeePrice && (
- <div className="flex flex-col gap-2">
- <label className="text-xs font-semibold text-gray-500">Precio unitario</label>
- <input
- type="number"
- min={0}
- step="0.01"
- value={newPrice}
- onChange={(e) => setNewPrice(e.target.value)}
- placeholder="0.00"
- className="border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
- disabled={!canEditPrice || savingCart}
- />
- </div>
- )}
  <div className="flex flex-col gap-2 md:col-span-2">
  <label className="text-xs font-semibold text-gray-500">Caracteristicas</label>
  <input
@@ -479,20 +449,12 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  >
  Agregar al carrito
  </button>
- <button
- type="button"
- onClick={handleSaveCart}
- disabled={!canEdit || savingCart || dirtyCount === 0}
- className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-blue-600 text-white text-sm font-semibold shadow-sm disabled:bg-gray-200 disabled:text-gray-500"
- >
- <FiSave size={14} />
- {savingCart ? "Guardando carrito..." : "Guardar carrito"}
- </button>
  </div>
  </div>
 
  <div className="bg-white border border-gray-100 rounded-2xl p-4 sm:p-5">
- <div className="flex flex-col gap-2 mb-3">
+ <div className="flex flex-col sm:flex-row sm:items-end gap-3 mb-3">
+ <div className="flex flex-col gap-2 flex-1">
  <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Buscar inversiones</label>
  <input
  type="search"
@@ -501,6 +463,31 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  onChange={(e) => setSearchTerm(e.target.value)}
  className="border border-gray-200 rounded-2xl px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-100 focus:border-emerald-400"
  />
+ </div>
+ <div className="flex rounded-xl overflow-hidden border border-gray-200 self-end">
+ <button
+ type="button"
+ onClick={() => setShowOnlySelected(false)}
+ className={`px-3 py-2 text-xs font-semibold transition-colors ${
+ !showOnlySelected
+ ? "bg-emerald-600 text-white"
+ : "bg-white text-gray-600 hover:bg-gray-50"
+ }`}
+ >
+ Todas
+ </button>
+ <button
+ type="button"
+ onClick={() => setShowOnlySelected(true)}
+ className={`px-3 py-2 text-xs font-semibold transition-colors ${
+ showOnlySelected
+ ? "bg-emerald-600 text-white"
+ : "bg-white text-gray-600 hover:bg-gray-50"
+ }`}
+ >
+ En carrito ({selectedCount})
+ </button>
+ </div>
  </div>
 
  {!items.length && !loading && (
@@ -513,7 +500,9 @@ const InvestmentsSection = ({ permissions = {}, ownership = {} }) => {
  filteredItems.map(renderInvestmentCard)
  ) : (
  <div className="p-6 text-center text-gray-500 text-sm">
- No se encontraron coincidencias. Intenta con otra palabra clave.
+ {showOnlySelected
+ ? "No hay inversiones en el carrito aun."
+ : "No se encontraron coincidencias. Intenta con otra palabra clave."}
  </div>
  )}
  </>

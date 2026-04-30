@@ -25,6 +25,7 @@ const REQUESTER_ROLES = [
   "tecnico",
   "jefe_tecnico",
   "jefe_servicio_tecnico",
+  "admin",
 ];
 
 const ALLOWED_STATUSES = new Set(["pending", "approved", "paid", "rejected"]);
@@ -100,8 +101,12 @@ function isFinanceUser(user = {}) {
   return Array.from(roles).some((role) => FINANCE_ROLES.includes(role));
 }
 
+function isGlobalViaticosViewer(user = {}) {
+  return isFinanceUser(user) || isAdminUser(user);
+}
+
 function canAccessViaticos(user = {}) {
-  if (isFinanceUser(user)) return true;
+  if (isGlobalViaticosViewer(user)) return true;
   const roles = collectUserRoles(user);
   return Array.from(roles).some((role) => REQUESTER_ROLES.includes(role));
 }
@@ -150,12 +155,12 @@ function assertOperationalApprover(user = {}) {
 
 function isAdminUser(user = {}) {
   const roles = collectUserRoles(user);
-  return Array.from(roles).some((role) => ["admin", "administrador", "gerencia_general"].includes(role));
+  return Array.from(roles).some((role) => ["admin", "gerencia_general"].includes(role));
 }
 
 function assertAdminOrFinance(user = {}) {
   if (!isFinanceUser(user) && !isAdminUser(user)) {
-    const error = new Error("Solo finanzas o administrador puede ejecutar esta accion");
+    const error = new Error("Solo finanzas o admin puede ejecutar esta accion");
     error.status = 403;
     throw error;
   }
@@ -692,9 +697,20 @@ async function listVisitCandidates({ actorUser, startDate, endDate, status, requ
     filters.push(`LOWER(base.requester_email) = $${params.length}`);
   }
 
-  if (!isFinanceUser(actorUser)) {
-    params.push(String(actorUser.email || "").toLowerCase());
-    filters.push(`LOWER(base.requester_email) = $${params.length}`);
+  if (!isGlobalViaticosViewer(actorUser)) {
+    const actorEmail = String(actorUser.email || "").toLowerCase();
+    const actorUserId = Number(actorUser.id);
+    params.push(actorEmail);
+    const emailParamIndex = params.length;
+    if (Number.isFinite(actorUserId) && actorUserId > 0) {
+      params.push(actorUserId);
+      const userIdParamIndex = params.length;
+      filters.push(
+        `(LOWER(COALESCE(base.requester_email, '')) = $${emailParamIndex} OR base.requester_user_id = $${userIdParamIndex})`
+      );
+    } else {
+      filters.push(`LOWER(COALESCE(base.requester_email, '')) = $${emailParamIndex}`);
+    }
   }
 
   const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
@@ -751,8 +767,8 @@ async function listVisitCandidates({ actorUser, startDate, endDate, status, requ
           u.email AS requester_email,
           ae.user_id AS requester_user_id,
           ae.start_time::date AS visit_date,
-          COALESCE(ae.destination_description, ae.origin_description, 'Viaje operacional') AS city,
-          COALESCE(ae.destination_description, ae.type, 'Salida operacional') AS reference_name,
+          COALESCE(NULLIF(BTRIM(ae.description), ''), 'Salida operacional') AS city,
+          COALESCE(NULLIF(BTRIM(ae.description), ''), ae.type, 'Salida operacional') AS reference_name,
           ae.start_time AS hora_entrada,
           ae.return_time AS hora_salida,
           NULL::numeric AS lat_entrada,
@@ -767,6 +783,7 @@ async function listVisitCandidates({ actorUser, startDate, endDate, status, requ
         FROM attendance_exceptions ae
         LEFT JOIN users u ON u.id = ae.user_id
         WHERE ae.start_time::date BETWEEN $1 AND $2
+          AND LOWER(COALESCE(ae.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
           AND UPPER(COALESCE(ae.status, '')) = 'COMPLETED'
       ),
       base AS (
@@ -819,9 +836,20 @@ async function listAllowances({ actorUser, startDate, endDate, status }) {
     filters.push(`ta.status = $${params.length}`);
   }
 
-  if (!isFinanceUser(actorUser)) {
-    params.push(String(actorUser.email || "").toLowerCase());
-    filters.push(`LOWER(ta.requester_email) = $${params.length}`);
+  if (!isGlobalViaticosViewer(actorUser)) {
+    const actorEmail = String(actorUser.email || "").toLowerCase();
+    const actorUserId = Number(actorUser.id);
+    params.push(actorEmail);
+    const emailParamIndex = params.length;
+    if (Number.isFinite(actorUserId) && actorUserId > 0) {
+      params.push(actorUserId);
+      const userIdParamIndex = params.length;
+      filters.push(
+        `(LOWER(COALESCE(ta.requester_email, '')) = $${emailParamIndex} OR ta.requester_user_id = $${userIdParamIndex})`
+      );
+    } else {
+      filters.push(`LOWER(COALESCE(ta.requester_email, '')) = $${emailParamIndex}`);
+    }
   }
 
   const { rows } = await db.query(
@@ -903,14 +931,13 @@ async function resolveReferencedVisit(sourceType, sourceId) {
            ae.user_id AS requester_user_id,
            u.email AS requester_email,
            ae.start_time::date AS visit_date,
-           COALESCE(ae.destination_description, ae.origin_description, 'Viaje operacional') AS city,
+           COALESCE(NULLIF(BTRIM(ae.description), ''), 'Salida operacional') AS city,
            ae.start_time,
-           ae.return_time,
-           ae.closure_type,
-           ae.outside_labor_area
+           ae.return_time
          FROM attendance_exceptions ae
          LEFT JOIN users u ON u.id = ae.user_id
          WHERE ae.id = $1
+           AND LOWER(COALESCE(ae.type, '')) = ANY(ARRAY['operacion_campo', 'operacion_de_campo', 'salida_oficina', 'viaje', 'campo']::text[])
            AND UPPER(COALESCE(ae.status, '')) = 'COMPLETED'
          LIMIT 1
        `,
@@ -928,9 +955,9 @@ async function getAllowanceById(allowanceId) {
 }
 
 function assertAllowanceAccess(allowance, actorUser) {
-  const finance = isFinanceUser(actorUser);
+  const privilegedViewer = isGlobalViaticosViewer(actorUser);
   const requesterEmail = String(actorUser?.email || "").toLowerCase();
-  if (finance) return;
+  if (privilegedViewer) return;
   if (String(allowance?.requester_email || "").toLowerCase() !== requesterEmail) {
     const error = new Error("No tienes acceso a este viatico");
     error.status = 403;
@@ -1005,12 +1032,6 @@ async function upsertAllowance({ actorUser, payload }) {
   const paymentDate = finalStatus === "paid" ? payload.payment_date || new Date().toISOString().slice(0, 10) : null;
   const outsideLaborArea = Boolean(payload.outside_labor_area);
 
-  if (!financeActor && !outsideLaborArea) {
-    const error = new Error("Solo se permiten viaticos para gastos fuera del area de labores");
-    error.status = 400;
-    throw error;
-  }
-
   if (fuelAmount > 0 && distanceKm <= 1000) {
     const error = new Error("Gasolina solo aplica cuando la distancia supera 1000 km");
     error.status = 400;
@@ -1079,8 +1100,8 @@ async function upsertAllowance({ actorUser, payload }) {
           $16, $17, $18, $19, $20, $21,
           $22, $23, $24,
           'unchecked', NULL,
-          $25, $26, CASE WHEN $26 IS NULL THEN NULL ELSE NOW() END,
-          $27, $28, NOW(), NOW()
+          $25::integer, $26::integer, CASE WHEN $26::integer IS NULL THEN NULL ELSE NOW() END,
+          $27::date, $28, NOW(), NOW()
         )
         RETURNING *
       `,
@@ -1145,8 +1166,8 @@ async function upsertAllowance({ actorUser, payload }) {
         $17, $18, $19, $20, $21, $22,
         $23, $24, $25,
         'unchecked', NULL,
-        $26, $27, CASE WHEN $27 IS NULL THEN NULL ELSE NOW() END,
-        $28, $29, NOW(), NOW()
+        $26::integer, $27::integer, CASE WHEN $27::integer IS NULL THEN NULL ELSE NOW() END,
+        $28::date, $29, NOW(), NOW()
       )
       ON CONFLICT (source_type, source_id)
       WHERE source_id IS NOT NULL

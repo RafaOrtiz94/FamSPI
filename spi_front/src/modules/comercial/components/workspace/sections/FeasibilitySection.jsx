@@ -166,26 +166,29 @@ const FeasibilitySection = ({
  </div>
  )}
 
- <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
- <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
- <div className="grid gap-4 md:grid-cols-2">
+ <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+ <div className="min-w-0 flex-1 rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+ <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+ Decision de factibilidad
+ </p>
+ <div className="grid gap-3 sm:grid-cols-2">
  <button
  type="button"
  disabled={!canEdit}
  onClick={() => setIsFeasible(true)}
- className={`rounded-2xl border p-4 text-left transition ${
+ className={`rounded-2xl border p-4 text-left transition-colors ${
  isFeasible
- ? "border-emerald-300 bg-emerald-50"
- : "border-gray-200 bg-white hover:border-emerald-200"
+ ? "border-emerald-300 bg-emerald-50 ring-2 ring-emerald-200"
+ : "border-gray-200 bg-white hover:border-emerald-200 hover:bg-emerald-50/40"
  } ${!canEdit ? "cursor-not-allowed opacity-70" : ""}`}
  >
  <div className="flex items-center gap-3">
- <div className="rounded-xl bg-emerald-100 p-2 text-emerald-700">
+ <div className="shrink-0 rounded-xl bg-emerald-100 p-2 text-emerald-700">
  <FiTrendingUp size={18} />
  </div>
- <div>
+ <div className="min-w-0">
  <p className="text-sm font-semibold text-gray-900">Factible / rentable</p>
- <p className="text-xs text-gray-600">
+ <p className="mt-0.5 text-xs text-gray-500">
  Cierra el BC como factible y permite continuar en workspace de compras.
  </p>
  </div>
@@ -196,19 +199,19 @@ const FeasibilitySection = ({
  type="button"
  disabled={!canEdit}
  onClick={() => setIsFeasible(false)}
- className={`rounded-2xl border p-4 text-left transition ${
+ className={`rounded-2xl border p-4 text-left transition-colors ${
  !isFeasible
- ? "border-rose-300 bg-rose-50"
- : "border-gray-200 bg-white hover:border-rose-200"
+ ? "border-rose-300 bg-rose-50 ring-2 ring-rose-200"
+ : "border-gray-200 bg-white hover:border-rose-200 hover:bg-rose-50/40"
  } ${!canEdit ? "cursor-not-allowed opacity-70" : ""}`}
  >
  <div className="flex items-center gap-3">
- <div className="rounded-xl bg-rose-100 p-2 text-rose-700">
+ <div className="shrink-0 rounded-xl bg-rose-100 p-2 text-rose-700">
  <FiXCircle size={18} />
  </div>
- <div>
+ <div className="min-w-0">
  <p className="text-sm font-semibold text-gray-900">No factible</p>
- <p className="text-xs text-gray-600">
+ <p className="mt-0.5 text-xs text-gray-500">
  Cierra el BC y deriva la alternativa comercial para seguir el flujo en compras.
  </p>
  </div>
@@ -269,7 +272,7 @@ const FeasibilitySection = ({
  </div>
  </div>
 
- <div className="space-y-4">
+ <div className="w-full shrink-0 space-y-4 xl:w-72">
  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Estado actual</p>
  <div className="mt-3 space-y-2 text-sm text-gray-700">
@@ -288,10 +291,11 @@ const FeasibilitySection = ({
  <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Regla operativa</p>
  <ul className="mt-3 space-y-2 text-sm text-gray-700">
- <li>1. Cantidades Maximas debe quedar registrada.</li>
- <li>2. Sincronizacion debe generar el Sheet oficial.</li>
- <li>3. ACP Comercial o Jefe Comercial resuelven la factibilidad.</li>
- <li>4. La decision cierra el Business Case.</li>
+ <li>1. Sincronizacion debe generar el Sheet oficial.</li>
+ <li>2. ACP Comercial o Jefe Comercial registran la decision de factibilidad.</li>
+ <li>3. La decision cierra el Business Case.</li>
+ <li className="mt-1 text-xs text-emerald-700 font-medium">→ Si es factible: se habilita la seccion Cantidades Maximas para control operativo.</li>
+ <li className="text-xs text-rose-700 font-medium">→ Si no es factible: se registra la alternativa comercial y el flujo continua en compras.</li>
  </ul>
  </div>
  </div>

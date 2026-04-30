@@ -494,8 +494,16 @@ const buildAttendanceRangeQuery = async ({
           SELECT
             'office_exit'::text AS event_type,
             e.start_time AS event_time,
-            NULL::double precision AS lat,
-            NULL::double precision AS lng,
+            CASE
+              WHEN strpos(COALESCE(e.start_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.start_location, ',', 1)), '')::double precision
+              ELSE NULL
+            END AS lat,
+            CASE
+              WHEN strpos(COALESCE(e.start_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.start_location, ',', 2)), '')::double precision
+              ELSE NULL
+            END AS lng,
             'salida_campo'::text AS source,
             NULL::integer AS client_request_id,
             NULL::text AS prospect_name
@@ -509,8 +517,16 @@ const buildAttendanceRangeQuery = async ({
           SELECT
             'client_entry'::text AS event_type,
             e.arrival_time AS event_time,
-            NULL::double precision AS lat,
-            NULL::double precision AS lng,
+            CASE
+              WHEN strpos(COALESCE(e.arrival_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.arrival_location, ',', 1)), '')::double precision
+              ELSE NULL
+            END AS lat,
+            CASE
+              WHEN strpos(COALESCE(e.arrival_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.arrival_location, ',', 2)), '')::double precision
+              ELSE NULL
+            END AS lng,
             'llegada_cliente'::text AS source,
             NULL::integer AS client_request_id,
             NULL::text AS prospect_name
@@ -524,8 +540,16 @@ const buildAttendanceRangeQuery = async ({
           SELECT
             'client_exit'::text AS event_type,
             e.departure_time AS event_time,
-            NULL::double precision AS lat,
-            NULL::double precision AS lng,
+            CASE
+              WHEN strpos(COALESCE(e.departure_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.departure_location, ',', 1)), '')::double precision
+              ELSE NULL
+            END AS lat,
+            CASE
+              WHEN strpos(COALESCE(e.departure_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.departure_location, ',', 2)), '')::double precision
+              ELSE NULL
+            END AS lng,
             'salida_cliente'::text AS source,
             NULL::integer AS client_request_id,
             NULL::text AS prospect_name
@@ -539,8 +563,16 @@ const buildAttendanceRangeQuery = async ({
           SELECT
             'office_entry'::text AS event_type,
             e.return_time AS event_time,
-            NULL::double precision AS lat,
-            NULL::double precision AS lng,
+            CASE
+              WHEN strpos(COALESCE(e.return_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.return_location, ',', 1)), '')::double precision
+              ELSE NULL
+            END AS lat,
+            CASE
+              WHEN strpos(COALESCE(e.return_location, ''), ',') > 0
+              THEN NULLIF(trim(split_part(e.return_location, ',', 2)), '')::double precision
+              ELSE NULL
+            END AS lng,
             'retorno_oficina'::text AS source,
             NULL::integer AS client_request_id,
             NULL::text AS prospect_name

@@ -275,6 +275,15 @@ function normalizeInvestmentNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function normalizeBool(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "boolean") return value ? "Si" : "No";
+  const s = String(value).trim().toLowerCase();
+  if (s === "true" || s === "1" || s === "yes" || s === "si" || s === "sí") return "Si";
+  if (s === "false" || s === "0" || s === "no") return "No";
+  return value;
+}
+
 async function getEquipmentNamesMapByIds(ids = []) {
   const cleanIds = Array.from(
     new Set(
@@ -351,7 +360,6 @@ function buildInversionesPayload(investments = []) {
       if (!name) return;
       const cantidad = normalizeInvestmentNumber(item?.quantity);
       const precio = normalizeInvestmentNumber(item?.unit_price);
-      if (cantidad === null && precio === null) return;
       out[name] = {
         cantidad: cantidad === null ? 0 : cantidad,
         precio: precio === null ? 0 : precio,
@@ -497,24 +505,24 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     equipmentDetails?.backup_status,
     normalizeEquipmentTypeLabel(primaryPair?.backup_type),
   ));
-  setFieldIfPresent(fields, "InstalarJuntoPrincipal", pickFirst(
+  setFieldIfPresent(fields, "InstalarJuntoPrincipal", normalizeBool(pickFirst(
     primaryPair?.backup_install_simultaneous,
     equipmentDetails?.install_with_primary,
-  ));
+  )));
   setFieldIfPresent(fields, "UbicacionEquipos", equipmentDetails?.installation_location);
-  setFieldIfPresent(fields, "RequiereEquipoComplementario", equipmentDetails?.requires_complementary);
+  setFieldIfPresent(fields, "RequiereEquipoComplementario", normalizeBool(equipmentDetails?.requires_complementary));
   setFieldIfPresent(fields, "EquipoComplementarioPrueba", equipmentDetails?.complementary_test_purpose);
 
   const includesLis = pickFirst(lisIntegration?.includes_lis, lisIntegration?.lis_includes);
   const hasCurrentSystem = hasValue(lisIntegration?.current_system_name) || hasValue(lisIntegration?.current_system_provider);
-  setFieldIfPresent(fields, "IncluyeLIS", includesLis);
+  setFieldIfPresent(fields, "IncluyeLIS", normalizeBool(includesLis));
   setFieldIfPresent(fields, "ProveedorSistemaTrabajar", lisIntegration?.lis_provider);
-  setFieldIfPresent(fields, "IncluyeHadwareLIS", lisIntegration?.includes_hardware);
+  setFieldIfPresent(fields, "IncluyeHadwareLIS", normalizeBool(lisIntegration?.includes_hardware));
   setFieldIfPresent(fields, "NumeroPacientesMensual", lisIntegration?.monthly_patients);
-  setFieldIfPresent(fields, "InterfazSistemaActual", hasCurrentSystem);
+  setFieldIfPresent(fields, "InterfazSistemaActual", normalizeBool(hasCurrentSystem));
   setFieldIfPresent(fields, "NombreSistema", lisIntegration?.current_system_name);
   setFieldIfPresent(fields, "ProveedorSistemaActual", lisIntegration?.current_system_provider);
-  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", lisIntegration?.current_system_hardware);
+  setFieldIfPresent(fields, "IncluyeHadwareSistemaActual", normalizeBool(lisIntegration?.current_system_hardware));
   setFieldIfPresent(fields, "ModeloProveedor1", lisInterfaces[0]?.model || lisInterfaces[0]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor2", lisInterfaces[1]?.model || lisInterfaces[1]?.provider);
   setFieldIfPresent(fields, "ModeloProveedor3", lisInterfaces[2]?.model || lisInterfaces[2]?.provider);
@@ -535,7 +543,7 @@ async function buildAutoGenerationInput({ businessCaseId, bcRow, input = {} }) {
     generalData.purchase_commitment,
   ));
   setFieldIfPresent(fields, "TipoEntrega", normalizeDeliveryTypeLabel(deliveries?.delivery_type));
-  setFieldIfPresent(fields, "DeterminacionEfectiva", deliveries?.effective_determination);
+  setFieldIfPresent(fields, "DeterminacionEfectiva", normalizeBool(deliveries?.effective_determination));
   setFieldIfPresent(fields, "Observaciones", pickFirst(requirements?.observations, metadata?.notes, generalData?.notes));
 
   // The WebApp contract requires at least one field. Keep Cliente as minimal fallback.
@@ -1237,14 +1245,17 @@ async function processSingleJob(job) {
   };
 
   try {
-    const payload = job.request_payload && typeof job.request_payload === "object"
+    const storedPayload = job.request_payload && typeof job.request_payload === "object"
       ? job.request_payload
       : {};
+    // Strip inversiones so buildAutoGenerationInput always fetches fresh data from DB.
+    // The stored payload may have stale inversiones from enqueue time.
+    const { inversiones: _stale, ...inputWithoutInversiones } = storedPayload;
     const bcRow = await assertBusinessCaseExists(job.business_case_id);
     const refreshedPayload = await buildAutoGenerationInput({
       businessCaseId: job.business_case_id,
       bcRow,
-      input: payload,
+      input: inputWithoutInversiones,
     });
     const outputFolderId = await resolveOutputFolderIdForJob(job);
     const previousSheetMeta = toObject(bcRow?.modern_bc_metadata)?.bc_sheet_generation?.last || {};

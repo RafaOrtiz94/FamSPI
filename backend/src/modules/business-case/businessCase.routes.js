@@ -41,6 +41,14 @@ const investmentRoles = [
   "gerencia",
   "gerencia_general",
 ];
+const investmentValuesRoles = [
+  "jefe_operaciones",
+  "jefe_de_operaciones",
+  "jefe_financiero",
+  "gerencia",
+  "gerencia_general",
+  "admin",
+];
 const adminRoles = ["admin", "gerencia", "jefe_tecnico"];
 const determinationsCatalogWriteRoles = [
   "admin",
@@ -197,6 +205,8 @@ router.delete("/:id/investments/:invId", verifyToken, requireRole(businessCaseRo
 router.get("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.getInvestmentCatalog);
 router.post("/:id/investments/catalog", verifyToken, requireRole(investmentRoles), ctrl.createInvestmentCatalogItem);
 router.post("/:id/investments/selections", verifyToken, requireRole(investmentRoles), ctrl.saveInvestmentSelection);
+router.get("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.getInvestmentValues);
+router.post("/:id/investments/values", verifyToken, requireRole(investmentValuesRoles), ctrl.saveInvestmentValues);
 router.get("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.getConsumptionItems);
 router.put("/:id/consumption-items", verifyToken, requireRole(businessCaseRoles), ctrl.saveConsumptionItems);
 router.patch("/:id/consumption-items/:itemKey", verifyToken, requireRole(businessCaseRoles), ctrl.patchConsumptionItem);

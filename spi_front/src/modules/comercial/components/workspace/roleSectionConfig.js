@@ -9,22 +9,26 @@ export const ROLE_SECTION_CONFIG = {
  },
  acp_comercial: {
  visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace", "feasibility"],
- canEdit: ["general", "lab", "equipment", "lis", "requirement", "investments", "consumption_export", "feasibility"],
+ canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "feasibility"],
+ },
+ backoffice: {
+ visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export", "feasibility"],
+ canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export"],
  },
  backoffice_comercial: {
  visible: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export", "feasibility"],
  canEdit: ["general", "lab", "requirement", "equipment", "lis", "determinations", "investments", "consumption_export"],
  },
  jefe_comercial: {
- visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace", "feasibility"],
+ visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "investment_values_op", "investment_values_fin", "consumption_export", "dispatch_workspace", "feasibility"],
  canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace", "feasibility"],
  },
  gerencia: {
- visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace", "feasibility"],
+ visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "investment_values_op", "investment_values_fin", "consumption_export", "dispatch_workspace", "feasibility"],
  canEdit: ["feasibility"],
  },
  gerencia_general: {
- visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "consumption_export", "dispatch_workspace", "feasibility"],
+ visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "investment_values_op", "investment_values_fin", "consumption_export", "dispatch_workspace", "feasibility"],
  canEdit: ["feasibility"],
  },
  operaciones: {
@@ -32,20 +36,24 @@ export const ROLE_SECTION_CONFIG = {
  canEdit: ["equipment", "determinations", "dispatch_workspace"],
  },
  jefe_operaciones: {
- visible: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace", "feasibility"],
- canEdit: ["equipment", "determinations", "requirement", "investments", "dispatch_workspace"],
+ visible: ["equipment", "determinations", "requirement", "investments", "investment_values_op", "dispatch_workspace", "feasibility"],
+ canEdit: ["equipment", "determinations", "requirement", "investments", "investment_values_op", "dispatch_workspace"],
+ },
+ jefe_financiero: {
+ visible: ["investment_values_fin"],
+ canEdit: ["investment_values_fin"],
  },
  servicio_tecnico: {
  visible: ["equipment", "determinations", "feasibility"],
- canEdit: [],
+ canEdit: ["determinations"],
  },
  jefe_tecnico: {
  visible: ["equipment", "determinations", "requirement", "investments", "feasibility"],
- canEdit: ["equipment", "investments"],
+ canEdit: ["equipment", "determinations", "investments"],
  },
  admin: {
- visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace", "feasibility"],
- canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "dispatch_workspace", "feasibility"],
+ visible: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "investment_values_op", "investment_values_fin", "dispatch_workspace", "feasibility"],
+ canEdit: ["general", "lab", "equipment", "lis", "determinations", "requirement", "investments", "investment_values_op", "investment_values_fin", "dispatch_workspace", "feasibility"],
  },
 };
 

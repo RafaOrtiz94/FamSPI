@@ -6,6 +6,7 @@ import { useUI } from "../../../../core/ui/UIContext";
 import EquipmentSection from "./EquipmentSection";
 import DeterminationsSection from "./DeterminationsSection";
 import InvestmentsSection from "./InvestmentsSection";
+import InvestmentValuesSection from "./sections/InvestmentValuesSection";
 import ClientDataSection from "./ClientDataSection";
 import RequirementsSection from "./sections/RequirementsSection";
 // New sections - Phase 1 UX Improvements
@@ -97,6 +98,16 @@ const SectionContent = ({
  title: "Inversiones Adicionales",
  description: "Costos adicionales y presupuesto de inversiones",
  icon: "INV"
+ },
+ investment_values_op: {
+ title: "Valores Operativos",
+ description: "Precios unitarios de inversiones operativas — productos y adquisiciones",
+ icon: "OPV"
+ },
+ investment_values_fin: {
+ title: "Valores Financieros",
+ description: "Precios unitarios de inversiones financieras — servicios y mano de obra",
+ icon: "FIN"
  },
  consumption_export: {
  title: "Sincronizacion Sheets",
@@ -198,6 +209,30 @@ const SectionContent = ({
  );
  }
 
+ if (selectedSection === "investment_values_op") {
+ return (
+ <InvestmentValuesSection
+ investmentClass="operativa"
+ businessCase={businessCase}
+ permissions={permissions}
+ ownership={uiGuidance?.sectionOwnership?.rules?.investment_values_op || {}}
+ onSave={forwardSave}
+ />
+ );
+ }
+
+ if (selectedSection === "investment_values_fin") {
+ return (
+ <InvestmentValuesSection
+ investmentClass="financiera"
+ businessCase={businessCase}
+ permissions={permissions}
+ ownership={uiGuidance?.sectionOwnership?.rules?.investment_values_fin || {}}
+ onSave={forwardSave}
+ />
+ );
+ }
+
  if (selectedSection === "consumption_export") {
  return (
  <ConsumptionExportSection
@@ -210,6 +245,7 @@ const SectionContent = ({
  return (
  <DispatchWorkspaceSection
  onSave={forwardSave}
+ ownership={uiGuidance?.sectionOwnership?.rules?.dispatch_workspace || {}}
  />
  );
  }

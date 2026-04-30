@@ -36,5 +36,8 @@ ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'ACTIVE';
 
 -- Index for reporting
 CREATE INDEX IF NOT EXISTS idx_attendance_exceptions_user_date ON attendance_exceptions(user_id, date);
+CREATE INDEX IF NOT EXISTS idx_attendance_exceptions_active_by_user
+  ON attendance_exceptions(user_id, id DESC)
+  WHERE UPPER(COALESCE(status, '')) <> 'COMPLETED';
 
 COMMIT;

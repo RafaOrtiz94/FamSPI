@@ -26,7 +26,7 @@ const toNumber = (value, fallback = 0) => {
  return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-const DispatchWorkspaceSection = ({ onSave = () => {} }) => {
+const DispatchWorkspaceSection = ({ onSave = () => {}, ownership = {} }) => {
  const { id: businessCaseId } = useParams();
  const { showToast } = useUI();
  const { user } = useAuth();
@@ -171,14 +171,28 @@ const DispatchWorkspaceSection = ({ onSave = () => {} }) => {
  );
  }
 
+ const feasibilityDecided = Boolean(ownership?.metadata?.feasibility_decided);
+ const isFeasible = Boolean(ownership?.metadata?.is_feasible);
+ const isBlocked = !feasibilityDecided || !isFeasible;
+
  return (
  <div className="space-y-6 p-4 sm:p-6">
  <div className="flex flex-col gap-2">
  <h2 className="text-xl font-bold text-gray-900">Cantidades Maximas</h2>
  <p className="text-sm text-gray-600">
- Jefe Comercial define las cantidades maximas por elemento. Jefe Operaciones mantiene el control operativo de despacho sobre la misma base.
+ Disponible solo después de que el BC sea marcado como factible. Jefe Comercial define las cantidades máximas; Jefe Operaciones mantiene el control de despacho.
  </p>
  </div>
+
+ {isBlocked && (
+ <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+ {!feasibilityDecided
+ ? "Primero debe registrarse la decision de factibilidad en la seccion anterior."
+ : "El Business Case fue marcado como no factible. Cantidades Maximas no aplica."}
+ </div>
+ )}
+
+ {!isBlocked && <></>}
 
  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-3">
  <StatCard title="Elementos" value={summary?.totalItems ?? 0} />

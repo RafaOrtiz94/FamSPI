@@ -34,7 +34,11 @@ import { useAutoUpdate } from "../../api/index";
 import { fetchClients } from "../../api/clientsApi";
 import { formatDateSafe, formatTimeSafe, formatDateTimeSafe, toDate } from "../../../shared/utils/dateUtils";
 import { useAuth } from "../../auth/useAuth";
-import { getPreciseLocation } from "../../../shared/utils/preciseGeolocation";
+import {
+  getLocationForAction as getSharedLocation,
+  startLocationPrewarm,
+  stopLocationPrewarm,
+} from "../../../shared/utils/attendanceLocationCache";
 
 const EXCEPTION_PRESETS = Object.freeze({
   permiso: "Salida por permiso personal",
@@ -50,7 +54,7 @@ const EXIT_REMINDER_AFTER_HOURS = 8;
 const PUNCTUALITY_BASE_MINUTES = 9 * 60;
 const PUNCTUALITY_TOLERANCE_MINUTES = 5;
 const RECENT_LOCATION_STORAGE_KEY = "attendance_recent_valid_location";
-const RECENT_LOCATION_MAX_AGE_MS = 3 * 60 * 1000;
+const RECENT_LOCATION_MAX_AGE_MS = 90 * 1000;
 const ATTENDANCE_LOCATION_FIELDS = Object.freeze({
   entry: "entry_location",
   lunch_start: "lunch_start_location",
@@ -173,13 +177,22 @@ const deriveAttendanceState = (record = {}) => {
   return "working";
 };
 
+const ECUADOR_TZ = "America/Guayaquil";
+
 const getPunctualityState = (entryTime) => {
   const parsed = toDate(entryTime);
   if (!parsed) {
     return { state: "no_entry", minutesLate: null, points: 0 };
   }
 
-  const minutes = parsed.getHours() * 60 + parsed.getMinutes();
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ECUADOR_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(parsed);
+  const partMap = parts.reduce((acc, p) => { if (p.type !== "literal") acc[p.type] = Number(p.value); return acc; }, {});
+  const minutes = (partMap.hour || 0) * 60 + (partMap.minute || 0);
   const delta = minutes - PUNCTUALITY_BASE_MINUTES;
   if (delta <= PUNCTUALITY_TOLERANCE_MINUTES) {
     return { state: "on_time", minutesLate: 0, points: 3 };
@@ -190,6 +203,25 @@ const getPunctualityState = (entryTime) => {
   }
 
   return { state: "late", minutesLate: delta, points: 1 };
+};
+
+const getEcuadorEntryMinutes = (entryTime) => {
+  const parsed = toDate(entryTime);
+  if (!parsed) return Number.POSITIVE_INFINITY;
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: ECUADOR_TZ,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(parsed);
+  const partMap = parts.reduce((acc, p) => {
+    if (p.type !== "literal") acc[p.type] = Number(p.value);
+    return acc;
+  }, {});
+  const hour = Number(partMap.hour);
+  const minute = Number(partMap.minute);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return Number.POSITIVE_INFINITY;
+  return (hour * 60) + minute;
 };
 
 const mapPermisoToExceptionSuggestion = (permiso) => {
@@ -299,7 +331,7 @@ const selectBestTodayAttendance = (rows = []) => {
 
 const AttendanceWidget = () => {
   const { showToast } = useUI();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const [attendance, setAttendance] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -340,6 +372,8 @@ const AttendanceWidget = () => {
   const [fieldVisitNotes, setFieldVisitNotes] = useState("");
   const [tripClosureReason, setTripClosureReason] = useState("");
   const [fieldVisitSubmitting, setFieldVisitSubmitting] = useState(false);
+  const [exitConfirmOpen, setExitConfirmOpen] = useState(false);
+  const doClockOutRef = useRef(null);
   const [scheduledClientsToday, setScheduledClientsToday] = useState([]);
   const [scheduledClientsLoading, setScheduledClientsLoading] = useState(false);
   const [emergencyClients, setEmergencyClients] = useState([]);
@@ -347,6 +381,7 @@ const AttendanceWidget = () => {
   const [fieldEmergencyClientId, setFieldEmergencyClientId] = useState("");
   const [fieldEmergencyClientSearch, setFieldEmergencyClientSearch] = useState("");
   const autoOpenSessionRef = useRef(null);
+  const initializedRef = useRef(false);
   const openLateJustificationFlow = useCallback(() => {
     setWidgetModalOpen(false);
     setExceptionModalOpen(false);
@@ -358,14 +393,14 @@ const AttendanceWidget = () => {
   }, []);
 
   useEffect(() => {
-    refreshAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    startLocationPrewarm();
+    return () => stopLocationPrewarm();
   }, []);
 
   useEffect(() => {
-    if (user?.id) {
-      refreshAll();
-    }
+    if (initializedRef.current) return;
+    initializedRef.current = true;
+    refreshAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -396,7 +431,18 @@ const AttendanceWidget = () => {
         return todayData;
       }
     } catch (err) {
-      if (err?.response?.status !== 409) {
+      const status = Number(err?.response?.status || 0);
+      if (status === 401) {
+        showToast("Tu sesión expiró. Por favor inicia sesión nuevamente.", "warning");
+        setAttendance(null);
+        try {
+          await logout?.();
+        } catch (logoutErr) {
+          console.error("AttendanceWidget logout after 401 failed:", logoutErr);
+        }
+        return null;
+      }
+      if (status !== 409) {
         console.error(err);
       }
     }
@@ -611,13 +657,7 @@ const AttendanceWidget = () => {
 
     setLocationLoading(true);
     try {
-      const precise = await getPreciseLocation({
-        desiredAccuracyMeters: 40,
-        goodAccuracyMeters: 25,
-        highAccuracyTimeoutMs: 7000,
-        sampleWindowMs: 4500,
-        sampleCount: 2,
-      });
+      const precise = await getSharedLocation({ forceRefresh: true });
 
       const preciseLatitude = Number(precise?.latitude);
       const preciseLongitude = Number(precise?.longitude);
@@ -665,29 +705,17 @@ const AttendanceWidget = () => {
     }
   };
 
-  const getLocationForAction = async () => {
-    let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        const result = await getLocation(attempt === 2);
-        if (result?.latitude && result?.longitude) {
-          return {
-            latitude: result.latitude,
-            longitude: result.longitude,
-            accuracy: result.accuracy ?? null,
-            timestamp: result.timestamp || Date.now(),
-            source: result.source || "gps",
-          };
-        }
-      } catch (error) {
-        lastError = error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1200));
+  const getLocationForAction = async ({ forceRefresh = false } = {}) => {
+    setLocationLoading(true);
+    try {
+      const result = await getSharedLocation({ forceRefresh });
+      setCachedLocation({ latitude: result.latitude, longitude: result.longitude });
+      setCachedLocationAccuracy(result.accuracy ?? null);
+      setLocationTimestamp(result.timestamp);
+      return result;
+    } finally {
+      setLocationLoading(false);
     }
-
-    const error = new Error("Ubicacion obligatoria. No se pudo registrar por timeout de GPS.");
-    error.cause = lastError || null;
-    throw error;
   };
 
   const ensureSyncTargetLocation = async (target, locationPayload, baseRecord = null) => {
@@ -841,7 +869,8 @@ const AttendanceWidget = () => {
     } catch (err) {
       console.error("Attendance registration error:", err);
       const status = Number(err?.response?.status || 0);
-      if ((status === 400 || status === 409) && options?.syncTarget) {
+      // 422 = GPS required/accuracy low — no conflict recovery, just show error
+      if (status !== 422 && (status === 400 || status === 409) && options?.syncTarget) {
         const recovered = await resolveAttendanceConflict(options.syncTarget, actionLocation || cachedLocation || null);
         if (recovered) {
           showToast("La marca ya existia. Se actualizo el estado de asistencia.", "warning");
@@ -958,6 +987,7 @@ const AttendanceWidget = () => {
       "comercial",
       "acp_comercial",
       "jefe_comercial",
+      "asesor_comercial",
       "backoffice_comercial",
       "backoffice",
       "tecnico",
@@ -1029,6 +1059,9 @@ const AttendanceWidget = () => {
     const payload = {};
     const location = await getLocationForAction();
     payload.location = `${location.latitude},${location.longitude}`;
+    if (Number.isFinite(location.accuracy) && location.accuracy >= 0) {
+      payload.location_accuracy = location.accuracy;
+    }
     payload.location_meta = {
       accuracy: location.accuracy ?? null,
       timestamp: location.timestamp || Date.now(),
@@ -1375,10 +1408,7 @@ const AttendanceWidget = () => {
           ...row,
           punctuality,
           dateKey: normalizeDateKey(row?.date),
-          entryMinutes: (() => {
-            const parsed = toDate(row?.entry_time);
-            return parsed ? (parsed.getHours() * 60 + parsed.getMinutes()) : Number.POSITIVE_INFINITY;
-          })(),
+          entryMinutes: getEcuadorEntryMinutes(row?.entry_time),
           totalHoursNumeric: Number(row?.total_hours || 0),
         };
       })
@@ -1902,7 +1932,7 @@ const AttendanceWidget = () => {
 
   const renderExceptionControls = () => {
     if (isFieldOperationFlow) {
-      // Field operation is managed by renderFieldOperationsControls below â€” no duplicate controls here
+      // Field operation is managed by renderFieldOperationsControls below no duplicate controls here
       return null;
     }
     if (!hasActiveException) {
@@ -2050,7 +2080,7 @@ const AttendanceWidget = () => {
             ) : null}
             {fieldClientId ? (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
-                âœ“ {getClientDisplayLabel(scheduledClientsToday.find((c) => String(c.id) === String(fieldClientId)))}
+                {getClientDisplayLabel(scheduledClientsToday.find((c) => String(c.id) === String(fieldClientId)))}
               </p>
             ) : null}
           </>
@@ -2093,7 +2123,7 @@ const AttendanceWidget = () => {
             ) : null}
             {fieldEmergencyClientId ? (
               <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-medium text-emerald-700">
-                âœ“ {getClientDisplayLabel(emergencyClients.find((c) => String(c.id) === String(fieldEmergencyClientId)))}
+                {getClientDisplayLabel(emergencyClients.find((c) => String(c.id) === String(fieldEmergencyClientId)))}
               </p>
             ) : null}
             <input
@@ -2432,20 +2462,22 @@ const AttendanceWidget = () => {
               ? "Finalizar jornada"
               : "Salir a almuerzo";
 
+    doClockOutRef.current = () => handle(clockOut, "Buen trabajo!", true, {
+      syncTarget: "exit",
+      onSuccess: async (res) => {
+        if (Number(res?.overtime?.hours || 0) > 0) {
+          setOvertimePrompt({ hours: Number(res.overtime.hours) });
+          setOvertimeReason("");
+        }
+      },
+    });
+
     const handlePrimaryAction = !hasEntry
       ? () => handle(clockIn, "Entrada registrada", false, { syncTarget: "entry" })
       : isOnLunch
         ? () => handle(clockInLunch, "Regresaste del almuerzo", false, { syncTarget: "lunch_end" })
         : attendance?.lunch_end_time
-          ? () => handle(clockOut, "Buen trabajo!", true, {
-            syncTarget: "exit",
-            onSuccess: async (res) => {
-              if (Number(res?.overtime?.hours || 0) > 0) {
-                setOvertimePrompt({ hours: Number(res.overtime.hours) });
-                setOvertimeReason("");
-              }
-            },
-          })
+          ? () => setExitConfirmOpen(true)
           : () => handle(clockOutLunch, "Buen provecho", false, { syncTarget: "lunch_start" });
 
     return (
@@ -2986,6 +3018,35 @@ const AttendanceWidget = () => {
               className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-rose-600 hover:bg-rose-700`}
             >
               {lateJustificationSubmitting ? "Guardando..." : "Guardar justificación"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      <Modal
+        isOpen={exitConfirmOpen}
+        onClose={() => setExitConfirmOpen(false)}
+        title="Confirmar salida"
+        maxWidth="max-w-sm"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-gray-700 dark:text-gray-300">
+            ¿Confirmas que deseas registrar tu <strong>salida final</strong> de hoy? Esta acción cerrará tu jornada.
+          </p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setExitConfirmOpen(false)}
+              className={ACTION_BTN_MODAL_SECONDARY_CLASS}
+              disabled={loading}
+            >
+              Cancelar
+            </button>
+            <Button
+              onClick={() => { setExitConfirmOpen(false); doClockOutRef.current?.(); }}
+              disabled={loading}
+              className={`${ACTION_BTN_MODAL_PRIMARY_CLASS} bg-red-600 hover:bg-red-700`}
+            >
+              {loading ? "Registrando..." : "Sí, registrar salida"}
             </Button>
           </div>
         </div>

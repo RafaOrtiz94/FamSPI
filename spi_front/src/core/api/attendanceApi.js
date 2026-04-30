@@ -396,6 +396,48 @@ export const getAttendanceRange = async (...args) => {
   return data;
 };
 
+export const getAttendanceTeamRange = async (...args) => {
+  const [firstArg, secondArg, thirdArg, fourthArg] = args;
+  const query =
+    firstArg && typeof firstArg === "object" && !Array.isArray(firstArg)
+      ? firstArg
+      : {
+          startDate: firstArg,
+          endDate: secondArg,
+          status: thirdArg,
+          quickRange: fourthArg,
+        };
+
+  const params = new URLSearchParams();
+  const startDate = query?.startDate ?? query?.start ?? "";
+  const endDate = query?.endDate ?? query?.end ?? "";
+  if (startDate) params.set("start", startDate);
+  if (endDate) params.set("end", endDate);
+  if (query?.status) params.set("status", query.status);
+  if (query?.quickRange) params.set("quickRange", query.quickRange);
+  if (query?.onlyDiscrepancies) params.set("onlyDiscrepancies", "1");
+  if (query?.onlyWithGeo) params.set("onlyWithGeo", "1");
+  if (query?.view) params.set("view", query.view);
+  if (Array.isArray(query?.userIds) && query.userIds.length) {
+    params.set("userIds", query.userIds.join(","));
+  }
+
+  const { data } = await api.get(`/attendance/team-range?${params.toString()}`);
+  return data;
+};
+
+export const getAttendanceNonCompliance = async (days = 7) => {
+  const query = new URLSearchParams();
+  query.set("days", String(days));
+  const { data } = await api.get(`/attendance/non-compliance?${query.toString()}`);
+  return data;
+};
+
+export const scheduleAttendanceFollowUpMeeting = async (userId, payload = {}) => {
+  const { data } = await api.post(`/attendance/non-compliance/${userId}/schedule-meeting`, payload);
+  return data;
+};
+
 /**
  * Download Attendance PDF
  */
